@@ -1,0 +1,73 @@
+# MoneyFast — Contract (Sözleşme) İş Akışı
+
+Modüler monolite geçince "servisler arası sözleşme" sorunu büyük ölçüde ortadan
+kalktı — modüller aynı process'te Python import'uyla konuşuyor, Pydantic tipleri
+otomatik kontrol sağlıyor. Gerçek sözleşme ihtiyacı sadece **2 network sınırında**
+kalıyor: backend↔frontend ve backend↔ai-service. Bu ikisi de elle senkronize
+edilmiyor, backend'in ürettiği OpenAPI şemasından **otomatik üretiliyor.**
+
+## Temel prensip
+
+Tek gerçek kaynak (source of truth): backend'in Pydantic modelleri → bunlardan
+otomatik üretilen `/openapi.json`. Kimse frontend'de veya ai-service'te elle
+"Transaction" tipi tanımlamaz, hepsi bu şemadan türetilir.
+
+## Backend ↔ Frontend
+
+FastAPI her başlattığında `http://localhost:8000/openapi.json`'ı otomatik üretir.
+Frontend bunu TypeScript tiplerine çevirir:
+
+```bash
+cd frontend
+npx openapi-typescript http://localhost:8000/openapi.json -o src/api/generated/schema.d.ts
+```
+
+**Kural:** Backend'de bir endpoint/model değiştiğinde, frontend ekibi bu komutu
+tekrar çalıştırır. Elle DTO senkronizasyonu yok.
+
+## Backend ↔ ai-service
+
+ai-service, backend'in bazı endpoint'lerini (kullanıcı portföyü, hesap bilgisi, işlem
+gerçekleştirme) HTTP ile çağırır. Aynı prensip:
+
+```bash
+cd ai-service
+datamodel-codegen --url http://localhost:8000/openapi.json \
+  --output app/backend_client/models.py
+```
+
+ai-service, backend'e giden isteklerde bu üretilmiş Pydantic modellerini kullanır.
+
+## Ne zaman regenerate edilir
+
+- Backend'de bir endpoint eklendiğinde/değiştiğinde/silindiğinde
+- Bir Pydantic modelinin alanları değiştiğinde (yeni alan, tip değişikliği, zorunlu→opsiyonel)
+- Sprint başında ya da PR merge sonrası, düzenli bir alışkanlık olarak
+
+## PR kuralı
+
+Backend'de bir modelin/endpoint'in şeklini değiştiren PR açıklamasına şu not
+eklenmeli:
+
+> ⚠️ Breaking change: `/api/investment/portfolio` response şeması değişti.
+> Frontend ve ai-service'in regenerate etmesi gerekiyor.
+
+Bu notu görmeyen kimse "neden benim tarafımda tip hatası çıktı" diye şaşırmaz.
+
+## Neden bu yeterli, neden ekstra bir "Contracts repo/paketi" kurmuyoruz
+
+Yedi mikroservisli senaryoda paylaşılan bir DTO paketi/NuGet/PyPI paketi kurmak
+mantıklıydı çünkü hiçbir servis diğerinin kodunu göremiyordu. Modüler monolitte
+backend zaten tek codebase — asıl "sözleşme" ihtiyacı sadece dışarıya açılan iki
+sınırda var, bu da otomatik üretimle elle bakım yükü olmadan çözülüyor. Ekstra bir
+paket/versiyonlama katmanı bu ölçekte gereksiz karmaşıklık olurdu.
+
+## Kritik akış: chatbot işlem onayı
+
+FG-CB-02 (chatbot piyasa işlemi gerçekleştirebilmeli) ve FOG-03 (hassas işlemler için
+ek kimlik doğrulama) birlikte şunu gerektiriyor: ai-service bir işlemi *önerir*,
+gerçek gerçekleştirme backend'in investment modülünde, kullanıcının frontend'de açık
+onayından **sonra** olur. Bu akış OpenAPI şemasında iki ayrı endpoint olarak net
+görünmeli: `POST /investment/orders/propose` (ai-service çağırır, sadece öneri döner)
+ve `POST /investment/orders/confirm` (frontend, kullanıcı onayından sonra çağırır).
+Tek bir endpoint'e "öner ve hemen gerçekleştir" mantığını gömmeyin.

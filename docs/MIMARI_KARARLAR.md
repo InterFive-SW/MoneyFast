@@ -9,11 +9,25 @@ işaretleyip ilgili yere (CLAUDE.md, CONTRACT_WORKFLOW.md) yansıtılmalı.
 |---|---|---|
 | Backend dili | Python | .NET denendi, ekip Python'a çok daha aşina olduğu için geri dönüldü |
 | Backend framework | FastAPI | Async, otomatik OpenAPI üretimi contract workflow'un temeli |
-| Mimari stil | Modüler monolit + ayrı ai-service | Mikroservis (7 servis) koordinasyon yükü 4 hafta için fazla bulundu |
+| Mimari stil | Modüler monolit (backend+frontend birlikte) + ayrı ai-service | Mikroservis (7 servis) koordinasyon yükü fazla bulundu; PO değerlendirmesi sonrası frontend de backend'e birleşti (2 Dockerfile) — gerekçe aşağıda |
 | Veritabanı | PostgreSQL | .NET denemesindeki MySQL kararından değişti |
 | Auth | FastAPI + JWT (python-jose/passlib) | ASP.NET Identity önerisi .NET dönemine aitti, Python'a taşındı |
-| Frontend | React + Vite + TS + Tailwind | Değişmedi |
-| Servisler arası sözleşme | OpenAPI-tabanlı otomatik üretim | Detay: CONTRACT_WORKFLOW.md |
+| Frontend | React + Vite + TS + Tailwind — backend'e entegre (StaticFiles + SPA fallback) | Ayrı servis değil; multi-stage Dockerfile ile aynı image'da build edilip serve ediliyor |
+| Servisler arası sözleşme | OpenAPI-tabanlı otomatik üretim | Detay: CONTRACT_WORKFLOW.md — artık sadece backend↔ai-service sınırı için geçerli |
+
+### Neden frontend backend'e birleşti, ai-service neden ayrı kaldı
+
+PO'nun "3 Dockerfile yerine neden tek değil" sorusu üzerine değerlendirildi. Sonuç:
+frontend ile backend arasında gerçek bir izolasyon ihtiyacı yoktu (frontend statik
+dosya, CPU/bellek yükü yaratmıyor; frontend çökerse zaten kullanıcı hiçbir şeye
+erişemez, "arkadaki servisler ayakta kalsın" argümanı bu durumda değersiz).
+Birleştirme CORS'u ve bir deploy adımını ortadan kaldırdı — gerçek bir kazanç.
+ai-service'i ayrı tutmanın gerekçesi farklı ve hâlâ geçerli: RAG/embedding
+kütüphaneleri farklı bağımlılık profiline sahip, performans izolasyonu gerekiyor
+(chatbot yavaşlarsa/çökerse bankacılık işlemleri etkilenmemeli — FOG-04/FOG-05).
+Sonuç: 3 servisten 2'ye inildi (backend+frontend birlikte, ai-service ayrı),
+tam tek container'a gidilmedi çünkü bu, ai-service izolasyonunun gerçek gerekçesini
+geri alırdı.
 
 ## Açık kararlar
 
@@ -46,6 +60,14 @@ Kayıt/giriş "tek kullanımlık kod" için gerçek SMS/email mi, demo simülasy
 Kim: Bahar (BA) + Auth modülünü kuracak kişi.
 - [ ] Karar verildi: ______________________
 
+## shared/ kuralı — DB modeli asla buraya girmez
+
+`shared/` sadece domain'siz ortak kod içindir (enum, exception, pagination
+yardımcıları). DB modelleri (SQLAlchemy sınıfları) sahiplendikleri modülde yaşar —
+örn. `User` sadece `app/modules/auth/models.py`'de. Başka bir modülün kullanıcıya
+ihtiyacı varsa `User` sınıfını import etmez, sadece `user_id: UUID` foreign key
+kolonu tutar. Detay ve gerekçe: CLAUDE.md.
+
 ## Kritik ürün notu
 
 Chatbot kullanıcı adına piyasa işlemi (alım/satım) gerçekleştirebilecek (FG-CB-02).
@@ -57,6 +79,10 @@ dahil edilmeli.
 ## Eksik olabilecek altyapı parçaları
 
 - ✅ Paylaşılan sözleşme: OpenAPI-tabanlı otomatik üretimle çözüldü (CONTRACT_WORKFLOW.md)
-- ✅ Local orchestration: infra/docker-compose.yml ile çözüldü
-- [ ] Router auto-discovery mekanizması backend/app/main.py'de kurulmalı (bkz. CLAUDE.md)
+- ✅ Local orchestration: infra/docker-compose.yml ile çözüldü (postgres + backend, healthcheck'li)
+- ✅ Router auto-discovery: backend/app/main.py'de kuruldu, doğrulandı
+- ✅ Backend altyapısı: auth modülü uçtan uca test edildi (register → Postgres kaydı)
+- ✅ Frontend altyapısı: backend'e entegre, SPA routing doğrulandı
+- [ ] ai-service iskeleti henüz kurulmadı (Şevval, Burak)
 - [ ] Pre-commit hook (ruff/black/eslint/prettier) henüz kurulmadı
+- [ ] Test suite (pytest) henüz kurulmadı

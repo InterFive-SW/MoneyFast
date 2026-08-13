@@ -2,9 +2,16 @@
 
 Modüler monolite geçince "servisler arası sözleşme" sorunu büyük ölçüde ortadan
 kalktı — modüller aynı process'te Python import'uyla konuşuyor, Pydantic tipleri
-otomatik kontrol sağlıyor. Gerçek sözleşme ihtiyacı sadece **2 network sınırında**
-kalıyor: backend↔frontend ve backend↔ai-service. Bu ikisi de elle senkronize
-edilmiyor, backend'in ürettiği OpenAPI şemasından **otomatik üretiliyor.**
+otomatik kontrol sağlıyor.
+
+**Güncelleme:** Frontend backend'e birleşti (aynı image, aynı origin'den serve
+ediliyor — bkz. MIMARI_KARARLAR.md). Bu yüzden backend↔frontend arasında artık
+gerçek bir network sınırı yok, TypeScript tip üretimi opsiyonel hale geldi (frontend
+zaten aynı repoda, backend'in Pydantic modellerine bakarak elle de yazılabilir,
+isteyen `openapi-typescript` ile otomatik üretime devam edebilir). **Tek gerçek
+sözleşme ihtiyacı backend↔ai-service sınırında kalıyor** — bu ikisi ayrı process,
+ayrı container. Elle senkronize edilmiyor, backend'in ürettiği OpenAPI şemasından
+**otomatik üretiliyor.**
 
 ## Temel prensip
 
@@ -12,18 +19,20 @@ Tek gerçek kaynak (source of truth): backend'in Pydantic modelleri → bunlarda
 otomatik üretilen `/openapi.json`. Kimse frontend'de veya ai-service'te elle
 "Transaction" tipi tanımlamaz, hepsi bu şemadan türetilir.
 
-## Backend ↔ Frontend
+## Backend ↔ Frontend (opsiyonel — artık aynı repo/image, zorunlu değil)
 
-FastAPI her başlattığında `http://localhost:8000/openapi.json`'ı otomatik üretir.
-Frontend bunu TypeScript tiplerine çevirir:
+Frontend backend'e birleştiği için bu adım artık zorunlu değil, ama tip güvenliği
+için önerilir. FastAPI her başlattığında `http://localhost:8000/openapi.json`'ı
+otomatik üretir. Frontend bunu TypeScript tiplerine çevirebilir:
 
 ```bash
 cd frontend
 npx openapi-typescript http://localhost:8000/openapi.json -o src/api/generated/schema.d.ts
 ```
 
-**Kural:** Backend'de bir endpoint/model değiştiğinde, frontend ekibi bu komutu
-tekrar çalıştırır. Elle DTO senkronizasyonu yok.
+Backend'de bir endpoint/model değiştiğinde, isteyen bu komutu tekrar çalıştırır.
+Zorunlu adım listesine dahil değil — küçük/stub sayfalarda elle tip yazmak da kabul
+edilebilir.
 
 ## Backend ↔ ai-service
 

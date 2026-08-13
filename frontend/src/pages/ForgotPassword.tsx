@@ -4,33 +4,29 @@ import { Link } from 'react-router-dom'
 
 export default function ForgotPassword() {
   const [tcNo, setTcNo] = useState('')
-  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
   const [error, setError] = useState('')
 
   function handleTcChange(value: string) {
     setTcNo(value.replace(/\D/g, '').slice(0, 11))
   }
 
-  function handlePhoneChange(value: string) {
-    setPhone(value.replace(/\D/g, '').slice(0, 10))
-  }
-
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
 
-    if (!tcNo || !phone) {
+    if (!tcNo || !email.trim()) {
       setError('Lütfen tüm alanları doldurun.')
+      return
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Lütfen geçerli bir e-posta adresi girin.')
       return
     }
 
     if (tcNo.length !== 11) {
       setError('T.C. Kimlik No 11 haneli olmalıdır.')
-      return
-    }
-
-    if (phone.length !== 10) {
-      setError('Telefon numarası 10 haneli olmalıdır.')
       return
     }
 
@@ -136,27 +132,21 @@ export default function ForgotPassword() {
 
               <div>
                 <label
-                  htmlFor="phone"
+                  htmlFor="email"
                   className="mb-2 block text-sm font-semibold text-slate-700"
                 >
-                  Telefon Numarası
+                  E-posta Adresi
                 </label>
 
-                <div className="flex">
-                  <div className="flex items-center rounded-l-2xl border border-r-0 border-slate-200 bg-slate-100 px-4 text-sm font-medium text-slate-600">
-                    +90
-                  </div>
-
-                  <input
-                    id="phone"
-                    type="tel"
-                    inputMode="numeric"
-                    value={phone}
-                    onChange={(event) => handlePhoneChange(event.target.value)}
-                    placeholder="5XX XXX XX XX"
-                    className="w-full rounded-r-2xl border border-slate-200 bg-slate-50/60 px-4 py-3.5 text-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
-                  />
-                </div>
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="ornek@posta.com"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3.5 text-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
+                />
               </div>
 
               {error && (

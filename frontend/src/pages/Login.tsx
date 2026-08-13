@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 export default function Login() {
+  const navigate = useNavigate()
+
   const [tcNo, setTcNo] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -30,6 +32,7 @@ export default function Login() {
 
     // Backend login entegrasyonu daha sonra eklenecek.
     console.log('Login form submitted')
+    navigate('/dashboard')
   }
 
   return (

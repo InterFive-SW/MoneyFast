@@ -9,6 +9,7 @@ export default function Register() {
   const [surname, setSurname] = useState('')
   const [tcNo, setTcNo] = useState('')
   const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
   const [error, setError] = useState('')
 
   function handleTcChange(value: string) {
@@ -23,8 +24,13 @@ export default function Register() {
     event.preventDefault()
     setError('')
 
-    if (!name.trim() || !surname.trim() || !tcNo || !phone) {
+    if (!name.trim() || !surname.trim() || !tcNo || !phone || !email.trim()) {
       setError('Lütfen tüm alanları doldurun.')
+      return
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Lütfen geçerli bir e-posta adresi girin.')
       return
     }
 
@@ -187,6 +193,26 @@ export default function Register() {
                   value={tcNo}
                   onChange={(event) => handleTcChange(event.target.value)}
                   placeholder="11 haneli T.C. Kimlik No"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3.5 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
+                />
+              </div>
+
+              {/* E-posta */}
+              <div>
+                <label
+                  htmlFor="email"
+                  className="mb-2 block text-sm font-semibold text-slate-700"
+                >
+                  E-posta Adresi
+                </label>
+
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="ornek@posta.com"
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 px-4 py-3.5 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
                 />
               </div>

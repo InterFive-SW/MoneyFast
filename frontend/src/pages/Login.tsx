@@ -1,177 +1,273 @@
-import { FormEvent, useState } from 'react'
+import { useState } from 'react'
+import type { FormEvent } from 'react'
 
 export default function Login() {
-  const [email, setEmail] = useState('')
+  const [tcNo, setTcNo] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+
+  function handleTcChange(value: string) {
+    // Sadece rakam kabul et ve maksimum 11 karakter tut.
+    const onlyNumbers = value.replace(/\D/g, '').slice(0, 11)
+    setTcNo(onlyNumbers)
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
 
-    if (!email.trim() || !password.trim()) {
-      setError('Lütfen e-posta ve şifre alanlarını doldurun.')
+    if (!tcNo.trim() || !password.trim()) {
+      setError('Lütfen T.C. Kimlik No ve şifre alanlarını doldurun.')
       return
     }
 
-    // Backend entegrasyonu daha sonra burada yapılacak.
-    console.log('Login form submitted:', { email })
+    if (tcNo.length !== 11) {
+      setError('T.C. Kimlik No 11 haneli olmalıdır.')
+      return
+    }
+
+    // Backend login entegrasyonu daha sonra eklenecek.
+    console.log('Login form submitted')
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 lg:grid lg:grid-cols-2">
-      {/* Sol alan */}
-      <section className="relative hidden overflow-hidden bg-slate-950 p-12 text-white lg:flex lg:flex-col lg:justify-between">
-        <div>
-          <div className="mb-16 flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-400 font-bold text-slate-950">
-              M
-            </div>
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-white to-emerald-50/50">
+      {/* Hafif arka plan efektleri */}
+      <div className="pointer-events-none absolute -left-40 -top-40 h-96 w-96 rounded-full bg-emerald-200/30 blur-3xl" />
 
-            <span className="text-2xl font-semibold tracking-tight">
+      <div className="pointer-events-none absolute -bottom-40 -right-40 h-96 w-96 rounded-full bg-teal-200/20 blur-3xl" />
+
+      {/* Logo */}
+      <header className="absolute left-6 top-6 z-10 sm:left-10 sm:top-8">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-200/60">
+  <svg
+    viewBox="0 0 40 40"
+    className="h-8 w-8"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+  >
+    {/* M şekli */}
+    <path
+      d="M7 29V12L14.5 22L20 14.5L25.5 22L33 12V29"
+      stroke="#020617"
+      strokeWidth="3.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+
+    {/* Finansal yükseliş */}
+    <path
+      d="M9 27L16 23L22 25L31 17"
+      stroke="white"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+
+    {/* Ok ucu */}
+    <path
+      d="M26.5 17H31V21.5"
+      stroke="white"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+</div>
+
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
               MoneyFast
-            </span>
-          </div>
-
-          <div className="max-w-lg">
-            <p className="mb-4 text-sm font-medium uppercase tracking-[0.22em] text-emerald-400">
-              Akıllı Finans Danışmanın
-            </p>
-
-            <h1 className="text-5xl font-semibold leading-tight">
-              Finansal kararlarını daha bilinçli ver.
             </h1>
 
-            <p className="mt-6 max-w-md text-lg leading-8 text-slate-300">
-              Finansal durumunu takip et, portföyünü değerlendir ve yapay
-              zekâ destekli analizlerle seçeneklerini daha iyi anla.
+            <p className="hidden text-xs font-medium text-slate-500 sm:block">
+              Akıllı Finans Danışmanı
             </p>
           </div>
         </div>
+      </header>
 
-        <p className="text-sm text-slate-500">
-          © 2026 MoneyFast · InterFive
-        </p>
+      {/* Ana alan */}
+      <main className="flex min-h-screen items-center justify-center px-5 pb-10 pt-28 sm:px-8">
+        <section className="w-full max-w-xl rounded-[2.5rem] border border-slate-200/80 bg-white px-7 py-10 shadow-[0_24px_70px_-30px_rgba(15,23,42,0.3)] sm:px-12 sm:py-12">
+          <div className="mx-auto max-w-md">
+            {/* Başlık */}
+            <div className="mb-9 text-center">
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                Güvenli Giriş
+              </div>
 
-        <div className="absolute -bottom-40 -right-32 h-96 w-96 rounded-full bg-emerald-400/10 blur-3xl" />
-      </section>
+              <h2 className="text-3xl font-bold tracking-tight text-slate-950">
+                Hoş geldin 👋
+              </h2>
 
-      {/* Login alanı */}
-      <main className="flex min-h-screen items-center justify-center px-6 py-12 sm:px-10">
-        <div className="w-full max-w-md">
-          {/* Mobil logo */}
-          <div className="mb-10 flex items-center gap-3 lg:hidden">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 font-bold text-white">
-              M
+              <p className="mt-3 text-sm leading-6 text-slate-500">
+                MoneyFast hesabına giriş yaparak finansal görünümüne eriş.
+              </p>
             </div>
 
-            <span className="text-xl font-semibold text-slate-950">
-              MoneyFast
-            </span>
-          </div>
+            <form onSubmit={handleSubmit} className="space-y-5">
+              {/* TC Kimlik No */}
+              <div>
+                <label
+                  htmlFor="tcNo"
+                  className="mb-2 block text-sm font-semibold text-slate-700"
+                >
+                  T.C. Kimlik No
+                </label>
 
-          <div className="mb-8">
-            <h2 className="text-3xl font-semibold tracking-tight text-slate-950">
-              Tekrar hoş geldiniz
-            </h2>
+                <div className="relative">
+                  <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+                    <svg
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <circle cx="12" cy="8" r="4" />
+                      <path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" />
+                    </svg>
+                  </div>
 
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              MoneyFast hesabınıza giriş yaparak finansal görünümünüze
-              erişebilirsiniz.
-            </p>
-          </div>
+                  <input
+                    id="tcNo"
+                    name="tcNo"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="username"
+                    maxLength={11}
+                    value={tcNo}
+                    onChange={(event) =>
+                      handleTcChange(event.target.value)
+                    }
+                    placeholder="11 haneli T.C. Kimlik No"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3.5 pl-12 pr-4 text-sm text-slate-950 outline-none transition duration-200 placeholder:text-slate-400 hover:border-slate-300 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
+                  />
+                </div>
+              </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label
-                htmlFor="email"
-                className="mb-2 block text-sm font-medium text-slate-700"
-              >
-                E-posta
-              </label>
-
-              <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="ornek@email.com"
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-              />
-            </div>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
+              {/* Şifre */}
+              <div>
                 <label
                   htmlFor="password"
-                  className="text-sm font-medium text-slate-700"
+                  className="mb-2 block text-sm font-semibold text-slate-700"
                 >
                   Şifre
                 </label>
 
+                <div className="relative">
+                  <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
+                    <svg
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="5" y="10" width="14" height="10" rx="2" />
+                      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                    </svg>
+                  </div>
+
+                  <input
+                    id="password"
+                    name="password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(event) =>
+                      setPassword(event.target.value)
+                    }
+                    placeholder="Şifrenizi girin"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50/60 py-3.5 pl-12 pr-20 text-sm text-slate-950 outline-none transition duration-200 placeholder:text-slate-400 hover:border-slate-300 focus:border-emerald-400 focus:bg-white focus:ring-4 focus:ring-emerald-100"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShowPassword((current) => !current)
+                    }
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-500 transition hover:text-emerald-600"
+                  >
+                    {showPassword ? 'Gizle' : 'Göster'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Hesap / şifre linkleri */}
+              <div className="flex items-center justify-between pt-1 text-sm">
                 <button
                   type="button"
-                  className="text-sm font-medium text-slate-600 transition hover:text-slate-950"
+                  className="font-semibold text-slate-600 transition hover:text-emerald-600"
+                >
+                  Hesap oluştur
+                </button>
+
+                <button
+                  type="button"
+                  className="font-semibold text-slate-600 transition hover:text-emerald-600"
                 >
                   Şifremi unuttum
                 </button>
               </div>
 
-              <div className="relative">
-                <input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Şifrenizi girin"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 pr-20 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                />
-
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((current) => !current)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-500 hover:text-slate-950"
+              {/* Hata mesajı */}
+              {error && (
+                <div
+                  role="alert"
+                  className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
                 >
-                  {showPassword ? 'Gizle' : 'Göster'}
-                </button>
-              </div>
+                  {error}
+                </div>
+              )}
+
+              {/* Giriş butonu */}
+              <button
+                type="submit"
+                className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3.5 font-semibold text-white shadow-lg shadow-slate-200 transition duration-200 hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-slate-200"
+              >
+                Giriş Yap
+
+                <span className="transition-transform duration-200 group-hover:translate-x-1">
+                  →
+                </span>
+              </button>
+            </form>
+
+            {/* Güven bilgisi */}
+            <div className="mt-7 flex items-center justify-center gap-2 text-xs text-slate-400">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="5" y="10" width="14" height="10" rx="2" />
+                <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              </svg>
+
+              <span>Güvenli ve korumalı giriş</span>
             </div>
-
-            <label className="flex cursor-pointer items-center gap-3 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-slate-300 accent-slate-950"
-              />
-              Beni hatırla
-            </label>
-
-            {error && (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full rounded-xl bg-slate-950 px-4 py-3 font-medium text-white transition hover:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-slate-200"
-            >
-              Giriş Yap
-            </button>
-          </form>
-
-          <p className="mt-8 text-center text-sm text-slate-500">
-            Hesabınız yok mu?{' '}
-            <button
-              type="button"
-              className="font-semibold text-slate-900 hover:underline"
-            >
-              Hesap oluştur
-            </button>
-          </p>
-        </div>
+          </div>
+        </section>
       </main>
     </div>
   )

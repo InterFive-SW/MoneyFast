@@ -44,9 +44,16 @@ export default function Register() {
       return
     }
 
-    // Backend entegrasyonu daha sonra eklenecek.
-    // Şimdilik ikinci kayıt adımına geçiyoruz.
-    navigate('/register/password')
+    // İkinci kayıt adımına geçerken verileri state olarak gönder
+    navigate('/register/password', { 
+      state: { 
+        name, 
+        surname, 
+        tcNo, 
+        phone, 
+        email 
+      } 
+    })
   }
 
   return (
@@ -57,7 +64,7 @@ export default function Register() {
 
       {/* Logo */}
       <header className="absolute left-6 top-6 z-10 sm:left-10 sm:top-8">
-        <Link to="/login" className="flex items-center gap-3">
+        <Link to="/" className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-200/60">
             <svg
               viewBox="0 0 40 40"

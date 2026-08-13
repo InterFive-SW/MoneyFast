@@ -18,7 +18,10 @@ def _discover_routers(application: FastAPI) -> None:
         try:
             mod = importlib.import_module(f"app.modules.{pkg.name}.router")
             if hasattr(mod, "router"):
-                application.include_router(mod.router, prefix=f"/api/{pkg.name}")
+                if not mod.router.prefix:
+                    application.include_router(mod.router, prefix=f"/api/v1/{pkg.name}")
+                else:
+                    application.include_router(mod.router)
         except ModuleNotFoundError:
             pass
 

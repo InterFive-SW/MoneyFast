@@ -222,3 +222,6 @@ node_modules/
 dist/
 .vite/
 *.local
+
+# Editor configs
+pyrightconfig.json

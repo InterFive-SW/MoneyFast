@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { api } from '../api/client'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -9,6 +10,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   function handleTcChange(value: string) {
     // Sadece rakam kabul et ve maksimum 11 karakter tut.
@@ -16,7 +18,7 @@ export default function Login() {
     setTcNo(onlyNumbers)
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
 
@@ -30,9 +32,20 @@ export default function Login() {
       return
     }
 
-    // Backend login entegrasyonu daha sonra eklenecek.
-    console.log('Login form submitted')
-    navigate('/dashboard')
+    setLoading(true)
+    try {
+      const response = await api.post<{ access_token: string }>('/api/v1/auth/login', {
+        tc_no: tcNo,
+        password: password,
+      })
+      
+      localStorage.setItem('access_token', response.access_token)
+      navigate('/dashboard')
+    } catch (err: any) {
+      setError(err.message || 'Giriş yapılamadı. Bilgilerinizi kontrol edin.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -44,7 +57,7 @@ export default function Login() {
 
       {/* Logo */}
       <header className="absolute left-6 top-6 z-10 sm:left-10 sm:top-8">
-  <div className="flex items-center gap-3">
+  <Link to="/" className="flex items-center gap-3">
     <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-200/60">
       <svg
         viewBox="0 0 40 40"
@@ -93,7 +106,7 @@ export default function Login() {
         Akıllı Finans Danışmanı
       </p>
     </div>
-  </div>
+  </Link>
 </header>
 
       {/* Ana alan */}
@@ -243,13 +256,16 @@ export default function Login() {
               {/* Giriş butonu */}
               <button
                 type="submit"
-                className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3.5 font-semibold text-white shadow-lg shadow-slate-200 transition duration-200 hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-slate-200"
+                disabled={loading}
+                className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3.5 font-semibold text-white shadow-lg shadow-slate-200 transition duration-200 hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-slate-200 disabled:opacity-70 disabled:hover:translate-y-0"
               >
-                Giriş Yap
+                {loading ? 'Giriş Yapılıyor...' : 'Giriş Yap'}
 
-                <span className="transition-transform duration-200 group-hover:translate-x-1">
-                  →
-                </span>
+                {!loading && (
+                  <span className="transition-transform duration-200 group-hover:translate-x-1">
+                    →
+                  </span>
+                )}
               </button>
             </form>
 

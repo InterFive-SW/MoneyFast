@@ -1,17 +1,27 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { api } from '../api/client'
 
 export default function RegisterPassword() {
   const navigate = useNavigate()
+  const location = useLocation()
+  
+  // State eksikse, 1. adıma geri dön
+  useEffect(() => {
+    if (!location.state) {
+      navigate('/register')
+    }
+  }, [location, navigate])
 
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
 
@@ -35,11 +45,26 @@ export default function RegisterPassword() {
       return
     }
 
-    // Backend register entegrasyonu daha sonra eklenecek.
-    console.log('Registration completed')
+    const { name, surname, tcNo, phone, email } = location.state || {}
 
-    // Şimdilik başarılı kayıt sonrası login ekranına dön.
-    navigate('/login')
+    setLoading(true)
+    try {
+      await api.post('/api/v1/auth/register', {
+        first_name: name,
+        last_name: surname,
+        tc_no: tcNo,
+        phone_number: phone?.startsWith('+') ? phone : '+90' + phone,
+        email: email,
+        password: password
+      })
+      
+      // Şimdilik başarılı kayıt sonrası login ekranına dön.
+      navigate('/login')
+    } catch (err: any) {
+      setError(err.message || 'Kayıt olurken bir hata oluştu. Lütfen bilgilerinizi kontrol edin.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -50,7 +75,7 @@ export default function RegisterPassword() {
 
       {/* Logo */}
       <header className="absolute left-6 top-6 z-10 sm:left-10 sm:top-8">
-        <Link to="/login" className="flex items-center gap-3">
+        <Link to="/" className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-200/60">
             <svg
               viewBox="0 0 40 40"
@@ -226,13 +251,16 @@ export default function RegisterPassword() {
               {/* Hesap oluştur */}
               <button
                 type="submit"
-                className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3.5 font-semibold text-white shadow-lg shadow-slate-200 transition duration-200 hover:-translate-y-0.5 hover:bg-slate-800"
+                disabled={loading}
+                className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3.5 font-semibold text-white shadow-lg shadow-slate-200 transition duration-200 hover:-translate-y-0.5 hover:bg-slate-800 disabled:opacity-70 disabled:hover:translate-y-0"
               >
-                Hesap Oluştur
+                {loading ? 'Hesap Oluşturuluyor...' : 'Hesap Oluştur'}
 
-                <span className="transition-transform duration-200 group-hover:translate-x-1">
-                  →
-                </span>
+                {!loading && (
+                  <span className="transition-transform duration-200 group-hover:translate-x-1">
+                    →
+                  </span>
+                )}
               </button>
             </form>
 

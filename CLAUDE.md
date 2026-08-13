@@ -69,15 +69,17 @@ sınıfı import etmiyoruz — böylece modüller arası gizli bağımlılık a�
 
 ## Modül sınırı kuralları — HERKES İÇİN GEÇERLİ
 
-- **Sadece kendi modülünde çalış.** `app/modules/<senin-modülün>/` dışına, özellikle
-  `core/` ve `shared/`'a dokunman gerekiyorsa önce ekiple konuş, tek başına değiştirme.
-- `main.py`'ye router eklemek için elle satır eklemene gerek yok — router
-  auto-discovery mekanizması modülünü otomatik bulur (bkz. backend/app/main.py).
-- **Alembic migration ekleyeceksen:** önce `main`'den güncel çek, migration'ı en son
-  adım olarak at, aynı gün migration atacak biri varsa koordine ol (kısa bir mesajla
-  "5 dk migration atıyorum" yeterli). Bu, tek gerçek çakışma noktası.
-- Yeni bir endpoint/model eklediğinde ya da mevcut birini değiştirdiğinde, bu bir
-  "breaking change" olabilir — PR açıklamasına not düş (bkz. CONTRACT_WORKFLOW.md).
+- **Sadece ilgili modülde çalışılır.** `app/modules/<modül>/` dışına, özellikle
+  `core/` ve `shared/`'a dokunmak gerekiyorsa önce ekiple konuşulur, tek başına
+  değiştirilmez.
+- `main.py`'ye router eklemek için elle satır eklemeye gerek yok — router
+  auto-discovery mekanizması modülü otomatik bulur (bkz. backend/app/main.py).
+- **Alembic migration eklerken:** önce `main`'den güncel çekilir, migration en son
+  adım olarak atılır, aynı gün migration atacak başka biri varsa koordine olunur
+  (kısa bir mesajla "5 dk migration atıyorum" yeterli). Bu, tek gerçek çakışma
+  noktası.
+- Yeni bir endpoint/model eklendiğinde ya da mevcut biri değiştirildiğinde, bu bir
+  "breaking change" olabilir — PR açıklamasına not düşülür (bkz. CONTRACT_WORKFLOW.md).
 
 ## Kod kuralları
 

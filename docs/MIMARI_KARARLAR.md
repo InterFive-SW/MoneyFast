@@ -41,18 +41,18 @@ Scraping mi, ücretsiz bir finans API'si mi. Kim: Şevval, Burak.
 
 ### 3. Admin paneli
 PG-05'te "sistem admini hesapları yönetebilmeli" var, hiçbir modülde karşılığı yok.
-auth modülüne rol bazlı mı eklenecek, ayrı bir yüzey mi olacak? Kim: Sen + Arda + Bahar.
+auth modülüne rol bazlı mı eklenecek, ayrı bir yüzey mi olacak? Kim: Mustafa, Arda, Bahar.
 - [ ] Karar verildi: ______________________
 
 ### 4. Bildirim mekanizması
 Ayrı mesaj kuyruğu (RabbitMQ vb.) mu, yoksa zaten kurulu olan Redis'in Pub/Sub'ı mı,
-yoksa senkron REST çağrısı mı. Kim: Sen + Arda.
+yoksa senkron REST çağrısı mı. Kim: Mustafa, Arda.
 - [ ] Karar verildi: ______________________
 
 ### 5. İş kuralları (İK-01 → İK-10) — gerçek mi simüle mi
 EFT saat kısıtı, FAST 7/24, BIST/ABD seans saatleri + yaz/kış saati dönüşümü gibi
 kurallar gerçek bir zamanlayıcı ile mi uygulanacak, yoksa demo kapsamında validasyon
-mesajı gösterip anında mı işlenecek? Kim: Bahar (BA) karar verir, siz uygularsınız.
+mesajı gösterip anında mı işlenecek? Kim: Bahar (BA) karar verir, backend ekibi uygular.
 - [ ] Karar verildi: ______________________
 
 ### 6. OTP teslimatı

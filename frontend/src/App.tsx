@@ -7,6 +7,9 @@ import Banking from './pages/Banking'
 import Investment from './pages/Investment'
 import Risk from './pages/Risk'
 import Login from './pages/Login'
+import ForgotPassword from './pages/ForgotPassword'
+import Register from './pages/Register'
+import RegisterPassword from './pages/RegisterPassword'
 
 function Layout() {
   return (
@@ -24,6 +27,9 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="login" element={<Login />} />
+        <Route path="forgot-password" element={<ForgotPassword />} />
+        <Route path="register" element={<Register />} />
+        <Route path="register/password" element={<RegisterPassword />} />
         
         <Route element={<Layout />}>
           <Route index element={<Dashboard />} />

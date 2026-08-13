@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 
 export default function Login() {
   const [tcNo, setTcNo] = useState('')
@@ -40,55 +41,57 @@ export default function Login() {
 
       {/* Logo */}
       <header className="absolute left-6 top-6 z-10 sm:left-10 sm:top-8">
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-200/60">
-  <svg
-    viewBox="0 0 40 40"
-    className="h-8 w-8"
-    fill="none"
-    xmlns="http://www.w3.org/2000/svg"
-    aria-hidden="true"
-  >
-    {/* M şekli */}
-    <path
-      d="M7 29V12L14.5 22L20 14.5L25.5 22L33 12V29"
-      stroke="#020617"
-      strokeWidth="3.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
+  <div className="flex items-center gap-3">
+    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-200/60">
+      <svg
+        viewBox="0 0 40 40"
+        className="h-8 w-8"
+        fill="none"
+        aria-hidden="true"
+      >
+        <path
+          d="M7 29V12L14.5 22L20 14.5L25.5 22L33 12V29"
+          stroke="#020617"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
 
-    {/* Finansal yükseliş */}
-    <path
-      d="M9 27L16 23L22 25L31 17"
-      stroke="white"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
+        <path
+          d="M9 27L16 23L22 25L31 17"
+          stroke="white"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
 
-    {/* Ok ucu */}
-    <path
-      d="M26.5 17H31V21.5"
-      stroke="white"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-</div>
+        <path
+          d="M26.5 17H31V21.5"
+          stroke="white"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </div>
 
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-950">
-              MoneyFast
-            </h1>
+    <div>
+      <div>
+        <span className="text-2xl font-extrabold tracking-tight text-slate-950">
+          Money
+        </span>
 
-            <p className="hidden text-xs font-medium text-slate-500 sm:block">
-              Akıllı Finans Danışmanı
-            </p>
-          </div>
-        </div>
-      </header>
+        <span className="text-2xl font-extrabold tracking-tight text-emerald-500">
+          Fast
+        </span>
+      </div>
+
+      <p className="hidden text-xs font-medium tracking-wide text-slate-500 sm:block">
+        Akıllı Finans Danışmanı
+      </p>
+    </div>
+  </div>
+</header>
 
       {/* Ana alan */}
       <main className="flex min-h-screen items-center justify-center px-5 pb-10 pt-28 sm:px-8">
@@ -209,19 +212,19 @@ export default function Login() {
 
               {/* Hesap / şifre linkleri */}
               <div className="flex items-center justify-between pt-1 text-sm">
-                <button
-                  type="button"
+                <Link
+                  to="/register"
                   className="font-semibold text-slate-600 transition hover:text-emerald-600"
                 >
                   Hesap oluştur
-                </button>
+                </Link>
 
-                <button
-                  type="button"
-                  className="font-semibold text-slate-600 transition hover:text-emerald-600"
+                <Link
+                    to="/forgot-password"
+                    className="font-semibold text-slate-600 transition hover:text-emerald-600"
                 >
-                  Şifremi unuttum
-                </button>
+                    Şifremi unuttum
+                </Link>
               </div>
 
               {/* Hata mesajı */}

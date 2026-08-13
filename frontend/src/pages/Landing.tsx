@@ -13,6 +13,8 @@
  */
 
 import { Link } from 'react-router-dom'
+import logo from '../assets/logo.png'
+import logoInline from '../assets/logo-inline.png'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Alt Bileşen: AnimatedBlob
@@ -101,6 +103,12 @@ export default function Landing() {
     <div className="relative min-h-screen overflow-x-hidden bg-slate-50 font-sans selection:bg-emerald-200">
 
       {/* ── Üst Bölüm (Hero) ───────────────────────────────────────────────── */}
+
+      {/* Logo Header */}
+      <header className="absolute left-6 top-6 z-50 sm:left-10 sm:top-8">
+        <img src={logo} alt="MoneyFast Logo" className="h-16 w-auto object-contain transition-transform duration-300 hover:scale-105" />
+      </header>
+
       <section className="relative min-h-screen flex flex-col items-center justify-center">
         {/* Katman 1: Animasyonlu Arka Plan Blob'ları */}
         <AnimatedBlob
@@ -140,11 +148,9 @@ export default function Landing() {
           </div>
 
           <h1 className="max-w-4xl text-[clamp(2.4rem,6vw,4.5rem)] font-extrabold leading-[1.05] tracking-tight text-slate-950">
-            Paranızı Hızla Yönetin,{' '}
-            <span className="bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-400 bg-clip-text text-transparent">
-              MoneyFast
-            </span>{' '}
-            ile Sınırları Aşın
+            <span className="block mb-4">Paranızı Hızla Yönetin,</span>
+            <img src={logoInline} alt="MoneyFast" className="mx-auto inline-block h-[1.8em] -translate-y-1.5 align-middle" />
+            <span className="block mt-4">ile Sınırları Aşın</span>
           </h1>
 
           <p className="mt-8 max-w-2xl text-[1.125rem] leading-relaxed text-slate-500">

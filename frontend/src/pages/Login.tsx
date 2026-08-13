@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import logo from '../assets/logo.png'
 import { api } from '../api/client'
 
 export default function Login() {
@@ -58,55 +59,8 @@ export default function Login() {
       {/* Logo */}
       <header className="absolute left-6 top-6 z-10 sm:left-10 sm:top-8">
   <Link to="/" className="flex items-center gap-3">
-    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-200/60">
-      <svg
-        viewBox="0 0 40 40"
-        className="h-8 w-8"
-        fill="none"
-        aria-hidden="true"
-      >
-        <path
-          d="M7 29V12L14.5 22L20 14.5L25.5 22L33 12V29"
-          stroke="#020617"
-          strokeWidth="3.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        <path
-          d="M9 27L16 23L22 25L31 17"
-          stroke="white"
-          strokeWidth="2.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        <path
-          d="M26.5 17H31V21.5"
-          stroke="white"
-          strokeWidth="2.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </div>
-
-    <div>
-      <div>
-        <span className="text-2xl font-extrabold tracking-tight text-slate-950">
-          Money
-        </span>
-
-        <span className="text-2xl font-extrabold tracking-tight text-emerald-500">
-          Fast
-        </span>
-      </div>
-
-      <p className="hidden text-xs font-medium tracking-wide text-slate-500 sm:block">
-        Akıllı Finans Danışmanı
-      </p>
-    </div>
-  </Link>
+          <img src={logo} alt="MoneyFast Logo" className="h-16 w-auto object-contain transition-transform duration-300 hover:scale-105" />
+        </Link>
 </header>
 
       {/* Ana alan */}

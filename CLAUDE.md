@@ -12,25 +12,33 @@ işlemleri, yatırım/portföy yönetimi, RAG tabanlı piyasa/haber okuma ve ris
 değerlendirmesi sunuyor. Süre: 4 hafta. Gerçek müşteri verisi kullanılmıyor — tüm veri
 dummy/sentetik (TC kimlik no dahil, gerçekçi ama açıkça sahte formatta).
 
-## Mimari: modüler monolit + ayrı AI/RAG servisi
+## Mimari: backend+frontend birlikte, AI/RAG ayrı servis (2 Dockerfile)
 
-Neden bu şekilde: RAG/embedding kütüphaneleri farklı bağımlılık profiline sahip ve
-performans izolasyonu gerektiriyor (chatbot yavaşlarsa bankacılık işlemleri
-etkilenmemeli — bkz. gereksinim FOG-04/FOG-05). Bunun dışındaki tüm modüller
-(auth, banking, investment, notification, analytics) network sınırı olmadan, aynı
-process içinde, doğrudan Python import'uyla birbirini çağırır.
+Güncelleme: Başlangıçta 3 ayrı servis (backend, frontend, ai-service) planlanmıştı;
+PO ile yapılan değerlendirme sonrası **frontend backend'e birleştirildi** —
+aralarında gerçek bir izolasyon ihtiyacı yoktu (frontend statik dosya, CPU/bellek
+yükü yaratmıyor), birleştirme CORS'u ve bir deploy adımını ortadan kaldırdı.
+**ai-service ayrı kaldı** — bunun gerekçesi hâlâ geçerli: RAG/embedding
+kütüphaneleri farklı bağımlılık profiline sahip ve performans izolasyonu
+gerektiriyor (chatbot yavaşlarsa/çökerse bankacılık işlemleri etkilenmemeli —
+bkz. gereksinim FOG-04/FOG-05). Frontend çökerse zaten kullanıcı hiçbir şeye
+erişemez, bu yüzden onu izole etmenin gerçek bir koruma değeri yoktu.
+
+backend modülleri (auth, banking, investment, notification, analytics) network
+sınırı olmadan, aynı process içinde, doğrudan Python import'uyla birbirini çağırır.
 
 ```
 moneyfast/
-├── backend/            ← ana monolit (FastAPI)
+├── backend/            ← ana monolit (FastAPI) + frontend'in derlenmiş statik dosyaları
 │   └── app/
-│       ├── main.py     ← modül router'larını otomatik keşfedip toplar
+│       ├── main.py     ← modül router'larını otomatik keşfedip toplar + StaticFiles serve
 │       ├── core/        (config, DB bağlantısı, JWT middleware)
 │       ├── modules/      auth/, banking/, investment/, notification/, analytics/
-│       └── shared/      (modüller arası ortak tipler)
+│       └── shared/      (SADECE domain'siz ortak kod — enum, exception, pagination.
+│                         DB modeli KOYMA, bkz. "shared/ kuralı" aşağıda)
+├── frontend/            ← React kaynak kodu (geliştirme sırasında ayrı, build sonrası backend'e kopyalanır)
 ├── ai-service/         ← ayrı servis: chatbot, RAG, MCP, ajanlar
-├── frontend/           ← React
-├── infra/docker-compose.yml
+├── infra/docker-compose.yml   ← backend (frontend dahil) + ai-service + postgres + redis
 └── docs/
 ```
 
@@ -44,6 +52,20 @@ moneyfast/
 - Frontend: React + Vite + TypeScript + TailwindCSS
 - Servisler arası tek network sınırı: backend ↔ ai-service (HTTP). Sözleşme yönetimi
   için bkz. `CONTRACT_WORKFLOW.md`.
+
+## shared/ kuralı — DB modeli asla buraya girmez
+
+`shared/` çöp kutusu değil, sadece **domain'siz** ortak kod içindir: enum'lar
+(`RiskLevel`, `TransactionType`), custom exception sınıfları, pagination
+yardımcıları, generic tipler.
+
+Bir DB modeli (SQLAlchemy sınıfı) her zaman onu **sahiplenen modülde** yaşar —
+örn. `User` modeli sadece `app/modules/auth/models.py`'de. Başka bir modül
+(`banking` gibi) o kullanıcıya referans vermek istediğinde, `User` sınıfını
+import ETMEZ; sadece bir `user_id: UUID` foreign key kolonu tutar. Aynı Postgres
+DB'si olduğu için bu foreign key sorunsuz çalışır, sadece Python seviyesinde
+sınıfı import etmiyoruz — böylece modüller arası gizli bağımlılık ağı oluşmaz,
+"sadece kendi modülünde çalış" kuralı anlamını korur.
 
 ## Modül sınırı kuralları — HERKES İÇİN GEÇERLİ
 

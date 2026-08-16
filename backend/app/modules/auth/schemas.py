@@ -6,6 +6,7 @@ Pydantic V2 kullanarak girdi verilerini sıkı bir şekilde doğrular.
 """
 
 from uuid import UUID
+from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 
 
@@ -16,7 +17,7 @@ class UserBase(BaseModel):
     last_name: str = Field(..., description="Kullanıcının soyadı")
 
 
-class UserCreate(UserBase):
+class RegisterRequest(UserBase):
     """Sıkı doğrulamalarla yeni bir kullanıcı kaydetmek için şema."""
 
     tc_no: str = Field(
@@ -44,7 +45,7 @@ class UserCreate(UserBase):
         return v
 
 
-class UserLogin(BaseModel):
+class LoginRequest(BaseModel):
     """Kullanıcı giriş bilgileri için şema."""
 
     tc_no: str = Field(
@@ -56,16 +57,18 @@ class UserLogin(BaseModel):
 class UserResponse(UserBase):
     """Kullanıcı verilerini güvenli bir şekilde (şifresiz) döndürmek için şema."""
 
-    id: UUID
+    id: str
     tc_no: str
     email: EmailStr
     phone_number: str
+    is_active: bool
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class Token(BaseModel):
+class TokenResponse(BaseModel):
     """JWT token yanıtı için şema."""
 
     access_token: str
-    token_type: str
+    token_type: str = "bearer"

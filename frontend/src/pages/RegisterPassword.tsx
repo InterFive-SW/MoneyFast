@@ -50,7 +50,7 @@ export default function RegisterPassword() {
 
     setLoading(true)
     try {
-      await api.post('/api/v1/auth/register', {
+      await api.post('/api/auth/register', {
         first_name: name,
         last_name: surname,
         tc_no: tcNo,

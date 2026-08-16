@@ -5,12 +5,15 @@ Kullanıcı kaydı, girişi ve profil bilgilerini getirme uç noktalarını tan�
 Veritabanı ekibi tarafından uygulanacak veritabanı işlemleri için yer tutucular içerir.
 """
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from pydantic import EmailStr
 
-from app.modules.auth import schemas
+from app.modules.auth import schemas, service
+from app.core.database import get_db
+from sqlalchemy.orm import Session
 from app.core.security import (
-    get_password_hash,
+    hash_password,
     verify_password,
     create_access_token,
     decode_access_token,
@@ -20,7 +23,7 @@ from app.core.security import (
 # Profesyonel loglayıcıyı başlat
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
+router = APIRouter(tags=["Authentication"])
 
 
 @router.post(
@@ -29,26 +32,28 @@ router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
     status_code=status.HTTP_201_CREATED,
     summary="Yeni bir kullanıcı kaydet"
 )
-async def register(user_in: schemas.UserCreate):
+async def register(user_in: schemas.RegisterRequest, db: Session = Depends(get_db)):
     """
     Girdilerini doğrulayarak ve şifrelerini güvenli bir şekilde hashleyerek yeni bir kullanıcı kaydeder.
     """
     # Düz metin şifreyi güvenli bir şekilde hashle
-    hashed_password = get_password_hash(user_in.password)
+    hashed_password = hash_password(user_in.password)
     
     # TODO: DB Mühendisi - Kullanıcı oluşturma mantığını burada uygula.
-    # Beklenen fonksiyon imzası: db_create_user(user_in: schemas.UserCreate, hashed_password: str)
-    # Fonksiyon, kullanıcıyı veritabanına kaydetmeli ve ORM model örneğini döndürmelidir.
+    # Veritabanı bağlandığında aşağıdaki satırı aktif edin ve mock kodları silin:
+    # return service.create_user(user_in, db)
     
     # --- YER TUTUCU SİMÜLASYONU (DB bağlandığında kaldırın) ---
     import uuid
     simulated_user = {
-        "id": uuid.uuid4(),
+        "id": str(uuid.uuid4()),
         "first_name": user_in.first_name,
         "last_name": user_in.last_name,
         "tc_no": user_in.tc_no,
         "email": user_in.email,
         "phone_number": user_in.phone_number,
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc)
     }
     logger.info(f"User registration simulated for {user_in.email}")
     return simulated_user
@@ -56,20 +61,20 @@ async def register(user_in: schemas.UserCreate):
 
 @router.post(
     "/login", 
-    response_model=schemas.Token,
+    response_model=schemas.TokenResponse,
     summary="Kullanıcıyı doğrula ve JWT token döndür"
 )
-async def login(credentials: schemas.UserLogin):
+async def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
     """
     TC ve şifresini doğrulayarak bir kullanıcıyı doğrular ve ardından bir JWT erişim token'ı verir.
     """
     # TODO: DB Mühendisi - Kullanıcı alma mantığını burada uygula.
-    # Beklenen fonksiyon imzası: db_get_user_by_tc_no(tc_no: str)
-    # Fonksiyon bulunursa kullanıcı ORM modelini, bulunamazsa None döndürmelidir.
+    # Veritabanı bağlandığında aşağıdaki satırı aktif edin ve mock kodları silin:
+    # return service.authenticate_user(credentials, db)
     
     # --- YER TUTUCU SİMÜLASYONU (DB bağlandığında kaldırın) ---
     # Gösterim için, "Password123" şifresine sahip simüle edilmiş bir kullanıcının var olduğunu varsayıyoruz
-    simulated_hashed_password = get_password_hash("Password123")
+    simulated_hashed_password = hash_password("Password123")
     simulated_db_user = {
         "id": "123e4567-e89b-12d3-a456-426614174000",
         "tc_no": credentials.tc_no,
@@ -135,11 +140,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     # --- YER TUTUCU SİMÜLASYONU (DB bağlandığında kaldırın) ---
     import uuid
     simulated_user = {
-        "id": uuid.uuid4(),
+        "id": str(uuid.uuid4()),
         "first_name": "Simulated",
         "last_name": "User",
         "tc_no": tc_no,
         "email": "simulated@example.com",
         "phone_number": "+905554443322",
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc)
     }
     return simulated_user

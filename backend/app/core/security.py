@@ -16,10 +16,10 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Token çıkarmak için OAuth2 şemasını tanımla.
 # tokenUrl, Swagger UI'a nerede kimlik doğrulaması yapılacağını bildirmek için login uç noktasına işaret eder.
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
-def get_password_hash(password: str) -> str:
+def hash_password(password: str) -> str:
     """
     Bcrypt kullanarak düz metin şifreden güvenli bir hash oluşturur.
 

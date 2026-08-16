@@ -35,7 +35,7 @@ export default function Login() {
 
     setLoading(true)
     try {
-      const response = await api.post<{ access_token: string }>('/api/v1/auth/login', {
+      const response = await api.post<{ access_token: string }>('/api/auth/login', {
         tc_no: tcNo,
         password: password,
       })

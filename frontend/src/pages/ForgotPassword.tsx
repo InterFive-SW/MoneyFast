@@ -37,8 +37,8 @@ export default function ForgotPassword() {
 
     setLoading(true)
     try {
-      await api.post('/api/v1/auth/forgot-password', {
-        email: email
+      await api.post('/api/auth/forgot-password', {
+        email
       })
       
       setSuccess('Şifre yenileme bağlantısı e-posta adresinize gönderildi.')

@@ -150,3 +150,15 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         "created_at": datetime.now(timezone.utc)
     }
     return simulated_user
+
+
+@router.get(
+    "/health",
+    summary="Auth modülü sağlık durumu"
+)
+async def health_check():
+    """
+    Auth modülünün durumunu (health check) kontrol eder.
+    Sistemin ayakta olup olmadığını ve doğru modüle ulaşıldığını doğrulamak için kullanılır.
+    """
+    return {"status": "ok", "module": "auth"}

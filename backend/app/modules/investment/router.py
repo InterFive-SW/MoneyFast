@@ -3,7 +3,8 @@ from typing import List, Dict
 
 from .schemas import (
     InvestmentBalance, Position, Order, CandlestickDataPoint, AssetAllocationItem,
-    WatchlistItem, TopMoverItem, DividendItem, SectorAllocationItem, HeatmapItem
+    WatchlistItem, TopMoverItem, DividendItem, SectorAllocationItem, HeatmapItem,
+    OrderProposeRequest, OrderConfirmRequest
 )
 from .mock_data import (
     MOCK_INVESTMENT_BALANCE, MOCK_POSITIONS, MOCK_ORDERS, MOCK_CHART_DATA, MOCK_ASSET_ALLOCATION,
@@ -82,3 +83,47 @@ async def get_heatmap():
     Isı haritası (heatmap) için gerekli olan verileri döner.
     """
     return MOCK_HEATMAP
+
+@router.post("/orders/propose", response_model=Dict[str, str])
+async def propose_order(request: OrderProposeRequest):
+    """
+    AI servisi tarafından iletilen işlem önerisini alır ve geçici (mock) bir işlem numarası ile öneri statüsünü döner.
+    
+    Parametreler:
+        request (OrderProposeRequest): Varlık türü, işlem türü ve miktarını içeren veri modeli.
+        
+    Dönüş:
+        Dict[str, str]: İşlem numarası ve 'proposed' statüsünü içeren yanıt.
+    """
+    return {
+        "order_id": "TEST-ORDER-123",
+        "status": "proposed"
+    }
+
+@router.post("/orders/confirm", response_model=Dict[str, str])
+async def confirm_order(request: OrderConfirmRequest):
+    """
+    Frontend tarafında kullanıcı tarafından onaylanan işlemi kesinleştirir ve onay statüsünü döner.
+    
+    Parametreler:
+        request (OrderConfirmRequest): Kullanıcı tarafından onaylanan sipariş numarasını ve işlem türünü içeren veri modeli.
+        
+    Dönüş:
+        Dict[str, str]: İşlem onay mesajı ve 'confirmed' statüsünü içeren yanıt.
+    """
+    return {
+        "message": f"Sipariş başarıyla onaylandı (Sipariş No: {request.order_id})",
+        "status": "confirmed"
+    }
+
+
+@router.get(
+    "/health",
+    summary="Investment modülü sağlık durumu"
+)
+async def health_check():
+    """
+    Investment modülünün durumunu (health check) kontrol eder.
+    Sistemin ayakta olup olmadığını ve doğru modüle ulaşıldığını doğrulamak için kullanılır.
+    """
+    return {"status": "ok", "module": "investment"}

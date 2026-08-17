@@ -4,86 +4,6 @@
  */
 
 export interface paths {
-    "/api/auth/register": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Yeni bir kullanıcı kaydet
-         * @description Girdilerini doğrulayarak ve şifrelerini güvenli bir şekilde hashleyerek yeni bir kullanıcı kaydeder.
-         */
-        post: operations["register_api_auth_register_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/auth/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Kullanıcıyı doğrula ve JWT token döndür
-         * @description TC ve şifresini doğrulayarak bir kullanıcıyı doğrular ve ardından bir JWT erişim token'ı verir.
-         */
-        post: operations["login_api_auth_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/auth/forgot-password": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Şifre sıfırlama bağlantısı iste
-         * @description Sağlanan e-postaya bir sıfırlama bağlantısı göndererek şifre sıfırlama sürecini başlatır.
-         */
-        post: operations["forgot_password_api_auth_forgot_password_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/auth/me": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Mevcut doğrulanmış kullanıcı profilini getir
-         * @description JWT token'ına dayanarak şu anda kimliği doğrulanmış kullanıcının profil bilgilerini getirir.
-         */
-        get: operations["get_current_user_api_auth_me_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/investment/portfolio/summary": {
         parameters: {
             query?: never;
@@ -285,6 +205,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/investment/orders/propose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Order
+         * @description AI servisi tarafından iletilen işlem önerisini alır ve geçici (mock) bir işlem numarası ile öneri statüsünü döner.
+         *
+         *     Parametreler:
+         *         request (OrderProposeRequest): Varlık türü, işlem türü ve miktarını içeren veri modeli.
+         *
+         *     Dönüş:
+         *         Dict[str, str]: İşlem numarası ve 'proposed' statüsünü içeren yanıt.
+         */
+        post: operations["propose_order_api_investment_orders_propose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/investment/orders/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Order
+         * @description Frontend tarafında kullanıcı tarafından onaylanan işlemi kesinleştirir ve onay statüsünü döner.
+         *
+         *     Parametreler:
+         *         request (OrderConfirmRequest): Kullanıcı tarafından onaylanan sipariş numarasını ve işlem türünü içeren veri modeli.
+         *
+         *     Dönüş:
+         *         Dict[str, str]: İşlem onay mesajı ve 'confirmed' statüsünü içeren yanıt.
+         */
+        post: operations["confirm_order_api_investment_orders_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/market/tickers": {
         parameters: {
             query?: never;
@@ -342,14 +314,6 @@ export interface components {
             amount: number;
             /** Color */
             color: string;
-        };
-        /** Body_forgot_password_api_auth_forgot_password_post */
-        Body_forgot_password_api_auth_forgot_password_post: {
-            /**
-             * Email
-             * Format: email
-             */
-            email: string;
         };
         /** CandlestickDataPoint */
         CandlestickDataPoint: {
@@ -476,6 +440,28 @@ export interface components {
             /** Date */
             date: string;
         };
+        /**
+         * OrderConfirmRequest
+         * @description Frontend tarafının, kullanıcıdan alınan işlem onayını iletirken kullanacağı veri modeli (şeması).
+         */
+        OrderConfirmRequest: {
+            /** Order Id */
+            order_id: string;
+            /** Action */
+            action: string;
+        };
+        /**
+         * OrderProposeRequest
+         * @description AI servisinin işlem önerisi yaparken kullanacağı veri modeli (şeması).
+         */
+        OrderProposeRequest: {
+            /** Asset */
+            asset: string;
+            /** Action */
+            action: string;
+            /** Amount */
+            amount: number;
+        };
         /** Position */
         Position: {
             /** Symbol */
@@ -506,16 +492,6 @@ export interface components {
             /** Color */
             color: string;
         };
-        /**
-         * Token
-         * @description JWT token yanıtı için şema.
-         */
-        Token: {
-            /** Access Token */
-            access_token: string;
-            /** Token Type */
-            token_type: string;
-        };
         /** TopMoverItem */
         TopMoverItem: {
             /** Symbol */
@@ -524,89 +500,6 @@ export interface components {
             price: number;
             /** Changepercent */
             changePercent: number;
-        };
-        /**
-         * UserCreate
-         * @description Sıkı doğrulamalarla yeni bir kullanıcı kaydetmek için şema.
-         */
-        UserCreate: {
-            /**
-             * First Name
-             * @description Kullanıcının adı
-             */
-            first_name: string;
-            /**
-             * Last Name
-             * @description Kullanıcının soyadı
-             */
-            last_name: string;
-            /**
-             * Tc No
-             * @description 11 haneli T.C. Kimlik Numarası
-             */
-            tc_no: string;
-            /**
-             * Email
-             * Format: email
-             * @description Geçerli e-posta adresi
-             */
-            email: string;
-            /**
-             * Phone Number
-             * @description İsteğe bağlı ülke koduyla telefon numarası
-             */
-            phone_number: string;
-            /**
-             * Password
-             * @description Şifre en az 8 karakter olmalı, 1 büyük harf ve 1 rakam içermelidir
-             */
-            password: string;
-        };
-        /**
-         * UserLogin
-         * @description Kullanıcı giriş bilgileri için şema.
-         */
-        UserLogin: {
-            /**
-             * Tc No
-             * @description 11 haneli T.C. Kimlik Numarası
-             */
-            tc_no: string;
-            /**
-             * Password
-             * @description Kullanıcının şifresi
-             */
-            password: string;
-        };
-        /**
-         * UserResponse
-         * @description Kullanıcı verilerini güvenli bir şekilde (şifresiz) döndürmek için şema.
-         */
-        UserResponse: {
-            /**
-             * First Name
-             * @description Kullanıcının adı
-             */
-            first_name: string;
-            /**
-             * Last Name
-             * @description Kullanıcının soyadı
-             */
-            last_name: string;
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Tc No */
-            tc_no: string;
-            /**
-             * Email
-             * Format: email
-             */
-            email: string;
-            /** Phone Number */
-            phone_number: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -641,125 +534,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    register_api_auth_register_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UserCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    login_api_auth_login_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UserLogin"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Token"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    forgot_password_api_auth_forgot_password_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["Body_forgot_password_api_auth_forgot_password_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_current_user_api_auth_me_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserResponse"];
-                };
-            };
-        };
-    };
     get_portfolio_summary_api_investment_portfolio_summary_get: {
         parameters: {
             query?: never;
@@ -962,6 +736,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HeatmapItem"][];
+                };
+            };
+        };
+    };
+    propose_order_api_investment_orders_propose_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderProposeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_order_api_investment_orders_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrderConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

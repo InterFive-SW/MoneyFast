@@ -22,3 +22,15 @@ async def get_market_news():
     Şu an mock veri dönmektedir, ileride RSS/Scraping entegrasyonu yapılacaktır.
     """
     return MOCK_NEWS
+
+
+@router.get(
+    "/health",
+    summary="Market modülü sağlık durumu"
+)
+async def health_check():
+    """
+    Market modülünün durumunu (health check) kontrol eder.
+    Sistemin ayakta olup olmadığını ve doğru modüle ulaşıldığını doğrulamak için kullanılır.
+    """
+    return {"status": "ok", "module": "market"}

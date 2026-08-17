@@ -8,29 +8,29 @@ interface SuggestedPromptsProps {
 /**
  * SuggestedPrompts Bileşeni
  * 
- * Sohbet geçmişi boş olduğunda kullanıcıya sunulan örnek finansal komutları barındırır.
+ * Sohbet girdi alanının üzerinde yatay olarak kaydırılabilir (horizontal scroll) 
+ * öneri butonlarını (chip/pill) barındırır.
  */
 export default function SuggestedPrompts({ onSelectPrompt }: SuggestedPromptsProps) {
   const prompts = [
-    "Portföyümün risk analizini yap",
-    "Bugün en çok kazandıran BIST hisseleri neler?",
-    "Apple (AAPL) son çeyrek bilançosunu özetle"
+    "SASA'nın son çeyrek bilançosunu basitçe anlat",
+    "THYAO'da son dönemde öne çıkan gelişmeler neler?",
+    "BIST 100'de bugün en çok kazandıranlar",
+    "Apple (AAPL) finansal özetini getir",
+    "TLY ve PHE fonlarının getiri ve portföy dağılımını karşılaştır"
   ];
 
   return (
-    <div className="flex flex-col items-center justify-center h-full w-full p-6 transition-opacity duration-500 opacity-100">
-      <h2 className="text-2xl font-medium text-slate-800 mb-8">Nasıl yardımcı olabilirim?</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-4xl">
-        {prompts.map((prompt, index) => (
-          <div 
-            key={index}
-            onClick={() => onSelectPrompt(prompt)}
-            className="bg-white/60 border border-slate-200 hover:border-emerald-400 hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer rounded-xl p-4 flex items-center justify-center text-center text-slate-700 font-medium"
-          >
-            {prompt}
-          </div>
-        ))}
-      </div>
+    <div className="w-full flex flex-wrap justify-center gap-3">
+      {prompts.map((prompt, index) => (
+        <button 
+          key={index}
+          onClick={() => onSelectPrompt(prompt)}
+          className="px-5 py-3 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-medium text-slate-700 transition-colors cursor-pointer shadow-sm"
+        >
+          {prompt}
+        </button>
+      ))}
     </div>
   );
 }

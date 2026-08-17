@@ -1,6 +1,8 @@
 // src/components/chat/MessageBubble.tsx
 import React from 'react';
-import { ChatMessage } from '../../types/chat';
+import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload } from '../../types/chat';
+import ChartWidget from './widgets/ChartWidget';
+import ActionWidget from './widgets/ActionWidget';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -10,7 +12,7 @@ interface MessageBubbleProps {
  * MessageBubble Bileşeni
  * 
  * Kullanıcı ve yapay zeka mesajlarının arayüzdeki temsilidir.
- * Mesaj tipine göre farklı stiller uygulanır.
+ * Mesaj tipine göre farklı stiller uygulanır ve widget varsa render edilir.
  */
 export default function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.sender === 'user';
@@ -42,6 +44,14 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
         >
           <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{message.text}</p>
           
+          {/* Widget Render Alanı */}
+          {message.widget && message.widget.type === 'chart' && (
+            <ChartWidget payload={message.widget.payload as ChartWidgetPayload} />
+          )}
+          {message.widget && message.widget.type === 'action' && (
+            <ActionWidget payload={message.widget.payload as ActionWidgetPayload} />
+          )}
+
           <span 
             className={`text-[10px] mt-1 ${
               isUser ? 'text-emerald-200 self-end' : 'text-slate-400 self-start'

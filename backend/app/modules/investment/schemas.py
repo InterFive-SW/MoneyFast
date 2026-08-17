@@ -75,3 +75,18 @@ class HeatmapItem(BaseModel):
     weight: float
     changePercent: float
     sector: str
+
+class OrderProposeRequest(BaseModel):
+    """
+    AI servisinin işlem önerisi yaparken kullanacağı veri modeli (şeması).
+    """
+    asset: str
+    action: str
+    amount: float
+
+class OrderConfirmRequest(BaseModel):
+    """
+    Frontend tarafının, kullanıcıdan alınan işlem onayını iletirken kullanacağı veri modeli (şeması).
+    """
+    order_id: str
+    action: str

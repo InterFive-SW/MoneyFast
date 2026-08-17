@@ -1,0 +1,16 @@
+# MoneyFast orchestrator runtime deps.
+# Upper bounds are deliberate: the MCP SDK moved FastMCP in 2.0 and LangGraph
+# still makes breaking minor releases. Re-pin with pip-compile before release.
+
+langgraph>=0.2.60,<0.7
+langchain-core>=0.3.29,<0.4
+langchain-groq>=0.2.3,<0.4
+
+# MCP client. Keep below 2.0: mcp.client.sse and mcp.server.fastmcp both moved.
+mcp>=1.9,<2
+
+httpx>=0.27,<0.29
+fastapi>=0.115,<0.121
+uvicorn[standard]>=0.32,<0.40
+pydantic>=2.9,<3
+python-dotenv>=1.0,<2

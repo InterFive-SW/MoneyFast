@@ -225,3 +225,6 @@ dist/
 
 # Editor configs
 pyrightconfig.json
+
+ai-orchestrator/.env
+ai-orchestrator/__pycache__/

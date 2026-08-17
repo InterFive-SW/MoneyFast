@@ -1,0 +1,60 @@
+services:
+  # Existing MCP tool server. Replace `build` with your published image if you
+  # already have one; keep container_name, it is the hostname the orchestrator
+  # dials.
+  mcp-market-data:
+    container_name: mcp-moneyfast
+    build:
+      context: ./mcp-server
+    # image: moneyfast/mcp-market-data:latest
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8000"
+    expose:
+      - "8000"
+    ports:
+      # Loopback only. Do not publish a tool server to 0.0.0.0.
+      - "127.0.0.1:8000:8000"
+    networks:
+      - moneyfast-net
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c 'import socket; socket.create_connection(("127.0.0.1", 8000), 2).close()'
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  orchestrator_agent:
+    container_name: orchestrator-agent
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      # Container name as host. NOT localhost: inside a container that is the
+      # container itself.
+      MCP_SERVER_URL: http://mcp-market-data:8000/sse
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      GROQ_FAST_MODEL: ${GROQ_FAST_MODEL:-llama-3.1-8b-instant}
+      JURISDICTION: ${JURISDICTION:-TR}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-tr-TR}
+      MAX_COMPLIANCE_REVISIONS: ${MAX_COMPLIANCE_REVISIONS:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      mcp-market-data:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - moneyfast-net
+    restart: unless-stopped
+
+networks:
+  moneyfast-net:
+    name: moneyfast-net
+    driver: bridge

@@ -34,9 +34,10 @@ export type HeatmapItem = GetResponseType<paths['/api/investment/heatmap']>[0];
 class ApiClient {
     /**
      * API İsteklerinin yönlendirileceği Base URL (Backend sunucusu).
-     * Geliştirme ortamında doğrudan backend'in yayın yaptığı 8000 portuna istek atılır.
+     * Göreceli path kullanılır çünkü frontend backend ile aynı origin'den serve ediliyor
+     * (CORS'a gerek yok, hangi adresten erişilirse erişilsin otomatik doğru yere gider).
      */
-    private baseUrl = 'http://localhost:8000/api';
+    private baseUrl = '/api';
 
     private async request<T>(endpoint: string): Promise<T> {
         try {

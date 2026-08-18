@@ -42,7 +42,7 @@ def _discover_routers(application: FastAPI) -> None:
 
 _discover_routers(app)
 
-_static_dir = Path(__file__).parent.parent.parent / "frontend" / "dist"
+_static_dir = Path(__file__).parent.parent / "frontend" / "dist"
 
 if _static_dir.exists():
     @app.get("/{full_path:path}", include_in_schema=False)

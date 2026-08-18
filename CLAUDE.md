@@ -97,3 +97,21 @@ sınıfı import etmiyoruz — böylece modüller arası gizli bağımlılık a�
 - Üretilen kod her zaman commit öncesi gözden geçirilir; otomatik commit'e güvenilmez.
 - Antigravity gibi otonom, tarayıcı/terminal erişimli ajanlarla çalışırken: hiçbir
   otomatik işlem (dış siteden veri çekme, terminal komutu) review'suz merge edilmez.
+
+## Analiz ve Tasarım Dokümanları
+
+- docs/analiz/ — iş gereksinimleri, user story'ler, test senaryoları, UAT planı
+- docs/tasarim/ — wireframe notları, tasarım referansları (Fintables)
+
+Yeni bir modül/endpoint/ekran geliştirirken ilgili User Story ve İş Kuralı'na
+(İK-XX) bakılmalı, kod bunlarla tutarlı olmalı.
+
+## Belirsizlik ve Kapsam Kararları
+
+- Bir User Story'de veya İş Kuralında AÇIKÇA tanımlı bir davranış varsa, ona
+  sadık kal, sormaya gerek yok.
+- Dokümanlar arasında belirsiz/eksik/çelişkili bir nokta bulursan (örn. iki
+  dokümanın çelişmesi, ya da hiç bahsedilmeyen bir durum), varsayımda bulunup
+  ilerlemek yerine kullanıcıya SOR.
+- Proje mimarisini (modül sınırları, DB şeması, servisler arası iletişim gibi)
+  etkileyecek bir karar noktasında da mutlaka sor.

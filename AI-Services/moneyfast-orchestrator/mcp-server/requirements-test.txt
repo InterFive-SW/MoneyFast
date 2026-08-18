@@ -1,0 +1,15 @@
+# Test-only dependencies for the MoneyFast MCP tool server.
+# Install on top of the runtime deps:  pip install -r requirements-test.txt
+#
+# Upper bounds are deliberate. pytest-asyncio in particular has changed its
+# default loop and mode semantics across minor releases; an unpinned bump
+# turns a green suite red for reasons unrelated to the code under test.
+
+pytest>=8.3,<10
+pytest-asyncio>=0.24,<2         # async MCP dispatch tests in test_server.py
+pytest-cov>=5.0,<8              # line + branch coverage, --cov-fail-under gate
+pytest-mock>=3.14,<4            # the `mocker` fixture used across the suite
+
+# Runtime dependency the tests import directly. Keep the bound identical to
+# the Dockerfile: mcp 2.0 moved mcp.server.fastmcp to mcp.server.mcpserver.
+mcp>=1.9,<2

@@ -1,6 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 from typing import List, Dict
 
+from app.core.database import get_db
+from app.modules.auth.router import get_current_user
+from app.modules.investment import service
 from .schemas import (
     InvestmentBalance, Position, Order, CandlestickDataPoint, AssetAllocationItem,
     WatchlistItem, TopMoverItem, DividendItem, SectorAllocationItem, HeatmapItem,
@@ -101,20 +105,24 @@ async def propose_order(request: OrderProposeRequest):
     }
 
 @router.post("/orders/confirm", response_model=Dict[str, str])
-async def confirm_order(request: OrderConfirmRequest):
+async def confirm_order(
+    request: OrderConfirmRequest, 
+    db: Session = Depends(get_db), 
+    current_user: dict = Depends(get_current_user)
+):
     """
     Frontend tarafında kullanıcı tarafından onaylanan işlemi kesinleştirir ve onay statüsünü döner.
+    Veritabanı bağlantısı ile bakiye kontrolü yapar ve işlemi kalıcı hale getirir.
     
     Parametreler:
-        request (OrderConfirmRequest): Kullanıcı tarafından onaylanan sipariş numarasını ve işlem türünü içeren veri modeli.
+        request (OrderConfirmRequest): Kullanıcı tarafından onaylanan sipariş detaylarını içeren veri modeli.
+        db (Session): SQLAlchemy veritabanı oturumu.
+        current_user (dict): Doğrulanmış kullanıcının (şu an için simüle edilmiş) bilgileri.
         
     Dönüş:
-        Dict[str, str]: İşlem onay mesajı ve 'confirmed' statüsünü içeren yanıt.
+        Dict[str, str]: İşlem onay mesajı, statüsü ve yeni bakiye bilgisini içeren yanıt.
     """
-    return {
-        "message": f"Sipariş başarıyla onaylandı (Sipariş No: {request.order_id})",
-        "status": "confirmed"
-    }
+    return service.process_order_confirmation(db, current_user, request)
 
 
 @router.get(

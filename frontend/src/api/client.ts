@@ -36,11 +36,22 @@ class ApiClient {
      * API İsteklerinin yönlendirileceği Base URL (Backend sunucusu).
      * Geliştirme ortamında doğrudan backend'in yayın yaptığı 8000 portuna istek atılır.
      */
-    private baseUrl = 'http://localhost:8000/api';
+    private baseUrl = '/api';
 
     private async request<T>(endpoint: string): Promise<T> {
         try {
-            const response = await fetch(`${this.baseUrl}${endpoint}`);
+            const token = localStorage.getItem('access_token');
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+            };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            const response = await fetch(`${this.baseUrl}${endpoint}`, {
+                method: 'GET',
+                headers,
+            });
             if (!response.ok) {
                 throw new Error(`API Hatası: ${response.status} ${response.statusText}`);
             }
@@ -117,7 +128,18 @@ class ApiClient {
         const normalizedUrl = url.startsWith('/api') ? url.substring(4) : url;
         const fullUrl = url.startsWith('http') ? url : `${this.baseUrl}${normalizedUrl}`;
         try {
-            const response = await fetch(fullUrl);
+            const token = localStorage.getItem('access_token');
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+            };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            const response = await fetch(fullUrl, {
+                method: 'GET',
+                headers,
+            });
             if (!response.ok) {
                 throw new Error(`API Hatası: ${response.status} ${response.statusText}`);
             }
@@ -134,11 +156,17 @@ class ApiClient {
         const normalizedUrl = url.startsWith('/api') ? url.substring(4) : url;
         const fullUrl = url.startsWith('http') ? url : `${this.baseUrl}${normalizedUrl}`;
         try {
+            const token = localStorage.getItem('access_token');
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+            };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
             const response = await fetch(fullUrl, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers,
                 body: data ? JSON.stringify(data) : undefined,
             });
             if (!response.ok) {

@@ -27,9 +27,12 @@ export default function ActionWidget({ payload }: ActionWidgetProps) {
     setToastMessage(null);
 
     try {
+      // Backend'in bizden beklediği Pydantic şemasına tam uyumlu istek atıyoruz
       await api.confirmOrder({
         order_id: payload.actionId,
-        action: 'confirm',
+        action: payload.action,
+        asset: payload.asset,
+        amount: payload.amount,
       });
       
       setStatus('confirmed');

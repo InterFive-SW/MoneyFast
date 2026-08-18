@@ -22,8 +22,11 @@ services:
       - ../backend/.env
     environment:
       DATABASE_URL: postgresql://moneyfast:password@postgres:5432/moneyfast
+      ORCHESTRATOR_URL: http://host.docker.internal:8080
     ports:
       - "8000:8000"
+    volumes:
+      - ../backend/app:/app/app
     depends_on:
       postgres:
         condition: service_healthy

@@ -1,5 +1,6 @@
 // src/components/chat/ChatPopup.tsx
 import React, { useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useChat } from '../../context/ChatContext';
 import MessageBubble from './MessageBubble';
 import ChatInput from './ChatInput';
@@ -20,17 +21,14 @@ interface ChatPopupProps {
 export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
   const { messages, isTyping, currentThought, handleSendMessage } = useChat();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   const scrollToBottom = () => {
     // DOM'un render olmasını bekleyip öyle scroll yapmak için setTimeout kullanıyoruz
     setTimeout(() => {
-      if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTo({
-          top: scrollContainerRef.current.scrollHeight,
-          behavior: 'smooth'
-        });
-      }
-    }, 50);
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 150);
   };
 
   useEffect(() => {
@@ -55,23 +53,51 @@ export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
             <p className="text-[10px] text-emerald-600 font-medium leading-tight mt-0.5">Sizin için hazır</p>
           </div>
         </div>
-        <button 
-          onClick={onClose}
-          className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors focus:outline-none"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        
+        <div className="flex items-center gap-1">
+          {/* Tam Ekrana (Sohbet Sayfasına) Geçiş Butonu */}
+          <button 
+            onClick={() => {
+              onClose();
+              navigate('/chat');
+            }}
+            className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors focus:outline-none"
+            title="Sohbet Sayfasına Git"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+            </svg>
+          </button>
+          
+          {/* Kapatma Butonu */}
+          <button 
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors focus:outline-none"
+            title="Kapat"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Mesaj Listesi */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 py-4 bg-slate-50/50">
-        <div className="flex flex-col">
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
-          {isTyping && <TypingIndicator thought={currentThought} />}
+        <div className="flex flex-col min-h-full justify-end">
+          {messages.length === 0 ? (
+            <div className="text-center text-slate-400 text-sm py-4 my-auto">
+              Sohbete başlamak için bir mesaj yazın...
+            </div>
+          ) : (
+            <>
+              {messages.map((msg) => (
+                <MessageBubble key={msg.id} message={msg} />
+              ))}
+              {isTyping && <TypingIndicator thought={currentThought} />}
+              <div ref={messagesEndRef} className="h-2 w-full" />
+            </>
+          )}
         </div>
       </div>
 

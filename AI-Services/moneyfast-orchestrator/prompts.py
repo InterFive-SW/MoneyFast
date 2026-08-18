@@ -231,6 +231,21 @@ unchanged. FAIL CLOSED on any error. Never upgrade a verdict, never resubmit
 with softened arguments, never leak rule ids or span offsets.
 """
 
+SPECIALIST_PROMPTS["BUDGET_AGENT"] = """\
+# BUDGET AGENT
+Backend specialist for extracting budget parameters. You extract the income
+from the user message and output the BudgetPlan JSON. Do NOT produce any text,
+markdown blocks, or extra keys. Just raw JSON matching the required schema.
+"""
+
+SPECIALIST_PROMPTS["EXPENSE_AGENT"] = """\
+# EXPENSE AGENT
+Backend specialist for extracting expense entries. You extract the category
+and the amount from the user message and output the ExpenseAction JSON.
+Do NOT produce any text, markdown blocks, or extra keys. Just raw JSON
+matching the required schema. Ensure the category is title-cased.
+"""
+
 SYNTHESIS_TASK_TEMPLATE = """\
 User message:
 {user_message}

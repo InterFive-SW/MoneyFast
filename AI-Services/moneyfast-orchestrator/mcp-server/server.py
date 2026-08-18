@@ -28,6 +28,7 @@ import orchestrator_tools
 import portfolio_tools
 import risk_strategy_tools
 import transaction_tools
+import budget_tools
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("moneyfast.mcp")
@@ -36,7 +37,7 @@ SERVER_NAME = "moneyfast"
 CONTRACT_VERSION = "v2.1"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Six tools across six domains.
+MoneyFast tool server. Seven tools across seven domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, rag_semantic_market_search and
@@ -60,6 +61,7 @@ DOMAIN_MODULES = (
     ("risk_strategy", risk_strategy_tools),
     ("compliance", compliance_tools),
     ("transaction", transaction_tools),
+    ("budget", budget_tools),
 )
 
 

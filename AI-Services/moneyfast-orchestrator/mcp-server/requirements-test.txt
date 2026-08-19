@@ -4,6 +4,8 @@
 # Upper bounds are deliberate. pytest-asyncio in particular has changed its
 # default loop and mode semantics across minor releases; an unpinned bump
 # turns a green suite red for reasons unrelated to the code under test.
+# httpx is the only new runtime dependency introduced by the backend refactor.
+httpx>=0.27,<0.29
 
 pytest>=8.3,<10
 pytest-asyncio>=0.24,<2         # async MCP dispatch tests in test_server.py

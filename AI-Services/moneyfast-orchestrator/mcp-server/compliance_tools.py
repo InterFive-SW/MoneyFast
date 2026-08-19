@@ -1,21 +1,38 @@
 # filename: compliance_tools.py
 """Compliance domain tools.
 
-MoneyFast MCP server, mock skeleton.
+MoneyFast MCP server.
 Contracts are frozen against "MCP Tools Interface Definitions v2.1".
-All business logic is mocked; no network, database, or broker call is made.
-Mock values are deterministic so orchestrator routing tests are reproducible.
+Data comes from the core backend over HTTP; see backend_client for the base
+URL, timeout, retry and error-mapping policy. Nothing in this module returns
+canned data, and nothing falls back to canned data on failure.
 """
 
-#from __future__ import annotations
+# from __future__ import annotations
 
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+import backend_client
+from backend_client import (
+    AuthorizationError,
+    ContractViolationError,
+    InvalidInputError,
+    UpstreamUnavailableError,
+)
+
+TOOL = "validate_compliance_rules"
+VERDICTS = frozenset({"PASS", "REVISE", "BLOCK"})
+
+#: Shown to the user when the rule engine blocks without supplying a reason.
+DEFAULT_BLOCK_REASON_TR = (
+    "Bu soruya bu şekilde yanıt veremem. Dilerseniz geçmiş verileri ve "
+    "maliyetleri birlikte inceleyebiliriz."
+)
 
 
-def validate_compliance_rules(
+async def validate_compliance_rules(
     draft_response: str,
     user_query: str,
     jurisdiction: str = "TR",
@@ -128,71 +145,77 @@ def validate_compliance_rules(
         - This tool validates LANGUAGE, not ACCURACY. "PASS" is not confirmation that
           the underlying figures or claims are correct.
     """
-    # MOCK: replace with the rule engine client.
-    # The mock always returns PASS. It performs NO screening whatsoever.
-    # Do not treat a PASS from this skeleton as evidence that a draft is
-    # compliant. See REVISE_FIXTURE below to exercise the other branches.
+    # POST /compliance/validate.
+    #
+    # This function never returns a verdict it did not receive. There is no
+    # offline mode, no cached verdict and no default. Every failure raises, and
+    # the orchestrator converts any exception into BLOCK. That asymmetry is the
+    # whole point: an unreachable rule engine must cost a user a reply, not
+    # cost the firm a licence.
+    #
+    # tools_used defaults to [] rather than being dropped, because the backend
+    # distinguishes "no tool contributed" from "the caller forgot to say".
+    payload = await backend_client.request(
+        "POST",
+        "/compliance/validate",
+        tool=TOOL,
+        json_body={
+            "draft_response": draft_response,
+            "user_query": user_query,
+            "jurisdiction": jurisdiction,
+            "tools_used": list(tools_used or []),
+            "contains_personal_data": contains_personal_data,
+            "contains_transaction_proposal": contains_transaction_proposal,
+            "strictness": strictness,
+        },
+    )
+    return _normalize(payload)
+
+
+def _normalize(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project the backend verdict onto the exact v2.1 payload.
+
+    Every ambiguity resolves toward BLOCK:
+
+    * an unrecognised verdict string becomes BLOCK, never PASS;
+    * a CRITICAL violation forces BLOCK even if the backend said otherwise;
+    * REVISE without remediated_response becomes BLOCK, because there is
+      nothing safe to emit and the original draft is not a fallback.
+    """
+    backend_client.require(payload, ("verdict", "audit_id"), TOOL)
+
+    verdict = str(payload["verdict"]).upper()
+    if verdict not in VERDICTS:
+        raise ContractViolationError(
+            f"{TOOL}: unrecognised verdict {payload['verdict']!r}; refusing to interpret it."
+        )
+
+    violations = list(payload.get("violations") or [])
+    if verdict != "BLOCK" and any(
+        str(v.get("severity", "")).upper() == "CRITICAL" for v in violations if isinstance(v, dict)
+    ):
+        # Defence in depth. The rule engine should already have done this.
+        verdict = "BLOCK"
+
+    remediated = payload.get("remediated_response")
+    if verdict == "REVISE" and not remediated:
+        verdict = "BLOCK"
+        remediated = None
+
+    blocked_reason = payload.get("blocked_reason_user_facing")
+    if verdict == "BLOCK" and not blocked_reason:
+        blocked_reason = DEFAULT_BLOCK_REASON_TR
+
     return {
-        "verdict": "PASS",
-        "rule_pack_version": "TR_RETAIL_2026.07",
-        "violations": [],
-        "required_disclosures": [],
-        "remediated_response": None,
-        "blocked_reason_user_facing": None,
-        "audit_id": "aud_5c1e7b90",
+        "verdict": verdict,
+        "rule_pack_version": str(payload.get("rule_pack_version", "UNKNOWN")),
+        "violations": violations,
+        # Emitted verbatim to the user; never reshaped, translated or merged.
+        "required_disclosures": list(payload.get("required_disclosures") or []),
+        "remediated_response": remediated if verdict == "REVISE" else None,
+        "blocked_reason_user_facing": blocked_reason if verdict == "BLOCK" else None,
+        "audit_id": str(payload["audit_id"]),
     }
-
-
-# Swap this fixture into the return above to test the REVISE branch of the
-# orchestrator: it must emit remediated_response, never draft_response.
-REVISE_FIXTURE: dict[str, Any] = {
-    "verdict": "REVISE",
-    "rule_pack_version": "TR_RETAIL_2026.07",
-    "violations": [
-        {
-            "rule_id": "ADV-001",
-            "rule_name": "Personalized investment recommendation",
-            "severity": "HIGH",
-            "offending_span": {"start": 42, "end": 71, "text": "bu hisseyi almanızı öneririm"},
-            "rationale": "Directs the user to acquire a named instrument.",
-            "remediation": "Replace with a descriptive statement of the metric.",
-        }
-    ],
-    "required_disclosures": [
-        {
-            "disclosure_id": "DISC-TR-001",
-            "text": "Burada yer alan bilgiler yatırım danışmanlığı kapsamında değildir.",
-            "placement": "APPEND",
-        }
-    ],
-    "remediated_response": "<remediated draft supplied by the rule engine>",
-    "blocked_reason_user_facing": None,
-    "audit_id": "aud_5c1e7b91",
-}
-
-# Swap this fixture in to test the BLOCK branch. The orchestrator must emit
-# blocked_reason_user_facing and must NOT emit any variant of the draft.
-BLOCK_FIXTURE: dict[str, Any] = {
-    "verdict": "BLOCK",
-    "rule_pack_version": "TR_RETAIL_2026.07",
-    "violations": [
-        {
-            "rule_id": "GUAR-002",
-            "rule_name": "Guaranteed return claim",
-            "severity": "CRITICAL",
-            "offending_span": {"start": 0, "end": 24, "text": "kesin kazandıracak hisse"},
-            "rationale": "Asserts a guaranteed investment outcome.",
-            "remediation": "No remediation available; the claim cannot be made.",
-        }
-    ],
-    "required_disclosures": [],
-    "remediated_response": None,
-    "blocked_reason_user_facing": (
-        "Bu soruya getiri garantisi içeren bir yanıt veremem. "
-        "Geçmiş verileri ve maliyetleri birlikte inceleyebiliriz."
-    ),
-    "audit_id": "aud_5c1e7b92",
-}
 
 
 def register(mcp: FastMCP) -> None:

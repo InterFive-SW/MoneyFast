@@ -18,6 +18,10 @@ değerlendirmesi sunuyor.
 
 Neden bu şekilde ve hangi kararların nasıl alındığı için: **[docs/MIMARI_KARARLAR.md](docs/MIMARI_KARARLAR.md)**.
 
+Core işlemler ve RAG retrieval yükü iki bağımsız PostgreSQL instance'ında
+çalışır. Vector DB sınırları, migration sahipliği ve kaynak izolasyonu için:
+**[docs/VECTOR_DB_ARCHITECTURE.md](docs/VECTOR_DB_ARCHITECTURE.md)**.
+
 ```
 moneyfast/
 ├── backend/          FastAPI modüler monolit + frontend'in derlenmiş hali
@@ -38,6 +42,8 @@ moneyfast/
 Gereksinimler: Docker + Docker Compose.
 
 ```bash
+cp infra/.env.example infra/.env
+# infra/.env içindeki change-me değerlerini değiştir
 cd infra
 docker compose up --build
 ```
@@ -48,6 +54,8 @@ docker compose up --build
 
 İlk çalıştırmada Postgres hazır olduktan sonra backend otomatik olarak Alembic
 migration'larını uygular, elle bir şey yapmana gerek yok.
+Vector DB migration'ları ayrı `vector-migrations` job'ı tarafından checksum
+kontrollü olarak uygulanır; backend vector şemasını migrate etmez.
 
 ### Ortam değişkenleri
 

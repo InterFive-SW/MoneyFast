@@ -14,6 +14,8 @@ işaretleyip ilgili yere (CLAUDE.md, CONTRACT_WORKFLOW.md) yansıtılmalı.
 | Auth | FastAPI + JWT (python-jose/passlib) | ASP.NET Identity önerisi .NET dönemine aitti, Python'a taşındı |
 | Frontend | React + Vite + TS + Tailwind — backend'e entegre (StaticFiles + SPA fallback) | Ayrı servis değil; multi-stage Dockerfile ile aynı image'da build edilip serve ediliyor |
 | Servisler arası sözleşme | OpenAPI-tabanlı otomatik üretim | Detay: CONTRACT_WORKFLOW.md — artık sadece backend↔ai-service sınırı için geçerli |
+| Veritabanı izolasyonu | Ayrı `core-db` ve `vector-db` PostgreSQL 16 instance'ları | Vector sorguları core işlem yükünden, volume'den ve resource limitlerinden izole; detay: VECTOR_DB_ARCHITECTURE.md |
+| Embedding | `text-embedding-3-small`, 1536 boyut | Model/boyut değişikliği vector migration, re-embedding ve retrieval evaluation gerektirir |
 
 ### Neden frontend backend'e birleşti, ai-service neden ayrı kaldı
 
@@ -80,6 +82,7 @@ dahil edilmeli.
 
 - ✅ Paylaşılan sözleşme: OpenAPI-tabanlı otomatik üretimle çözüldü (CONTRACT_WORKFLOW.md)
 - ✅ Local orchestration: infra/docker-compose.yml ile çözüldü (postgres + backend, healthcheck'li)
+- ✅ Core/vector PostgreSQL performans izolasyonu ve ayrı migration sahipliği tanımlandı
 - ✅ Router auto-discovery: backend/app/main.py'de kuruldu, doğrulandı
 - ✅ Backend altyapısı: auth modülü uçtan uca test edildi (register → Postgres kaydı)
 - ✅ Frontend altyapısı: backend'e entegre, SPA routing doğrulandı

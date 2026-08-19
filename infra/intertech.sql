@@ -1,6 +1,3 @@
--- Senin yapay zeka işlemlerin için gereken vektör eklentisi
-CREATE EXTENSION IF NOT EXISTS vector;
-
 -- Şemaların Oluşturulması
 -- Deployment açısından database'leri ayırmak yerine şemalara böldüm.
 CREATE SCHEMA auth;
@@ -499,37 +496,6 @@ CREATE TABLE ai.messages (
     
     created_at TIMESTAMPTZ DEFAULT now()
 );
-
-CREATE TABLE ai.rag_documents (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    
-    title TEXT NOT NULL,                     -- Doküman başlığı
-    source TEXT,                             -- 'KAP', 'Reuters', 'Internal_PDF' vb.
-    source_url TEXT,                         -- Varsa dokümanın orijinal linki
-    document_type TEXT,                      -- 'news', 'financial_report', 'faq'
-    
-    metadata JSONB,                          -- Yazar, yayın tarihi gibi ekstra esnek bilgiler
-    
-    created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE ai.rag_chunks (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    document_id UUID NOT NULL REFERENCES ai.rag_documents(id) ON DELETE CASCADE,
-    
-    content TEXT NOT NULL,                   -- Parçalanmış saf metin
-    chunk_index INTEGER NOT NULL,            -- Doküman içindeki sıra numarası (0, 1, 2...)
-    
-    -- 1536 boyutu OpenAI (text-embedding-ada-002 veya text-embedding-3-small) için standarttır.
-    -- Eğer açık kaynaklı (örneğin BAAI/bge-m3) kullanacaksan 1024 gibi modelin boyutunu yazmalısın.
-    embedding VECTOR(1536),                  
-    
-    metadata JSONB,                          -- O chunk'a özel etiketler
-    
-    created_at TIMESTAMPTZ DEFAULT now()
-);
-
 
 CREATE INDEX idx_market_quotes_product_time
 ON investment.market_quotes(product_id, market_timestamp DESC);

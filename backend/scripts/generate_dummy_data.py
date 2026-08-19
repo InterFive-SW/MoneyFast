@@ -20,10 +20,36 @@ DUMMY_TC_PREFIX = "999"  # TC must be 11 digits, so we use 999 as prefix for dum
 
 def is_safe_environment() -> bool:
     """Check if we are in a safe environment to generate dummy data."""
-    # This prevents running in production by checking the DB URL
-    safe_indicators = ["localhost", "127.0.0.1", "test", "sqlite"]
-    db_url = str(settings.DATABASE_URL).lower()
-    return any(indicator in db_url for indicator in safe_indicators)
+    try:
+        from sqlalchemy.engine.url import make_url
+        parsed_url = make_url(str(settings.DATABASE_URL))
+    except Exception:
+        return False
+
+    # Priority 1: Check environment variables
+    env = os.environ.get("ENV") or os.environ.get("APP_ENV") or os.environ.get("ENVIRONMENT")
+    if env and env.strip().lower() in ("prod", "production"):
+        return False
+
+    drivername = parsed_url.drivername.lower() if parsed_url.drivername else ""
+    host = parsed_url.host.lower() if parsed_url.host else None
+    database = parsed_url.database.lower() if parsed_url.database else ""
+
+    # Priority 2: SQLite database checks
+    if "sqlite" in drivername:
+        # Allow memory DB or explicitly test-named databases
+        if database in (":memory:", "test.db", None) or database.endswith("_test.db"):
+            return True
+        return False
+
+    # Priority 3: Remote database (Postgres, etc.) checks
+    if host in ("localhost", "127.0.0.1", "::1"):
+        # Block if the database name explicitly implies production
+        if "prod" in database and "test" not in database:
+            return False
+        return True
+
+    return False
 
 
 def generate_dummy_data(users_count: int, seed: int = None, reset: bool = False):

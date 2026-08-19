@@ -100,3 +100,51 @@ def test_generator_valid_tc_and_phone(mock_session_local, mock_is_safe_environme
     
     # Email must end with DUMMY_EMAIL_DOMAIN
     assert user.email.endswith(DUMMY_EMAIL_DOMAIN)
+
+
+def test_is_safe_environment_logic(mocker):
+    """Test the production guard logic against different DATABASE_URL configurations."""
+    from scripts.generate_dummy_data import is_safe_environment
+    
+    mock_settings = mocker.patch("scripts.generate_dummy_data.settings")
+    mock_environ = mocker.patch("scripts.generate_dummy_data.os.environ.get", return_value=None)
+    
+    # Allowed cases
+    allowed_urls = [
+        "sqlite:///:memory:",
+        "sqlite:///test.db",
+        "sqlite:///products_test.db",  # Explicitly allowed edge-case (substring prod shouldn't block test)
+        "postgresql://user:pass@localhost/moneyfast",
+        "postgresql://user:pass@127.0.0.1:5432/db",
+    ]
+    
+    for url in allowed_urls:
+        mock_settings.DATABASE_URL = url
+        assert is_safe_environment() is True, f"URL {url} should be safe"
+        
+    # Blocked cases
+    blocked_urls = [
+        "sqlite:///production.sqlite",
+        "sqlite:///contest.db",            # Ends with test.db but not exactly or _test.db
+        "sqlite:///mycontest.db",          # Ends with test.db but not exactly or _test.db
+        "postgresql://user:pass@prod-db.moneyfast.com/db",
+        "postgresql://user:pass@production.moneyfast.com/db",
+        "postgresql://localhost:pass@remote-host.com/db",  # localhost in username
+        "postgresql://user:localhost@remote-host.com/db",  # localhost in password
+        "postgresql://user:test@remote-host.com/db",       # test in password
+        "mysql://root@remote-server.com/test_db",          # host is not localhost
+        "postgresql://user:pass@localhost/production",     # prod in db name
+        "sqlite:///data.sqlite"
+    ]
+    
+    for url in blocked_urls:
+        mock_settings.DATABASE_URL = url
+        assert is_safe_environment() is False, f"URL {url} should NOT be safe"
+        
+    # Test ENV variables
+    mock_settings.DATABASE_URL = "sqlite:///:memory:"
+    
+    env_cases = ["prod", "PRODUCTION", " Production ", "PROD"]
+    for env_val in env_cases:
+        mock_environ.side_effect = lambda key: env_val if key == "ENV" else None
+        assert is_safe_environment() is False, f"Should block if ENV={env_val}"

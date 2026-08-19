@@ -61,49 +61,15 @@ DATA_FAILURE_TR = (
     "Birazdan tekrar denememi ister misiniz?"
 )
 
-from pydantic import BaseModel, Field
-
 AGENTS = [
     "PORTFOLIO_AGENT",
     "MARKET_RESEARCH_AGENT",
     "RISK_STRATEGY_AGENT",
     "TRANSACTION_AGENT",
-    "BUDGET_AGENT",
-    "EXPENSE_AGENT",
     "EDUCATION_AGENT",
     "SMALLTALK_AGENT",
     "HUMAN_HANDOFF",
 ]
-
-# Structured output models for strict JSON contracts
-class ExpenseAction(BaseModel):
-    widget_type: Literal["expense_action"] = Field(default="expense_action")
-    category: str = Field(description="Harcamanın kategorisi (örn: Market, Akaryakıt)")
-    amount: float = Field(description="Harcama tutarı (sayısal)")
-
-class BudgetPlan(BaseModel):
-    widget_type: Literal["budget_plan"] = Field(default="budget_plan")
-    income: float = Field(description="Toplam gelir")
-    needs: float = Field(description="Gelirin %50'si (İhtiyaçlar)")
-    wants: float = Field(description="Gelirin %30'u (İstekler)")
-    savings: float = Field(description="Gelirin %20'si (Tasarruf)")
-
-class PortfolioPosition(BaseModel):
-    symbol: str
-    quantity: float
-    avg_cost: float
-    last_price: float
-    market_value: float
-    unrealized_pnl: float
-    unrealized_pnl_pct: float
-
-class PortfolioWidget(BaseModel):
-    widget_type: Literal["portfolio"] = Field(default="portfolio")
-    total_value: float
-    total_profit_loss: float
-    positions: list[PortfolioPosition]
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -241,24 +207,11 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
     args.setdefault("base_currency", "TRY")
     args.setdefault("valuation_mode", "LAST_CLOSE")
     args.setdefault("include_closed", False)
-    tool_result = await _run_tool(
+    return await _run_tool(
         state, "get_portfolio_positions", args,
         assumptions=plan.get("assumptions") or [],
         empty_when=lambda p: not p.get("positions"),
     )
-    
-    payload = tool_result.get("specialist_output", {}).get("data", {})
-    if payload and "totals" in payload:
-        widget = PortfolioWidget(
-            total_value=payload["totals"].get("total_market_value", 0.0),
-            total_profit_loss=payload["totals"].get("total_unrealized_pnl", 0.0),
-            positions=[PortfolioPosition(**p) for p in payload.get("positions", [])]
-        )
-    else:
-        widget = PortfolioWidget(total_value=0.0, total_profit_loss=0.0, positions=[])
-        
-    tool_result["final_output"] = widget.model_dump_json()
-    return tool_result
 
 
 async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
@@ -466,7 +419,7 @@ async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
 # Conditional edges
 # ---------------------------------------------------------------------------
 SpecialistRoute = Literal[
-    "portfolio", "market_research", "risk", "transaction", "handoff", "synthesis", "budget", "expense"
+    "portfolio", "market_research", "risk", "transaction", "handoff", "synthesis"
 ]
 
 
@@ -481,8 +434,6 @@ def route_after_router(state: MoneyFastState) -> SpecialistRoute:
         "MARKET_RESEARCH_AGENT": "market_research",
         "RISK_STRATEGY_AGENT": "risk",
         "TRANSACTION_AGENT": "transaction",
-        "BUDGET_AGENT": "budget",
-        "EXPENSE_AGENT": "expense",
         "HUMAN_HANDOFF": "handoff",
     }.get(state.get("target_agent") or "", "synthesis")
 
@@ -495,49 +446,6 @@ def route_after_compliance(state: MoneyFastState) -> Literal["synthesis", "__end
             return "synthesis"
     return END
 
-# ---------------------------------------------------------------------------
-# New Nodes for Budget and Expense
-# ---------------------------------------------------------------------------
-async def budget_node(state: MoneyFastState) -> dict[str, Any]:
-    """
-    Kullanıcının bütçe isteğini işler.
-    with_structured_output ile LLM'den doğrudan BudgetPlan formatında çıktı alır.
-    MCP aracı calculate_budget kullanılabilir veya doğrudan LLM hesaplayabilir.
-    """
-    llm = get_llm(fast=True).with_structured_output(BudgetPlan)
-    from langchain_core.messages import SystemMessage, HumanMessage
-    
-    # Özel Pydantic modelimiz ile yapılandırılmış çıktı alıyoruz
-    plan = await llm.ainvoke([
-        SystemMessage(content=SPECIALIST_PROMPTS.get("BUDGET_AGENT", "Extract income from the user message and return budget plan JSON.")),
-        HumanMessage(content=state["user_message"])
-    ])
-    
-    return {
-        "final_output": plan.model_dump_json(),
-        "specialist_output": {"status": "OK", "data": plan.model_dump(), "agent": "BUDGET_AGENT"},
-        "tools_used": ["budget_plan"]
-    }
-
-async def expense_node(state: MoneyFastState) -> dict[str, Any]:
-    """
-    Kullanıcının harcama beyanını işler.
-    with_structured_output ile LLM'den doğrudan ExpenseAction formatında çıktı alır.
-    """
-    llm = get_llm(fast=True).with_structured_output(ExpenseAction)
-    from langchain_core.messages import SystemMessage, HumanMessage
-    
-    action = await llm.ainvoke([
-        SystemMessage(content=SPECIALIST_PROMPTS.get("EXPENSE_AGENT", "Extract expense category and amount from the user message and return expense action JSON.")),
-        HumanMessage(content=state["user_message"])
-    ])
-    
-    return {
-        "final_output": action.model_dump_json(),
-        "specialist_output": {"status": "OK", "data": action.model_dump(), "agent": "EXPENSE_AGENT"},
-        "tools_used": ["expense_action"]
-    }
-
 
 # ---------------------------------------------------------------------------
 # Graph
@@ -549,8 +457,6 @@ def build_graph():
     g.add_node("market_research", market_research_node)
     g.add_node("risk", risk_node)
     g.add_node("transaction", transaction_node)
-    g.add_node("budget", budget_node)
-    g.add_node("expense", expense_node)
     g.add_node("handoff", handoff_node)
     g.add_node("synthesis", synthesis_node)
     g.add_node("compliance", compliance_gate_node)
@@ -564,20 +470,12 @@ def build_graph():
             "market_research": "market_research",
             "risk": "risk",
             "transaction": "transaction",
-            "budget": "budget",
-            "expense": "expense",
             "handoff": "handoff",
             "synthesis": "synthesis",
         },
     )
-    for node in ("market_research", "risk", "transaction", "handoff"):
+    for node in ("portfolio", "market_research", "risk", "transaction", "handoff"):
         g.add_edge(node, "synthesis")
-        
-    # Budget, Expense, ve Portfolio doğrudan END'e gider (JSON döndükleri için text synthesis/compliance gerekmez)
-    g.add_edge("budget", END)
-    g.add_edge("expense", END)
-    g.add_edge("portfolio", END)
-    
     g.add_edge("synthesis", "compliance")
     g.add_conditional_edges(
         "compliance", route_after_compliance, {"synthesis": "synthesis", END: END}

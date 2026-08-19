@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import List, Literal, Optional
 
 class InvestmentBreakdown(BaseModel):
@@ -88,7 +88,5 @@ class OrderConfirmRequest(BaseModel):
     """
     Frontend tarafının, kullanıcıdan alınan işlem onayını iletirken kullanacağı veri modeli (şeması).
     """
-    order_id: str = Field(..., description="Onaylanacak siparişin benzersiz ID'si")
-    action: str = Field(..., description="İşlem türü: 'buy' veya 'sell'")
-    asset: str = Field(..., description="Hisse senedi sembolü (Örn: AAPL)")
-    amount: float = Field(..., description="Alınacak/satılacak lot miktarı")
+    order_id: str
+    action: str

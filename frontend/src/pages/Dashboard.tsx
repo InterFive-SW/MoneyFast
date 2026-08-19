@@ -1,7 +1,7 @@
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import GridLayout from 'react-grid-layout'
 import type { Layout } from 'react-grid-layout'
 
@@ -39,7 +39,7 @@ const CUSTOM_LAYOUTS_KEY = 'mf_custom_layouts_v2'
 
 // Tüm mümkün widget tipleri ve Türkçe isimleri
 const ALL_AVAILABLE_WIDGETS: { type: WidgetType; label: string; defaultW: number; defaultH: number }[] = [
-  { type: 'investment-balance', label: 'Yatırım Hesabım', defaultW: 3, defaultH: 3 },
+  { type: 'investment-balance', label: 'Yatırım Hesabım', defaultW: 3, defaultH: 2 },
   { type: 'positions', label: 'Pozisyonlar', defaultW: 7, defaultH: 6 },
   { type: 'order-history', label: 'Emir Geçmişi', defaultW: 6, defaultH: 3 },
   { type: 'portfolio-chart', label: 'Portföy Grafiği', defaultW: 5, defaultH: 3 },
@@ -70,7 +70,7 @@ function loadLayoutState(): DashboardLayoutState {
   try {
     const raw = localStorage.getItem(LAYOUT_STORAGE_KEY)
     if (raw) return JSON.parse(raw) as DashboardLayoutState
-  } catch {}
+  } catch { }
   return { activeTemplateId: DEFAULT_TEMPLATE_ID }
 }
 
@@ -78,7 +78,7 @@ function loadCustomLayouts(): CustomLayoutState[] {
   try {
     const raw = localStorage.getItem(CUSTOM_LAYOUTS_KEY)
     if (raw) return JSON.parse(raw) as CustomLayoutState[]
-  } catch {}
+  } catch { }
   return []
 }
 
@@ -92,13 +92,13 @@ function saveCustomLayout(layout: CustomLayoutState) {
 }
 
 // ─── Widget Render Motoru ─────────────────────────────────────────────────────
-function renderWidgetContent(type: WidgetType): JSX.Element | null {
+function renderWidgetContent(type: WidgetType, w?: number, h?: number): JSX.Element | null {
   switch (type) {
     case 'investment-balance': return <InvestmentBalanceWidget data={MOCK_INVESTMENT_BALANCE} />
     case 'positions': return <PositionsWidget positions={MOCK_POSITIONS} />
     case 'asset-allocation': return <AssetAllocationWidget items={MOCK_ASSET_ALLOCATION} />
     case 'order-history': return <OrderHistoryWidget orders={MOCK_ORDERS} />
-    case 'portfolio-chart': return <PortfolioChartWidget />
+    case 'portfolio-chart': return <PortfolioChartWidget w={w} h={h} />
     case 'news': return <NewsWidget news={MOCK_NEWS} />
     case 'mini-ticker-usd': return <MiniTickerWidget ticker={MOCK_MARKET_TICKERS.find(t => t.symbol === 'USD/TRY')!} />
     case 'mini-ticker-eur': return <MiniTickerWidget ticker={MOCK_MARKET_TICKERS.find(t => t.symbol === 'EUR/TRY')!} />
@@ -113,19 +113,19 @@ function renderWidgetContent(type: WidgetType): JSX.Element | null {
     case 'top-movers': return <TopMoversWidget />
     case 'dividend-calendar': return <DividendCalendarWidget />
     case 'sector-allocation-pie': return <SectorAllocationWidget />
-    case 'heatmap': return <ProfitLossHeatmapWidget />
+    case 'heatmap': return <ProfitLossHeatmapWidget w={w} h={h} />
     default: return null
   }
 }
 
 // ─── Şablon Seçici Alt Bileşeni ───────────────────────────────────────────────
-function TemplateSelector({ 
-  templates, customLayouts, activeId, onChange, disabled 
-}: { 
-  templates: DashboardTemplate[], customLayouts: CustomLayoutState[], activeId: string, onChange: (id: string) => void, disabled?: boolean 
+function TemplateSelector({
+  templates, customLayouts, activeId, onChange, disabled
+}: {
+  templates: DashboardTemplate[], customLayouts: CustomLayoutState[], activeId: string, onChange: (id: string) => void, disabled?: boolean
 }) {
   const [isOpen, setIsOpen] = useState(false)
-  
+
   const getActiveNameAndIcon = () => {
     const t = templates.find(x => x.id === activeId)
     if (t) return { name: t.name, icon: t.icon }
@@ -152,17 +152,17 @@ function TemplateSelector({
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
           <div className="absolute right-0 top-full z-20 mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 py-1.5 shadow-[0_20px_60px_-12px_rgba(15,23,42,0.18)] backdrop-blur-xl max-h-[80vh] overflow-y-auto">
-            
+
             <div className="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">Hazır Şablonlar</div>
             {templates.map(template => (
               <div
                 key={template.id}
                 onClick={() => { onChange(template.id); setIsOpen(false) }}
-                className={`flex cursor-pointer items-start gap-3 px-4 py-2 hover:bg-slate-50 ${template.id === activeId ? 'bg-emerald-50/60' : ''}`}
+                className={`flex cursor-pointer items-start gap-3 px-4 py-2 hover:bg-slate-50 ${template.id === activeId ? 'bg-primary-50/60' : ''}`}
               >
                 <span className="mt-0.5 text-lg leading-none">{template.icon}</span>
                 <div>
-                  <p className={`text-sm font-semibold ${template.id === activeId ? 'text-emerald-700' : 'text-slate-800'}`}>{template.name}</p>
+                  <p className={`text-sm font-semibold ${template.id === activeId ? 'text-primary-600' : 'text-slate-800'}`}>{template.name}</p>
                 </div>
               </div>
             ))}
@@ -175,11 +175,11 @@ function TemplateSelector({
                   <div
                     key={layout.id}
                     onClick={() => { onChange(layout.id); setIsOpen(false) }}
-                    className={`flex cursor-pointer items-start gap-3 px-4 py-2 hover:bg-slate-50 ${layout.id === activeId ? 'bg-emerald-50/60' : ''}`}
+                    className={`flex cursor-pointer items-start gap-3 px-4 py-2 hover:bg-slate-50 ${layout.id === activeId ? 'bg-primary-50/60' : ''}`}
                   >
                     <span className="mt-0.5 text-lg leading-none">🧑‍🎨</span>
                     <div>
-                      <p className={`text-sm font-semibold ${layout.id === activeId ? 'text-emerald-700' : 'text-slate-800'}`}>{layout.name}</p>
+                      <p className={`text-sm font-semibold ${layout.id === activeId ? 'text-primary-600' : 'text-slate-800'}`}>{layout.name}</p>
                     </div>
                   </div>
                 ))}
@@ -194,11 +194,12 @@ function TemplateSelector({
 
 // ─── Ana Sayfa Bileşeni ───────────────────────────────────────────────────────
 export default function Dashboard() {
+  const dragTypeRef = useRef<WidgetType | null>(null);
   const [layoutState, setLayoutState] = useState<DashboardLayoutState>(loadLayoutState)
-  const [isEditing, setIsEditing] = useState(false)
+  const [isEditMode, setIsEditMode] = useState(false)
   const [isPoolOpen, setIsPoolOpen] = useState(false)
   const [customLayouts, setCustomLayouts] = useState<CustomLayoutState[]>(loadCustomLayouts)
-  
+
   // Düzen ismi kaydetme modal state
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [saveName, setSaveName] = useState('')
@@ -206,13 +207,19 @@ export default function Dashboard() {
   const { width: containerWidth, containerRef } = useContainerWidth({ initialWidth: 900 })
 
   const getActiveLayoutItems = (): GridLayoutItem[] => {
+    let items: GridLayoutItem[] = []
     const custom = customLayouts.find(c => c.id === layoutState.activeTemplateId)
-    if (custom) return custom.items
-    const tpl = DASHBOARD_TEMPLATES.find(t => t.id === layoutState.activeTemplateId) || DASHBOARD_TEMPLATES[0]
-    return generateDefaultLayout(tpl) as GridLayoutItem[]
+    if (custom) {
+      items = custom.items
+    } else {
+      const tpl = DASHBOARD_TEMPLATES.find(t => t.id === layoutState.activeTemplateId) || DASHBOARD_TEMPLATES[0]
+      items = generateDefaultLayout(tpl) as GridLayoutItem[]
+    }
+    return items.map(item => ({ ...item, static: true }))
   }
 
   const [gridLayout, setGridLayout] = useState<GridLayoutItem[]>(getActiveLayoutItems)
+  const [originalLayout, setOriginalLayout] = useState<GridLayoutItem[]>([])
 
   function handleTemplateChange(templateId: string) {
     const nextState: DashboardLayoutState = {
@@ -225,30 +232,40 @@ export default function Dashboard() {
 
     const custom = customLayouts.find(c => c.id === templateId)
     if (custom) {
-      setGridLayout(custom.items)
+      setGridLayout(custom.items.map(i => ({ ...i, static: true })))
     } else {
       const nextTemplate = DASHBOARD_TEMPLATES.find((t) => t.id === templateId)
-      if (nextTemplate) setGridLayout(generateDefaultLayout(nextTemplate) as GridLayoutItem[])
+      if (nextTemplate) {
+        const layout = generateDefaultLayout(nextTemplate) as GridLayoutItem[]
+        setGridLayout(layout.map(i => ({ ...i, static: true })))
+      }
     }
-    setIsEditing(false)
+    setIsEditMode(false)
     setIsPoolOpen(false)
   }
 
+  // BURASI DEĞİŞTİRİLDİ: RGL'nin kendi yarattığı ghost elementleri silmesini engelledik.
   const handleGridLayoutChange = useCallback((newLayout: Layout) => {
-    setGridLayout(prev => Array.from(newLayout).map(item => {
-      const existing = prev.find(p => p.i === item.i)
-      return { ...item, type: existing ? existing.type : (item.i.split('-custom-')[0] as WidgetType) } as GridLayoutItem
-    }))
-  }, [gridLayout])
+    setGridLayout(prev => {
+      // PREV (eski state) üzerinden dönüyoruz ki, yeni eklediğimiz eleman silinmesin!
+      return prev.map(item => {
+        const matched = newLayout.find(l => l.i === item.i);
+        // Eğer RGL'den yeni koordinat geldiyse güncelle, yoksa (yani bizim yeni eklediğimiz bir widget ise) mevcut halini koru.
+        return matched ? { ...item, x: matched.x, y: matched.y, w: matched.w, h: matched.h } : item;
+      });
+    });
+  }, []);
 
   function handleEditToggle() {
-    if (!isEditing) {
-      setGridLayout(getActiveLayoutItems())
+    if (!isEditMode) {
+      setOriginalLayout(gridLayout) // İptal durumu için yedekle
       setIsPoolOpen(true)
+      setGridLayout(prev => prev.map(item => ({ ...item, static: false })))
     } else {
       setIsPoolOpen(false)
+      setGridLayout(prev => prev.map(item => ({ ...item, static: true })))
     }
-    setIsEditing(!isEditing)
+    setIsEditMode(!isEditMode)
   }
 
   function handleRemoveWidget(id: string) {
@@ -264,7 +281,8 @@ export default function Dashboard() {
         y: Infinity, // En alta ekle
         w: widgetConf.defaultW,
         h: widgetConf.defaultH,
-        type: widgetConf.type as any
+        type: widgetConf.type as any,
+        static: false
       }
     ])
   }
@@ -287,7 +305,7 @@ export default function Dashboard() {
 
   function submitSaveLayoutInPlace() {
     const currentId = layoutState.activeTemplateId
-    
+
     let name = 'Özel Düzen'
     const custom = customLayouts.find(c => c.id === currentId)
     if (custom) {
@@ -306,7 +324,7 @@ export default function Dashboard() {
 
     saveCustomLayout(payload)
     setCustomLayouts(loadCustomLayouts())
-    setIsEditing(false)
+    setIsEditMode(false)
     setIsPoolOpen(false)
   }
 
@@ -320,7 +338,7 @@ export default function Dashboard() {
     const tpl = DASHBOARD_TEMPLATES.find(t => t.id === layoutState.activeTemplateId)
     const w = tpl?.widgets.find(w => w.id === item.i)
     if (w) return w.type
-    
+
     // Eğer string içeriyorsa
     const conf = ALL_AVAILABLE_WIDGETS.find(aw => item.i.includes(aw.type))
     return conf?.type as WidgetType || null
@@ -329,22 +347,21 @@ export default function Dashboard() {
   const activeTypes = new Set(gridLayout.map(item => getWidgetType(item)).filter(Boolean))
   const availablePoolWidgets = ALL_AVAILABLE_WIDGETS.filter(w => !activeTypes.has(w.type))
 
-  const cardBaseClass = `h-full w-full flex flex-col rounded-2xl bg-white/70 p-4 backdrop-blur-sm transition-all duration-200 ${
-    isEditing
-      ? 'border-2 border-dashed border-emerald-400/70 shadow-[0_4px_20px_-8px_rgba(16,185,129,0.15)]'
-      : 'border border-slate-200/60 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] hover:shadow-[0_8px_32px_-8px_rgba(15,23,42,0.14)]'
-  }`
+  const cardBaseClass = `h-full w-full flex flex-col rounded-2xl bg-white/70 p-4 backdrop-blur-sm transition-all duration-200 ${isEditMode
+    ? 'border-2 border-dashed border-primary-400/70 shadow-[0_4px_20px_-8px_rgba(16,185,129,0.15)]'
+    : 'border border-slate-200/60 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] hover:shadow-[0_8px_32px_-8px_rgba(15,23,42,0.14)]'
+    }`
 
   return (
-    <div className={`p-6 sm:p-8 min-h-screen transition-[padding] duration-300 ${isEditing && isPoolOpen ? 'pr-[340px]' : ''}`}>
+    <div className={`p-6 sm:p-8 min-h-screen transition-[padding] duration-300 ${isEditMode ? 'pl-[280px]' : ''}`}>
       {/* ── Üst Araç Çubuğu ──────────────────────────────────────────── */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-xl font-bold tracking-tight text-slate-950">
-            {isEditing ? '🔧 Panel Düzenleme Modu' : 'Hoş Geldiniz 👋'}
+            {isEditMode ? '🔧 Panel Düzenleme Modu' : 'Hoş Geldiniz 👋'}
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            {isEditing
+            {isEditMode
               ? 'Widget\'ları sürükleyerek yeniden düzenleyin. Alttaki havuzdan yeni modüller ekleyebilirsiniz.'
               : 'Finansal durumunuzun güncel özeti aşağıda görüntülenmektedir.'}
           </p>
@@ -356,22 +373,23 @@ export default function Dashboard() {
             customLayouts={customLayouts}
             activeId={layoutState.activeTemplateId}
             onChange={handleTemplateChange}
-            disabled={isEditing}
+            disabled={isEditMode}
           />
 
-          {!isEditing ? (
+          {!isEditMode ? (
             <button
               onClick={handleEditToggle}
               className="flex items-center gap-2 rounded-xl border border-slate-200/80 bg-white/80 px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm backdrop-blur-sm transition hover:border-slate-300 hover:bg-white"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-              Paneli Düzenle
+              Düzeni Düzenle
             </button>
           ) : (
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
-                  setIsEditing(false)
+                  setGridLayout(originalLayout)
+                  setIsEditMode(false)
                   setIsPoolOpen(false)
                 }}
                 className="rounded-xl border border-slate-200/80 bg-white/80 px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm backdrop-blur-sm transition hover:bg-white"
@@ -380,13 +398,13 @@ export default function Dashboard() {
               </button>
               <button
                 onClick={submitSaveLayoutInPlace}
-                className="rounded-xl border border-emerald-500 bg-white px-4 py-2 text-sm font-semibold text-emerald-600 shadow-sm transition hover:bg-emerald-50"
+                className="rounded-xl border border-primary-500 bg-white px-4 py-2 text-sm font-semibold text-primary-500 shadow-sm transition hover:bg-primary-50"
               >
                 Kaydet
               </button>
               <button
                 onClick={() => setShowSaveModal(true)}
-                className="flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-emerald-500/30 transition hover:bg-emerald-600"
+                className="flex items-center gap-2 rounded-xl bg-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-primary-500/30 transition hover:bg-primary-600"
               >
                 Farklı Kaydet
               </button>
@@ -396,9 +414,10 @@ export default function Dashboard() {
       </div>
 
       {/* ── Widget Alanı ──────────────────────────────────────────────── */}
-      <div ref={containerRef as any}>
+      <div ref={containerRef as any} onDragOver={(e) => e.preventDefault()}>
         <AnyGridLayout
-          layout={gridLayout as any}
+          className={`layout ${isEditMode ? 'border-2 border-dashed border-primary-200 min-h-[400px] rounded-xl' : ''}`}
+          layout={gridLayout}
           cols={GRID_COLS}
           rowHeight={ROW_HEIGHT}
           width={containerWidth}
@@ -406,9 +425,51 @@ export default function Dashboard() {
           containerPadding={[0, 0]}
           draggableHandle=".drag-handle"
           onLayoutChange={handleGridLayoutChange}
-          isResizable={isEditing}
-          isDraggable={isEditing}
+          isResizable={isEditMode}
+          isDraggable={isEditMode}
           useCSSTransforms
+          isDroppable={isEditMode}
+          compactType="vertical"
+          preventCollision={false}
+          onDropDragOver={(e: any) => {
+            const type = dragTypeRef.current;
+            const widgetConf = ALL_AVAILABLE_WIDGETS.find(w => w.type === type);
+            // Asla false dönme! Bulamazsa varsayılan w:4, h:3 dön ki ızgara diğerlerini itip yer açsın.
+            return {
+              w: widgetConf?.defaultW || 4,
+              h: widgetConf?.defaultH || 3
+            };
+          }}
+          onDrop={(layout: any, layoutItem: any, e: any) => {
+            e.preventDefault(); // Tarayıcının işlemi iptal etmesini kesin olarak engelliyoruz
+            const type = dragTypeRef.current;
+            if (!type) return;
+
+            const widgetConf = ALL_AVAILABLE_WIDGETS.find(w => w.type === type);
+            if (!widgetConf) return;
+
+            const newId = `${type}-custom-${Date.now()}`;
+
+            // Yeni widget'ı state'e "ZORLA" ve güvenli bir şekilde ekliyoruz
+            setGridLayout(prev => {
+              // Varsa eski önizleme (ghost) kutularını temizle
+              const cleanPrev = prev.filter(p => p.i !== 'drop-preview' && p.i !== '__dropping-elem__');
+              return [
+                ...cleanPrev,
+                {
+                  i: newId,
+                  x: layoutItem.x,
+                  y: layoutItem.y,
+                  w: widgetConf.defaultW,
+                  h: widgetConf.defaultH,
+                  type: type as any,
+                  static: false
+                }
+              ];
+            });
+            dragTypeRef.current = null;
+          }}
+          droppingItem={{ i: '__dropping-elem__', w: 4, h: 3 }}
         >
           {gridLayout.map((layoutItem) => {
             const type = getWidgetType(layoutItem)
@@ -416,21 +477,21 @@ export default function Dashboard() {
 
             return (
               <div key={layoutItem.i} className={`${cardBaseClass} relative overflow-hidden group`}>
-                {isEditing && (
-                  <div className="drag-handle absolute left-3 top-3 z-10 flex cursor-grab items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 active:cursor-grabbing">
-                    <span className="text-[10px] font-semibold text-emerald-600">Sürükle</span>
+                {isEditMode && (
+                  <div className="drag-handle absolute left-3 top-3 z-10 flex cursor-grab items-center gap-1.5 rounded-lg border border-primary-200 bg-primary-50 px-2 py-1 active:cursor-grabbing">
+                    <span className="text-[10px] font-semibold text-primary-500">Sürükle</span>
                   </div>
                 )}
-                {isEditing && (
-                  <button 
+                {isEditMode && (
+                  <button
                     onClick={() => handleRemoveWidget(layoutItem.i)}
                     className="absolute right-3 top-3 z-10 p-1 rounded-md text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                   </button>
                 )}
-                <div className={`flex-1 w-full h-full overflow-hidden ${isEditing ? 'mt-8' : ''}`}>
-                  {renderWidgetContent(type)}
+                <div className={`flex-1 w-full h-full overflow-hidden ${isEditMode ? 'mt-8 pointer-events-none' : ''}`}>
+                  {renderWidgetContent(type, layoutItem.w, layoutItem.h)}
                 </div>
               </div>
             )
@@ -438,79 +499,56 @@ export default function Dashboard() {
         </AnyGridLayout>
       </div>
 
-      {/* ── Widget Havuzu (Right Drawer) ──────────────────────────────────────────────── */}
-      {isEditing && (
-        <>
-          <div className={`fixed right-0 top-0 bottom-0 w-[320px] bg-slate-50/95 backdrop-blur-xl border-l border-slate-200 shadow-2xl z-40 flex flex-col transition-transform duration-300 ${isPoolOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-white/50">
-              <div>
-                <h3 className="font-semibold text-slate-800">Widget Havuzu</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Önizlemelerden seçip ekleyin</p>
-              </div>
-              <button onClick={() => setIsPoolOpen(false)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-              </button>
+      {/* ── Sol Widget Paleti (Edit Mode) ──────────────────────────────────────────────── */}
+      {isEditMode && (
+        <div className={`fixed left-0 top-0 bottom-0 w-64 bg-slate-50/95 backdrop-blur-xl border-r border-slate-200 shadow-2xl z-50 flex flex-col transition-transform duration-300 translate-x-0`}>
+          <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-white/50">
+            <div>
+              <h3 className="font-semibold text-slate-800">Widget Paleti</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Sürükleyip bırakın</p>
             </div>
-          <div className="p-4 flex-1 overflow-y-auto space-y-5 custom-scrollbar">
+          </div>
+          <div className="p-4 flex-1 overflow-y-auto space-y-4 custom-scrollbar">
             {availablePoolWidgets.length === 0 ? (
               <p className="text-sm text-slate-500 text-center py-8">Tüm modüller ekranda mevcut.</p>
             ) : (
               availablePoolWidgets.map(widgetConf => (
-                <div 
+                <div
                   key={widgetConf.type}
-                  className="group relative rounded-xl border border-slate-200/80 bg-white overflow-hidden shadow-sm hover:border-emerald-400 hover:shadow-md transition-all"
+                  draggable={true}
+                  unselectable="on"
+                  // BURASI DEĞİŞTİRİLDİ: Tarayıcının bloklamasını önlemek için text/plain eklendi.
+                  onDragStart={(e) => {
+                    dragTypeRef.current = widgetConf.type;
+                    e.dataTransfer.setData("text/plain", widgetConf.type);
+                    e.dataTransfer.setData("widgetType", widgetConf.type);
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  className="group relative rounded-xl border border-slate-200/80 bg-white overflow-hidden shadow-sm hover:border-primary-400 hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
                 >
-                  {/* Başlık ve Ekle Butonu */}
                   <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                    <span className="text-sm font-medium text-slate-700">{widgetConf.label}</span>
-                    <button
-                      onClick={() => handleAddWidget(widgetConf)}
-                      className="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-500 hover:text-white transition-colors"
-                      title="Ekrana Ekle"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                    </button>
+                    <span className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 9h14M5 15h14" /></svg>
+                      {widgetConf.label}
+                    </span>
                   </div>
-                  
-                  {/* Önizleme Konteyneri (Scale Down) */}
-                  <div className="relative h-32 w-full bg-slate-50/30 overflow-hidden">
-                    <div 
+                  <div className="relative h-20 w-full bg-slate-50/30 overflow-hidden">
+                    <div
                       className="absolute inset-0 origin-top-left pointer-events-none"
-                      style={{ 
-                        width: '200%', 
-                        height: '200%', 
-                        transform: 'scale(0.5)' 
-                      }}
+                      style={{ width: '200%', height: '200%', transform: 'scale(0.5)' }}
                     >
                       <div className="w-full h-full p-2 opacity-90 grayscale-[0.2]">
                         <div className="h-full w-full rounded-xl bg-white shadow-sm overflow-hidden pointer-events-none">
-                          {renderWidgetContent(widgetConf.type as WidgetType)}
+                          {renderWidgetContent(widgetConf.type as WidgetType, widgetConf.defaultW, widgetConf.defaultH)}
                         </div>
                       </div>
                     </div>
-                    {/* Üzerine tıklanınca ekleme overlay'i */}
-                    <div 
-                      onClick={() => handleAddWidget(widgetConf)}
-                      className="absolute inset-0 bg-emerald-500/0 hover:bg-emerald-500/5 cursor-pointer transition-colors"
-                    />
                   </div>
                 </div>
               ))
             )}
           </div>
-          </div>
-          
-          {/* ── Widget Havuzunu Yeniden Açma Butonu (Floating) ── */}
-          {!isPoolOpen && (
-            <button 
-              onClick={() => setIsPoolOpen(true)}
-              title="Widget Havuzunu Aç"
-              className="fixed right-0 top-1/2 -translate-y-1/2 z-40 bg-white border border-slate-200 border-r-0 rounded-l-xl py-4 px-2 shadow-lg flex items-center justify-center text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 transition"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-            </button>
-          )}
-        </>
+        </div>
       )}
 
       {/* ── Düzen Kaydetme Modalı ──────────────────────────────────────────────── */}
@@ -519,27 +557,27 @@ export default function Dashboard() {
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-slate-900">Düzeni Kaydet</h3>
             <p className="mt-1 text-sm text-slate-500">Bu panele bir isim verin. Açılır menüden daha sonra tekrar seçebilirsiniz.</p>
-            
-            <input 
+
+            <input
               type="text"
               autoFocus
               value={saveName}
               onChange={(e) => setSaveName(e.target.value)}
               placeholder="Örn: Hafta Sonu Görünümü"
-              className="mt-4 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className="mt-4 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
             />
-            
+
             <div className="mt-6 flex justify-end gap-3">
-              <button 
+              <button
                 onClick={() => setShowSaveModal(false)}
                 className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
               >
                 İptal
               </button>
-              <button 
+              <button
                 onClick={submitSaveLayout}
                 disabled={!saveName.trim()}
-                className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 hover:bg-emerald-600"
+                className="rounded-xl bg-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 hover:bg-primary-600"
               >
                 Kaydet
               </button>

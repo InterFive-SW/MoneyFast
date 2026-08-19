@@ -64,8 +64,8 @@ export default function TradeModal({ symbol, price, onClose }: TradeModalProps) 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xl p-4">
+      <div className="w-full max-w-sm rounded-[2.5rem] bg-slate-900/50 backdrop-blur-xl border border-white/10 p-6 shadow-2xl">
         {step === 'success' ? (
           <div className="flex flex-col items-center text-center gap-3 py-4">
             <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center">
@@ -73,8 +73,8 @@ export default function TradeModal({ symbol, price, onClose }: TradeModalProps) 
                 <path d="M20 6 9 17l-5-5" />
               </svg>
             </div>
-            <h3 className="font-bold text-slate-900">Emriniz İletildi</h3>
-            <p className="text-sm text-slate-500">{confirmMessage}</p>
+            <h3 className="font-bold text-white">Emriniz İletildi</h3>
+            <p className="text-sm text-slate-400">{confirmMessage}</p>
             <p className="text-xs text-slate-400">
               (Mock akış — gerçek bir işlem gerçekleşmedi, veritabanı bağlandığında güncellenecek.)
             </p>
@@ -89,17 +89,17 @@ export default function TradeModal({ symbol, price, onClose }: TradeModalProps) 
           <>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Varlık</h3>
-                <p className="font-bold text-slate-900 text-lg">{symbol}</p>
+                <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Varlık</h3>
+                <p className="font-bold text-white text-lg">{symbol}</p>
               </div>
-              <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+              <button onClick={onClose} className="text-slate-400 hover:text-slate-300 transition-colors">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
                   <path d="M18 6 6 18M6 6l12 12" />
                 </svg>
               </button>
             </div>
 
-            <p className="tabular-nums text-2xl font-bold text-slate-900 mb-4">{formatCurrency(price)}</p>
+            <p className="tabular-nums text-2xl font-bold text-white mb-4">{formatCurrency(price)}</p>
 
             <div className="flex gap-2 mb-4">
               <button
@@ -107,7 +107,7 @@ export default function TradeModal({ symbol, price, onClose }: TradeModalProps) 
                 className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition-colors ${
                   action === 'Alış'
                     ? 'bg-emerald-500 text-white shadow-sm shadow-emerald-500/30'
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    : 'bg-slate-100 text-slate-400 hover:bg-slate-700'
                 }`}
               >
                 Al
@@ -117,27 +117,27 @@ export default function TradeModal({ symbol, price, onClose }: TradeModalProps) 
                 className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition-colors ${
                   action === 'Satış'
                     ? 'bg-rose-500 text-white shadow-sm shadow-rose-500/30'
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    : 'bg-slate-100 text-slate-400 hover:bg-slate-700'
                 }`}
               >
                 Sat
               </button>
             </div>
 
-            <label className="block text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-1.5">Adet</label>
+            <label className="block text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-1.5">Adet</label>
             <input
               type="number"
               min={1}
               value={quantity}
               onChange={(e) => setQuantity(Math.max(1, Number(e.target.value)))}
-              className="w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm tabular-nums mb-4 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+              className="w-full rounded-xl border border-white/10 bg-slate-800 text-white placeholder:text-slate-400 px-3 py-2.5 text-sm tabular-nums mb-4 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
             />
 
             <div className="flex items-center justify-between mb-4">
-              <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Limit Emri</span>
+              <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Limit Emri</span>
               <button
                 onClick={() => setLimitEnabled((v) => !v)}
-                className={`w-10 h-6 rounded-full transition-colors relative ${limitEnabled ? 'bg-emerald-500' : 'bg-slate-200'}`}
+                className={`w-10 h-6 rounded-full transition-colors relative ${limitEnabled ? 'bg-emerald-500' : 'bg-slate-700'}`}
               >
                 <span
                   className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
@@ -149,21 +149,21 @@ export default function TradeModal({ symbol, price, onClose }: TradeModalProps) 
 
             {limitEnabled && (
               <>
-                <label className="block text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-1.5">Limit Fiyat</label>
+                <label className="block text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-1.5">Limit Fiyat</label>
                 <input
                   type="number"
                   min={0}
                   step={0.01}
                   value={limitPrice}
                   onChange={(e) => setLimitPrice(Number(e.target.value))}
-                  className="w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm tabular-nums mb-4 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  className="w-full rounded-xl border border-white/10 bg-slate-800 text-white placeholder:text-slate-400 px-3 py-2.5 text-sm tabular-nums mb-4 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                 />
               </>
             )}
 
             <div className="flex items-center justify-between mb-4 px-1">
-              <span className="text-xs text-slate-500">Tahmini Tutar</span>
-              <span className="tabular-nums text-sm font-semibold text-slate-800">{formatCurrency(estimatedTotal)}</span>
+              <span className="text-xs text-slate-400">Tahmini Tutar</span>
+              <span className="tabular-nums text-sm font-semibold text-slate-200">{formatCurrency(estimatedTotal)}</span>
             </div>
 
             {step === 'error' && <p className="text-sm text-rose-500 mb-3">{errorMessage}</p>}

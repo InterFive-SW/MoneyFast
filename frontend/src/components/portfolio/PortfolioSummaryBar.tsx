@@ -21,7 +21,7 @@ function formatPercent(percent: number): string {
 export default function PortfolioSummaryBar({ positions, loading }: PortfolioSummaryBarProps) {
   if (loading) {
     return (
-      <div className="flex h-28 items-center justify-center bg-white/70 backdrop-blur-md rounded-2xl border border-white/50 shadow-sm">
+      <div className="flex h-28 items-center justify-center bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
       </div>
     )
@@ -57,14 +57,14 @@ export default function PortfolioSummaryBar({ positions, loading }: PortfolioSum
   ]
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-900/50 backdrop-blur-xl rounded-[2rem] p-5 border border-white/10 shadow-2xl">
       {stats.map((stat) => (
         <div key={stat.label} className="flex flex-col gap-1">
-          <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">{stat.label}</span>
+          <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">{stat.label}</span>
           <div className="flex items-baseline gap-2">
             <span
               className={`text-2xl font-bold tabular-nums ${
-                stat.tone === 'negative' ? 'text-rose-500' : stat.tone === 'positive' ? 'text-emerald-500' : 'text-slate-900'
+                stat.tone === 'negative' ? 'text-rose-500' : stat.tone === 'positive' ? 'text-emerald-500' : 'text-white'
               }`}
             >
               {stat.value}

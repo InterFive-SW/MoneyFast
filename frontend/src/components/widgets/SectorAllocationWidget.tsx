@@ -23,16 +23,16 @@ export default function SectorAllocationWidget() {
 
   if (loading) {
     return (
-      <div className="flex flex-col h-full items-center justify-center bg-white/70 backdrop-blur-md rounded-2xl border border-white/50 shadow-sm">
+      <div className="flex flex-col h-full items-center justify-center bg-transparent rounded-2xl border border-transparent shadow-sm">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col h-full bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
+    <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Sektörel Dağılım</h3>
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Sektörel Dağılım</h3>
       </div>
 
       <div className="flex-1 flex flex-col md:flex-row items-center gap-4">
@@ -71,9 +71,9 @@ export default function SectorAllocationWidget() {
                   className="w-2.5 h-2.5 rounded-full" 
                   style={{ backgroundColor: item.color }} 
                 />
-                <span className="text-sm font-medium text-slate-700">{item.sector}</span>
+                <span className="text-sm font-medium text-slate-300">{item.sector}</span>
               </div>
-              <span className="text-sm font-semibold text-slate-800 tabular-nums">{item.percentage}%</span>
+              <span className="text-sm font-semibold text-white tabular-nums">{item.percentage}%</span>
             </div>
           ))}
         </div>

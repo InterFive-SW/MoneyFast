@@ -25,29 +25,29 @@ const IconInfo = () => (
 
 export default function RiskFactorsWidget({ factors }: RiskFactorsWidgetProps) {
   return (
-    <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h3 className="mb-4 text-base font-semibold text-slate-800">Öne Çıkan Risk Faktörleri</h3>
+    <div className="flex flex-col rounded-2xl border border-white/10 bg-slate-900/50 backdrop-blur-xl border-white/10 shadow-2xl p-6 shadow-sm">
+      <h3 className="mb-4 text-base font-semibold text-white">Öne Çıkan Risk Faktörleri</h3>
       
       <div className="flex flex-col gap-3">
         {factors.map((factor) => {
           let icon = <IconInfo />
-          let bg = 'bg-blue-50'
+          let bg = 'bg-blue-500/10'
           if (factor.impact === 'positive') {
             icon = <IconCheck />
-            bg = 'bg-emerald-50'
+            bg = 'bg-emerald-500/10'
           } else if (factor.impact === 'negative') {
             icon = <IconX />
-            bg = 'bg-rose-50'
+            bg = 'bg-rose-500/10'
           }
 
           return (
-            <div key={factor.id} className="flex items-start gap-4 rounded-xl border border-slate-100 p-4 transition-colors hover:bg-slate-50">
+            <div key={factor.id} className="flex items-start gap-4 rounded-xl border border-white/10 p-4 transition-colors hover:bg-white/10">
               <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${bg}`}>
                 {icon}
               </div>
               <div className="flex-1">
-                <h4 className="text-sm font-semibold text-slate-800">{factor.title}</h4>
-                <p className="mt-1 text-sm text-slate-500">{factor.description}</p>
+                <h4 className="text-sm font-semibold text-white">{factor.title}</h4>
+                <p className="mt-1 text-sm text-slate-400">{factor.description}</p>
               </div>
             </div>
           )

@@ -15,8 +15,8 @@ export default function Investment() {
     <div className="p-6 sm:p-8 min-h-screen">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Piyasalar</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="text-2xl font-bold tracking-tight text-white">Piyasalar</h1>
+          <p className="text-sm text-slate-400 mt-1">
             Hisseler, fonlar, endeksler, sektörler ve piyasa geneli analizleri tek ekrandan takip edin.
           </p>
         </div>
@@ -25,7 +25,7 @@ export default function Investment() {
 
       <MarketPulseSummary instruments={MOCK_MARKET_INSTRUMENTS} tickers={MOCK_MARKET_TICKERS} />
 
-      <div className="mb-6 bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
+      <div className="mb-6 bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5">
         <MarketTickerWidget tickers={MOCK_MARKET_TICKERS} />
       </div>
 

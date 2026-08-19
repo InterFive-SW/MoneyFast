@@ -12,7 +12,7 @@ function CompanyComparisonTable({ instruments }: { instruments: MarketInstrument
     <div className="overflow-x-auto mt-3">
       <table className="w-full text-left border-collapse min-w-[560px]">
         <thead>
-          <tr className="border-b border-slate-200/50">
+          <tr className="border-b border-white/10/50">
             <th className="py-2 text-[10px] uppercase tracking-wider font-semibold text-slate-400">Şirket</th>
             <th className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Fiyat</th>
             <th className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Değişim</th>
@@ -23,16 +23,16 @@ function CompanyComparisonTable({ instruments }: { instruments: MarketInstrument
         </thead>
         <tbody className="divide-y divide-slate-100/50">
           {instruments.map((item) => (
-            <tr key={item.symbol} className="hover:bg-slate-50/50 transition-colors">
+            <tr key={item.symbol} className="hover:bg-slate-800/5/50 transition-colors">
               <td className="py-2.5">
-                <Link to={`/investment/hisseler/${item.symbol}`} className="text-sm font-semibold text-slate-800 hover:text-emerald-600 transition-colors">{item.symbol}</Link>
+                <Link to={`/investment/hisseler/${item.symbol}`} className="text-sm font-semibold text-white hover:text-emerald-500 transition-colors">{item.symbol}</Link>
                 <span className="text-xs text-slate-400 ml-2">{item.name}</span>
               </td>
-              <td className="py-2.5 pl-4 text-right tabular-nums text-sm text-slate-700">{item.price.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</td>
+              <td className="py-2.5 pl-4 text-right tabular-nums text-sm text-slate-200">{item.price.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</td>
               <td className={`py-2.5 pl-4 text-right tabular-nums text-sm font-semibold ${item.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>{item.changePercent > 0 ? '+' : ''}{item.changePercent.toFixed(2)}%</td>
-              <td className="py-2.5 pl-4 text-right tabular-nums text-sm text-slate-600">{fmt(item.pe, 'x')}</td>
-              <td className="py-2.5 pl-4 text-right tabular-nums text-sm text-slate-600">{fmt(item.pb, 'x')}</td>
-              <td className="py-2.5 pl-4 text-right tabular-nums text-sm text-slate-600">{fmt(item.evEbitda, 'x')}</td>
+              <td className="py-2.5 pl-4 text-right tabular-nums text-sm text-slate-300">{fmt(item.pe, 'x')}</td>
+              <td className="py-2.5 pl-4 text-right tabular-nums text-sm text-slate-300">{fmt(item.pb, 'x')}</td>
+              <td className="py-2.5 pl-4 text-right tabular-nums text-sm text-slate-300">{fmt(item.evEbitda, 'x')}</td>
             </tr>
           ))}
         </tbody>
@@ -77,36 +77,36 @@ export default function SectorsScreen() {
     <div>
       {/* En Sektörler / En Hisseler */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <div className="bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
-          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-3">En Sektörler</h3>
+        <div className="bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5">
+          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">En Sektörler</h3>
           <div className="flex flex-col gap-2">
             {topSectors.map((s) => (
-              <div key={s.sector} className="flex items-center justify-between p-2.5 bg-emerald-50/50 rounded-lg">
-                <span className="text-sm font-semibold text-slate-800">{s.sector}</span>
-                <span className="text-sm font-bold tabular-nums text-emerald-600">+{s.avgChange.toFixed(2)}%</span>
+              <div key={s.sector} className="flex items-center justify-between p-2.5 bg-emerald-500/10/50 rounded-lg">
+                <span className="text-sm font-semibold text-white">{s.sector}</span>
+                <span className="text-sm font-bold tabular-nums text-emerald-500">+{s.avgChange.toFixed(2)}%</span>
               </div>
             ))}
             {bottomSectors.map((s) => (
-              <div key={s.sector} className="flex items-center justify-between p-2.5 bg-rose-50/50 rounded-lg">
-                <span className="text-sm font-semibold text-slate-800">{s.sector}</span>
+              <div key={s.sector} className="flex items-center justify-between p-2.5 bg-rose-500/10/50 rounded-lg">
+                <span className="text-sm font-semibold text-white">{s.sector}</span>
                 <span className="text-sm font-bold tabular-nums text-rose-500">{s.avgChange.toFixed(2)}%</span>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
-          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-3">En Hisseler</h3>
+        <div className="bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5">
+          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">En Hisseler</h3>
           <div className="flex flex-col gap-2">
             {topStocks.map((s) => (
-              <Link key={s.symbol} to={`/investment/hisseler/${s.symbol}`} className="flex items-center justify-between p-2.5 bg-emerald-50/50 rounded-lg hover:bg-emerald-50 transition-colors">
-                <span className="text-sm font-semibold text-slate-800">{s.symbol} <span className="text-xs text-slate-400 font-normal">{s.name}</span></span>
-                <span className="text-sm font-bold tabular-nums text-emerald-600">+{s.changePercent.toFixed(2)}%</span>
+              <Link key={s.symbol} to={`/investment/hisseler/${s.symbol}`} className="flex items-center justify-between p-2.5 bg-emerald-500/10/50 rounded-lg hover:bg-emerald-500/10 transition-colors">
+                <span className="text-sm font-semibold text-white">{s.symbol} <span className="text-xs text-slate-400 font-normal">{s.name}</span></span>
+                <span className="text-sm font-bold tabular-nums text-emerald-500">+{s.changePercent.toFixed(2)}%</span>
               </Link>
             ))}
             {bottomStocks.map((s) => (
-              <Link key={s.symbol} to={`/investment/hisseler/${s.symbol}`} className="flex items-center justify-between p-2.5 bg-rose-50/50 rounded-lg hover:bg-rose-50 transition-colors">
-                <span className="text-sm font-semibold text-slate-800">{s.symbol} <span className="text-xs text-slate-400 font-normal">{s.name}</span></span>
+              <Link key={s.symbol} to={`/investment/hisseler/${s.symbol}`} className="flex items-center justify-between p-2.5 bg-rose-500/10/50 rounded-lg hover:bg-rose-500/10 transition-colors">
+                <span className="text-sm font-semibold text-white">{s.symbol} <span className="text-xs text-slate-400 font-normal">{s.name}</span></span>
                 <span className="text-sm font-bold tabular-nums text-rose-500">{s.changePercent.toFixed(2)}%</span>
               </Link>
             ))}
@@ -116,15 +116,15 @@ export default function SectorsScreen() {
 
       {/* Resmî sektör listesi */}
       <div className="mb-6">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-3 px-1">Sektörler</h3>
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3 px-1">Sektörler</h3>
         <div className="flex flex-col gap-3">
           {sectorStats.map(({ sector, items, avgChange }) => {
             const isExpanded = expandedSector === sector
             return (
-              <div key={sector} className="bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
+              <div key={sector} className="bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5">
                 <button onClick={() => setExpandedSector(isExpanded ? null : sector)} className="w-full flex items-center justify-between text-left">
                   <div>
-                    <span className="text-sm font-bold text-slate-900">{sector}</span>
+                    <span className="text-sm font-bold text-white">{sector}</span>
                     <span className="text-xs text-slate-400 ml-2">{items.length} şirket</span>
                   </div>
                   <div className="flex items-center gap-3">
@@ -143,7 +143,7 @@ export default function SectorsScreen() {
 
       {/* Özel segmentasyon — BIST'in resmî sınıflandırmasında olmayan gruplar */}
       <div>
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-3 px-1">
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3 px-1">
           Özel Gruplar <span className="normal-case text-slate-400">(resmî BIST sınıflandırmasında yer almaz)</span>
         </h3>
         <div className="flex flex-col gap-3">
@@ -151,14 +151,14 @@ export default function SectorsScreen() {
             const items = MOCK_MARKET_INSTRUMENTS.filter((i) => group.symbols.includes(i.symbol))
             const isExpanded = expandedGroup === group.name
             return (
-              <div key={group.name} className="bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-dashed border-emerald-200/70 shadow-sm">
+              <div key={group.name} className="bg-slate-800/70 backdrop-blur-md rounded-[2rem] p-5 border border-dashed border-emerald-200/70 shadow-sm">
                 <button onClick={() => setExpandedGroup(isExpanded ? null : group.name)} className="w-full flex items-center justify-between text-left">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-900">{group.name}</span>
-                      <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Özel</span>
+                      <span className="text-sm font-bold text-white">{group.name}</span>
+                      <span className="text-[10px] font-semibold text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">Özel</span>
                     </div>
-                    <p className="text-xs text-slate-500 mt-1 max-w-xl">{group.description}</p>
+                    <p className="text-xs text-slate-400 mt-1 max-w-xl">{group.description}</p>
                   </div>
                   <svg className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
                 </button>

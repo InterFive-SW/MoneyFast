@@ -41,14 +41,14 @@ export default function Chat() {
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="flex flex-col md:flex-row h-[calc(100vh-80px)] bg-white relative overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+    <div className="flex flex-col md:flex-row h-[calc(100vh-80px)] bg-slate-900/30 relative overflow-hidden rounded-xl border border-white/10 shadow-sm">
       
       {/* Sol Sidebar - Sohbet Geçmişi */}
-      <div className="hidden md:flex w-64 border-r border-slate-100 bg-slate-50/30 flex-col">
-        <div className="p-4 border-b border-slate-100">
+      <div className="hidden md:flex w-64 border-r border-white/10 bg-slate-900/50 flex-col">
+        <div className="p-4 border-b border-white/10">
           <button 
             onClick={createNewSession}
-            className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors shadow-sm"
+            className="w-full flex items-center justify-center gap-2 bg-brandBlue hover:bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium transition-colors shadow-sm"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -69,7 +69,7 @@ export default function Chat() {
           {sessions.map(session => (
             <div 
               key={session.id} 
-              className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${activeSessionId === session.id ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-slate-100 text-slate-600'}`}
+              className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${activeSessionId === session.id ? 'bg-brandBlue/20 text-brandBlue' : 'hover:bg-white/5 text-slate-300'}`}
               onClick={() => loadSession(session.id)}
             >
               <div className="flex items-center gap-2 overflow-hidden">
@@ -102,19 +102,19 @@ export default function Chat() {
             {!hasMessages ? (
               <div className="flex-1 flex flex-col items-center justify-center w-full mt-[-10vh] animate-in fade-in duration-500">
                 <div className="flex items-center gap-2 mb-8">
-                  <div className="w-8 h-8 rounded-md bg-emerald-500 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                  <div className="w-8 h-8 rounded-md bg-brandBlue text-white flex items-center justify-center font-bold text-sm shadow-sm">
                     MF
                   </div>
-                  <span className="text-xl font-bold tracking-tight text-slate-800">
+                  <span className="text-xl font-bold tracking-tight text-white">
                     finansal zeka
                   </span>
                 </div>
                 
-                <h1 className="text-2xl md:text-3xl font-semibold text-slate-800 mb-4 text-center">
+                <h1 className="text-2xl md:text-3xl font-semibold text-white mb-4 text-center">
                   Nasıl yardımcı olabilirim?
                 </h1>
                 
-                <p className="text-slate-500 text-center text-sm md:text-base max-w-lg mb-8 leading-relaxed">
+                <p className="text-slate-400 text-center text-sm md:text-base max-w-lg mb-8 leading-relaxed">
                   MoneyFast, finansal verileri analiz eden yapay zeka asistanınız. Bilanço, gelir tablosu, fiyat verileri ve daha fazlasını sorgulayabilirsiniz.
                 </p>
 
@@ -134,7 +134,7 @@ export default function Chat() {
         </div>
 
         {/* Sabit Mesaj Girdi Alanı */}
-        <div className="absolute bottom-0 w-full bg-gradient-to-t from-white via-white/95 to-transparent pt-10 pb-4 px-4 md:px-8">
+        <div className="absolute bottom-0 w-full bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pt-10 pb-4 px-4 md:px-8">
           <div className="max-w-3xl mx-auto w-full flex flex-col items-center">
             <ChatInput onSendMessage={handleSendMessage} disabled={isTyping} />
           </div>
@@ -143,7 +143,7 @@ export default function Chat() {
 
       {/* Akıllı Bağlam Paneli (Sadece mesaj varsa ve Desktop'ta görünür) */}
       {hasMessages && activeContext && (
-        <div className="hidden lg:block w-80 xl:w-96 h-full border-l border-slate-100 bg-slate-50/50">
+        <div className="hidden lg:block w-80 xl:w-96 h-full border-l border-white/10 bg-slate-900/50">
           <ContextPanel contextTopic={activeContext} />
         </div>
       )}

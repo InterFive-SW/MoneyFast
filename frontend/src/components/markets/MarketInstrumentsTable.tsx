@@ -29,7 +29,7 @@ function Week52RangeBar({ low, high, price }: { low: number; high: number; price
 
   return (
     <div className="flex flex-col items-end gap-1 w-24">
-      <div className="relative h-1.5 w-full rounded-full bg-slate-100">
+      <div className="relative h-1.5 w-full rounded-full bg-slate-800/5">
         <div
           className="absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 -translate-x-1/2 rounded-full bg-emerald-500 border-2 border-white shadow-sm"
           style={{ left: `${position}%` }}
@@ -116,17 +116,17 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
   ]
 
   return (
-    <div className="flex flex-col h-full bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
+    <div className="flex flex-col h-full bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
         <div className="flex items-center gap-3">
-          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Enstrümanlar</h3>
-          <div className="flex bg-slate-100/80 p-1 rounded-lg backdrop-blur-sm">
+          <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Enstrümanlar</h3>
+          <div className="flex bg-slate-800/5 p-1 rounded-lg backdrop-blur-sm">
             {(['BIST', 'ABD', 'Kripto'] as MarketTab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
-                  activeTab === tab ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                  activeTab === tab ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 {tab}
@@ -146,9 +146,9 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Sembol veya şirket ara..."
-            className="w-full sm:w-72 rounded-xl border border-slate-200 bg-white/80 pl-9 pr-16 py-2 text-sm text-slate-700 outline-none transition focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400"
+            className="w-full sm:w-72 rounded-xl border border-white/10 bg-slate-800 pl-9 pr-16 py-2 text-sm text-slate-200 outline-none transition focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400"
           />
-          <kbd className="hidden sm:inline-flex absolute right-2.5 top-1/2 -translate-y-1/2 items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400">
+          <kbd className="hidden sm:inline-flex absolute right-2.5 top-1/2 -translate-y-1/2 items-center gap-0.5 rounded-md border border-white/10 bg-slate-800/5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400">
             Ctrl K
           </kbd>
         </div>
@@ -157,13 +157,13 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
       <div className="flex-1 overflow-x-auto">
         <table className="w-full text-left border-collapse min-w-[780px]">
           <thead>
-            <tr className="border-b border-slate-200/50">
+            <tr className="border-b border-white/10/50">
               <th className="py-2 w-8" />
               {columns.map((col) => (
                 <th
                   key={col.key}
                   onClick={() => handleSort(col.key)}
-                  className={`py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 cursor-pointer select-none hover:text-slate-600 transition-colors ${
+                  className={`py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 cursor-pointer select-none hover:text-slate-300 transition-colors ${
                     col.align === 'right' ? 'text-right' : 'text-left'
                   }`}
                 >
@@ -177,7 +177,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
               ))}
               {activeColumnSet.key === 'getiri' ? (
                 <>
-                  <th onClick={() => handleSort('volume')} className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right cursor-pointer select-none hover:text-slate-600">
+                  <th onClick={() => handleSort('volume')} className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right cursor-pointer select-none hover:text-slate-300">
                     <span className="inline-flex items-center gap-1">
                       Hacim
                       {sortKey === 'volume' && <span className="text-emerald-500">{sortDir === 'asc' ? '▲' : '▼'}</span>}
@@ -200,7 +200,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
               <tr
                 key={item.symbol}
                 onClick={() => navigate(`/investment/hisseler/${item.symbol}`)}
-                className="hover:bg-slate-50/50 transition-colors group cursor-pointer"
+                className="hover:bg-slate-800/5/50 transition-colors group cursor-pointer"
               >
                 <td className="py-3">
                   <button
@@ -214,13 +214,13 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
                   </button>
                 </td>
                 <td className="py-3">
-                  <div className="font-semibold text-slate-800 text-sm hover:text-emerald-600 transition-colors">{item.symbol}</div>
+                  <div className="font-semibold text-white text-sm hover:text-emerald-500 transition-colors">{item.symbol}</div>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className="text-xs text-slate-400">{item.name}</span>
-                    <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{item.sector}</span>
+                    <span className="text-[10px] font-medium text-slate-400 bg-slate-800/5 px-1.5 py-0.5 rounded">{item.sector}</span>
                   </div>
                 </td>
-                <td className="py-3 pl-4 text-right tabular-nums text-sm font-medium text-slate-700">
+                <td className="py-3 pl-4 text-right tabular-nums text-sm font-medium text-slate-200">
                   {formatPrice(item.price)} {item.unit}
                 </td>
                 <td className={`py-3 pl-4 text-right tabular-nums text-sm font-semibold ${item.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
@@ -228,15 +228,15 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
                 </td>
                 {activeColumnSet.key === 'getiri' ? (
                   <>
-                    <td className="py-3 pl-4 text-right tabular-nums text-sm text-slate-600">{formatCompact(item.volume)}</td>
-                    <td className="py-3 pl-4 text-right tabular-nums text-sm text-slate-600">{formatCompact(item.marketCap)} {item.unit}</td>
+                    <td className="py-3 pl-4 text-right tabular-nums text-sm text-slate-300">{formatCompact(item.volume)}</td>
+                    <td className="py-3 pl-4 text-right tabular-nums text-sm text-slate-300">{formatCompact(item.marketCap)} {item.unit}</td>
                     <td className="py-3 pl-6">
                       <Week52RangeBar low={item.week52Low} high={item.week52High} price={item.price} />
                     </td>
                   </>
                 ) : (
                   activeColumnSet.metrics.map((metric) => (
-                    <td key={String(metric.key)} className="py-3 pl-4 text-right tabular-nums text-sm text-slate-600">
+                    <td key={String(metric.key)} className="py-3 pl-4 text-right tabular-nums text-sm text-slate-300">
                       {formatMetricValue(item, metric)}
                     </td>
                   ))
@@ -245,7 +245,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={3 + (activeColumnSet.key === 'getiri' ? 3 : activeColumnSet.metrics.length)} className="py-8 text-center text-sm text-slate-500">
+                <td colSpan={3 + (activeColumnSet.key === 'getiri' ? 3 : activeColumnSet.metrics.length)} className="py-8 text-center text-sm text-slate-400">
                   Aramanızla eşleşen enstrüman bulunamadı.
                 </td>
               </tr>

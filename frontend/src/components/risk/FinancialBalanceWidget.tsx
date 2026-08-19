@@ -19,9 +19,9 @@ export default function FinancialBalanceWidget({ income, expense, debt, debtToIn
   ]
 
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="flex h-full flex-col rounded-2xl border border-white/10 bg-slate-900/50 backdrop-blur-xl border-white/10 shadow-2xl p-6 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-base font-semibold text-slate-800">Finansal Denge</h3>
+        <h3 className="text-base font-semibold text-white">Finansal Denge</h3>
         <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
           debtToIncomeRatio > 40 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
         }`}>
@@ -33,11 +33,11 @@ export default function FinancialBalanceWidget({ income, expense, debt, debtToIn
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} barSize={40}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 13 }} dy={10} />
+            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 13 }} dy={10} />
             <YAxis 
               axisLine={false} 
               tickLine={false} 
-              tick={{ fill: '#64748b', fontSize: 12 }} 
+              tick={{ fill: '#94a3b8', fontSize: 12 }} 
               tickFormatter={(val) => `₺${val / 1000}k`}
             />
             <Tooltip 
@@ -54,7 +54,7 @@ export default function FinancialBalanceWidget({ income, expense, debt, debtToIn
         </ResponsiveContainer>
       </div>
       
-      <p className="mt-4 text-xs text-slate-500 text-center">
+      <p className="mt-4 text-xs text-slate-400 text-center">
         İdeal senaryoda aylık borç ödemelerinizin, gelirinizin %30'unu aşmaması önerilir.
       </p>
     </div>

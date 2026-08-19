@@ -25,8 +25,8 @@ export default function Risk() {
     return (
       <div className="flex min-h-[50vh] items-center justify-center p-6">
         <div className="flex flex-col items-center gap-4">
-          <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-emerald-500" />
-          <p className="text-sm font-medium text-slate-500">Risk profiliniz analiz ediliyor...</p>
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-white/10 border-t-brandBlue" />
+          <p className="text-sm font-medium text-slate-400">Risk profiliniz analiz ediliyor...</p>
         </div>
       </div>
     )
@@ -35,8 +35,8 @@ export default function Risk() {
   if (!data) {
     return (
       <div className="p-6 sm:p-8 min-h-screen">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Risk Analizi</h1>
-        <p className="mt-4 text-slate-500">Risk verilerine ulaşılamadı. Lütfen daha sonra tekrar deneyin.</p>
+        <h1 className="text-2xl font-bold tracking-tight text-white">Risk Analizi</h1>
+        <p className="mt-4 text-slate-400">Risk verilerine ulaşılamadı. Lütfen daha sonra tekrar deneyin.</p>
       </div>
     )
   }
@@ -45,8 +45,8 @@ export default function Risk() {
     <div className="p-6 sm:p-8 min-h-screen">
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Risk Analizi</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="text-2xl font-bold tracking-tight text-white">Risk Analizi</h1>
+          <p className="text-sm text-slate-400 mt-1">
             Finansal sağlığınızı, portföy riskinizi ve iyileştirme fırsatlarınızı buradan takip edebilirsiniz.
           </p>
         </div>

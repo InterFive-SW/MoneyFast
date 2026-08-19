@@ -29,7 +29,7 @@ export default function ProfitLossHeatmapWidget({ w = 4, h = 4 }: Props) {
 
   if (loading) {
     return (
-      <div className="flex flex-col h-full items-center justify-center bg-white/70 backdrop-blur-md rounded-2xl border border-white/50 shadow-sm">
+      <div className="flex flex-col h-full items-center justify-center bg-transparent rounded-2xl border border-transparent shadow-sm">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
       </div>
     )
@@ -40,8 +40,8 @@ export default function ProfitLossHeatmapWidget({ w = 4, h = 4 }: Props) {
     const avgChange = data.reduce((acc, curr) => acc + curr.changePercent, 0) / (data.length || 1)
     const isPositive = avgChange >= 0
     return (
-      <div className="flex flex-col h-full bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm items-center justify-center text-center">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">Piyasa Isısı (Özet)</h3>
+      <div className="flex flex-col h-full flex-col h-full bg-transparent p-1 items-center justify-center text-center">
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Piyasa Isısı (Özet)</h3>
         <div className={`text-2xl font-bold ${isPositive ? 'text-accent-600' : 'text-rose-500'}`}>
           {isPositive ? '+' : ''}{avgChange.toFixed(2)}%
         </div>
@@ -59,9 +59,9 @@ export default function ProfitLossHeatmapWidget({ w = 4, h = 4 }: Props) {
   }
 
   return (
-    <div className="relative flex flex-col h-full bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
+    <div className="relative flex flex-col h-full flex-col h-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Isı Haritası</h3>
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Isı Haritası</h3>
         <span className="text-xs font-medium text-slate-400">BIST 30</span>
       </div>
 

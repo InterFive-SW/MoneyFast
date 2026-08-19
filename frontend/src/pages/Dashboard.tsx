@@ -1,7 +1,7 @@
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import GridLayout from 'react-grid-layout'
 import type { Layout } from 'react-grid-layout'
 
@@ -38,32 +38,33 @@ const LAYOUT_STORAGE_KEY = 'mf_dashboard_layout_v1'
 const CUSTOM_LAYOUTS_KEY = 'mf_custom_layouts_v2'
 
 // Tüm mümkün widget tipleri ve Türkçe isimleri
-const ALL_AVAILABLE_WIDGETS: { type: WidgetType; label: string; defaultW: number; defaultH: number }[] = [
-  { type: 'investment-balance', label: 'Yatırım Hesabım', defaultW: 3, defaultH: 2 },
-  { type: 'positions', label: 'Pozisyonlar', defaultW: 7, defaultH: 6 },
-  { type: 'order-history', label: 'Emir Geçmişi', defaultW: 6, defaultH: 3 },
-  { type: 'portfolio-chart', label: 'Portföy Grafiği', defaultW: 5, defaultH: 3 },
-  { type: 'news', label: 'Piyasa Haberleri', defaultW: 5, defaultH: 4 },
-  { type: 'asset-allocation', label: 'Varlık Dağılımı', defaultW: 3, defaultH: 3 },
-  { type: 'mini-ticker-usd', label: 'USD/TRY Ticker', defaultW: 3, defaultH: 1 },
-  { type: 'mini-ticker-eur', label: 'EUR/TRY Ticker', defaultW: 3, defaultH: 1 },
-  { type: 'mini-ticker-gold', label: 'Altın Ticker', defaultW: 3, defaultH: 1 },
-  { type: 'mini-ticker-bist100', label: 'BIST100 Ticker', defaultW: 3, defaultH: 1 },
-  { type: 'total-balance', label: 'Banka Bakiyesi', defaultW: 8, defaultH: 2 },
-  { type: 'recent-transactions', label: 'Son İşlemler', defaultW: 7, defaultH: 5 },
-  { type: 'spending-overview', label: 'Harcama Özeti', defaultW: 5, defaultH: 4 },
-  { type: 'quick-actions', label: 'Hızlı İşlemler', defaultW: 4, defaultH: 3 },
-  { type: 'savings-goal', label: 'Tasarruf Hedefi', defaultW: 5, defaultH: 5 },
-  { type: 'watchlist', label: 'İzleme Listesi', defaultW: 4, defaultH: 6 },
-  { type: 'top-movers', label: 'Hareketliler', defaultW: 4, defaultH: 6 },
-  { type: 'dividend-calendar', label: 'Temettü Takvimi', defaultW: 4, defaultH: 6 },
-  { type: 'sector-allocation-pie', label: 'Sektörel Dağılım', defaultW: 4, defaultH: 4 },
-  { type: 'heatmap', label: 'Isı Haritası', defaultW: 8, defaultH: 5 },
+const ALL_AVAILABLE_WIDGETS: { type: WidgetType; label: string; defaultW: number; defaultH: number; minW: number; minH: number }[] = [
+  { type: 'investment-balance', label: 'Yatırım Hesabım', defaultW: 3, defaultH: 2, minW: 2, minH: 1 },
+  { type: 'positions', label: 'Pozisyonlar', defaultW: 7, defaultH: 6, minW: 4, minH: 3 },
+  { type: 'order-history', label: 'Emir Geçmişi', defaultW: 6, defaultH: 3, minW: 3, minH: 2 },
+  { type: 'portfolio-chart', label: 'Portföy Grafiği', defaultW: 5, defaultH: 3, minW: 3, minH: 2 },
+  { type: 'news', label: 'Piyasa Haberleri', defaultW: 5, defaultH: 4, minW: 3, minH: 2 },
+  { type: 'asset-allocation', label: 'Varlık Dağılımı', defaultW: 3, defaultH: 3, minW: 2, minH: 2 },
+  { type: 'mini-ticker-usd', label: 'USD/TRY Ticker', defaultW: 3, defaultH: 1, minW: 2, minH: 1 },
+  { type: 'mini-ticker-eur', label: 'EUR/TRY Ticker', defaultW: 3, defaultH: 1, minW: 2, minH: 1 },
+  { type: 'mini-ticker-gold', label: 'Altın Ticker', defaultW: 3, defaultH: 1, minW: 2, minH: 1 },
+  { type: 'mini-ticker-bist100', label: 'BIST100 Ticker', defaultW: 3, defaultH: 1, minW: 2, minH: 1 },
+  { type: 'total-balance', label: 'Banka Bakiyesi', defaultW: 8, defaultH: 2, minW: 3, minH: 1 },
+  { type: 'recent-transactions', label: 'Son İşlemler', defaultW: 7, defaultH: 5, minW: 4, minH: 3 },
+  { type: 'spending-overview', label: 'Harcama Özeti', defaultW: 5, defaultH: 4, minW: 3, minH: 2 },
+  { type: 'quick-actions', label: 'Hızlı İşlemler', defaultW: 4, defaultH: 3, minW: 2, minH: 2 },
+  { type: 'savings-goal', label: 'Tasarruf Hedefi', defaultW: 5, defaultH: 5, minW: 2, minH: 2 },
+  { type: 'watchlist', label: 'İzleme Listesi', defaultW: 4, defaultH: 6, minW: 2, minH: 3 },
+  { type: 'top-movers', label: 'Hareketliler', defaultW: 4, defaultH: 6, minW: 2, minH: 3 },
+  { type: 'dividend-calendar', label: 'Temettü Takvimi', defaultW: 4, defaultH: 6, minW: 2, minH: 3 },
+  { type: 'sector-allocation-pie', label: 'Sektörel Dağılım', defaultW: 4, defaultH: 4, minW: 2, minH: 2 },
+  { type: 'heatmap', label: 'Isı Haritası', defaultW: 8, defaultH: 5, minW: 4, minH: 3 },
 ]
 
 // ─── Yardımcı Fonksiyonlar ────────────────────────────────────────────────────
 const generateDefaultLayout = (template: DashboardTemplate): Layout => {
-  return template.widgets.map((w) => ({ i: w.id, x: w.x, y: w.y, w: w.w, h: w.h }))
+  // type bilgisini gridLayout state'ine zorla ekliyoruz
+  return template.widgets.map((w) => ({ i: w.id, x: w.x, y: w.y, w: w.w, h: w.h, type: w.type } as any))
 }
 
 function loadLayoutState(): DashboardLayoutState {
@@ -141,7 +142,7 @@ function TemplateSelector({
       <button
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
-        className={`flex items-center gap-2 rounded-xl border border-slate-200/80 bg-white/80 px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm backdrop-blur-sm transition hover:border-slate-300 hover:bg-white ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
+        className={`flex items-center gap-2 rounded-xl border border-white/10 bg-slate-900/50 px-3.5 py-2 text-sm font-medium text-slate-300 shadow-sm backdrop-blur-sm transition hover:border-white/20 hover:bg-white/10 ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
       >
         <span>{active.icon}</span>
         <span>{active.name}</span>
@@ -151,35 +152,35 @@ function TemplateSelector({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 top-full z-20 mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 py-1.5 shadow-[0_20px_60px_-12px_rgba(15,23,42,0.18)] backdrop-blur-xl max-h-[80vh] overflow-y-auto">
+          <div className="absolute right-0 top-full z-20 mt-2 w-72 overflow-hidden rounded-2xl border border-white/10 bg-slate-900 py-1.5 shadow-[0_20px_60px_-12px_rgba(0,0,0,0.5)] backdrop-blur-xl max-h-[80vh] overflow-y-auto">
 
             <div className="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">Hazır Şablonlar</div>
             {templates.map(template => (
               <div
                 key={template.id}
                 onClick={() => { onChange(template.id); setIsOpen(false) }}
-                className={`flex cursor-pointer items-start gap-3 px-4 py-2 hover:bg-slate-50 ${template.id === activeId ? 'bg-primary-50/60' : ''}`}
+                className={`flex cursor-pointer items-start gap-3 px-4 py-2 hover:bg-white/5 ${template.id === activeId ? 'bg-brandBlue/10' : ''}`}
               >
                 <span className="mt-0.5 text-lg leading-none">{template.icon}</span>
                 <div>
-                  <p className={`text-sm font-semibold ${template.id === activeId ? 'text-primary-600' : 'text-slate-800'}`}>{template.name}</p>
+                  <p className={`text-sm font-semibold ${template.id === activeId ? 'text-brandBlue' : 'text-slate-200'}`}>{template.name}</p>
                 </div>
               </div>
             ))}
 
             {customLayouts.filter(c => !templates.some(t => t.id === c.id)).length > 0 && (
               <>
-                <div className="mt-2 border-t border-slate-100" />
+                <div className="mt-2 border-t border-white/10" />
                 <div className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">Kişisel Düzenlerim</div>
                 {customLayouts.filter(c => !templates.some(t => t.id === c.id)).map(layout => (
                   <div
                     key={layout.id}
                     onClick={() => { onChange(layout.id); setIsOpen(false) }}
-                    className={`flex cursor-pointer items-start gap-3 px-4 py-2 hover:bg-slate-50 ${layout.id === activeId ? 'bg-primary-50/60' : ''}`}
+                    className={`flex cursor-pointer items-start gap-3 px-4 py-2 hover:bg-white/5 ${layout.id === activeId ? 'bg-brandBlue/10' : ''}`}
                   >
                     <span className="mt-0.5 text-lg leading-none">🧑‍🎨</span>
                     <div>
-                      <p className={`text-sm font-semibold ${layout.id === activeId ? 'text-primary-600' : 'text-slate-800'}`}>{layout.name}</p>
+                      <p className={`text-sm font-semibold ${layout.id === activeId ? 'text-brandBlue' : 'text-slate-200'}`}>{layout.name}</p>
                     </div>
                   </div>
                 ))}
@@ -195,6 +196,13 @@ function TemplateSelector({
 // ─── Ana Sayfa Bileşeni ───────────────────────────────────────────────────────
 export default function Dashboard() {
   const dragTypeRef = useRef<WidgetType | null>(null);
+  // Sürükleme sırasında mouse'un üzerine geldiği grid hücresi
+  const dropPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: Infinity });
+  // Ghost önizleme: sürükleme sırasında grid'e enjekte edilen geçici eleman
+  const [dropPreview, setDropPreview] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  // dragover throttle için son güncelleme zamanı
+  const lastPreviewUpdate = useRef<number>(0);
+  const [droppingItem, setDroppingItem] = useState<{ i: string; w: number; h: number }>({ i: '__dropping-elem__', w: 4, h: 3 });
   const [layoutState, setLayoutState] = useState<DashboardLayoutState>(loadLayoutState)
   const [isEditMode, setIsEditMode] = useState(false)
   const [isPoolOpen, setIsPoolOpen] = useState(false)
@@ -256,6 +264,19 @@ export default function Dashboard() {
     });
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isEditMode) {
+        setGridLayout(originalLayout)
+        setIsEditMode(false)
+        setIsPoolOpen(false)
+      }
+    }
+    
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isEditMode, originalLayout])
+
   function handleEditToggle() {
     if (!isEditMode) {
       setOriginalLayout(gridLayout) // İptal durumu için yedekle
@@ -278,9 +299,9 @@ export default function Dashboard() {
       {
         i: `${widgetConf.type}-custom-${Date.now()}`,
         x: 0,
-        y: Infinity, // En alta ekle
-        w: widgetConf.defaultW,
-        h: widgetConf.defaultH,
+        y: Infinity,
+        w: widgetConf.minW,   // Başlangıçta minimum boyut
+        h: widgetConf.minH,
         type: widgetConf.type as any,
         static: false
       }
@@ -304,29 +325,14 @@ export default function Dashboard() {
   }
 
   function submitSaveLayoutInPlace() {
-    const currentId = layoutState.activeTemplateId
-
-    let name = 'Özel Düzen'
-    const custom = customLayouts.find(c => c.id === currentId)
-    if (custom) {
-      name = custom.name
-    } else {
-      const tpl = DASHBOARD_TEMPLATES.find(t => t.id === currentId)
-      if (tpl) name = tpl.name
-    }
-
-    const payload: CustomLayoutState = {
-      id: currentId,
-      name: name,
-      items: gridLayout,
-      savedAt: new Date().toISOString(),
-    }
-
-    saveCustomLayout(payload)
-    setCustomLayouts(loadCustomLayouts())
+    // DİKKAT: localStorage'a hiçbir şekilde kayıt YAPILMAYACAK.
+    // Sadece düzenleme modunu kapatıyor ve tüm widget'ları static:true yapıyoruz.
+    // static:false kalan widget'lar düzenleme modu kapansa bile sürüklenebilir kalır.
+    setGridLayout(prev => prev.map(item => ({ ...item, static: true })))
     setIsEditMode(false)
     setIsPoolOpen(false)
   }
+
 
   // Havuzdaki mevcut olmayan widget'ları hesapla
 
@@ -334,12 +340,19 @@ export default function Dashboard() {
   // Widget ID'sinden veya `type` property'sinden widget türünü bulma
   const getWidgetType = (item: any): WidgetType | null => {
     if (item.type) return item.type
-    // Eğer şablondan geliyorsa:
+
+    // Önce o anki aktif şablonda ara
     const tpl = DASHBOARD_TEMPLATES.find(t => t.id === layoutState.activeTemplateId)
     const w = tpl?.widgets.find(w => w.id === item.i)
     if (w) return w.type
 
-    // Eğer string içeriyorsa
+    // Bulamazsa ID değişimi yaşanmış olabilir, TÜM hazır şablonlarda ara
+    for (const template of DASHBOARD_TEMPLATES) {
+      const found = template.widgets.find(widget => widget.id === item.i)
+      if (found) return found.type
+    }
+
+    // String kontrolü (yeni eklenenler için)
     const conf = ALL_AVAILABLE_WIDGETS.find(aw => item.i.includes(aw.type))
     return conf?.type as WidgetType || null
   }
@@ -347,9 +360,9 @@ export default function Dashboard() {
   const activeTypes = new Set(gridLayout.map(item => getWidgetType(item)).filter(Boolean))
   const availablePoolWidgets = ALL_AVAILABLE_WIDGETS.filter(w => !activeTypes.has(w.type))
 
-  const cardBaseClass = `h-full w-full flex flex-col rounded-2xl bg-white/70 p-4 backdrop-blur-sm transition-all duration-200 ${isEditMode
-    ? 'border-2 border-dashed border-primary-400/70 shadow-[0_4px_20px_-8px_rgba(16,185,129,0.15)]'
-    : 'border border-slate-200/60 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] hover:shadow-[0_8px_32px_-8px_rgba(15,23,42,0.14)]'
+  const cardBaseClass = `h-full w-full flex flex-col rounded-2xl bg-slate-900/50 p-4 backdrop-blur-xl transition-all duration-200 text-white ${isEditMode
+    ? 'border-2 border-dashed border-brandBlue/50 shadow-[0_4px_20px_-8px_rgba(75,123,229,0.3)]'
+    : 'border border-white/10 shadow-[0_4px_24px_-8px_rgba(0,0,0,0.2)] hover:shadow-[0_8px_32px_-8px_rgba(0,0,0,0.4)]'
     }`
 
   return (
@@ -357,12 +370,12 @@ export default function Dashboard() {
       {/* ── Üst Araç Çubuğu ──────────────────────────────────────────── */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-950">
+          <h2 className="text-xl font-bold tracking-tight text-white">
             {isEditMode ? '🔧 Panel Düzenleme Modu' : 'Hoş Geldiniz 👋'}
           </h2>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-slate-400">
             {isEditMode
-              ? 'Widget\'ları sürükleyerek yeniden düzenleyin. Alttaki havuzdan yeni modüller ekleyebilirsiniz.'
+              ? 'Widget\'ları sürükleyerek yeniden düzenleyin. Soldaki havuzdan yeni modüller ekleyebilirsiniz.'
               : 'Finansal durumunuzun güncel özeti aşağıda görüntülenmektedir.'}
           </p>
         </div>
@@ -379,10 +392,10 @@ export default function Dashboard() {
           {!isEditMode ? (
             <button
               onClick={handleEditToggle}
-              className="flex items-center gap-2 rounded-xl border border-slate-200/80 bg-white/80 px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm backdrop-blur-sm transition hover:border-slate-300 hover:bg-white"
+              className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-900/50 px-3.5 py-2 text-sm font-medium text-slate-300 shadow-sm backdrop-blur-sm transition hover:border-white/20 hover:bg-white/10 hover:text-white"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
-              Düzeni Düzenle
+              Paneli Düzenle
             </button>
           ) : (
             <div className="flex items-center gap-2">
@@ -392,19 +405,25 @@ export default function Dashboard() {
                   setIsEditMode(false)
                   setIsPoolOpen(false)
                 }}
-                className="rounded-xl border border-slate-200/80 bg-white/80 px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm backdrop-blur-sm transition hover:bg-white"
+                className="rounded-xl border border-white/10 bg-slate-900/50 px-3.5 py-2 text-sm font-medium text-slate-300 shadow-sm backdrop-blur-sm transition hover:bg-white/10 hover:text-white"
               >
                 İptal
               </button>
               <button
                 onClick={submitSaveLayoutInPlace}
-                className="rounded-xl border border-primary-500 bg-white px-4 py-2 text-sm font-semibold text-primary-500 shadow-sm transition hover:bg-primary-50"
+                className="rounded-xl border border-brandBlue bg-slate-900/50 px-4 py-2 text-sm font-semibold text-brandBlue shadow-sm transition hover:bg-brandBlue hover:text-white"
               >
                 Kaydet
               </button>
               <button
+                onClick={() => setGridLayout([])}
+                className="rounded-xl border border-rose-500/50 bg-slate-900/50 px-4 py-2 text-sm font-semibold text-rose-500 shadow-sm transition hover:bg-rose-500/10"
+              >
+                Tümünü Temizle
+              </button>
+              <button
                 onClick={() => setShowSaveModal(true)}
-                className="flex items-center gap-2 rounded-xl bg-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-primary-500/30 transition hover:bg-primary-600"
+                className="flex items-center gap-2 rounded-xl bg-brandBlue px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-brandBlue/30 transition hover:bg-brandBlue/80"
               >
                 Farklı Kaydet
               </button>
@@ -414,10 +433,70 @@ export default function Dashboard() {
       </div>
 
       {/* ── Widget Alanı ──────────────────────────────────────────────── */}
-      <div ref={containerRef as any} onDragOver={(e) => e.preventDefault()}>
+      <div
+        ref={containerRef as any}
+        onDragOver={(e) => {
+          if (!isEditMode || !dragTypeRef.current) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          const mouseX = e.clientX - rect.left;
+          const mouseY = e.clientY - rect.top;
+          const MARGIN = 16;
+          const cellW = (containerWidth + MARGIN) / GRID_COLS;
+          const cellH = ROW_HEIGHT + MARGIN;
+          const newX = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(mouseX / cellW)));
+          // Widget'ı cursor'a ortala: widget yüksekliğinin yarısını çıkar
+          const type = dragTypeRef.current;
+          const widgetConf = ALL_AVAILABLE_WIDGETS.find(w => w.type === type);
+          const widgetH = widgetConf?.defaultH || 3;
+          const halfHeightOffset = Math.floor(widgetH / 2) * cellH;
+          const newY = Math.max(0, Math.floor((mouseY - halfHeightOffset) / cellH));
+          dropPositionRef.current = { x: newX, y: newY };
+          // 60fps için throttle (~16ms)
+          const now = Date.now();
+          if (now - lastPreviewUpdate.current > 50) {
+            lastPreviewUpdate.current = now;
+            setDropPreview({ x: newX, y: newY, w: widgetConf?.defaultW || 4, h: widgetConf?.defaultH || 3 });
+          }
+
+        }}
+        onDragLeave={(e) => {
+          // Gerçekten container'dan çıkılıyorsa ghost'u temizle
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            setDropPreview(null);
+          }
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDropPreview(null);
+          const type = dragTypeRef.current;
+          if (!type || !isEditMode) return;
+          const widgetConf = ALL_AVAILABLE_WIDGETS.find(w => w.type === type);
+          if (!widgetConf) return;
+          const newId = `${type}-custom-${Date.now()}`;
+          setGridLayout(prev => [
+            ...prev,
+            {
+              i: newId,
+              x: dropPositionRef.current.x,
+              y: dropPositionRef.current.y,
+              w: widgetConf.minW,   // Başlangıçta minimum boyut
+              h: widgetConf.minH,
+              type: type as any,
+              static: false
+            }
+          ]);
+          dragTypeRef.current = null;
+        }}
+      >
         <AnyGridLayout
-          className={`layout ${isEditMode ? 'border-2 border-dashed border-primary-200 min-h-[400px] rounded-xl' : ''}`}
-          layout={gridLayout}
+          className={`layout ${isEditMode ? 'border-2 border-dashed border-brandBlue/50 min-h-[400px] rounded-xl' : ''}`}
+          layout={[
+            ...gridLayout,
+            // Ghost önizleme: sürükleme sırasında geçici placeholder enjekte et
+            ...(dropPreview ? [{ i: '__drop-preview__', x: dropPreview.x, y: dropPreview.y, w: dropPreview.w, h: dropPreview.h, static: true, isDraggable: false, isResizable: false }] : [])
+          ]}
           cols={GRID_COLS}
           rowHeight={ROW_HEIGHT}
           width={containerWidth}
@@ -428,48 +507,9 @@ export default function Dashboard() {
           isResizable={isEditMode}
           isDraggable={isEditMode}
           useCSSTransforms
-          isDroppable={isEditMode}
+          isDroppable={false}
           compactType="vertical"
           preventCollision={false}
-          onDropDragOver={(e: any) => {
-            const type = dragTypeRef.current;
-            const widgetConf = ALL_AVAILABLE_WIDGETS.find(w => w.type === type);
-            // Asla false dönme! Bulamazsa varsayılan w:4, h:3 dön ki ızgara diğerlerini itip yer açsın.
-            return {
-              w: widgetConf?.defaultW || 4,
-              h: widgetConf?.defaultH || 3
-            };
-          }}
-          onDrop={(layout: any, layoutItem: any, e: any) => {
-            e.preventDefault(); // Tarayıcının işlemi iptal etmesini kesin olarak engelliyoruz
-            const type = dragTypeRef.current;
-            if (!type) return;
-
-            const widgetConf = ALL_AVAILABLE_WIDGETS.find(w => w.type === type);
-            if (!widgetConf) return;
-
-            const newId = `${type}-custom-${Date.now()}`;
-
-            // Yeni widget'ı state'e "ZORLA" ve güvenli bir şekilde ekliyoruz
-            setGridLayout(prev => {
-              // Varsa eski önizleme (ghost) kutularını temizle
-              const cleanPrev = prev.filter(p => p.i !== 'drop-preview' && p.i !== '__dropping-elem__');
-              return [
-                ...cleanPrev,
-                {
-                  i: newId,
-                  x: layoutItem.x,
-                  y: layoutItem.y,
-                  w: widgetConf.defaultW,
-                  h: widgetConf.defaultH,
-                  type: type as any,
-                  static: false
-                }
-              ];
-            });
-            dragTypeRef.current = null;
-          }}
-          droppingItem={{ i: '__dropping-elem__', w: 4, h: 3 }}
         >
           {gridLayout.map((layoutItem) => {
             const type = getWidgetType(layoutItem)
@@ -478,14 +518,14 @@ export default function Dashboard() {
             return (
               <div key={layoutItem.i} className={`${cardBaseClass} relative overflow-hidden group`}>
                 {isEditMode && (
-                  <div className="drag-handle absolute left-3 top-3 z-10 flex cursor-grab items-center gap-1.5 rounded-lg border border-primary-200 bg-primary-50 px-2 py-1 active:cursor-grabbing">
-                    <span className="text-[10px] font-semibold text-primary-500">Sürükle</span>
+                  <div className="drag-handle absolute left-3 top-3 z-10 flex cursor-grab items-center gap-1.5 rounded-lg border border-brandBlue/30 bg-brandBlue/10 px-2 py-1 active:cursor-grabbing">
+                    <span className="text-[10px] font-semibold text-brandBlue">Sürükle</span>
                   </div>
                 )}
                 {isEditMode && (
                   <button
                     onClick={() => handleRemoveWidget(layoutItem.i)}
-                    className="absolute right-3 top-3 z-10 p-1 rounded-md text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition"
+                    className="absolute right-3 top-3 z-10 p-1 rounded-md text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 transition"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                   </button>
@@ -496,49 +536,71 @@ export default function Dashboard() {
               </div>
             )
           })}
+          {/* Ghost önizleme elementi */}
+          {dropPreview && (
+            <div key="__drop-preview__" className="pointer-events-none">
+              <div className="h-full w-full rounded-2xl border-2 border-dashed border-brandBlue bg-brandBlue/20 backdrop-blur-sm flex items-center justify-center animate-pulse">
+                <span className="text-brandBlue text-xs font-semibold tracking-wide">Buraya bırak</span>
+              </div>
+            </div>
+          )}
         </AnyGridLayout>
       </div>
 
       {/* ── Sol Widget Paleti (Edit Mode) ──────────────────────────────────────────────── */}
       {isEditMode && (
-        <div className={`fixed left-0 top-0 bottom-0 w-64 bg-slate-50/95 backdrop-blur-xl border-r border-slate-200 shadow-2xl z-50 flex flex-col transition-transform duration-300 translate-x-0`}>
-          <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-white/50">
+        <div className={`fixed left-0 top-0 bottom-0 w-64 bg-slate-950/95 backdrop-blur-xl border-r border-white/10 shadow-2xl z-50 flex flex-col transition-transform duration-300 translate-x-0`}>
+          <div className="p-4 border-b border-white/10 flex items-center justify-between bg-slate-900/50">
             <div>
-              <h3 className="font-semibold text-slate-800">Widget Paleti</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Sürükleyip bırakın</p>
+              <h3 className="font-semibold text-white">Widget Paleti</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Sürükleyip bırakın</p>
             </div>
           </div>
           <div className="p-4 flex-1 overflow-y-auto space-y-4 custom-scrollbar">
             {availablePoolWidgets.length === 0 ? (
-              <p className="text-sm text-slate-500 text-center py-8">Tüm modüller ekranda mevcut.</p>
+              <p className="text-sm text-slate-400 text-center py-8">Tüm modüller ekranda mevcut.</p>
             ) : (
               availablePoolWidgets.map(widgetConf => (
                 <div
                   key={widgetConf.type}
                   draggable={true}
                   unselectable="on"
-                  // BURASI DEĞİŞTİRİLDİ: Tarayıcının bloklamasını önlemek için text/plain eklendi.
+                  onClick={() => handleAddWidget(widgetConf)}
+                  onMouseEnter={() => {
+                    setDroppingItem({ i: '__dropping-elem__', w: widgetConf.defaultW, h: widgetConf.defaultH });
+                  }}
                   onDragStart={(e) => {
                     dragTypeRef.current = widgetConf.type;
+                    setDroppingItem({
+                      i: '__dropping-elem__',
+                      w: widgetConf.defaultW,
+                      h: widgetConf.defaultH
+                    });
                     e.dataTransfer.setData("text/plain", widgetConf.type);
-                    e.dataTransfer.setData("widgetType", widgetConf.type);
-                    e.dataTransfer.effectAllowed = 'copy';
+                    // RGL 'move' effectAllowed bekliyor, 'copy' drop'u tarayıcı engelleyebilir
+                    e.dataTransfer.effectAllowed = 'move';
                   }}
-                  className="group relative rounded-xl border border-slate-200/80 bg-white overflow-hidden shadow-sm hover:border-primary-400 hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
+                  onDragEnd={() => {
+                    // Sürükleme iptal edilirse veya dışarıda bırakılırsa temizle
+                    if (dragTypeRef.current) {
+                      dragTypeRef.current = null;
+                    }
+                  }}
+                  className="group relative rounded-xl border border-white/10 bg-slate-900 overflow-hidden shadow-sm hover:border-brandBlue hover:shadow-md transition-all cursor-grab active:cursor-grabbing hover:cursor-pointer"
                 >
-                  <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                    <span className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                  <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between bg-white/5">
+                    <span className="text-sm font-medium text-white flex items-center gap-2">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 9h14M5 15h14" /></svg>
                       {widgetConf.label}
                     </span>
                   </div>
-                  <div className="relative h-20 w-full bg-slate-50/30 overflow-hidden">
+                  <div className="relative h-20 w-full bg-slate-950/50 overflow-hidden">
                     <div
                       className="absolute inset-0 origin-top-left pointer-events-none"
                       style={{ width: '200%', height: '200%', transform: 'scale(0.5)' }}
                     >
                       <div className="w-full h-full p-2 opacity-90 grayscale-[0.2]">
-                        <div className="h-full w-full rounded-xl bg-white shadow-sm overflow-hidden pointer-events-none">
+                        <div className="h-full w-full rounded-xl bg-slate-900 border border-white/10 shadow-sm overflow-hidden pointer-events-none">
                           {renderWidgetContent(widgetConf.type as WidgetType, widgetConf.defaultW, widgetConf.defaultH)}
                         </div>
                       </div>
@@ -554,9 +616,9 @@ export default function Dashboard() {
       {/* ── Düzen Kaydetme Modalı ──────────────────────────────────────────────── */}
       {showSaveModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-900">Düzeni Kaydet</h3>
-            <p className="mt-1 text-sm text-slate-500">Bu panele bir isim verin. Açılır menüden daha sonra tekrar seçebilirsiniz.</p>
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-white">Düzeni Kaydet</h3>
+            <p className="mt-1 text-sm text-slate-400">Bu panele bir isim verin. Açılır menüden daha sonra tekrar seçebilirsiniz.</p>
 
             <input
               type="text"
@@ -564,20 +626,20 @@ export default function Dashboard() {
               value={saveName}
               onChange={(e) => setSaveName(e.target.value)}
               placeholder="Örn: Hafta Sonu Görünümü"
-              className="mt-4 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+              className="mt-4 w-full rounded-xl border border-white/20 bg-slate-950 px-4 py-2.5 text-sm text-white outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue"
             />
 
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={() => setShowSaveModal(false)}
-                className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                className="rounded-xl px-4 py-2 text-sm font-medium text-slate-300 hover:bg-white/10"
               >
                 İptal
               </button>
               <button
                 onClick={submitSaveLayout}
                 disabled={!saveName.trim()}
-                className="rounded-xl bg-primary-500 px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 hover:bg-primary-600"
+                className="rounded-xl bg-brandBlue px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-50 hover:bg-brandBlue/80"
               >
                 Kaydet
               </button>

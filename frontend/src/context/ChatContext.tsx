@@ -152,7 +152,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }, 800);
 
     try {
-      const data = await api.post<any>('/api/ai_assistant/chat', { text });
+      const data = await api.post<any>('/api/ai_orchestrator/chat', { user_message: text });
       
       clearInterval(thoughtInterval);
       setCurrentThought(undefined);
@@ -164,7 +164,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
       const aiResponse: ChatMessage = {
         id: data.id || ((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString()),
-        text: data.text,
+        text: data.final_output || data.text || "Yanıt alınamadı.",
         sender: 'ai',
         timestamp: new Date(),
         widget: data.widget

@@ -15,8 +15,8 @@ interface ChartWidgetProps {
  */
 export default function ChartWidget({ payload }: ChartWidgetProps) {
   return (
-    <div className="mt-3 w-full bg-white rounded-xl p-4 shadow-sm border border-slate-100 overflow-hidden">
-      <h4 className="text-sm font-semibold text-slate-800 mb-4">{payload.title}</h4>
+    <div className="mt-3 w-full bg-slate-900/50 backdrop-blur-xl border border-white/10 rounded-xl p-4 shadow-2xl overflow-hidden">
+      <h4 className="text-sm font-semibold text-white mb-4">{payload.title}</h4>
       <div className="h-40 w-full min-w-[200px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={payload.data} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>

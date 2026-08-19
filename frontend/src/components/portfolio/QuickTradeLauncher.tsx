@@ -53,14 +53,14 @@ export default function QuickTradeLauncher({ positions }: QuickTradeLauncherProp
   const selectedOption = options.find((o) => o.symbol === selectedSymbol)
 
   return (
-    <div className="bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
-      <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-4">Hızlı İşlem</h3>
+    <div className="bg-slate-900/50 backdrop-blur-xl rounded-[2rem] p-5 border border-white/10 shadow-2xl">
+      <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-4">Hızlı İşlem</h3>
 
       <div className="flex flex-col sm:flex-row gap-3">
         <select
           value={selectedSymbol}
           onChange={(e) => setSelectedSymbol(e.target.value)}
-          className="flex-1 rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+          className="flex-1 rounded-xl border border-white/10 bg-slate-800 px-3 py-2.5 text-sm font-medium text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
         >
           {['Pozisyonlarım', 'Takip Listesi'].map((group) => {
             const groupOptions = options.filter((o) => o.group === group)

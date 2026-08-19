@@ -89,13 +89,13 @@ export default function StockFilterPanel({ filters, onChange, sectors }: Props) 
     setSavedSearches(next)
   }
 
-  const inputClass = 'w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400'
+  const inputClass = 'w-full rounded-lg border border-white/10 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400'
 
   return (
-    <div className="bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm mb-6">
+    <div className="bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5 mb-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Filtrele</h3>
-        <button onClick={() => onChange(EMPTY_STOCK_FILTERS)} className="text-xs font-medium text-slate-400 hover:text-slate-600">
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Filtrele</h3>
+        <button onClick={() => onChange(EMPTY_STOCK_FILTERS)} className="text-xs font-medium text-slate-400 hover:text-slate-300">
           Temizle
         </button>
       </div>
@@ -140,13 +140,13 @@ export default function StockFilterPanel({ filters, onChange, sectors }: Props) 
         </div>
       </div>
 
-      <div className="flex items-center justify-between flex-wrap gap-3 pt-3 border-t border-slate-100">
+      <div className="flex items-center justify-between flex-wrap gap-3 pt-3 border-t border-white/10">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[10px] uppercase font-semibold text-slate-400 mr-1">Kayıtlı Aramalar:</span>
           {savedSearches.length === 0 && <span className="text-xs text-slate-400">yok</span>}
           {savedSearches.map((s) => (
-            <span key={s.id} className="inline-flex items-center gap-1 rounded-lg bg-slate-100 pl-2.5 pr-1 py-1 text-xs font-medium text-slate-600">
-              <button onClick={() => handleLoad(s)} className="hover:text-emerald-600">{s.name}</button>
+            <span key={s.id} className="inline-flex items-center gap-1 rounded-lg bg-slate-800/5 pl-2.5 pr-1 py-1 text-xs font-medium text-slate-300">
+              <button onClick={() => handleLoad(s)} className="hover:text-emerald-500">{s.name}</button>
               <button onClick={() => handleDelete(s.id)} aria-label={`${s.name} sil`} className="text-slate-400 hover:text-rose-500 px-1">×</button>
             </span>
           ))}
@@ -155,11 +155,11 @@ export default function StockFilterPanel({ filters, onChange, sectors }: Props) 
         {showSaveInput ? (
           <div className="flex items-center gap-1.5">
             <input autoFocus value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="Arama adı..." className={`${inputClass} w-32`} />
-            <button onClick={handleSave} className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">Kaydet</button>
-            <button onClick={() => setShowSaveInput(false)} className="text-xs text-slate-400 hover:text-slate-600">İptal</button>
+            <button onClick={handleSave} className="text-xs font-semibold text-emerald-500 hover:text-emerald-400">Kaydet</button>
+            <button onClick={() => setShowSaveInput(false)} className="text-xs text-slate-400 hover:text-slate-300">İptal</button>
           </div>
         ) : (
-          <button onClick={() => setShowSaveInput(true)} className="text-xs font-semibold text-emerald-600 hover:text-emerald-700">
+          <button onClick={() => setShowSaveInput(true)} className="text-xs font-semibold text-emerald-500 hover:text-emerald-400">
             + Bu Aramayı Kaydet
           </button>
         )}

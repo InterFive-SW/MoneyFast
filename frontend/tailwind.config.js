@@ -4,6 +4,7 @@ export default {
   theme: {
     extend: {
       colors: {
+        brandBlue: '#4b7be5',
         primary: {
           50: '#f5f3ff',
           100: '#ede9fe',
@@ -30,7 +31,10 @@ export default {
           900: '#134e4a',
           950: '#042f2e',
         }
-      }
+      },
+      fontFamily: {
+        sans: ['Poppins', 'sans-serif'],
+      },
     },
   },
   plugins: [],

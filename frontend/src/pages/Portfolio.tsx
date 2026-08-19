@@ -30,8 +30,8 @@ export default function Portfolio() {
   return (
     <div className="p-6 sm:p-8 min-h-screen">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900">Portföyüm</h1>
-        <p className="text-sm text-slate-500 mt-1">
+        <h1 className="text-2xl font-bold tracking-tight text-white">Portföyüm</h1>
+        <p className="text-sm text-slate-400 mt-1">
           Hisse senedi, altın ve döviz varlıklarınızın dağılımını ve performansını tek bir ekranda görüntüleyin.
         </p>
       </div>

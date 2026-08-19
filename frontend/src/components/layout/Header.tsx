@@ -44,7 +44,7 @@ function NotificationButton() {
     <button
       type="button"
       aria-label="Bildirimleri görüntüle"
-      className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200/80 bg-white/80 text-slate-500 shadow-sm backdrop-blur-sm transition hover:border-slate-300 hover:bg-white hover:text-slate-700"
+      className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-slate-900/50 text-slate-400 shadow-sm backdrop-blur-sm transition hover:border-white/20 hover:bg-white/10 hover:text-white"
     >
       <svg
         width="16"
@@ -61,7 +61,7 @@ function NotificationButton() {
         <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
       </svg>
       <span
-        className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white"
+        className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-brandBlue ring-2 ring-slate-950"
         aria-label="Okunmamış bildirim mevcut"
       />
     </button>
@@ -95,11 +95,11 @@ export default function Header({ pageTitle }: HeaderProps) {
   }, [dateStr])
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200/60 bg-white/70 px-6 backdrop-blur-xl sm:px-8">
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/10 bg-slate-950/80 px-6 backdrop-blur-xl sm:px-8">
 
       {/* ── Sol: Sayfa Başlığı ve Tarih ──────────────────────────────── */}
       <div>
-        <h1 className="text-base font-bold leading-none text-slate-950">{pageTitle}</h1>
+        <h1 className="text-base font-bold leading-none text-white">{pageTitle}</h1>
         <p className="mt-1 text-xs capitalize text-slate-400">{dateStr}</p>
       </div>
 
@@ -108,14 +108,14 @@ export default function Header({ pageTitle }: HeaderProps) {
         <NotificationButton />
 
         {/* Kullanıcı kimlik kartı */}
-        <div className="flex items-center gap-2.5 rounded-xl border border-slate-200/80 bg-white/80 px-3 py-1.5 shadow-sm backdrop-blur-sm">
+        <div className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-slate-900/50 px-3 py-1.5 shadow-sm backdrop-blur-sm">
 
           {/* Gradient avatar — baş harfler veya iskelet */}
           {isLoading ? (
-            <div className="h-6 w-6 animate-pulse rounded-lg bg-slate-200" />
+            <div className="h-6 w-6 animate-pulse rounded-lg bg-slate-800" />
           ) : (
             <div
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 text-[10px] font-bold text-white"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brandBlue to-primary-500 text-[10px] font-bold text-white"
               aria-hidden="true"
             >
               {profile?.initials ?? 'KL'}
@@ -126,12 +126,12 @@ export default function Header({ pageTitle }: HeaderProps) {
           <div className="hidden sm:block">
             {isLoading ? (
               <div className="space-y-1">
-                <div className="h-2.5 w-20 animate-pulse rounded bg-slate-200" />
-                <div className="h-2 w-14 animate-pulse rounded bg-slate-100" />
+                <div className="h-2.5 w-20 animate-pulse rounded bg-slate-800" />
+                <div className="h-2 w-14 animate-pulse rounded bg-slate-800/50" />
               </div>
             ) : (
               <>
-                <p className="text-xs font-semibold leading-none text-slate-800">
+                <p className="text-xs font-semibold leading-none text-white">
                   {profile?.fullName ?? 'Kullanıcı'}
                 </p>
                 <p className="mt-0.5 text-[10px] text-slate-400">Premium Üye</p>

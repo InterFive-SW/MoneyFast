@@ -15,17 +15,18 @@ yazmıyoruz, Compose kendisi yapıyor. Bu ağın içinde iki şey doğru:
 1. **Bir container'dan diğerine, IP adresiyle değil, `docker-compose.yml`'deki
    servis adıyla ulaşılır.** `backend` servisinin adı `backend`'se, başka bir
    container içinden `http://backend:...` yazınca Docker bunu otomatik doğru
-   container'a yönlendirir — internal bir DNS gibi düşünebilirsin.
-2. **`ports:` satırı sadece SENİN bilgisayarından (host) erişim içindir.**
-   Container'lar birbirine ulaşırken bu satırı hiç görmez/kullanmaz. Onun yerine
-   hedef servisin **container içinde gerçekten dinlediği port'u** kullanır.
+   container'a yönlendirir — internal bir DNS gibi düşünülebilir.
+2. **`ports:` satırı sadece host makineden (Enes'in bilgisayarından) erişim
+   içindir.** Container'lar birbirine ulaşırken bu satırı hiç görmez/kullanmaz.
+   Onun yerine hedef servisin **container içinde gerçekten dinlediği port'u**
+   kullanır.
 
 Bu ikinci madde en çok karıştırılan yer — somut örnekle:
 
 ```yaml
 backend:
   ports:
-    - "8000:8000"   # ← SADECE senin tarayıcından localhost:8000 için
+    - "8000:8000"   # ← SADECE Enes'in bilgisayarından (host) localhost:8000 için
 ```
 
 `backend/Dockerfile`'da `uvicorn app.main:app --host 0.0.0.0 --port 8000` ile
@@ -108,5 +109,5 @@ mcp-market-data:
    docker exec <container-adı> curl -s http://<hedef-servis>:<port>/health
    ```
    (veya hedefin sağlık endpoint'i neyse) — container içinden container içine
-   gerçek bir istek atarak network'ün çalıştığını kanıtla, sadece config'e
-   bakıp "olması lazım" deme.
+   gerçek bir istek atarak network'ün çalıştığını kanıtlamak gerekir, sadece
+   config'e bakıp "olması lazım" denilmemelidir.

@@ -198,7 +198,7 @@ def _normalize(payload: dict[str, Any]) -> dict[str, Any]:
         verdict = "BLOCK"
 
     remediated = payload.get("remediated_response")
-    if verdict == "REVISE" and not remediated:
+    if verdict == "REVISE" and not str(remediated or "").strip():
         verdict = "BLOCK"
         remediated = None
 

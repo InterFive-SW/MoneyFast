@@ -3,14 +3,10 @@ branch = True
 source = .
 omit =
     tests/*
-    */site-packages/*
-    setup.py
 
 [report]
 show_missing = True
-skip_covered = False
 fail_under = 100
 exclude_lines =
     pragma: no cover
     if TYPE_CHECKING:
-    raise NotImplementedError

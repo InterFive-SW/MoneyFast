@@ -60,6 +60,23 @@ cp .env.example .env
 python3 -c "import secrets; print(secrets.token_hex(32))"   # çıktıyı SECRET_KEY'e yapıştır
 ```
 
+### Dummy Data Generator
+
+Geliştirme aşamasında test verilerine ihtiyaç duyarsanız, veritabanına sentetik kullanıcılar ekleyebilirsiniz. Bu script **yalnızca** lokal veya test veritabanlarında çalışır (güvenlik kontrolü mevcuttur).
+
+Çalıştırmak için `backend` dizininde:
+
+```bash
+# 50 adet sahte kullanıcı üretir
+python -m scripts.generate_dummy_data --users 50
+
+# Test verilerini üretirken her zaman aynı verileri elde etmek için seed kullanabilirsiniz
+python -m scripts.generate_dummy_data --users 10 --seed 42
+
+# Sadece üretilmiş olan eski sahte kullanıcıları ("999" prefix'li T.C. numaraları vs.) temizler
+python -m scripts.generate_dummy_data --reset
+```
+
 ## Geliştirme kuralları
 
 Detaylar için **[CLAUDE.md](CLAUDE.md)** — özet:

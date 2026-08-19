@@ -1,1 +1,5 @@
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Legacy entry point retained to avoid deleting a tracked file.
+--
+-- Vector schema changes are now immutable, checksum-verified migrations under
+-- infra/vector-migrations/. The Compose migration job does not execute this
+-- file. Do not add DDL here.

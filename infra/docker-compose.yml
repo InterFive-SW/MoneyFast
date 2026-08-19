@@ -1,18 +1,27 @@
 services:
-  postgres:
+  core-db:
     image: postgres:16
     environment:
-      POSTGRES_USER: moneyfast
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: moneyfast
+      POSTGRES_USER: ${CORE_DB_USER:?Set CORE_DB_USER in infra/.env}
+      POSTGRES_PASSWORD: ${CORE_DB_PASSWORD:?Set CORE_DB_PASSWORD in infra/.env}
+      POSTGRES_DB: ${CORE_DB_NAME:-moneyfast}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U moneyfast -d moneyfast"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    mem_limit: ${CORE_DB_MEMORY_LIMIT:?Set CORE_DB_MEMORY_LIMIT in infra/.env}
+    cpus: ${CORE_DB_CPU_LIMIT:?Set CORE_DB_CPU_LIMIT in infra/.env}
+    networks:
+      - core-db-net
+    restart: unless-stopped
 
   backend:
     build:
@@ -21,29 +30,67 @@ services:
     env_file:
       - ../backend/.env
     environment:
-      DATABASE_URL: postgresql://moneyfast:password@postgres:5432/moneyfast
+      DATABASE_URL: ${CORE_DATABASE_URL:?Set a URL-encoded CORE_DATABASE_URL in infra/.env}
     ports:
       - "8000:8000"
     depends_on:
-      postgres:
+      core-db:
         condition: service_healthy
+    networks:
+      - core-db-net
+      - moneyfast-net
 
   vector-db:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER: moneyfast_ai
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: moneyfast_rag
+      POSTGRES_USER: ${VECTOR_DB_ADMIN_USER:?Set VECTOR_DB_ADMIN_USER in infra/.env}
+      POSTGRES_PASSWORD: ${VECTOR_DB_ADMIN_PASSWORD:?Set VECTOR_DB_ADMIN_PASSWORD in infra/.env}
+      POSTGRES_DB: ${VECTOR_DB_NAME:-moneyfast_rag}
     volumes:
       - vector_db_data:/var/lib/postgresql/data
-      - ./vector-db-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U moneyfast_ai -d moneyfast_rag"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    mem_limit: ${VECTOR_DB_MEMORY_LIMIT:?Set VECTOR_DB_MEMORY_LIMIT in infra/.env}
+    cpus: ${VECTOR_DB_CPU_LIMIT:?Set VECTOR_DB_CPU_LIMIT in infra/.env}
+    networks:
+      - vector-db-net
     restart: unless-stopped
+
+  vector-migrations:
+    image: pgvector/pgvector:pg16
+    environment:
+      PGHOST: vector-db
+      PGPORT: "5432"
+      PGDATABASE: ${VECTOR_DB_NAME:-moneyfast_rag}
+      PGUSER: ${VECTOR_DB_ADMIN_USER:?Set VECTOR_DB_ADMIN_USER in infra/.env}
+      PGPASSWORD: ${VECTOR_DB_ADMIN_PASSWORD:?Set VECTOR_DB_ADMIN_PASSWORD in infra/.env}
+      RAG_DB_USER: ${RAG_DB_USER:-rag_user}
+      RAG_DB_PASSWORD: ${RAG_DB_PASSWORD:-}
+      RAG_DB_PASSWORD_FILE: ${RAG_DB_PASSWORD_FILE:-}
+    volumes:
+      - ./vector-migrations:/migrations:ro
+      - ./run-vector-migrations.sh:/scripts/run-vector-migrations.sh:ro
+      - ./run-vector-bootstrap.sh:/scripts/run-vector-bootstrap.sh:ro
+      - ./vector-db-grants.sql:/bootstrap/vector-db-grants.sql:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        /scripts/run-vector-migrations.sh /migrations/base
+        /scripts/run-vector-bootstrap.sh
+    depends_on:
+      vector-db:
+        condition: service_healthy
+    networks:
+      - vector-db-net
+    restart: "no"
 
   mcp-market-data:
     container_name: mcp-moneyfast
@@ -53,10 +100,8 @@ services:
       MCP_TRANSPORT: sse
       MCP_HOST: 0.0.0.0
       MCP_PORT: "8000"
-      VECTOR_DB_URL: postgresql://moneyfast_ai:password@vector-db:5432/moneyfast_rag
-    depends_on:
-      vector-db:
-        condition: service_healthy
+    expose:
+      - "8000"
     healthcheck:
       test:
         - CMD-SHELL
@@ -65,6 +110,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    networks:
+      - moneyfast-net
     restart: unless-stopped
 
   orchestrator_agent:
@@ -81,12 +128,27 @@ services:
       MAX_COMPLIANCE_REVISIONS: ${MAX_COMPLIANCE_REVISIONS:-1}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
+      backend:
+        condition: service_started
       mcp-market-data:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:8080:8080"
+    expose:
+      - "8080"
+    networks:
+      - moneyfast-net
+      - ai-egress
     restart: unless-stopped
 
 volumes:
   postgres_data:
   vector_db_data:
+
+networks:
+  moneyfast-net:
+    internal: true
+  core-db-net:
+    internal: true
+  vector-db-net:
+    internal: true
+  ai-egress:
+    driver: bridge

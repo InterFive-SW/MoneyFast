@@ -10,7 +10,7 @@ FROM python:3.12-slim AS base
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
 
-RUN pip install "mcp>=1.9,<2" "uvicorn[standard]>=0.32,<0.40"
+RUN pip install "mcp>=1.9,<2" "uvicorn[standard]>=0.32,<0.40" "httpx>=0.27,<0.29"
 
 COPY . /app
 

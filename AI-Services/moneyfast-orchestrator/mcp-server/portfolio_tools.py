@@ -1,22 +1,31 @@
 # filename: portfolio_tools.py
 """Portfolio domain tools.
 
-MoneyFast MCP server, mock skeleton.
+MoneyFast MCP server.
 Contracts are frozen against "MCP Tools Interface Definitions v2.1".
-All business logic is mocked; no network, database, or broker call is made.
-Mock values are deterministic so orchestrator routing tests are reproducible.
+Data comes from the core backend over HTTP; see backend_client for the base
+URL, timeout, retry and error-mapping policy. Nothing in this module returns
+canned data, and nothing falls back to canned data on failure.
 """
 
-#from __future__ import annotations
+# from __future__ import annotations
 
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-AS_OF = "2026-08-13T15:10:00Z"
+import backend_client
+from backend_client import (
+    AuthorizationError,
+    ContractViolationError,
+    InvalidInputError,
+    UpstreamUnavailableError,
+)
+
+TOOL = "get_portfolio_positions"
 
 
-def get_portfolio_positions(
+async def get_portfolio_positions(
     user_id: str,
     account_ids: Optional[list[str]] = None,
     asset_classes: Optional[list[str]] = None,
@@ -127,89 +136,118 @@ def get_portfolio_positions(
         - Any response containing these figures MUST pass validate_compliance_rules
           before emission.
     """
-    # MOCK: replace with the custodian client call.
-    # Real implementation must honour account_ids, asset_classes,
-    # include_closed and valuation_mode. The mock ignores them.
-    positions: list[dict[str, Any]] = [
-        {
-            "symbol": "THYAO",
-            "isin": "TRATHYAO91M5",
-            "name": "Türk Hava Yolları A.O.",
-            "asset_class": "EQUITY",
-            "exchange": "XIST",
-            "quantity": 500.0,
-            "avg_cost": 268.40,
-            "instrument_currency": "TRY",
-            "last_price": 291.75,
-            "market_value": 145875.00,
-            "cost_basis": 134200.00,
-            "unrealized_pnl": 11675.00,
-            "unrealized_pnl_pct": 0.0870,
-            "weight": 0.7537,
-            "available_quantity": 500.0,
-            "opened_at": "2025-11-04",
+    # GET /portfolio/{user_id}. List parameters are sent as repeated keys
+    # (account_ids=a&account_ids=b); httpx renders bools as true/false.
+    payload = await backend_client.request(
+        "GET",
+        f"/portfolio/{user_id}",
+        tool=TOOL,
+        params={
+            "account_ids": account_ids,
+            "asset_classes": asset_classes,
+            "include_closed": include_closed,
+            "base_currency": base_currency,
+            "valuation_mode": valuation_mode,
         },
-        {
-            "symbol": "ASELS",
-            "isin": "TRAASELS91H2",
-            "name": "Aselsan Elektronik Sanayi ve Ticaret A.Ş.",
-            "asset_class": "EQUITY",
-            "exchange": "XIST",
-            "quantity": 300.0,
-            "avg_cost": 142.10,
-            "instrument_currency": "TRY",
-            "last_price": 158.90,
-            "market_value": 47670.00,
-            "cost_basis": 42630.00,
-            "unrealized_pnl": 5040.00,
-            "unrealized_pnl_pct": 0.1182,
-            "weight": 0.2463,
-            "available_quantity": 200.0,
-            "opened_at": "2026-02-17",
-        },
-    ]
-
-    return {
-        "as_of": AS_OF,
-        "source": "CUSTODIAN_OF_RECORD",
-        "is_delayed": True,
-        "delay_minutes": 15,
-        "base_currency": base_currency,
-        "positions": positions,
-        "totals": {
-            "total_market_value": 193545.00,
-            "total_cost_basis": 176830.00,
-            "total_unrealized_pnl": 16715.00,
-            "position_count": 2,
-        },
-        "warnings": [
-            "ASELS: 100 lot is pledged against an open order and is excluded "
-            "from available_quantity.",
-        ],
-    }
+    )
+    return _normalize(payload, base_currency)
 
 
-def get_portfolio_positions_empty(user_id: str) -> dict[str, Any]:
-    """Fixture for the empty-result path. Not registered as an MCP tool.
+def _normalize(payload: dict[str, Any], requested_currency: str) -> dict[str, Any]:
+    """Project the backend response onto the exact v2.1 payload.
 
-    Swap this into the registration below to exercise the orchestrator's
-    EMPTY handling. An empty positions list is a valid, complete answer.
+    Extra backend fields are dropped rather than passed through: the contract
+    promises an exact key set, and an unexpected key is a figure the model has
+    no instructions for.
     """
+    freshness = backend_client.freshness(payload, TOOL)
+    positions = backend_client.require_list(payload, "positions", TOOL)
+    backend_client.require(payload, ("totals",), TOOL)
+
+    delay_minutes = payload.get("delay_minutes")
+    if delay_minutes is None:
+        # Only inferable in the not-delayed direction. A delayed feed that does
+        # not state its lag cannot have one guessed for it.
+        if freshness["is_delayed"]:
+            raise ContractViolationError(
+                f"{TOOL}: is_delayed is true but delay_minutes is absent."
+            )
+        delay_minutes = 0
+
+    totals = payload["totals"]
+    if not isinstance(totals, dict):
+        raise ContractViolationError(f"{TOOL}: 'totals' must be an object.")
+
     return {
-        "as_of": AS_OF,
-        "source": "CUSTODIAN_OF_RECORD",
-        "is_delayed": True,
-        "delay_minutes": 15,
-        "base_currency": "TRY",
-        "positions": [],
+        **freshness,
+        "delay_minutes": int(delay_minutes),
+        # Echo what the caller asked for, not what the backend echoed back: the
+        # contract defines this field as the requested normalization currency.
+        "base_currency": payload.get("base_currency", requested_currency),
+        "positions": [_normalize_position(p) for p in positions],
         "totals": {
-            "total_market_value": 0.0,
-            "total_cost_basis": 0.0,
-            "total_unrealized_pnl": 0.0,
-            "position_count": 0,
+            "total_market_value": _num(totals, "total_market_value"),
+            "total_cost_basis": _num(totals, "total_cost_basis"),
+            "total_unrealized_pnl": _num(totals, "total_unrealized_pnl"),
+            "position_count": int(totals.get("position_count", len(positions))),
         },
-        "warnings": [],
+        "warnings": list(payload.get("warnings") or []),
     }
+
+
+def _normalize_position(raw: dict[str, Any]) -> dict[str, Any]:
+    """One position, with every documented key present.
+
+    Numeric fields are required: defaulting a missing quantity or avg_cost to
+    zero would render as a real holding worth nothing, which is worse than an
+    error. available_quantity is the one exception, because a backend that
+    does not model settlement holds means the whole position is sellable.
+    """
+    if not isinstance(raw, dict):
+        raise ContractViolationError(f"{TOOL}: each position must be an object.")
+    backend_client.require(
+        raw,
+        ("symbol", "quantity", "avg_cost", "last_price", "market_value", "cost_basis"),
+        TOOL,
+    )
+    quantity = float(raw["quantity"])
+    return {
+        "symbol": str(raw["symbol"]),
+        "isin": raw.get("isin"),
+        "name": str(raw.get("name", raw["symbol"])),
+        "asset_class": str(raw.get("asset_class", "EQUITY")),
+        "exchange": str(raw.get("exchange", "XIST")),
+        "quantity": quantity,
+        "avg_cost": float(raw["avg_cost"]),
+        "instrument_currency": str(raw.get("instrument_currency", "TRY")),
+        "last_price": float(raw["last_price"]),
+        "market_value": float(raw["market_value"]),
+        "cost_basis": float(raw["cost_basis"]),
+        "unrealized_pnl": float(raw["market_value"]) - float(raw["cost_basis"]),
+        "unrealized_pnl_pct": _pnl_pct(raw),
+        "weight": float(raw.get("weight", 0.0)),
+        "available_quantity": float(raw.get("available_quantity", quantity)),
+        "opened_at": str(raw.get("opened_at", "")),
+    }
+
+
+def _pnl_pct(raw: dict[str, Any]) -> float:
+    """P&L as a fraction of cost basis, guarding the zero-cost case.
+
+    A fully written-down or gifted position has cost_basis 0. Returning 0.0
+    beats propagating inf into a table the user reads.
+    """
+    cost_basis = float(raw["cost_basis"])
+    if cost_basis == 0:
+        return 0.0
+    return (float(raw["market_value"]) - cost_basis) / cost_basis
+
+
+def _num(mapping: dict[str, Any], key: str) -> float:
+    value = mapping.get(key)
+    if value is None:
+        raise ContractViolationError(f"{TOOL}: totals.{key} is missing.")
+    return float(value)
 
 
 def register(mcp: FastMCP) -> None:

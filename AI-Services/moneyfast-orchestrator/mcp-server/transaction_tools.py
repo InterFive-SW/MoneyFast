@@ -1,21 +1,34 @@
 # filename: transaction_tools.py
 """Transaction and execution domain tools.
 
-MoneyFast MCP server, mock skeleton.
+MoneyFast MCP server.
 Contracts are frozen against "MCP Tools Interface Definitions v2.1".
-All business logic is mocked; no network, database, or broker call is made.
-Mock values are deterministic so orchestrator routing tests are reproducible.
+Data comes from the core backend over HTTP; see backend_client for the base
+URL, timeout, retry and error-mapping policy. Nothing in this module returns
+canned data, and nothing falls back to canned data on failure.
 """
 
-#from __future__ import annotations
+# from __future__ import annotations
 
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
+import backend_client
+from backend_client import (
+    AuthorizationError,
+    ContractViolationError,
+    InvalidInputError,
+    UpstreamUnavailableError,
+)
+
+TOOL = "prepare_transaction_proposal"
+STATUSES = frozenset(
+    {"PENDING_USER_CONFIRMATION", "REJECTED_VALIDATION", "REQUIRES_ADDITIONAL_INPUT"}
+)
 
 
-def prepare_transaction_proposal(
+async def prepare_transaction_proposal(
     user_id: str,
     transaction_type: str,
     source_account_id: str,
@@ -194,67 +207,118 @@ def prepare_transaction_proposal(
           validate_compliance_rules with contains_transaction_proposal=True before
           emission.
     """
-    # MOCK: replace with the staging service client.
-    # This mock stages nothing. It NEVER executes, and no future revision of
-    # this module may add an execution path: settlement lives behind the
-    # frontend confirmation control, in a separate service.
-    symbol = (instrument or {}).get("symbol", "THYAO")
-    qty = quantity if quantity is not None else 100.0
-    price = limit_price if limit_price is not None else 291.75
-    gross = round(qty * price, 2)
-    commission = round(gross * 0.001, 2)
-    bsmv = round(commission * 0.05, 2)
+    # Client-side validation first. These are contradictions no backend should
+    # have to reject, and catching them here keeps a malformed order off the
+    # staging path entirely.
+    if quantity is not None and notional_amount is not None:
+        raise InvalidInputError(
+            f"{TOOL}: quantity and notional_amount are mutually exclusive."
+        )
+    if order_type in ("LIMIT", "STOP_LIMIT") and limit_price is None:
+        raise InvalidInputError(f"{TOOL}: {order_type} requires limit_price.")
+    if order_type in ("STOP", "STOP_LIMIT") and stop_price is None:
+        raise InvalidInputError(f"{TOOL}: {order_type} requires stop_price.")
+    if not idempotency_key:
+        raise InvalidInputError(f"{TOOL}: idempotency_key is required.")
 
-    return {
-        "proposal_id": "prp_8d31f04c",
-        "status": "PENDING_USER_CONFIRMATION",
-        "expires_at": "2026-08-13T15:25:00Z",
-        "confirmation_required": True,
-        "summary": {
+    # POST /transactions/stage. The key travels in the header as well as the
+    # body: the header is what a gateway or proxy deduplicates on, and a retry
+    # that creates a second proposal is the failure this endpoint most needs to
+    # avoid.
+    payload = await backend_client.request(
+        "POST",
+        "/transactions/stage",
+        tool=TOOL,
+        headers={"Idempotency-Key": idempotency_key},
+        json_body={
+            "user_id": user_id,
             "transaction_type": transaction_type,
-            "instrument_display": f"{symbol} (XIST)",
-            "quantity": qty,
-            "notional": notional_amount,
+            "source_account_id": source_account_id,
+            "idempotency_key": idempotency_key,
+            "instrument": instrument,
+            "quantity": quantity,
+            "notional_amount": notional_amount,
+            "destination_account_id": destination_account_id,
+            "beneficiary": beneficiary,
             "order_type": order_type,
             "limit_price": limit_price,
             "stop_price": stop_price,
             "time_in_force": time_in_force,
-            "source_account_display": f"Yatırım Hesabı {source_account_id[-4:]}",
-            "destination_display": None,
+            "assumptions": list(assumptions or []),
         },
-        "estimate": {
-            "indicative_price": price,
-            "indicative_price_timestamp": "2026-08-13T15:09:45Z",
-            "indicative_price_basis": (
-                "LIMIT_PRICE" if limit_price is not None else "LAST_TRADE"
-            ),
-            "gross_amount": gross,
-            "currency": "TRY",
-            "fees": [{"name": "Aracı kurum komisyonu", "amount": commission}],
-            "taxes": [{"name": "BSMV", "amount": bsmv}],
-            "total_cost": round(gross + commission + bsmv, 2),
-            "fx": None,
-            "price_certainty": "INDICATIVE",
-        },
-        "impact": {
-            "resulting_position_quantity": 600.0,
-            "resulting_weight": 0.7891,
-            "resulting_cash_balance": 12344.36,
-        },
-        "blockers": [],
-        "warnings": [
-            {
-                "code": "WIDE_SPREAD",
-                "message": "Spread is wider than the 20-day average for this instrument.",
-            }
-        ],
-        "missing_fields": [],
-        "disclosures": [
-            "Emir, ekrandaki onay adımı tamamlanmadan iletilmez.",
-            "Gösterilen fiyat göstergeseldir; gerçekleşen fiyat farklı olabilir.",
-        ],
-        "audit_id": "aud_7a20be31",
+    )
+    return _normalize(payload)
+
+
+def _normalize(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project the staging response onto the exact v2.1 payload.
+
+    Two invariants are enforced here rather than trusted:
+
+    1. confirmation_required is the constant True. The contract calls it a
+       contract assertion, not a setting. Anything else is a system fault, and
+       the proposal is refused rather than rendered, because a proposal that
+       reaches the user without a confirmation step is indistinguishable from
+       a completed order.
+    2. status must be one of the three documented values. An unrecognised
+       status could be anything, including something that already executed.
+    """
+    backend_client.require(payload, ("proposal_id", "status"), TOOL)
+
+    status = str(payload["status"]).upper()
+    if status not in STATUSES:
+        raise ContractViolationError(
+            f"{TOOL}: unrecognised status {payload['status']!r}; refusing to present it."
+        )
+
+    if payload.get("confirmation_required") is not True:
+        raise ContractViolationError(
+            f"{TOOL}: confirmation_required was not true. Refusing to present a "
+            "proposal that does not require explicit user confirmation."
+        )
+
+    blockers = list(payload.get("blockers") or [])
+    missing_fields = list(payload.get("missing_fields") or [])
+    if blockers and status == "PENDING_USER_CONFIRMATION":
+        raise ContractViolationError(
+            f"{TOOL}: status is PENDING_USER_CONFIRMATION but blockers are present."
+        )
+
+    return {
+        "proposal_id": str(payload["proposal_id"]),
+        "status": status,
+        "expires_at": str(payload.get("expires_at", "")),
+        "confirmation_required": True,
+        "summary": dict(payload.get("summary") or {}),
+        "estimate": _normalize_estimate(payload.get("estimate")),
+        "impact": payload.get("impact"),
+        "blockers": blockers,
+        "warnings": list(payload.get("warnings") or []),
+        "missing_fields": missing_fields,
+        # Emitted verbatim alongside the proposal.
+        "disclosures": list(payload.get("disclosures") or []),
+        "audit_id": str(payload.get("audit_id", "")),
     }
+
+
+def _normalize_estimate(raw: Any) -> Optional[dict[str, Any]]:
+    """Cost estimate, with price certainty defaulted to INDICATIVE.
+
+    INDICATIVE obliges the orchestrator to disclose that the executed price
+    will likely differ. FIRM removes that obligation, so it is never assumed:
+    the backend has to say so explicitly.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ContractViolationError(f"{TOOL}: 'estimate' must be an object.")
+    estimate = dict(raw)
+    certainty = str(estimate.get("price_certainty", "")).upper()
+    estimate["price_certainty"] = certainty if certainty == "FIRM" else "INDICATIVE"
+    estimate.setdefault("fees", [])
+    estimate.setdefault("taxes", [])
+    estimate.setdefault("fx", None)
+    return estimate
 
 
 def register(mcp: FastMCP) -> None:

@@ -1,22 +1,33 @@
 # filename: market_research_tools.py
 """Market research domain tools.
 
-MoneyFast MCP server, mock skeleton.
+MoneyFast MCP server.
 Contracts are frozen against "MCP Tools Interface Definitions v2.1".
-All business logic is mocked; no network, database, or broker call is made.
-Mock values are deterministic so orchestrator routing tests are reproducible.
+Data comes from the core backend over HTTP; see backend_client for the base
+URL, timeout, retry and error-mapping policy. Nothing in this module returns
+canned data, and nothing falls back to canned data on failure.
 """
 
-#from __future__ import annotations
+# from __future__ import annotations
 
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-AS_OF = "2026-08-13T15:10:00Z"
+import backend_client
+from backend_client import (
+    AuthorizationError,
+    ContractViolationError,
+    InvalidInputError,
+    UpstreamUnavailableError,
+)
+
+TOOL = "rag_semantic_market_search"
+MIN_TOP_K = 1
+MAX_TOP_K = 25
 
 
-def rag_semantic_market_search(
+async def rag_semantic_market_search(
     query: str,
     conversation_context: Optional[list[dict[str, str]]] = None,
     top_k: int = 8,
@@ -137,58 +148,76 @@ def rag_semantic_market_search(
         - Any response built on this tool MUST pass validate_compliance_rules before
           emission.
     """
-    # MOCK: replace with the vector store client call.
-    # Real implementation must apply filters BEFORE scoring, enforce
-    # min_similarity, and resolve coreference server-side using
-    # conversation_context. The mock echoes the query unchanged.
-    results: list[dict[str, Any]] = [
-        {
-            "chunk_id": "chk_9f2a41c7",
-            "doc_id": "doc_20260812_aa_thyao",
-            "title": "THY ikinci çeyrek finansal sonuçlarını açıkladı",
-            "snippet": (
-                "Şirket, ikinci çeyrekte yolcu sayısının bir önceki yılın "
-                "aynı dönemine göre arttığını, akaryakıt giderlerinin ise "
-                "birim bazda gerilediğini bildirdi."
-            ),
-            "publisher": "Anadolu Ajansı",
-            "author": None,
-            "published_at": "2026-08-12T07:45:00Z",
-            "url": "https://example-wire.invalid/thyao-2q26",
-            "tickers": ["THYAO"],
-            "doc_type": "NEWS",
-            "language": "tr",
-            "score": 0.87,
-            "is_opinion": False,
+    # POST /market-research/search. top_k is clamped to the documented 1..25
+    # window here rather than trusted to the backend: a negative bound would
+    # come back as an empty result set, which the orchestrator would report to
+    # the user as "no sources found".
+    payload = await backend_client.request(
+        "POST",
+        "/market-research/search",
+        tool=TOOL,
+        json_body={
+            "query": query,
+            "conversation_context": conversation_context,
+            "top_k": max(MIN_TOP_K, min(MAX_TOP_K, top_k)),
+            "filters": filters,
+            "min_similarity": min_similarity,
+            "rerank": rerank,
         },
-        {
-            "chunk_id": "chk_1b77e0d4",
-            "doc_id": "doc_20260811_broker_airlines",
-            "title": "Airlines sector note: capacity discipline into 2H26",
-            "snippet": (
-                "The analyst maintains a constructive stance on network "
-                "carriers, noting that unit revenue held up better than the "
-                "team had modelled in the prior quarter."
-            ),
-            "publisher": "Örnek Yatırım Menkul Değerler",
-            "author": "M. Demir",
-            "published_at": "2026-08-11T15:20:00Z",
-            "url": None,
-            "tickers": ["THYAO", "PGSUS"],
-            "doc_type": "ANALYST_REPORT",
-            "language": "en",
-            "score": 0.74,
-            "is_opinion": True,
-        },
-    ]
+    )
+    return _normalize(payload, query)
+
+
+def _normalize(payload: dict[str, Any], query: str) -> dict[str, Any]:
+    """Project the backend response onto the exact v2.1 payload."""
+    freshness = backend_client.freshness(payload, TOOL)
+    results = backend_client.require_list(payload, "results", TOOL)
+
+    lag = payload.get("index_lag_minutes")
+    if lag is None:
+        if freshness["is_delayed"]:
+            raise ContractViolationError(
+                f"{TOOL}: is_delayed is true but index_lag_minutes is absent."
+            )
+        lag = 0
 
     return {
-        "as_of": AS_OF,
-        "source": "VECTOR_STORE::market_corpus_v4",
-        "is_delayed": False,
-        "index_lag_minutes": 0,
-        "results": results[: max(1, top_k)],
-        "query_echo": query,
+        **freshness,
+        "index_lag_minutes": int(lag),
+        "results": [_normalize_result(item) for item in results],
+        # The backend resolves coreference, so its echo is authoritative. Fall
+        # back to the raw query only when it does not return one.
+        "query_echo": str(payload.get("query_echo") or query),
+    }
+
+
+def _normalize_result(raw: dict[str, Any]) -> dict[str, Any]:
+    """One retrieved chunk, provenance intact.
+
+    publisher and published_at are required rather than defaulted: they are
+    what the final answer must cite, and an uncitable chunk is worse than a
+    missing one because the model will cite it anyway.
+    """
+    if not isinstance(raw, dict):
+        raise ContractViolationError(f"{TOOL}: each result must be an object.")
+    backend_client.require(raw, ("chunk_id", "snippet", "publisher", "published_at"), TOOL)
+    return {
+        "chunk_id": str(raw["chunk_id"]),
+        "doc_id": str(raw.get("doc_id", raw["chunk_id"])),
+        "title": str(raw.get("title", "")),
+        # Returned verbatim. Instruction-like text inside a snippet is data;
+        # sanitising it here would hide an injection attempt from the layer
+        # that is supposed to detect it.
+        "snippet": str(raw["snippet"]),
+        "publisher": str(raw["publisher"]),
+        "author": raw.get("author"),
+        "published_at": str(raw["published_at"]),
+        "url": raw.get("url"),
+        "tickers": list(raw.get("tickers") or []),
+        "doc_type": str(raw.get("doc_type", "NEWS")),
+        "language": str(raw.get("language", "tr")),
+        "score": float(raw.get("score", 0.0)),
+        "is_opinion": bool(raw.get("is_opinion", False)),
     }
 
 

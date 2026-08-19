@@ -4,7 +4,12 @@ import { MOCK_CHART_DATA } from '../../data/mockData'
 
 type TimeFilter = 'Gün' | 'Hafta' | 'Ay' | '3 Ay' | 'Yıl'
 
-export default function PortfolioChartWidget() {
+interface Props {
+  w?: number
+  h?: number
+}
+
+export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
   const [filter, setFilter] = useState<TimeFilter>('Yıl')
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -62,10 +67,10 @@ export default function PortfolioChartWidget() {
 
     // Mum Serisi
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#26a69a',
+      upColor: '#14b8a6',
       downColor: '#ef5350',
       borderVisible: false,
-      wickUpColor: '#26a69a',
+      wickUpColor: '#14b8a6',
       wickDownColor: '#ef5350',
     })
     candlestickSeriesRef.current = candlestickSeries
@@ -125,6 +130,23 @@ export default function PortfolioChartWidget() {
     }
   }, [filter])
 
+  if (w <= 2 || h <= 2) {
+    const latestData = MOCK_CHART_DATA[filter].slice(-1)[0];
+    const prevData = MOCK_CHART_DATA[filter].slice(-2)[0];
+    const change = latestData && prevData ? latestData.close - prevData.close : 0;
+    const isPositive = change >= 0;
+    
+    return (
+      <div className="flex flex-col h-full w-full bg-white/70 backdrop-blur-md rounded-2xl p-5 shadow-sm border border-white/50 items-center justify-center text-center">
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">Portföy Performansı (Özet)</h3>
+        <div className={`text-2xl font-bold ${isPositive ? 'text-accent-500' : 'text-rose-500'}`}>
+          {latestData ? latestData.close.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : '-'}
+        </div>
+        <p className="text-xs text-slate-400 mt-1">Son Kapanış</p>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full w-full bg-white/70 backdrop-blur-md rounded-2xl p-5 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] border border-white/50">
       <div className="flex items-center justify-between mb-4 z-10">
@@ -140,7 +162,7 @@ export default function PortfolioChartWidget() {
               onClick={() => setFilter(f)}
               className={`px-3 py-1.5 text-[11px] uppercase tracking-wider font-bold rounded-md transition-all duration-200 ${
                 filter === f 
-                ? 'bg-white shadow-sm text-emerald-600' 
+                ? 'bg-white shadow-sm text-primary-600' 
                 : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
               }`}
             >

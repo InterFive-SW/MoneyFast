@@ -1,8 +1,9 @@
 // src/components/chat/MessageBubble.tsx
 import React from 'react';
-import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload } from '../../types/chat';
+import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload, PortfolioWidgetPayload } from '../../types/chat';
 import ChartWidget from './widgets/ChartWidget';
 import ActionWidget from './widgets/ActionWidget';
+import PortfolioWidget from './widgets/PortfolioWidget';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -50,6 +51,9 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           )}
           {message.widget && message.widget.type === 'action' && (
             <ActionWidget payload={message.widget.payload as ActionWidgetPayload} />
+          )}
+          {message.widget && message.widget.type === 'portfolio' && (
+            <PortfolioWidget payload={message.widget.payload as PortfolioWidgetPayload} />
           )}
 
           <span 

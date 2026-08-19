@@ -14,7 +14,7 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { id: 'iv-ticker-bist',  type: 'mini-ticker-bist100',  x: 9, y: 0, w: 3, h: 1 },
 
       // 1. Satır - Portföy Özeti ve Dağılım
-      { id: 'iv-balance',      type: 'investment-balance',   x: 0, y: 1, w: 3, h: 3 },
+      { id: 'iv-balance',      type: 'investment-balance',   x: 0, y: 1, w: 3, h: 2 },
       { id: 'iv-chart',        type: 'portfolio-chart',      x: 3, y: 1, w: 5, h: 3 },
       { id: 'iv-allocation',   type: 'sector-allocation-pie',x: 8, y: 1, w: 4, h: 3 },
 
@@ -45,20 +45,20 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { id: 'cv-ticker-bist',  type: 'mini-ticker-bist100',  x: 9, y: 0, w: 3, h: 1 },
       
       // Bakiye ve Portföy
-      { id: 'cv-total-bal',    type: 'total-balance',        x: 0, y: 1, w: 6, h: 3 },
-      { id: 'cv-inv-bal',      type: 'investment-balance',   x: 6, y: 1, w: 6, h: 3 },
+      { id: 'cv-total-bal',    type: 'total-balance',        x: 0, y: 1, w: 6, h: 2 },
+      { id: 'cv-inv-bal',      type: 'investment-balance',   x: 6, y: 1, w: 6, h: 2 },
 
       // Harcamalar ve Pozisyonlar
-      { id: 'cv-spending',     type: 'spending-overview',    x: 0, y: 4, w: 6, h: 4 },
-      { id: 'cv-positions',    type: 'positions',            x: 6, y: 4, w: 6, h: 4 },
+      { id: 'cv-spending',     type: 'spending-overview',    x: 0, y: 3, w: 6, h: 4 },
+      { id: 'cv-positions',    type: 'positions',            x: 6, y: 3, w: 6, h: 4 },
       
       // İşlemler ve Hedefler
-      { id: 'cv-transactions', type: 'recent-transactions',  x: 0, y: 8, w: 6, h: 4 },
-      { id: 'cv-goals',        type: 'savings-goal',         x: 6, y: 8, w: 6, h: 4 },
+      { id: 'cv-transactions', type: 'recent-transactions',  x: 0, y: 7, w: 6, h: 4 },
+      { id: 'cv-goals',        type: 'savings-goal',         x: 6, y: 7, w: 6, h: 4 },
 
       // Ek Widgetlar (İzleme Listesi ve Haberler)
-      { id: 'cv-watchlist',    type: 'watchlist',            x: 0, y: 12, w: 6, h: 4 },
-      { id: 'cv-news',         type: 'news',                 x: 6, y: 12, w: 6, h: 4 },
+      { id: 'cv-watchlist',    type: 'watchlist',            x: 0, y: 11, w: 6, h: 4 },
+      { id: 'cv-news',         type: 'news',                 x: 6, y: 11, w: 6, h: 4 },
     ]
   },
   {
@@ -67,7 +67,7 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Sadece harcamalar, hedefler ve son işlemler odaklı genel görünüm.',
     icon: '🏦',
     widgets: [
-      { id: 'sb-balance',      type: 'total-balance',        x: 0, y: 0, w: 8, h: 3 },
+      { id: 'sb-balance',      type: 'total-balance',        x: 0, y: 0, w: 8, h: 2 },
       { id: 'sb-actions',      type: 'quick-actions',        x: 8, y: 0, w: 4, h: 3 },
       
       { id: 'sb-spending',     type: 'spending-overview',    x: 0, y: 3, w: 5, h: 5 },

@@ -1,0 +1,21 @@
+# Test-only dependencies for the MoneyFast orchestrator.
+# Layered on top of requirements.txt:
+#   pip install -r requirements.txt -r requirements-test.txt
+#
+# Upper bounds are deliberate. pytest-asyncio has changed its default mode and
+# loop scope across minor releases, and an unpinned bump turns a green suite
+# red for reasons unrelated to the code under test.
+
+pytest>=8.3,<10
+pytest-asyncio>=0.24,<2      # async node, client and endpoint tests
+pytest-cov>=5.0,<8           # line + branch coverage and the fail-under gate
+pytest-mock>=3.14,<4         # the `mocker` fixture used throughout
+
+# httpx is already a runtime dependency (see requirements.txt); TestClient
+# needs it too. Listed here so the test image is self-describing.
+httpx>=0.27,<0.29
+
+# Optional: only needed if you add transport-level HTTP mocking later. The
+# current suite patches at the client boundary instead, which is faster and
+# does not couple the tests to the SSE wire format.
+respx>=0.21,<0.23

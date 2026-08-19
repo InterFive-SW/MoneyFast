@@ -43,9 +43,9 @@ export default function AssetAllocationWidget() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
+    <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Varlık Dağılımı</h3>
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Varlık Dağılımı</h3>
       </div>
 
       <div className="flex-1 flex flex-col sm:flex-row gap-4 items-center">
@@ -77,7 +77,7 @@ export default function AssetAllocationWidget() {
           {/* Ortadaki Toplam Etiketi */}
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
             <span className="text-[10px] uppercase font-semibold tracking-wider text-slate-400">Toplam</span>
-            <span className="text-sm font-bold text-slate-800">
+            <span className="text-sm font-bold text-white">
               {formatCurrency(items.reduce((acc, curr) => acc + curr.amount, 0))}
             </span>
           </div>
@@ -87,7 +87,7 @@ export default function AssetAllocationWidget() {
         <div className="w-full sm:w-1/2 flex-1 overflow-auto -mx-2 px-2">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="border-b border-slate-100">
+            <tr className="border-b border-white/10">
               <th className="pb-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Varlık</th>
               <th className="pb-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider text-right">Tutar</th>
               <th className="pb-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider text-right">Ağırlık</th>
@@ -95,16 +95,16 @@ export default function AssetAllocationWidget() {
           </thead>
           <tbody>
             {items.map((item) => (
-              <tr key={item.assetClass} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+              <tr key={item.assetClass} className="border-b border-slate-50 hover:bg-white/5 transition-colors">
                 <td className="py-2 flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="text-[12px] font-semibold text-slate-800">{item.assetClass}</span>
+                  <span className="text-[12px] font-semibold text-white">{item.assetClass}</span>
                 </td>
                 <td className="py-2 text-right">
-                  <span className="text-[12px] font-semibold tabular-nums text-slate-900">{formatCurrency(item.amount)}</span>
+                  <span className="text-[12px] font-semibold tabular-nums text-white">{formatCurrency(item.amount)}</span>
                 </td>
                 <td className="py-2 text-right">
-                  <span className="text-[12px] font-bold tabular-nums text-slate-500">{item.percentage}%</span>
+                  <span className="text-[12px] font-bold tabular-nums text-slate-400">{item.percentage}%</span>
                 </td>
               </tr>
             ))}

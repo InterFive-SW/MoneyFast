@@ -6,6 +6,7 @@ import { useState }             from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode }       from 'react'
 import { useUser }              from '../../contexts/UserContext'
+import logoInline               from '../../assets/logo-inline.png'
 
 // ─── Navigasyon Veri Yapısı ───────────────────────────────────────────────────
 
@@ -133,15 +134,15 @@ function SidebarNavItem({ item, isCollapsed }: NavItemProps) {
         className={({ isActive }) =>
           `group flex items-center gap-3.5 rounded-2xl px-4 py-3 text-[15px] transition-all duration-200 ${
             isActive
-              ? 'bg-emerald-50 text-emerald-700 font-semibold border border-emerald-100/60'
-              : 'text-slate-500 font-medium hover:bg-slate-50 hover:text-slate-800 border border-transparent'
+              ? 'bg-white/10 text-white font-semibold border border-white/10'
+              : 'text-slate-400 font-medium hover:bg-white/5 hover:text-slate-200 border border-transparent'
           }`
         }
       >
         {({ isActive }) => (
           <>
             {/* Navigasyon ikonu */}
-            <span className={`transition-colors duration-200 ${isActive ? 'text-emerald-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
+            <span className={`transition-colors duration-200 ${isActive ? 'text-brandBlue' : 'text-slate-400 group-hover:text-slate-200'}`}>
               {item.icon}
             </span>
 
@@ -156,7 +157,7 @@ function SidebarNavItem({ item, isCollapsed }: NavItemProps) {
 
             {/* Aktif gösterge noktası */}
             {isActive && !isCollapsed && (
-              <span className="absolute right-4 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+              <span className="absolute right-4 h-1.5 w-1.5 shrink-0 rounded-full bg-brandBlue" aria-hidden="true" />
             )}
           </>
         )}
@@ -187,7 +188,7 @@ function SidebarNavItem({ item, isCollapsed }: NavItemProps) {
  */
 export default function Sidebar() {
   const navigate                    = useNavigate()
-  const [isCollapsed, setCollapsed] = useState(false)
+  const [isCollapsed, setCollapsed] = useState(true)
   const { profile, isLoading }      = useUser()
 
   /** Oturumu sonlandırır: token silinir, giriş sayfasına yönlendirilir */
@@ -198,36 +199,29 @@ export default function Sidebar() {
 
   return (
     <aside
-      className={`relative flex h-screen shrink-0 flex-col border-r border-slate-100 bg-white shadow-sm transition-all duration-300 ease-in-out ${
+      onMouseEnter={() => setCollapsed(false)}
+      onMouseLeave={() => setCollapsed(true)}
+      className={`relative flex h-screen shrink-0 flex-col border-r border-white/10 bg-slate-950/80 backdrop-blur-xl shadow-sm transition-all duration-300 ease-in-out z-50 ${
         isCollapsed ? 'w-[80px]' : 'w-[256px]'
       }`}
     >
-      {/* ── Daralt / Genişlet Toggle Butonu ─────────────────────────── */}
-      <button
-        type="button"
-        onClick={() => setCollapsed((prev) => !prev)}
-        aria-label={isCollapsed ? 'Kenar çubuğunu genişlet' : 'Kenar çubuğunu daralt'}
-        className="absolute -right-3.5 top-8 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm transition-colors hover:text-slate-600"
-      >
-        <IconChevron className="h-4 w-4" collapsed={isCollapsed} />
-      </button>
-
       {/* ── Marka / Logo Alanı ───────────────────────────────────────── */}
-      <div className={`flex items-center px-6 py-8 ${isCollapsed ? 'justify-center px-0' : 'gap-3'}`}>
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-400 text-white shadow-sm">
-          <span className="text-sm font-bold tracking-wide">MF</span>
-        </div>
-
+      <div className={`flex items-center py-8 ${isCollapsed ? 'justify-center px-0' : 'px-6 gap-3'}`}>
+        <img 
+          src={logoInline} 
+          alt="MoneyFast Logo" 
+          className="h-12 w-12 transition-all duration-300 object-contain shrink-0" 
+        />
+        
         {/* Uygulama adı — daraltılmış modda gizlenir */}
         <div
           className={`overflow-hidden whitespace-nowrap transition-all duration-300 ${
             isCollapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'
           }`}
         >
-          <p className="text-[17px] font-bold leading-tight tracking-tight text-slate-900">
+          <p className="text-xl font-bold leading-tight tracking-tight text-white">
             MoneyFast
           </p>
-          <p className="text-[13px] font-medium leading-tight text-slate-400">Finans Platformu</p>
         </div>
       </div>
 
@@ -253,14 +247,14 @@ export default function Sidebar() {
       </nav>
 
       {/* ── Kullanıcı Bilgisi ve Oturum Kapatma ─────────────────────── */}
-      <div className="shrink-0 border-t border-slate-100 p-4">
+      <div className="shrink-0 border-t border-white/10 p-4">
         <div className={`flex items-center py-2 ${isCollapsed ? 'justify-center' : 'justify-between px-2'}`}>
           <div className={`flex items-center ${isCollapsed ? '' : 'gap-3'}`}>
             {isLoading ? (
-              <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-slate-200" />
+              <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-slate-800" />
             ) : (
               <div
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-400 text-[14px] font-bold text-white shadow-sm"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brandBlue to-primary-500 text-[14px] font-bold text-white shadow-sm"
                 aria-hidden="true"
               >
                 {profile?.initials ?? 'K'}
@@ -275,12 +269,12 @@ export default function Sidebar() {
             >
               {isLoading ? (
                 <div className="space-y-1">
-                  <div className="h-2.5 w-16 animate-pulse rounded bg-slate-200" />
-                  <div className="h-2 w-10 animate-pulse rounded bg-slate-100" />
+                  <div className="h-2.5 w-16 animate-pulse rounded bg-slate-800" />
+                  <div className="h-2 w-10 animate-pulse rounded bg-slate-800/50" />
                 </div>
               ) : (
                 <>
-                  <p className="text-[15px] font-bold leading-tight text-slate-800">
+                  <p className="text-[15px] font-bold leading-tight text-white">
                     {profile?.fullName ?? 'Kullanıcı'}
                   </p>
                   <p className="text-[13px] font-medium text-slate-400">Premium Üye</p>
@@ -296,7 +290,7 @@ export default function Sidebar() {
               onClick={handleLogout}
               aria-label="Oturumu kapat"
               title="Oturumu Kapat"
-              className="p-1 text-slate-400 transition-colors hover:text-slate-600"
+              className="p-1 text-slate-400 transition-colors hover:text-white"
             >
               <IconLogout className="h-5 w-5" />
             </button>

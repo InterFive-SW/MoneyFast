@@ -57,7 +57,7 @@ export default function ActionWidget({ payload }: ActionWidgetProps) {
 
   return (
     <div className="mt-3 w-full relative">
-      <div className="bg-white/60 backdrop-blur-sm rounded-xl p-4 border border-emerald-100 flex flex-col gap-3 shadow-sm transition-all">
+      <div className="bg-slate-900/50 backdrop-blur-xl rounded-xl p-4 border border-white/10 shadow-2xl flex flex-col gap-3 shadow-sm transition-all">
         <p className="text-sm font-medium text-slate-700 leading-relaxed">{payload.message}</p>
         
         {status === 'pending' || status === 'loading' ? (
@@ -79,7 +79,7 @@ export default function ActionWidget({ payload }: ActionWidgetProps) {
               <button 
                 onClick={handleCancel}
                 disabled={status === 'loading'}
-                className="flex-1 px-3 py-2 bg-white hover:bg-slate-50 text-slate-600 text-sm font-medium border border-slate-200 rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-3 py-2 bg-white hover:bg-slate-50 text-slate-300 text-sm font-medium border border-slate-200 rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {payload.cancelLabel}
               </button>
@@ -88,7 +88,7 @@ export default function ActionWidget({ payload }: ActionWidgetProps) {
         ) : (
           <div className={`text-sm font-medium px-3 py-2 rounded-lg text-center mt-1 border transition-all duration-300 ease-in-out ${
             status === 'confirmed' 
-              ? 'bg-emerald-50 border-emerald-100 text-emerald-700 shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
+              ? 'bg-emerald-50 border-white/10 text-emerald-700 shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
               : 'bg-rose-50 border-rose-100 text-rose-700'
           }`}>
             {status === 'confirmed' ? 'İşlem yetkilendirildi.' : 'İşlem sonlandırıldı.'}

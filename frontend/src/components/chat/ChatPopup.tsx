@@ -40,17 +40,17 @@ export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed bottom-24 right-4 md:right-8 w-[92vw] md:w-[380px] h-[550px] max-h-[70vh] bg-white/95 backdrop-blur-2xl border border-slate-200/80 shadow-2xl rounded-2xl z-[99999] flex flex-col overflow-hidden transition-all duration-300">
+    <div className="fixed bottom-24 right-4 md:right-8 w-[92vw] md:w-[380px] h-[550px] max-h-[70vh] bg-slate-950/80 backdrop-blur-2xl border border-white/10 shadow-2xl rounded-2xl z-[99999] flex flex-col overflow-hidden transition-all duration-300">
       
       {/* Başlık (Header) */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-white/80">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-slate-900/80">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 font-bold text-xs shrink-0">
+          <div className="w-8 h-8 rounded-xl bg-brandBlue/20 flex items-center justify-center text-brandBlue font-bold text-xs shrink-0">
             MF
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-slate-800 leading-tight">Yapay Zeka Asistanı</h3>
-            <p className="text-[10px] text-emerald-600 font-medium leading-tight mt-0.5">Sizin için hazır</p>
+            <h3 className="text-sm font-semibold text-white leading-tight">Yapay Zeka Asistanı</h3>
+            <p className="text-[10px] text-brandBlue font-medium leading-tight mt-0.5">Sizin için hazır</p>
           </div>
         </div>
         
@@ -61,7 +61,7 @@ export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
               onClose();
               navigate('/chat');
             }}
-            className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors focus:outline-none"
+            className="p-1.5 text-slate-400 hover:text-brandBlue hover:bg-brandBlue/10 rounded-lg transition-colors focus:outline-none"
             title="Sohbet Sayfasına Git"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -72,7 +72,7 @@ export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
           {/* Kapatma Butonu */}
           <button 
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors focus:outline-none"
+            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors focus:outline-none"
             title="Kapat"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -83,7 +83,7 @@ export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
       </div>
 
       {/* Mesaj Listesi */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 py-4 bg-slate-50/50">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 py-4 bg-transparent">
         <div className="flex flex-col min-h-full justify-end">
           {messages.length === 0 ? (
             <div className="text-center text-slate-400 text-sm py-4 my-auto">
@@ -102,7 +102,7 @@ export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
       </div>
 
       {/* Girdi Alanı */}
-      <div className="p-3 bg-white border-t border-slate-100">
+      <div className="p-3 bg-slate-900 border-t border-white/10">
         <ChatInput onSendMessage={handleSendMessage} disabled={isTyping} />
       </div>
 

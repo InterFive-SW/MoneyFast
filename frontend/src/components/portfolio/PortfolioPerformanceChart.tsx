@@ -182,19 +182,19 @@ export default function PortfolioPerformanceChart() {
       : null
 
   return (
-    <div className="flex flex-col h-full w-full bg-white/70 backdrop-blur-md rounded-2xl p-5 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] border border-white/50">
+    <div className="flex flex-col h-full w-full bg-slate-900/50 backdrop-blur-xl rounded-[2rem] p-5 border border-white/10 shadow-2xl">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4 z-10">
         <div className="flex items-center gap-3">
-          <h3 className="text-[13px] uppercase tracking-wider font-semibold text-slate-700">Portföy Performansı</h3>
+          <h3 className="text-[13px] uppercase tracking-wider font-semibold text-slate-200">Portföy Performansı</h3>
           {rangeLabel && (
-            <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full tabular-nums">
+            <span className="text-[11px] font-medium text-slate-400 bg-slate-800/5 px-2 py-0.5 rounded-full tabular-nums">
               {rangeLabel}
             </span>
           )}
         </div>
 
         <div className="relative flex items-center gap-2">
-          <div className="flex space-x-1 bg-slate-100/50 p-1 rounded-lg">
+          <div className="flex space-x-1 bg-slate-800/5/50 p-1 rounded-lg">
             {RANGE_PRESETS.map((preset) => (
               <button
                 key={preset}
@@ -204,8 +204,8 @@ export default function PortfolioPerformanceChart() {
                 }}
                 className={`px-3 py-1.5 text-[11px] uppercase tracking-wider font-bold rounded-md transition-all duration-200 ${
                   mode === preset
-                    ? 'bg-white shadow-sm text-emerald-600'
-                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
+                    ? 'bg-slate-800 shadow-sm text-emerald-600'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-200/50'
                 }`}
               >
                 {preset}
@@ -217,15 +217,15 @@ export default function PortfolioPerformanceChart() {
             onClick={() => setPickerOpen((v) => !v)}
             className={`px-3 py-1.5 text-[11px] uppercase tracking-wider font-bold rounded-lg border transition-all duration-200 ${
               mode === 'custom'
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-600'
-                : 'border-slate-200/80 bg-white/80 text-slate-500 hover:border-slate-300 hover:text-slate-700'
+                ? 'border-emerald-500/40 bg-emerald-500/20 text-emerald-600'
+                : 'border-white/10 bg-slate-800 text-slate-400 hover:border-slate-300 hover:text-slate-200'
             }`}
           >
             Özel Aralık
           </button>
 
           {pickerOpen && (
-            <div className="absolute right-0 top-full z-30 mt-2 flex w-[320px] flex-wrap items-end gap-3 rounded-xl border border-slate-200/80 bg-white p-3 shadow-[0_12px_40px_-12px_rgba(15,23,42,0.25)]">
+            <div className="absolute right-0 top-full z-30 mt-2 flex w-[320px] flex-wrap items-end gap-3 rounded-xl border border-white/10 bg-slate-800 p-3 shadow-2xl">
               <div className="flex flex-1 flex-col gap-1">
                 <label className="text-[10px] uppercase tracking-wider font-semibold text-slate-400">Başlangıç</label>
                 <input
@@ -234,7 +234,7 @@ export default function PortfolioPerformanceChart() {
                   min={minDate}
                   max={maxDate}
                   onChange={(e) => setFromInput(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200/80 bg-white px-2 py-1.5 text-xs tabular-nums text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  className="w-full rounded-lg border border-white/10 bg-slate-800 px-2 py-1.5 text-xs tabular-nums text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                 />
               </div>
               <div className="flex flex-1 flex-col gap-1">
@@ -245,20 +245,20 @@ export default function PortfolioPerformanceChart() {
                   min={minDate}
                   max={maxDate}
                   onChange={(e) => setToInput(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200/80 bg-white px-2 py-1.5 text-xs tabular-nums text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  className="w-full rounded-lg border border-white/10 bg-slate-800 px-2 py-1.5 text-xs tabular-nums text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                 />
               </div>
 
               <div className="flex w-full gap-2">
                 <button
                   onClick={handleApplyCustomRange}
-                  className="flex-1 rounded-lg bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-emerald-500/30 hover:bg-emerald-600 transition-colors"
+                  className="flex-1 rounded-lg bg-emerald-500/200 px-4 py-1.5 text-xs font-semibold text-white shadow-sm shadow-emerald-500/30 hover:bg-emerald-600 transition-colors"
                 >
                   Uygula
                 </button>
                 <button
                   onClick={handleClearCustomRange}
-                  className="flex-1 rounded-lg border border-slate-200/80 bg-white/80 px-4 py-1.5 text-xs font-semibold text-slate-500 hover:border-slate-300 hover:text-slate-700 transition-colors"
+                  className="flex-1 rounded-lg border border-white/10 bg-slate-800 px-4 py-1.5 text-xs font-semibold text-slate-400 hover:border-slate-300 hover:text-slate-200 transition-colors"
                 >
                   Temizle
                 </button>
@@ -274,7 +274,7 @@ export default function PortfolioPerformanceChart() {
         <div ref={chartContainerRef} className="absolute inset-0" />
         {data.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-sm text-slate-500">Seçilen aralıkta veri bulunmuyor.</p>
+            <p className="text-sm text-slate-400">Seçilen aralıkta veri bulunmuyor.</p>
           </div>
         )}
       </div>

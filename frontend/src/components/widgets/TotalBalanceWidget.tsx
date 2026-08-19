@@ -118,7 +118,7 @@ export default function TotalBalanceWidget({ data }: TotalBalanceWidgetProps) {
     <div className="flex h-full flex-col justify-between">
       {/* ── Üst Satır: Başlık ve Durum Rozeti ────────────────────────── */}
       <div className="flex items-start justify-between mb-2">
-        <h2 className="text-[11px] uppercase tracking-wider font-medium text-slate-500">{data.period} Toplam Varlık</h2>
+        <h2 className="text-[11px] uppercase tracking-wider font-medium text-slate-400">{data.period} Toplam Varlık</h2>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700 tracking-wide">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
           CANLI
@@ -128,7 +128,7 @@ export default function TotalBalanceWidget({ data }: TotalBalanceWidgetProps) {
       {/* ── Orta: Bakiye ve Değişim ───────────────────────────────────── */}
       <div className="flex-1 flex flex-col justify-center">
         <div className="flex items-baseline gap-3">
-          <p className="text-[2.2rem] font-bold leading-none tracking-tight text-slate-900 tabular-nums">
+          <p className="text-[2.2rem] font-bold leading-none tracking-tight text-white tabular-nums">
             {formatCurrency(data.total)}
           </p>
         </div>

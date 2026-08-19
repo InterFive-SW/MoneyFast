@@ -15,17 +15,17 @@ export default function NewsWidget({ news }: Props) {
   const filteredNews = filter === 'Tümü' ? news : news.filter(n => n.category === filter)
 
   return (
-    <div className="flex flex-col h-full bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
+    <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Piyasa Haberleri</h3>
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Piyasa Haberleri</h3>
         
-        <div className="flex space-x-1 bg-slate-100/50 p-1 rounded-lg">
+        <div className="flex space-x-1 bg-white/5/10/50 p-1 rounded-lg">
           {['Tümü', 'Piyasa Haberleri', 'KAP Bildirimleri'].map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f as any)}
               className={`px-2 py-1 text-[10px] uppercase tracking-wider font-semibold rounded-md transition-colors ${
-                filter === f ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'
+                filter === f ? 'bg-white/5 shadow-sm text-white' : 'text-slate-400 hover:text-slate-300'
               }`}
             >
               {f === 'Piyasa Haberleri' ? 'Piyasa' : f === 'KAP Bildirimleri' ? 'KAP' : f}
@@ -38,7 +38,7 @@ export default function NewsWidget({ news }: Props) {
         {filteredNews.map((item) => (
           <div key={item.id} className="group cursor-pointer">
             <div className="flex items-start justify-between">
-              <h4 className="text-sm font-semibold text-slate-800 group-hover:text-emerald-600 transition-colors line-clamp-2 pr-4">
+              <h4 className="text-sm font-semibold text-white group-hover:text-emerald-600 transition-colors line-clamp-2 pr-4">
                 {item.title}
               </h4>
               <span className="text-[10px] font-medium text-slate-400 whitespace-nowrap mt-0.5">{item.time}</span>
@@ -46,14 +46,14 @@ export default function NewsWidget({ news }: Props) {
             <div className="flex items-center mt-1.5 space-x-2">
               <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400">{item.source}</span>
               <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-              <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+              <span className="text-[10px] font-medium text-slate-400 bg-white/5/10 px-1.5 py-0.5 rounded">
                 {item.category}
               </span>
             </div>
           </div>
         ))}
         {filteredNews.length === 0 && (
-          <div className="text-sm text-slate-500 py-4 text-center">Bu kategoride haber bulunamadı.</div>
+          <div className="text-sm text-slate-400 py-4 text-center">Bu kategoride haber bulunamadı.</div>
         )}
       </div>
     </div>

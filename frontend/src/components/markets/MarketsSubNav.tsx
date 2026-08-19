@@ -11,14 +11,14 @@ const TABS = [
 /** Piyasalar ekranının 5 bölümü arasında geçiş için yatay pill-tab şeridi */
 export default function MarketsSubNav() {
   return (
-    <div className="flex flex-wrap bg-slate-100/80 p-1 rounded-lg backdrop-blur-sm w-fit mb-6" role="tablist" aria-label="Piyasalar bölümleri">
+    <div className="flex flex-wrap bg-slate-800/5 p-1 rounded-lg backdrop-blur-sm w-fit mb-6" role="tablist" aria-label="Piyasalar bölümleri">
       {TABS.map((tab) => (
         <NavLink
           key={tab.to}
           to={tab.to}
           className={({ isActive }) =>
             `px-4 py-1.5 text-sm font-semibold rounded-md transition-all ${
-              isActive ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              isActive ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
             }`
           }
         >

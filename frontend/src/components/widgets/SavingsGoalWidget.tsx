@@ -8,7 +8,7 @@ export default function SavingsGoalWidget({ goals }: { goals: SavingsGoal[] }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-medium text-slate-500">Birikim Hedefleri</h3>
+        <h3 className="text-[11px] uppercase tracking-wider font-medium text-slate-400">Birikim Hedefleri</h3>
       </div>
       <div className="flex-1 overflow-auto -mx-2 px-2 flex flex-col gap-4">
         {goals.map(g => {
@@ -18,11 +18,11 @@ export default function SavingsGoalWidget({ goals }: { goals: SavingsGoal[] }) {
               <div className="flex justify-between items-center mb-1.5">
                 <div className="flex items-center gap-2">
                   <span className="text-sm" aria-hidden="true">{g.icon}</span>
-                  <span className="text-[12px] font-semibold text-slate-800 uppercase tracking-wider">{g.name}</span>
+                  <span className="text-[12px] font-semibold text-white uppercase tracking-wider">{g.name}</span>
                 </div>
-                <span className="text-[12px] font-bold text-slate-900 tabular-nums">{percent}%</span>
+                <span className="text-[12px] font-bold text-white tabular-nums">{percent}%</span>
               </div>
-              <div className="h-1.5 w-full bg-slate-100/80 rounded-full overflow-hidden">
+              <div className="h-1.5 w-full bg-white/5/10/80 rounded-full overflow-hidden">
                 <div className={`h-full bg-gradient-to-r ${g.color}`} style={{ width: `${percent}%` }} />
               </div>
               <div className="flex justify-between mt-1 text-[10px] text-slate-400 font-medium uppercase tracking-wider">

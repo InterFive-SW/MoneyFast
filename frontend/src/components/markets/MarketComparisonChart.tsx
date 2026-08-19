@@ -30,9 +30,9 @@ export default function MarketComparisonChart({ instruments }: Props) {
   const chartData = useMemo(() => buildComparisonChartData(selected, SERIES_DAYS), [selected])
 
   return (
-    <div className="flex flex-col bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
+    <div className="flex flex-col bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">
           Karşılaştır <span className="normal-case text-slate-400">(son 90 gün, % değişim)</span>
         </h3>
       </div>
@@ -50,8 +50,8 @@ export default function MarketComparisonChart({ instruments }: Props) {
                 isSelected
                   ? 'bg-slate-800 text-white border-slate-800'
                   : disabled
-                  ? 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'
-                  : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                  ? 'bg-slate-800/5 text-slate-300 border-white/10 cursor-not-allowed'
+                  : 'bg-slate-800 text-slate-300 border-white/10 hover:border-slate-300'
               }`}
             >
               {item.symbol}
@@ -61,7 +61,7 @@ export default function MarketComparisonChart({ instruments }: Props) {
       </div>
 
       {selected.length === 0 ? (
-        <div className="flex items-center justify-center h-[260px] text-sm text-slate-500">
+        <div className="flex items-center justify-center h-[260px] text-sm text-slate-400">
           Karşılaştırmak için en fazla {MAX_SELECTION} enstrüman seçin.
         </div>
       ) : (

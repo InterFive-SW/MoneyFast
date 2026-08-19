@@ -33,8 +33,8 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: 'rgba(226, 232, 240, 0.6)' },
-        horzLines: { color: 'rgba(226, 232, 240, 0.6)' },
+        vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+        horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
       },
       rightPriceScale: {
         borderVisible: false,
@@ -130,15 +130,15 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
     }
   }, [filter])
 
-  if (w <= 2 || h <= 2) {
+  if (w <= 2 || h <= 1) {
     const latestData = MOCK_CHART_DATA[filter].slice(-1)[0];
     const prevData = MOCK_CHART_DATA[filter].slice(-2)[0];
     const change = latestData && prevData ? latestData.close - prevData.close : 0;
     const isPositive = change >= 0;
     
     return (
-      <div className="flex flex-col h-full w-full bg-white/70 backdrop-blur-md rounded-2xl p-5 shadow-sm border border-white/50 items-center justify-center text-center">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">Portföy Performansı (Özet)</h3>
+      <div className="flex flex-col h-full w-full bg-transparent p-1 items-center justify-center text-center">
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Portföy Performansı (Özet)</h3>
         <div className={`text-2xl font-bold ${isPositive ? 'text-accent-500' : 'text-rose-500'}`}>
           {latestData ? latestData.close.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : '-'}
         </div>
@@ -148,22 +148,22 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-white/70 backdrop-blur-md rounded-2xl p-5 shadow-[0_4px_24px_-8px_rgba(15,23,42,0.08)] border border-white/50">
+    <div className="flex flex-col h-full w-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4 z-10">
         <div className="flex items-center gap-3">
-          <h3 className="text-[13px] uppercase tracking-wider font-semibold text-slate-700">Portföy Performansı</h3>
-          <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">TRADINGVIEW ALTYAPISI</span>
+          <h3 className="text-[13px] uppercase tracking-wider font-semibold text-slate-300">Portföy Performansı</h3>
+          <span className="text-[11px] font-medium text-slate-400 bg-white/10 px-2 py-0.5 rounded-full">TRADINGVIEW ALTYAPISI</span>
         </div>
         
-        <div className="flex space-x-1 bg-slate-100/50 p-1 rounded-lg">
+        <div className="flex space-x-1 bg-white/5 p-1 rounded-lg">
           {(['Gün', 'Hafta', 'Ay', '3 Ay', 'Yıl'] as TimeFilter[]).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={`px-3 py-1.5 text-[11px] uppercase tracking-wider font-bold rounded-md transition-all duration-200 ${
                 filter === f 
-                ? 'bg-white shadow-sm text-primary-600' 
-                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
+                ? 'bg-white/10 shadow-sm text-brandBlue' 
+                : 'text-slate-400 hover:text-slate-300 hover:bg-white/10'
               }`}
             >
               {f}

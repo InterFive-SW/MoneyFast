@@ -24,22 +24,22 @@ function IndexDetail({ index }: { index: MarketIndex }) {
   const chartData = useMemo(() => buildComparisonChartData([index.code, benchmark.code], SERIES_DAYS), [index.code, benchmark.code])
 
   return (
-    <div className="mt-3 pt-4 border-t border-slate-100 grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="mt-3 pt-4 border-t border-white/10 grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div>
-        <h4 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-3">Endeks Ağırlıkları</h4>
+        <h4 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">Endeks Ağırlıkları</h4>
         <div className="flex flex-col gap-1.5">
           {weightedConstituents.map((c) => (
-            <Link key={c.symbol} to={`/investment/hisseler/${c.symbol}`} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50/60 transition-colors">
+            <Link key={c.symbol} to={`/investment/hisseler/${c.symbol}`} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-800/5/60 transition-colors">
               <div>
-                <span className="text-sm font-semibold text-slate-800">{c.symbol}</span>
+                <span className="text-sm font-semibold text-white">{c.symbol}</span>
                 <span className="text-xs text-slate-400 ml-2">{c.instrument.name}</span>
               </div>
-              <span className="text-sm font-bold tabular-nums text-slate-700">%{c.weight.toFixed(1)}</span>
+              <span className="text-sm font-bold tabular-nums text-slate-200">%{c.weight.toFixed(1)}</span>
             </Link>
           ))}
         </div>
 
-        <h4 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mt-5 mb-3">Getiri Vadeleri</h4>
+        <h4 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mt-5 mb-3">Getiri Vadeleri</h4>
         <div className="grid grid-cols-4 gap-2">
           {[
             { label: '6 Ay', value: index.returns.sixMonth },
@@ -47,16 +47,16 @@ function IndexDetail({ index }: { index: MarketIndex }) {
             { label: '3 Yıl', value: index.returns.threeYear },
             { label: '5 Yıl', value: index.returns.fiveYear },
           ].map((r) => (
-            <div key={r.label} className="rounded-lg bg-slate-50/60 p-2.5 text-center">
+            <div key={r.label} className="rounded-lg bg-slate-800/5/60 p-2.5 text-center">
               <div className="text-[10px] uppercase font-semibold text-slate-400">{r.label}</div>
-              <div className="text-sm font-bold tabular-nums text-emerald-600">+{r.value.toFixed(1)}%</div>
+              <div className="text-sm font-bold tabular-nums text-emerald-500">+{r.value.toFixed(1)}%</div>
             </div>
           ))}
         </div>
       </div>
 
       <div>
-        <h4 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-3">
+        <h4 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">
           Benchmark Karşılaştırma <span className="normal-case text-slate-400">({index.name} vs {benchmark.name}, son 90 gün)</span>
         </h4>
         <div className="h-[220px]">
@@ -86,21 +86,21 @@ export default function IndicesScreen() {
       {MOCK_INDICES.map((index) => {
         const isExpanded = expandedCode === index.code
         return (
-          <div key={index.code} className="bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm">
+          <div key={index.code} className="bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5">
             <button
               onClick={() => setExpandedCode(isExpanded ? null : index.code)}
               className="w-full flex items-center justify-between text-left"
             >
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-slate-900">{index.name}</span>
-                  <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{index.code}</span>
+                  <span className="text-sm font-bold text-white">{index.name}</span>
+                  <span className="text-[10px] font-medium text-slate-400 bg-slate-800/5 px-1.5 py-0.5 rounded">{index.code}</span>
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">{index.constituents.length} bileşen</p>
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-right">
-                  <div className="text-sm font-bold tabular-nums text-slate-800">{index.value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  <div className="text-sm font-bold tabular-nums text-white">{index.value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                   <div className={`text-xs font-semibold tabular-nums ${index.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
                     {index.changePercent > 0 ? '+' : ''}{index.changePercent.toFixed(2)}%
                   </div>

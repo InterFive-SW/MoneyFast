@@ -28,17 +28,17 @@ interface Props {
 
 /** Fonlar filtre paneli — yönetim ücreti, risk değeri, kurucu/PYŞ, şemsiye türü */
 export default function FundFilterPanel({ filters, onChange, founders, umbrellas }: Props) {
-  const inputClass = 'w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400'
+  const inputClass = 'w-full rounded-lg border border-white/10 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400'
 
   function updateField(key: keyof FundFilters, value: string) {
     onChange({ ...filters, [key]: value })
   }
 
   return (
-    <div className="bg-white/70 backdrop-blur-md rounded-2xl p-5 border border-white/50 shadow-sm mb-6">
+    <div className="bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5 mb-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-500">Filtrele</h3>
-        <button onClick={() => onChange(EMPTY_FUND_FILTERS)} className="text-xs font-medium text-slate-400 hover:text-slate-600">
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Filtrele</h3>
+        <button onClick={() => onChange(EMPTY_FUND_FILTERS)} className="text-xs font-medium text-slate-400 hover:text-slate-300">
           Temizle
         </button>
       </div>

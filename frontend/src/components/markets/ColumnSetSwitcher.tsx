@@ -16,7 +16,7 @@ export default function ColumnSetSwitcher({ value, onChange }: Props) {
           className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
             value === set.key
               ? 'bg-emerald-500 text-white border-emerald-500'
-              : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+              : 'bg-slate-800 text-slate-300 border-white/10 hover:border-slate-300'
           }`}
         >
           {set.label}

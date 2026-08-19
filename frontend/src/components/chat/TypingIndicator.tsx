@@ -15,8 +15,8 @@ export default function TypingIndicator({ thought }: TypingIndicatorProps) {
   return (
     <div className="flex justify-start w-full my-4">
       <div className="flex flex-col gap-2 max-w-[85%]">
-        <div className="flex items-center gap-2 bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm rounded-2xl rounded-bl-sm px-4 py-3 w-fit">
-          <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 font-bold text-xs shrink-0">
+        <div className="flex items-center gap-2 bg-slate-800/80 backdrop-blur-md border border-white/10 shadow-sm rounded-2xl rounded-bl-sm px-4 py-3 w-fit">
+          <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-brandBlue font-bold text-xs shrink-0">
             MF
           </div>
           <div className="flex gap-1 items-center h-5 px-1">
@@ -26,7 +26,7 @@ export default function TypingIndicator({ thought }: TypingIndicatorProps) {
           </div>
         </div>
         {thought && (
-          <div className="ml-1 flex items-center gap-2 text-xs font-medium text-slate-500 animate-pulse">
+          <div className="ml-1 flex items-center gap-2 text-xs font-medium text-slate-400 animate-pulse">
             <svg className="w-3.5 h-3.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>

@@ -36,9 +36,9 @@ export default function FundDetail() {
 
   if (!fund) {
     return (
-      <div className="bg-white/70 backdrop-blur-md rounded-2xl p-8 border border-white/50 shadow-sm text-center">
-        <p className="text-sm text-slate-500 mb-3">"{code}" kodlu bir fon bulunamadı.</p>
-        <Link to="/investment/fonlar" className="text-sm font-semibold text-emerald-600 hover:text-emerald-700">
+      <div className="bg-slate-800/70 backdrop-blur-md rounded-[2rem] p-8 border border-white/50 shadow-sm text-center">
+        <p className="text-sm text-slate-400 mb-3">"{code}" kodlu bir fon bulunamadı.</p>
+        <Link to="/investment/fonlar" className="text-sm font-semibold text-emerald-500 hover:text-emerald-400">
           ← Fonlar listesine dön
         </Link>
       </div>
@@ -47,34 +47,34 @@ export default function FundDetail() {
 
   return (
     <div>
-      <Link to="/investment/fonlar" className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-emerald-600 mb-4 transition-colors">
+      <Link to="/investment/fonlar" className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-emerald-500 mb-4 transition-colors">
         <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
         Fonlar listesine dön
       </Link>
 
-      <div className="bg-white/70 backdrop-blur-md rounded-2xl p-6 border border-white/50 shadow-sm mb-6">
+      <div className="bg-slate-800/70 backdrop-blur-md rounded-[2rem] p-6 border border-white/50 shadow-sm mb-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-slate-900">{fund.code}</h1>
-              <span className="text-[10px] font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{fund.umbrella}</span>
+              <h1 className="text-xl font-bold text-white">{fund.code}</h1>
+              <span className="text-[10px] font-medium text-slate-400 bg-slate-800/5 px-1.5 py-0.5 rounded">{fund.umbrella}</span>
             </div>
-            <p className="text-sm text-slate-500 mt-0.5">{fund.name} — {fund.founder}</p>
+            <p className="text-sm text-slate-400 mt-0.5">{fund.name} — {fund.founder}</p>
           </div>
           <div className="text-right">
-            <div className="text-2xl font-bold tabular-nums text-emerald-600">{fmtReturn(fund.returns.yearly)}</div>
+            <div className="text-2xl font-bold tabular-nums text-emerald-500">{fmtReturn(fund.returns.yearly)}</div>
             <div className="text-xs text-slate-400">Yıllık getiri</div>
           </div>
         </div>
       </div>
 
-      <div className="flex flex-wrap bg-slate-100/80 p-1 rounded-lg w-fit mb-6">
+      <div className="flex flex-wrap bg-slate-800/5 p-1 rounded-lg w-fit mb-6">
         {TABS.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={`px-3.5 py-1.5 text-sm font-semibold rounded-md transition-all ${
-              activeTab === tab.key ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              activeTab === tab.key ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             {tab.label}
@@ -82,7 +82,7 @@ export default function FundDetail() {
         ))}
       </div>
 
-      <div className="bg-white/70 backdrop-blur-md rounded-2xl p-6 border border-white/50 shadow-sm">
+      <div className="bg-slate-800/70 backdrop-blur-md rounded-[2rem] p-6 border border-white/50 shadow-sm">
         {activeTab === 'ozet' && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
@@ -93,9 +93,9 @@ export default function FundDetail() {
               { label: 'Risk Değeri', value: `${fund.riskValue} / 7` },
               { label: 'Net Giriş/Çıkış (1A)', value: `${fund.netCashFlow > 0 ? '+' : ''}${fmtCompact(fund.netCashFlow)} ₺` },
             ].map((stat) => (
-              <div key={stat.label} className="rounded-xl bg-slate-50/60 p-3.5">
+              <div key={stat.label} className="rounded-xl bg-slate-800/5/60 p-3.5">
                 <div className="text-[10px] uppercase tracking-wider font-semibold text-slate-400 mb-1">{stat.label}</div>
-                <div className="text-sm font-bold tabular-nums text-slate-800">{stat.value}</div>
+                <div className="text-sm font-bold tabular-nums text-white">{stat.value}</div>
               </div>
             ))}
           </div>
@@ -118,32 +118,32 @@ export default function FundDetail() {
                 {holdingsWithColor.map((h) => {
                   const stock = findInstrument(h.symbol)
                   return (
-                    <Link key={h.symbol} to={`/investment/hisseler/${h.symbol}`} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50/60 transition-colors">
+                    <Link key={h.symbol} to={`/investment/hisseler/${h.symbol}`} className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-800/5/60 transition-colors">
                       <div className="flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: h.color }} />
-                        <span className="text-sm font-semibold text-slate-800">{h.symbol}</span>
+                        <span className="text-sm font-semibold text-white">{h.symbol}</span>
                         {stock && <span className="text-xs text-slate-400">{stock.name}</span>}
                       </div>
-                      <span className="text-sm font-bold tabular-nums text-slate-700">%{h.weight}</span>
+                      <span className="text-sm font-bold tabular-nums text-slate-200">%{h.weight}</span>
                     </Link>
                   )
                 })}
               </div>
             </div>
           ) : (
-            <p className="text-sm text-slate-500">Bu fon türü (borçlanma/para piyasası) için hisse portföyü verisi bulunmuyor.</p>
+            <p className="text-sm text-slate-400">Bu fon türü (borçlanma/para piyasası) için hisse portföyü verisi bulunmuyor.</p>
           )
         )}
 
         {activeTab === 'getiri' && (
           <table className="w-full text-left border-collapse">
             <tbody className="divide-y divide-slate-100">
-              <tr><td className="py-2.5 text-sm text-slate-500">Günlük</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-600">{fmtReturn(fund.returns.daily)}</td></tr>
-              <tr><td className="py-2.5 text-sm text-slate-500">Aylık</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-600">{fmtReturn(fund.returns.monthly)}</td></tr>
-              <tr><td className="py-2.5 text-sm text-slate-500">3 Aylık</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-600">{fmtReturn(fund.returns.threeMonth)}</td></tr>
-              <tr><td className="py-2.5 text-sm text-slate-500">Yıllık</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-600">{fmtReturn(fund.returns.yearly)}</td></tr>
-              <tr><td className="py-2.5 text-sm text-slate-500">3 Yıllık</td><td className={`py-2.5 text-right text-sm font-semibold tabular-nums ${fund.returns.threeYear === null ? 'text-slate-400' : 'text-emerald-600'}`}>{fmtReturn(fund.returns.threeYear)}</td></tr>
-              <tr><td className="py-2.5 text-sm text-slate-500">5 Yıllık</td><td className={`py-2.5 text-right text-sm font-semibold tabular-nums ${fund.returns.fiveYear === null ? 'text-slate-400' : 'text-emerald-600'}`}>{fmtReturn(fund.returns.fiveYear)}</td></tr>
+              <tr><td className="py-2.5 text-sm text-slate-400">Günlük</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-500">{fmtReturn(fund.returns.daily)}</td></tr>
+              <tr><td className="py-2.5 text-sm text-slate-400">Aylık</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-500">{fmtReturn(fund.returns.monthly)}</td></tr>
+              <tr><td className="py-2.5 text-sm text-slate-400">3 Aylık</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-500">{fmtReturn(fund.returns.threeMonth)}</td></tr>
+              <tr><td className="py-2.5 text-sm text-slate-400">Yıllık</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-emerald-500">{fmtReturn(fund.returns.yearly)}</td></tr>
+              <tr><td className="py-2.5 text-sm text-slate-400">3 Yıllık</td><td className={`py-2.5 text-right text-sm font-semibold tabular-nums ${fund.returns.threeYear === null ? 'text-slate-400' : 'text-emerald-500'}`}>{fmtReturn(fund.returns.threeYear)}</td></tr>
+              <tr><td className="py-2.5 text-sm text-slate-400">5 Yıllık</td><td className={`py-2.5 text-right text-sm font-semibold tabular-nums ${fund.returns.fiveYear === null ? 'text-slate-400' : 'text-emerald-500'}`}>{fmtReturn(fund.returns.fiveYear)}</td></tr>
             </tbody>
           </table>
         )}

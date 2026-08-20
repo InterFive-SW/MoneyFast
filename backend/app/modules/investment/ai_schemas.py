@@ -39,6 +39,11 @@ class PositionOut(BaseModel):
 
 
 class PortfolioTotals(BaseModel):
+    #: Cash and the all-in total, added in contract v2.3. Optional so a caller
+    #: whose account cannot be resolved gets None rather than a fabricated 0 —
+    #: a zero balance is a claim, and the wrong one.
+    cash_balance: Optional[float] = None
+    total_value: Optional[float] = None
     total_market_value: float
     total_cost_basis: float
     total_unrealized_pnl: float
@@ -78,7 +83,10 @@ class NotionalAmount(BaseModel):
 class StageTransactionRequest(BaseModel):
     user_id: str
     transaction_type: str
-    source_account_id: str
+    #: Optional: the backend resolves the caller's own account. It was
+    #: required, which is why the chat interrogated users for an id it then
+    #: never validated — "1" was accepted and used for nothing.
+    source_account_id: Optional[str] = None
     idempotency_key: str
     instrument: Optional[Instrument] = None
     quantity: Optional[float] = None

@@ -31,8 +31,12 @@ STATUSES = frozenset(
 async def prepare_transaction_proposal(
     user_id: str,
     transaction_type: str,
-    source_account_id: str,
     idempotency_key: str,
+    # Optional, and ordered after the required arguments for that reason. The
+    # backend resolves the caller's own account. It used to be required, so the
+    # planner asked the user to recite an account id, then accepted "1" and
+    # never validated it. A null here means "mine".
+    source_account_id: Optional[str] = None,
     instrument: Optional[dict[str, Any]] = None,
     quantity: Optional[float] = None,
     notional_amount: Optional[dict[str, Any]] = None,
@@ -80,7 +84,8 @@ async def prepare_transaction_proposal(
         transaction_type (str): REQUIRED. One of:
             "BUY", "SELL", "TRANSFER_INTERNAL", "TRANSFER_EXTERNAL",
             "FX_CONVERSION", "FUND_SUBSCRIPTION", "FUND_REDEMPTION".
-        source_account_id (str): REQUIRED. Debited cash or custody account.
+        source_account_id (str | None): The account to debit. Omit it and the
+            backend uses the caller's own — do NOT ask the user for it.
         instrument (dict | None): REQUIRED for BUY, SELL, FUND_SUBSCRIPTION,
             FUND_REDEMPTION. Must resolve to exactly one tradable instrument:
             symbol (str), exchange (str, MIC code), isin (str | None). If the user

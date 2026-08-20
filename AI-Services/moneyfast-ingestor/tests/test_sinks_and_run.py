@@ -419,3 +419,111 @@ class TestProductCache:
         client = client_for(recorder(body=rows))
         assert sinks.fetch_products(client) == rows
         assert sinks.fetch_products(client) == rows
+
+
+class TestCycleBudget:
+    """A cycle that never fits its interval is a configuration problem. The
+    scheduler coalesces the overlap, which makes it silent unless it is said
+    out loud."""
+
+    def test_an_overrunning_cycle_is_logged(self, monkeypatch, caplog):
+        monkeypatch.setattr(run, "market_is_open", lambda: True)
+        monkeypatch.setattr(run, "current_interval_seconds", lambda: 0)
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [])
+        monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda products: [])
+        monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": 0})
+        with caplog.at_level("WARNING"):
+            run.run_quotes(None)
+        assert any("longer than its interval" in r.message for r in caplog.records)
+
+    def test_a_cycle_inside_its_budget_says_nothing(self, monkeypatch, caplog):
+        monkeypatch.setattr(run, "market_is_open", lambda: True)
+        monkeypatch.setattr(run, "current_interval_seconds", lambda: 3600)
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [])
+        monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda products: [])
+        monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": 0})
+        with caplog.at_level("WARNING"):
+            run.run_quotes(None)
+        assert not any("longer than its interval" in r.message for r in caplog.records)
+
+
+class TestSchedulerJobs:
+    """The wrapper APScheduler actually invokes.
+
+    A job that raises on its first tick surfaces hours later as "the ingestor
+    stopped", so the body is exercised rather than trusted.
+    """
+
+    def test_the_registered_job_opens_a_client_and_runs_the_work(self, monkeypatch):
+        registered = []
+
+        class FakeScheduler:
+            def __init__(self, **kwargs):
+                pass
+
+            def add_job(self, fn, *args, **kwargs):
+                registered.append(fn)
+
+            def start(self):
+                pass
+
+        import apscheduler.schedulers.blocking as blocking
+
+        monkeypatch.setattr(blocking, "BlockingScheduler", FakeScheduler)
+        monkeypatch.setattr(httpx, "Client", lambda **kwargs: client_for(recorder()))
+        ran = []
+        monkeypatch.setattr(
+            run, "_guard", lambda name, fn, client, **kwargs: ran.append(name)
+        )
+
+        run.start_scheduler()
+        assert registered, "no job was registered"
+        registered[0]()
+        assert ran, "the registered wrapper never ran its work"
+
+
+class TestEntryPoint:
+    def test_running_as_a_module_exits_with_mains_status(self, monkeypatch):
+        """`python -m ingestor.run` is how the container starts it, so the
+        guard is the real entry point, not dead code.
+
+        `runpy` executes the module in a FRESH namespace, so patching the
+        already-imported `run` has no effect on it. The stubs therefore go on
+        the modules it imports, which are shared, and `sys.argv` supplies the
+        one-shot flags so nothing schedules or sleeps.
+        """
+        import runpy
+        import sys
+
+        monkeypatch.setattr(sys, "argv", ["ingestor.run", "--once", "--quotes"])
+        monkeypatch.setattr(httpx, "Client", lambda **kwargs: client_for(recorder()))
+        monkeypatch.setattr(sinks, "fetch_products", lambda client: [])
+        monkeypatch.setattr(
+            "ingestor.sources.yfinance_source.fetch_quotes", lambda products: []
+        )
+        monkeypatch.setattr(sinks, "push_market_data", lambda c, q, k: {"quotes_written": 0})
+
+        with pytest.raises(SystemExit) as excinfo:
+            runpy.run_module("ingestor.run", run_name="__main__")
+        assert excinfo.value.code == 0
+
+
+class TestFundamentalsDelivery:
+    def test_a_successful_push_returns_the_backend_reply(self, monkeypatch):
+        """Only the failure path was covered, so a working push was never
+        exercised end to end."""
+        def handler(request):
+            return httpx.Response(200, json={"fundamentals_written": 3})
+
+        result = sinks.push_fundamentals(client_for(handler), [{"symbol": "THYAO"}])
+        assert result == {"fundamentals_written": 3}
+
+    def test_an_empty_batch_makes_no_request(self):
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200, json={})
+
+        assert sinks.push_fundamentals(client_for(handler), []) is None
+        assert not calls

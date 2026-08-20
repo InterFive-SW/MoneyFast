@@ -37,6 +37,8 @@ def make_proposal(**overrides):
         transaction_type="BUY",
         symbol="THYAO",
         quantity=10,
+        source_account_id="TR-TEST-0001",
+        destination_account_id=None,
         payload={"estimate": {"net_amount": 3022.26, "reference_price": 301.75}},
     )
     for key, value in overrides.items():
@@ -58,7 +60,7 @@ def confirm_client(proposal_or_none, caller_id, mocker):
     db = MagicMock(spec=Session)
     db.get.return_value = proposal_or_none
     mocker.patch.object(
-        market_service, "account", return_value=SimpleNamespace(id="acct-1", cash_balance=25000.0)
+        market_service, "account", return_value=SimpleNamespace(id="acct-1", cash_balance=25000.0, currency_code="TRY", account_number="TR-TEST-0001")
     )
     mocker.patch.object(
         service, "settle",
@@ -188,7 +190,7 @@ class TestStagingPersistence:
         # be able to afford the order or nothing is persisted.
         mocker.patch.object(
             market_service, "account",
-            return_value=SimpleNamespace(id="acct-1", cash_balance=1_000_000.0),
+            return_value=SimpleNamespace(id="acct-1", cash_balance=1_000_000.0, currency_code="TRY", account_number="TR-TEST-0001"),
         )
         app.dependency_overrides[get_db] = lambda: db
         client = TestClient(app)
@@ -300,7 +302,7 @@ class TestSettlementFailuresAtConfirm:
         why rather than seeing a generic failure."""
         mocker.patch.object(
             self.market_service, "account",
-            return_value=SimpleNamespace(id="acct-1", cash_balance=10.0),
+            return_value=SimpleNamespace(id="acct-1", cash_balance=10.0, currency_code="TRY", account_number="TR-TEST-0001"),
         )
         mocker.patch.object(
             self.service, "settle",
@@ -311,3 +313,82 @@ class TestSettlementFailuresAtConfirm:
         assert "Bakiye yetersiz" in response.json()["detail"]
         assert settle_client.db.rollback.called
         assert settle_client.db.get.return_value.status == "PENDING_USER_CONFIRMATION"
+
+
+class TestTransferConfirmation:
+    """A transfer settles against the banking ledger, not the investment
+    account. Routing it through securities settlement is what produced a
+    "Satım" with a blank ticker priced with brokerage commission."""
+
+    @pytest.fixture
+    def transfer_client(self, mocker):
+        from fastapi.testclient import TestClient
+        from app.modules.banking import service as banking_service
+
+        db = MagicMock(spec=Session)
+        db.get.return_value = make_proposal(
+            transaction_type="TRANSFER",
+            symbol=None,
+            quantity=None,
+            source_account_id="1000000000001",
+            destination_account_id="1000000000002",
+            payload={"estimate": {"net_amount": 300.0, "currency": "TRY"}},
+        )
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_optional_user_id] = lambda: "user-1"
+        self.banking = banking_service
+        try:
+            with TestClient(app) as client:
+                client.db = db
+                yield client
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_optional_user_id, None)
+
+    def test_a_confirmed_transfer_moves_money_through_the_ledger(
+        self, transfer_client, mocker
+    ):
+        transfer = mocker.patch.object(
+            self.banking, "transfer",
+            return_value={
+                "reference_number": "TRF-ABC", "status": "completed",
+                "amount": 300.0, "fee": 2.5, "currency": "TRY",
+                "source_balance_after": 47697.5, "destination_account": "1000000000002",
+            },
+        )
+        body = transfer_client.post(URL.format("PROP-ABC123")).json()
+        assert body["status"] == "confirmed"
+        assert "TRF-ABC" in body["message"], "the receipt number is the audit trail"
+        assert transfer.call_args.kwargs["amount"] == 300.0
+
+    def test_a_refused_transfer_leaves_the_proposal_pending(self, transfer_client, mocker):
+        mocker.patch.object(
+            self.banking, "transfer",
+            side_effect=self.banking.TransferError("Bakiye yetersiz: ..."),
+        )
+        response = transfer_client.post(URL.format("PROP-ABC123"))
+        assert response.status_code == 409
+        assert "Bakiye yetersiz" in response.json()["detail"]
+        assert transfer_client.db.get.return_value.status == "PENDING_USER_CONFIRMATION"
+
+    def test_a_transfer_without_an_amount_is_refused(self, transfer_client, mocker):
+        transfer_client.db.get.return_value.payload = {}
+        response = transfer_client.post(URL.format("PROP-ABC123"))
+        assert response.status_code == 409
+
+    def test_securities_settlement_is_not_used_for_a_transfer(
+        self, transfer_client, mocker
+    ):
+        from app.modules.investment import service as investment_service
+
+        settle = mocker.patch.object(investment_service, "settle")
+        mocker.patch.object(
+            self.banking, "transfer",
+            return_value={
+                "reference_number": "TRF-ABC", "status": "completed",
+                "amount": 300.0, "fee": 0.0, "currency": "TRY",
+                "source_balance_after": 100.0, "destination_account": "x",
+            },
+        )
+        transfer_client.post(URL.format("PROP-ABC123"))
+        assert not settle.called

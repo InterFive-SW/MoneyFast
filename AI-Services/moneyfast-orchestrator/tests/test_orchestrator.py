@@ -1736,36 +1736,50 @@ class TestDisclosurePlacement:
         assert orchestrator._without_disclosures("Cevap.", verdict) == "Cevap."
 
 
-class TestTransferRefusal:
-    """Banking is unimplemented. A transfer staged through the securities path
-    was costed with brokerage commission and BSMV, rendered by the widget as a
-    "Satım" with a blank ticker, and confirmed into a proposal that moved
-    nothing. It looked like it worked, which is worse than a refusal."""
+class TestTransferStaging:
+    """Transfers are staged like trades and confirmed by the user.
+
+    They used to be refused outright; before that, they were routed through
+    the SECURITIES path — costed with brokerage commission and BSMV, and
+    rendered as a "Satım" with a blank ticker. Now they settle against the
+    banking ledger.
+    """
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("kind", ["TRANSFER", "EFT", "HAVALE", "TRANSFER_INTERNAL"])
-    async def test_a_transfer_is_declined_rather_than_staged(
+    @pytest.mark.parametrize("kind", ["TRANSFER", "EFT", "HAVALE"])
+    async def test_a_transfer_is_staged_for_confirmation(
         self, fake_mcp, patched_llm, base_state, kind
     ):
-        patched_llm.set_response(
-            '{"arguments": {"transaction_type": "%s", "notional_amount": {"amount": 200, "currency": "TRY"},'
-            ' "source_account_id": "1", "destination_account_id": "2"}}' % kind
-        )
-        out = await orchestrator.transaction_node(base_state)
-        assert out["specialist_output"]["status"] == "UNSUPPORTED"
-        assert not fake_mcp.calls, "nothing may be staged"
-
-    @pytest.mark.asyncio
-    async def test_a_securities_order_is_unaffected(self, fake_mcp, patched_llm, base_state):
         fake_mcp.responses["prepare_transaction_proposal"] = {
-            "proposal_id": "PROP-1", "confirmation_required": True, "status": "PENDING_USER_CONFIRMATION",
+            "proposal_id": "PROP-1", "confirmation_required": True,
         }
         patched_llm.set_response(
-            '{"arguments": {"transaction_type": "BUY", "quantity": 10,'
-            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+            '{"arguments": {"transaction_type": "%s",'
+            ' "notional_amount": {"amount": 200, "currency": "TRY"},'
+            ' "destination_account_id": "1000000000002"}}' % kind
         )
-        out = await orchestrator.transaction_node(base_state)
+        state = {**base_state, "user_message": "1000000000002 hesabına 200 lira gönder"}
+        out = await orchestrator.transaction_node(state)
         assert out["specialist_output"]["status"] == "OK"
+        assert fake_mcp.calls[0][1]["transaction_type"] == kind
+
+    @pytest.mark.asyncio
+    async def test_a_transfer_still_requires_confirmation(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """The agent prepares; the user confirms. Same discipline as a trade —
+        conversational assent is never confirmation."""
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": False,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "TRANSFER",'
+            ' "notional_amount": {"amount": 200, "currency": "TRY"},'
+            ' "destination_account_id": "1000000000002"}}'
+        )
+        state = {**base_state, "user_message": "200 lira gönder"}
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "ERROR"
 
 
 class TestCurrentTurnAmount:
@@ -1840,5 +1854,105 @@ class TestCurrentTurnAmount:
             ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
         )
         state = self._state(base_state, "THYAO'nun hepsini sat", ["portföyümü göster"])
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+
+
+class TestDirectionGuard:
+    """"10 tane aselsan satsana" was staged as a BUY and settled.
+
+    The inversion is worse than it looks: a SELL mislabelled as BUY skips the
+    backend's sell-side inventory check and lands in the cash check instead, so
+    it surfaces as a successful purchase rather than an error.
+    """
+
+    @pytest.mark.parametrize(
+        "message,expected",
+        [
+            ("10 tane aselsan satsana", "SELL"),
+            ("ASELS satmak istiyorum", "SELL"),
+            ("hepsini bozdur", "SELL"),
+            ("pozisyonu nakde çevir", "SELL"),
+            # "altın" starts with the buy stem "al" — a prefix match would read
+            # every gold price question as a purchase order.
+            ("altın fiyatı ne kadar", None),
+            ("altın alsana", "BUY"),
+            ("10 tane aselsan al", "BUY"),
+            ("10 tane aselsan satın al", "BUY"),
+            ("100 lotluk THYAO alsana", "BUY"),
+            ("THYAO almak istiyorum", "BUY"),
+            ("portföyümü göster", None),
+        ],
+    )
+    def test_the_users_verb_decides_the_direction(self, message, expected):
+        assert orchestrator._stated_direction(message) == expected
+
+    def test_satin_al_is_a_buy_despite_containing_sat(self):
+        """The single most dangerous collision: every purchase phrased this way
+        would otherwise read as a sale."""
+        assert orchestrator._stated_direction("ASELS satın alıcam") == "BUY"
+        assert orchestrator._stated_direction("ASELS satin alicam") == "BUY"
+
+    @pytest.mark.parametrize("message", ["ASELS SATSANA", "ASELS Satsana"])
+    def test_case_and_turkish_i_do_not_change_the_reading(self, message):
+        assert orchestrator._stated_direction(message) == "SELL"
+
+    @pytest.mark.asyncio
+    async def test_a_buy_emitted_for_a_sell_request_is_refused(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 10,'
+            ' "instrument": {"symbol": "ASELS"}, "source_account_id": "1"}}'
+        )
+        state = {**base_state, "user_message": "10 tane aselsan satsana"}
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "NEEDS_INPUT"
+        assert "transaction_type" in out["specialist_output"]["missing_fields"]
+        assert not fake_mcp.calls, "nothing may be staged in the wrong direction"
+
+    @pytest.mark.asyncio
+    async def test_a_matching_sell_is_staged(self, fake_mcp, patched_llm, base_state):
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "SELL", "quantity": 10,'
+            ' "instrument": {"symbol": "ASELS"}, "source_account_id": "1"}}'
+        )
+        state = {**base_state, "user_message": "10 tane aselsan satsana"}
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+        assert fake_mcp.calls[0][1]["transaction_type"] == "SELL"
+
+    @pytest.mark.asyncio
+    async def test_an_unstated_direction_is_left_to_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Inferring a direction from history is the failure being prevented,
+        so silence here must not be turned into a guess either."""
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 10,'
+            ' "instrument": {"symbol": "ASELS"}, "source_account_id": "1"}}'
+        )
+        state = {**base_state, "user_message": "ASELS 10 adet"}
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_transaction_type_is_not_second_guessed(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "SUBSCRIBE", "quantity": 1,'
+            ' "instrument": {"symbol": "ASELS"}, "source_account_id": "1"}}'
+        )
+        state = {**base_state, "user_message": "ASELS satsana"}
         out = await orchestrator.transaction_node(state)
         assert out["specialist_output"]["status"] == "OK"

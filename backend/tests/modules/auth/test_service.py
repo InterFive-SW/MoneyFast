@@ -104,8 +104,8 @@ def test_create_user_raises_409_when_email_already_registered(mock_db):
 
 
 def test_create_user_persists_and_returns_user_response_on_success(mock_db):
-    # Üç sorgu: TC, e-posta ve kullanıcının mevcut yatırım hesabı.
-    mock_db.query.return_value.filter.return_value.first.side_effect = [None, None, None]
+    # Dört sorgu: TC, e-posta, yatırım hesabı ve mevduat hesabı.
+    mock_db.query.return_value.filter.return_value.first.side_effect = [None] * 4
 
     def _simulate_flush():
         """Gerçek bir flush, Python tarafındaki `default` ile üretilen id'yi
@@ -141,7 +141,7 @@ def test_create_user_persists_and_returns_user_response_on_success(mock_db):
 def test_registration_opens_an_investment_account(mock_db):
     """Bir kullanıcı hesapsız kalırsa işlem yapamaz; ikisi tek transaction'da
     yazılır, aksi halde yarım kalmış bir kayıt erişilebilir olurdu."""
-    mock_db.query.return_value.filter.return_value.first.side_effect = [None, None, None]
+    mock_db.query.return_value.filter.return_value.first.side_effect = [None] * 4
 
     def _simulate_flush():
         for obj in (call.args[0] for call in mock_db.add.call_args_list):
@@ -163,4 +163,32 @@ def test_registration_opens_an_investment_account(mock_db):
     assert float(account.cash_balance) > 0
     # Tek commit: kullanıcı yazılıp hesap yazılmadan araya bir hata girerse
     # ikisi birden geri alınır.
+    mock_db.commit.assert_called_once()
+
+
+def test_registration_opens_a_deposit_account(mock_db):
+    """Bir kullanıcı mevduat hesabı olmadan para gönderemez; kayıt anında
+    açılır ki "para gönder" isteğinin bir kaynağı olsun."""
+    mock_db.query.return_value.filter.return_value.first.side_effect = [None] * 4
+
+    def _simulate_flush():
+        for obj in (call.args[0] for call in mock_db.add.call_args_list):
+            if getattr(obj, "id", None) is None:
+                obj.id = str(uuid.uuid4())
+
+    mock_db.flush.side_effect = _simulate_flush
+    mock_db.refresh.side_effect = lambda user: (
+        setattr(user, "is_active", True),
+        setattr(user, "created_at", datetime.now(timezone.utc)),
+    )
+
+    create_user(RegisterRequest(**VALID_REGISTER_PAYLOAD), mock_db)
+
+    added = [call.args[0] for call in mock_db.add.call_args_list]
+    bank = next(a for a in added if type(a).__name__ == "BankAccount")
+    user = next(a for a in added if type(a).__name__ == "User")
+    assert bank.user_id == str(user.id)
+    assert bank.iban.startswith("TR")
+    assert float(bank.balance) > 0
+    # Hepsi tek commit: yarım kalmış bir kayıt erişilebilir olmamalı.
     mock_db.commit.assert_called_once()

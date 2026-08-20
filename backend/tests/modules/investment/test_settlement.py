@@ -23,12 +23,16 @@ def proposal(
     quantity=10,
     net_amount=3022.26,
     reference_price=301.75,
+    currency="TRY",
+    fx=None,
 ):
-    estimate = {}
+    estimate = {"currency": currency}
     if net_amount is not None:
         estimate["net_amount"] = net_amount
     if reference_price is not None:
         estimate["reference_price"] = reference_price
+    if fx is not None:
+        estimate["fx"] = fx
     return SimpleNamespace(
         id="PROP-1",
         transaction_type=transaction_type,
@@ -38,8 +42,12 @@ def proposal(
     )
 
 
-def account(cash=25000.0):
-    return SimpleNamespace(id="acct-1", cash_balance=cash)
+def account(cash=25000.0, currency="TRY"):
+    return SimpleNamespace(id="acct-1", cash_balance=cash, currency_code=currency)
+
+
+#: A USD proposal carrying the rate it was staged at, as _estimate now records.
+USD_FX = {"rate": 47.9479, "from_currency": "USD", "to_currency": "TRY"}
 
 
 class Fixture:
@@ -234,3 +242,90 @@ class TestEnsureAccount:
         first = service.ensure_account(db, "aaaaaaaa-1111-2222-3333-444444444444")
         second = service.ensure_account(db, "bbbbbbbb-1111-2222-3333-444444444444")
         assert first.account_number != second.account_number
+
+
+class TestForeignCurrency:
+    """The instrument's currency and the account's are different things.
+
+    AAPL is priced in USD; the account holds TRY. Applying `net_amount`
+    straight to `cash_balance` debited 315 TL for a 15.098 TL purchase and
+    credited 4.723 TL for a 226.468 TL sale — destroying 97% of the position's
+    value on the way out.
+    """
+
+    def test_a_usd_buy_debits_the_converted_amount(self):
+        acct = account(500_000.0)
+        service.settle(
+            Fixture().db,
+            proposal(quantity=1, net_amount=315.0, reference_price=314.88,
+                     currency="USD", fx=USD_FX),
+            acct,
+        )
+        spent = 500_000.0 - float(acct.cash_balance)
+        assert spent == pytest.approx(315.0 * 47.9479, rel=1e-6)
+        assert spent > 15_000, "a 15.000 TL purchase must not cost 315 TL"
+
+    def test_a_usd_sell_credits_the_converted_amount(self):
+        """The direction that lost the most money."""
+        position = SimpleNamespace(quantity=15.0, average_buy_price=264.0, updated_at=None)
+        acct = account(1000.0)
+        service.settle(
+            Fixture(position=position).db,
+            proposal(transaction_type="SELL", quantity=15, net_amount=4723.0,
+                     currency="USD", fx=USD_FX),
+            acct,
+        )
+        gained = float(acct.cash_balance) - 1000.0
+        assert gained == pytest.approx(4723.0 * 47.9479, rel=1e-6)
+        assert gained > 200_000
+
+    def test_a_try_trade_is_not_converted(self):
+        acct = account(25000.0)
+        service.settle(Fixture().db, proposal(net_amount=3022.26), acct)
+        assert float(acct.cash_balance) == pytest.approx(25000.0 - 3022.26)
+
+    def test_a_foreign_trade_without_its_rate_is_refused(self):
+        """Settling at 1.0 is what caused the loss. Refusing costs a retry."""
+        acct = account(500_000.0)
+        with pytest.raises(service.SettlementError) as excinfo:
+            service.settle(
+                Fixture().db,
+                proposal(quantity=1, net_amount=315.0, currency="USD", fx=None),
+                acct,
+            )
+        assert "kur" in str(excinfo.value).lower()
+        assert float(acct.cash_balance) == 500_000.0
+
+    def test_a_mismatched_rate_is_refused_rather_than_applied(self):
+        """An fx block naming a different currency pair cannot be trusted to
+        describe this trade."""
+        acct = account(500_000.0)
+        wrong = {"rate": 47.9, "from_currency": "EUR", "to_currency": "TRY"}
+        with pytest.raises(service.SettlementError):
+            service.settle(
+                Fixture().db,
+                proposal(quantity=1, net_amount=315.0, currency="USD", fx=wrong),
+                acct,
+            )
+
+    def test_the_cost_basis_stays_in_the_instruments_currency(self):
+        """`average_buy_price` sits beside a USD price feed and is converted at
+        read time; converting here too would double-convert the P&L."""
+        fix = Fixture(position=None)
+        service.settle(
+            fix.db,
+            proposal(quantity=1, net_amount=315.0, reference_price=314.88,
+                     currency="USD", fx=USD_FX),
+            account(500_000.0),
+        )
+        assert float(fix.added[0].average_buy_price) == pytest.approx(314.88)
+
+    def test_the_insufficient_funds_message_names_the_account_currency(self):
+        acct = account(100.0)
+        with pytest.raises(service.SettlementError) as excinfo:
+            service.settle(
+                Fixture().db,
+                proposal(quantity=1, net_amount=315.0, currency="USD", fx=USD_FX),
+                acct,
+            )
+        assert "TRY" in str(excinfo.value)

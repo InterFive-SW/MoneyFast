@@ -57,6 +57,44 @@ def get_product(db: Session, symbol: str) -> Optional[InvestmentProduct]:
     return db.query(InvestmentProduct).filter(InvestmentProduct.symbol == symbol).first()
 
 
+#: Everyday names for instruments whose ticker nobody types.
+#:
+#: "XAU" is the ISO code for gold and the obvious thing to type, but the
+#: product is XAUUSD named "Altın (Ons/USD)" — so exact match, provider symbol
+#: and name substring all miss, and the request died silently returning zero
+#: rows. Same for "dolar", which is how people ask for USDTRY.
+#:
+#: Keys are folded (see `_fold`): case, Turkish dotless-i and accents are
+#: normalised in Python rather than left to Postgres `upper()`, because the two
+#: disagree on ı/İ and the answer would then depend on the database collation.
+_ALIASES = {
+    "xau": "XAUUSD", "altin": "XAUUSD", "gold": "XAUUSD", "ons": "XAUUSD",
+    "gram altin": "XAUUSD", "ons altin": "XAUUSD",
+    "dolar": "USDTRY", "usd": "USDTRY", "amerikan dolari": "USDTRY",
+    "dolar kuru": "USDTRY", "usdtry": "USDTRY",
+    "euro": "EURTRY", "eur": "EURTRY", "avro": "EURTRY",
+    "bist": "XU100", "bist100": "XU100", "bist 100": "XU100",
+    "endeks": "XU100",
+}
+
+
+def _fold(text: str) -> str:
+    """Casefold with Turkish dotless-i and common accents normalised.
+
+    Done in Python, not via SQL `upper()`: Postgres folds ı/İ differently
+    depending on the database collation, so a name lookup that worked in
+    development could silently stop matching in production.
+    """
+    # Every i-shaped letter collapses to plain "i". Mapping "I" to "ı" instead
+    # would leave "ALTIN" and "altın" folding to different strings, because
+    # translate runs in a single pass and would not fold the result again.
+    table = str.maketrans({
+        "İ": "i", "I": "i", "ı": "i", "Ş": "s", "ş": "s", "Ğ": "g", "ğ": "g",
+        "Ü": "u", "ü": "u", "Ö": "o", "ö": "o", "Ç": "c", "ç": "c", "Â": "a", "â": "a",
+    })
+    return text.translate(table).lower().strip()
+
+
 def resolve_symbol(db: Session, text: str) -> Optional[InvestmentProduct]:
     """Find the instrument a human meant.
 
@@ -74,6 +112,18 @@ def resolve_symbol(db: Session, text: str) -> Optional[InvestmentProduct]:
         # Whitespace is not a lookup. Falling through would query for an empty
         # symbol and, worse, LIKE '%%' would match the entire universe.
         return None
+
+    # Everyday names first: "altın" and "dolar" would otherwise fall through to
+    # a name substring match that depends on the database's collation.
+    aliased = _ALIASES.get(_fold(candidate))
+    if aliased is not None:
+        found = (
+            db.query(InvestmentProduct)
+            .filter(func.upper(InvestmentProduct.symbol) == aliased)
+            .first()
+        )
+        if found is not None:
+            return found
 
     upper = candidate.upper()
     # ".IS" is the provider's suffix; "TEST-" is the historical prefix.
@@ -250,12 +300,24 @@ def upsert_fundamentals(db: Session, rows: list[dict[str, Any]]) -> int:
     Never coalesced to zero: a stock with no earnings data must not screen as
     the cheapest name on the list.
     """
-    products = {p.symbol: p.id for p in db.query(InvestmentProduct).all()}
+    products = {p.symbol: p for p in db.query(InvestmentProduct).all()}
     payload = []
+    renamed = 0
     for row in rows:
-        product_id = products.get(row["symbol"])
-        if product_id is None:
+        product = products.get(row["symbol"])
+        if product is None:
             continue
+        product_id = product.id
+
+        # Backfill the company name while we have it. 84 of 97 products are
+        # stored with name = ticker, which made "Aselsan" unresolvable —
+        # 'ASELS' LIKE '%ASELSAN%' is false because the stored name is shorter
+        # than what the user typed. Only filled when it is still the ticker,
+        # so a curated name is never overwritten by the provider's.
+        provider_name = (row.get("name") or "").strip()
+        if provider_name and product.name == product.symbol:
+            product.name = provider_name
+            renamed += 1
         payload.append(
             {
                 "id": str(uuid.uuid4()),
@@ -285,6 +347,8 @@ def upsert_fundamentals(db: Session, rows: list[dict[str, Any]]) -> int:
     )
     db.execute(statement)
     db.commit()
+    if renamed:
+        log.info("backfilled %d instrument names", renamed)
     return len(payload)
 
 
@@ -494,6 +558,9 @@ def holdings(
                 "name": product.name,
                 "market": product.market,
                 "currency": product.currency_code,
+                # Carried so the MCP contract can report a real asset_class;
+                # every position used to be labelled EQUITY, gold included.
+                "product_type": product.product_type,
                 "quantity": quantity,
                 "avg_cost": avg_cost,
                 "price": price,

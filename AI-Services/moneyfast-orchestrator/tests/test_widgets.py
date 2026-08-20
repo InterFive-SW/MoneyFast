@@ -134,7 +134,10 @@ class TestPortfolioWidget:
         assert widget["type"] == "portfolio"
         assert widget["payload"]["total_value"] == 555035.0
         assert len(widget["payload"]["positions"]) == 1
-        assert topic == "Portföy"
+        # No context topic: the table is already rendered inline, and the
+        # panel would open showing a live price for "Portföy", which is not an
+        # instrument.
+        assert topic is None
 
     def test_freshness_travels_with_the_figures(self):
         """The contract forbids restating quantities without their as_of and
@@ -210,3 +213,92 @@ class TestStaleStateGuard:
         assert widgets.build(
             {"specialist_output": {"agent": "PORTFOLIO_AGENT", "status": "OK", "data": PORTFOLIO}}
         ) == (None, None)
+
+
+class TestTransferWidget:
+    """A transfer is not a trade. It used to render as "Satım" with a blank
+    ticker, because the direction was computed as "buy, or else sell"."""
+
+    def _state(self, summary, estimate=None):
+        return {
+            "target_agent": "TRANSACTION_AGENT",
+            "specialist_output": {
+                "agent": "TRANSACTION_AGENT",
+                "status": "OK",
+                "data": {
+                    "proposal_id": "PROP-1",
+                    "status": "PENDING_USER_CONFIRMATION",
+                    "confirmation_required": True,
+                    "summary": summary,
+                    "estimate": estimate or {"net_amount": 200.0, "currency": "TRY"},
+                },
+            },
+        }
+
+    def test_a_transfer_names_the_destination_not_a_ticker(self):
+        widget, topic = widgets.build(self._state({
+            "transaction_type": "TRANSFER",
+            "destination_account_id": "1000000000002",
+        }))
+        assert "1000000000002" in widget["payload"]["message"]
+        assert "Satım" not in widget["payload"]["message"]
+        assert widget["payload"]["action"] == "transfer"
+        # A transfer has no instrument, so no context panel: the panel shows a
+        # live price and instrument news, and a transfer has neither.
+        assert topic is None
+
+    def test_a_sell_still_reads_as_a_sale(self):
+        widget, _ = widgets.build(self._state({
+            "transaction_type": "SELL", "symbol": "ASELS", "quantity": 10,
+        }))
+        assert "Satım" in widget["payload"]["message"]
+        assert widget["payload"]["action"] == "sell"
+
+    def test_a_buy_still_reads_as_a_purchase(self):
+        widget, _ = widgets.build(self._state({
+            "transaction_type": "BUY", "symbol": "ASELS", "quantity": 10,
+        }))
+        assert "Alım" in widget["payload"]["message"]
+        assert widget["payload"]["action"] == "buy"
+
+    def test_an_unrecognised_type_is_not_displayed_as_a_sale(self):
+        """The old fallback rendered anything unknown as "Satım" — a type
+        nobody handled was shown to the user as a sale of their holdings."""
+        widget, _ = widgets.build(self._state({
+            "transaction_type": "SUBSCRIBE", "symbol": "XYZ", "quantity": 1,
+        }))
+        assert "Satım" not in widget["payload"]["message"]
+        assert widget["payload"]["action"] == "unknown"
+
+
+class TestContextTopic:
+    """The topic drives a side panel that shows a live price and news for one
+    instrument. Anything that is not a ticker must not open it — the panel used
+    to appear mid-transaction showing a price for the word "Portföy"."""
+
+    def _action_state(self, summary):
+        return {
+            "target_agent": "TRANSACTION_AGENT",
+            "specialist_output": {
+                "agent": "TRANSACTION_AGENT", "status": "OK",
+                "data": {
+                    "proposal_id": "PROP-1",
+                    "status": "PENDING_USER_CONFIRMATION",
+                    "confirmation_required": True,
+                    "summary": summary,
+                    "estimate": {"net_amount": 100.0, "currency": "TRY"},
+                },
+            },
+        }
+
+    def test_a_real_ticker_becomes_the_topic(self):
+        _, topic = widgets.build(self._action_state({
+            "transaction_type": "BUY", "symbol": "ASELS", "quantity": 1,
+        }))
+        assert topic == "ASELS"
+
+    def test_a_trade_without_a_symbol_opens_no_panel(self):
+        _, topic = widgets.build(self._action_state({
+            "transaction_type": "BUY", "quantity": 1,
+        }))
+        assert topic is None

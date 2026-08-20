@@ -89,6 +89,18 @@ dondurulmuş. Sürüm geçmişi:
 |---|---|
 | v2.1 | Altı tool: `get_portfolio_positions`, `rag_semantic_market_search`, `calculate_portfolio_risk_metrics`, `prepare_transaction_proposal`, `validate_compliance_rules`, `route_user_request` |
 | **v2.2** | **`get_market_data` eklendi.** Mevcut altı tool'un şeması değişmedi. |
+| **v2.3** | `get_portfolio_positions` → `totals.cash_balance` ve `totals.total_value` (eklemeli). `prepare_transaction_proposal` → `source_account_id` artık opsiyonel. |
+
+v2.3 neden gerekti: sözleşmede **nakit yoktu**. `totals` yalnızca piyasa
+değeri, maliyet, K/Z ve pozisyon sayısı taşıyordu, dolayısıyla "bakiyem ne
+kadar" sorusuna ajan ya portföyün piyasa değerini bakiye diye söylüyor ya da
+bilgiyi bulamıyordu. `null` "bilinmiyor" demek — sıfır olarak raporlanmaz,
+çünkü sıfır bir iddiadır ve yanlış olanıdır.
+
+`source_account_id` aynı sürümde opsiyonele çevrildi: zorunluyken sohbet
+kullanıcıdan hiç doğrulanmayan bir hesap kimliği istiyordu ve gelen "1" değeri
+kabul edilip hiçbir yerde kullanılmıyordu. Artık backend çağıranın kendi
+hesabını çözüyor.
 
 `get_market_data` neden gerekti: altı tool portföy, doküman, risk, işlem
 hazırlama ve yönlendirmeyi kapsıyordu; hiçbiri **kullanıcının sahip olmadığı**

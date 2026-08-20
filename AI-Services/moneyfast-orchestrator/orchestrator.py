@@ -60,14 +60,10 @@ GENERIC_FAILURE_TR = (
     "Şu anda yanıtı hazırlayamadım. Kısa bir süre sonra tekrar deneyebilir "
     "misiniz?"
 )
-#: Transaction types the backend recognises as money transfers.
-TRANSFER_TYPES = frozenset({"TRANSFER", "EFT", "HAVALE", "TRANSFER_INTERNAL", "TRANSFER_EXTERNAL"})
-
-TRANSFER_UNSUPPORTED_TR = (
-    "Para transferi şu anda desteklenmiyor; bu asistan yalnızca yatırım "
-    "işlemlerini hazırlayabiliyor. Transferi bankacılık ekranından "
-    "yapmanız gerekiyor."
-)
+#: Transaction types the backend recognises as money transfers. The tool
+#: docstring once documented TRANSFER_INTERNAL/EXTERNAL, which the backend
+#: rejects — the three the backend accepts are the contract.
+TRANSFER_TYPES = frozenset({"TRANSFER", "EFT", "HAVALE"})
 
 DATA_FAILURE_TR = (
     "Verilere şu anda ulaşamadım, bu yüzden sayı paylaşmayacağım. "
@@ -398,27 +394,31 @@ async def transaction_node(state: MoneyFastState) -> dict[str, Any]:
         }
     args = dict(plan["arguments"])
 
-    # Money transfers are not supported. Banking is unimplemented, so a
-    # transfer staged here would be routed through the SECURITIES path: costed
-    # with brokerage commission and BSMV, rendered by the widget as a "Satım"
-    # with a blank ticker, and confirmed into a proposal that moves nothing.
-    # Declining is the honest answer; the previous behaviour looked like it
-    # worked, which is worse than a refusal.
-    if str(args.get("transaction_type", "")).upper() in TRANSFER_TYPES:
+    # Transfers are staged like trades and confirmed by the user. They settle
+    # against the banking ledger, not the investment account — routing them
+    # through securities settlement is what produced a "Satım" with a blank
+    # ticker, priced with brokerage commission.
+
+    # Direction before amount: staging the wrong side of a trade is worse than
+    # staging the wrong size of one.
+    inverted = _direction_contradicts_message(state, args)
+    if inverted is not None:
+        emitted, stated = inverted.split("!=")
         return {
             "specialist_output": {
                 "agent": "TRANSACTION_AGENT",
-                "status": "UNSUPPORTED",
-                "tool": None,
-                "data": None,
-                "instruction": TRANSFER_UNSUPPORTED_TR,
+                "status": "NEEDS_INPUT",
+                "missing_fields": ["transaction_type"],
+                "clarification_request": (
+                    "İşlemin yönünden emin olamadım: mesajınızı "
+                    f"{'satış' if stated == 'SELL' else 'alış'} olarak okudum ama "
+                    "hazırlanan öneri "
+                    f"{'alış' if emitted == 'BUY' else 'satış'} yönündeydi. "
+                    "Alım mı satım mı yapmak istiyorsunuz?"
+                ),
             }
         }
 
-    # The amount must come from THIS turn. The planner sees the last six turns
-    # verbatim, and with no precedence rule it read "250 lira" from the
-    # previous message while the user had just said "200 lira at" -- staging a
-    # figure the user never asked for in the turn they were answering.
     mismatch = _amount_not_in_current_turn(state, args)
     if mismatch is not None:
         return {
@@ -763,6 +763,88 @@ async def _repair_args(
     # identically and cost another round trip.
     merged = {**args, **repaired}
     return merged if merged != args else None
+
+
+#: Verb forms that state a direction, matched on whole words.
+#:
+#: Curated forms rather than a prefix like `al*`, because in this domain `al*`
+#: also matches **altın** (gold) — "altın fiyatı ne kadar" would read as a buy
+#: order. `sat*` is safer but still needs `satın` carved out, since "satın al"
+#: is a purchase that contains the sell stem.
+_SELL_FORMS = (
+    "satsana", "satsanıza", "satalım", "satayım", "satacağım", "satacagim",
+    "satıcam", "saticam", "satmak", "satıyorum", "satiyorum", "satabilir",
+    "satar", "satış", "satis", "satın", "sat", "bozdur", "bozdurayım",
+)
+_BUY_FORMS = (
+    "alsana", "alsanıza", "alayım", "alalım", "alacağım", "alacagim",
+    "alıcam", "alicam", "almak", "alıyorum", "aliyorum", "alabilir",
+    "alırım", "alirim", "alım", "alim", "al",
+)
+_SELL_PHRASES = ("elden çıkar", "elden cikar", "nakde çevir", "nakde cevir")
+_BUY_PHRASES = ("satın al", "satin al")
+
+
+def _fold(text: str) -> str:
+    """Lowercase with Turkish dotted/dotless i folded together.
+
+    `str.lower()` leaves "İ" intact on some inputs and maps "I" to "i" rather
+    than "ı", and users type both. Folding here keeps the verb match from
+    depending on which keyboard produced the message.
+    """
+    table = str.maketrans({"İ": "i", "I": "ı", "Î": "i"})
+    return text.translate(table).lower()
+
+
+def _has_word(folded: str, forms: tuple[str, ...]) -> bool:
+    """Whole-word match, so "al" does not fire inside "altın" or "alan"."""
+    return any(re.search(rf"(?<!\w){re.escape(form)}(?!\w)", folded) for form in forms)
+
+
+def _stated_direction(message: str) -> Optional[str]:
+    """BUY / SELL when the user's own words say so, else None.
+
+    "satın al" is checked first because it contains "sat": without that, every
+    purchase phrased that way would read as a sale.
+    """
+    folded = _fold(message or "")
+    if any(phrase in folded for phrase in _BUY_PHRASES):
+        return "BUY"
+    if any(phrase in folded for phrase in _SELL_PHRASES):
+        return "SELL"
+    if _has_word(folded, _SELL_FORMS):
+        return "SELL"
+    if _has_word(folded, _BUY_FORMS):
+        return "BUY"
+    return None
+
+
+def _direction_contradicts_message(
+    state: MoneyFastState, args: dict[str, Any]
+) -> Optional[str]:
+    """The planner's direction against the user's verb.
+
+    "10 tane aselsan satsana" was staged as a BUY and settled. The prompt now
+    names the verbs, but a prompt is guidance; this is the check. It also
+    matters that a flipped direction SKIPS the sell-side inventory guard in the
+    backend and lands in the cash check instead, so the mistake surfaces as a
+    successful purchase rather than an error.
+
+    Returns None when the user stated no direction — inferring one from history
+    is exactly the failure being prevented, so an unstated direction is left to
+    the tool's own validation.
+    """
+    stated = _stated_direction(state.get("user_message") or "")
+    if stated is None:
+        return None
+    emitted = str(args.get("transaction_type") or "").upper()
+    if emitted in ("BUY", "ALIS", "ALIŞ"):
+        emitted = "BUY"
+    elif emitted in ("SELL", "SATIS", "SATIŞ"):
+        emitted = "SELL"
+    else:
+        return None
+    return None if emitted == stated else f"{emitted}!={stated}"
 
 
 def _amount_not_in_current_turn(

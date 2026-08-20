@@ -87,7 +87,7 @@ def ai_client(mocker, holdings, quotes, resolved, cash):
     mocker.patch.object(market_service, "latest_quotes", return_value=quotes)
     mocker.patch.object(market_service, "resolve_symbol", side_effect=resolved)
     mocker.patch.object(
-        market_service, "account", return_value=SimpleNamespace(id="acct-1", cash_balance=cash)
+        market_service, "account", return_value=SimpleNamespace(id="acct-1", cash_balance=cash, currency_code="TRY", account_number="TR-TEST-0001")
     )
     app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
     try:
@@ -319,3 +319,200 @@ class TestBuyingPower:
         quoted = float(blocker.split("birlikte ")[1].split(" ")[0].replace(",", ""))
         gross = 100 * quotes["THYAO"]["price"]
         assert quoted > gross, "fees must be part of what the balance has to cover"
+
+
+class TestForeignCurrencyStaging:
+    """A USD instrument costs USD; the account holds TRY.
+
+    Comparing the two without converting made a foreign purchase look ~48x
+    cheaper than it is, which is how an unaffordable order passed the funds
+    check. The blocker message also labelled BOTH sides with the instrument's
+    currency, so a TRY balance was reported as USD.
+    """
+
+    @pytest.fixture
+    def cash(self):
+        return 20_000.0
+
+    @pytest.fixture
+    def resolved(self):
+        def _resolve(_db, text):
+            symbol = (text or "").upper()
+            if symbol in {"AAPL", "XAUUSD"}:
+                return Product(symbol, "USD", "NASDAQ")
+            return Product("THYAO") if symbol == "THYAO" else None
+        return _resolve
+
+    @pytest.fixture
+    def quotes(self):
+        return {
+            "THYAO": {"price": 304.0},
+            "AAPL": {"price": 314.88},
+            "XAUUSD": {"price": 4577.90},
+            "USDTRY": {"price": 47.9479},
+        }
+
+    def _stage(self, client, **overrides):
+        body = stage_body(**overrides)
+        return client.post("/api/investment/transactions/stage", json=body).json()
+
+    def test_a_usd_purchase_is_measured_in_the_accounts_currency(self, ai_client):
+        """1 AAPL is ~15.098 TL, not 315 TL. With a 20.000 TL balance it is
+        affordable — but only just, and for the right reason."""
+        result = self._stage(ai_client, instrument={"symbol": "AAPL"}, quantity=1)
+        assert result["status"] == "PENDING_USER_CONFIRMATION"
+
+    def test_an_unaffordable_usd_purchase_is_blocked(self, ai_client):
+        """2 AAPL is ~30.000 TL against a 20.000 TL balance. Before the fix
+        this compared 630 USD to 20.000 and sailed through."""
+        result = self._stage(ai_client, instrument={"symbol": "AAPL"}, quantity=2)
+        assert result["status"] == "REJECTED_VALIDATION"
+        blocker = next(b for b in result["blockers"] if "Bakiye yetersiz" in b)
+        assert "TRY" in blocker, "both sides must be quoted in the account's currency"
+        assert "USD" not in blocker
+
+    def test_the_proposal_records_the_rate_it_was_priced_at(self, ai_client):
+        """Settlement reads this rather than re-fetching: the user approved a
+        cost computed at this rate."""
+        result = self._stage(ai_client, instrument={"symbol": "AAPL"}, quantity=1)
+        fx = result["estimate"]["fx"]
+        assert fx["from_currency"] == "USD"
+        assert fx["to_currency"] == "TRY"
+        assert fx["rate"] == pytest.approx(47.9479, rel=1e-4)
+
+    def test_a_try_trade_records_no_conversion(self, ai_client):
+        result = self._stage(ai_client, instrument={"symbol": "THYAO"}, quantity=1)
+        assert result["estimate"]["fx"] is None
+
+
+class TestMissingExchangeRate:
+    """No USDTRY quote ingested. Guessing at 1.0 is what let a 15.000 TL
+    position be bought for 315 TL, so the trade is refused instead."""
+
+    @pytest.fixture
+    def cash(self):
+        return 1_000_000.0
+
+    @pytest.fixture
+    def resolved(self):
+        return lambda _db, text: (
+            Product("AAPL", "USD", "NASDAQ") if (text or "").upper() == "AAPL" else None
+        )
+
+    @pytest.fixture
+    def quotes(self):
+        # Deliberately no USDTRY.
+        return {"AAPL": {"price": 314.88}}
+
+    def test_a_foreign_purchase_without_a_rate_is_refused(self, ai_client):
+        result = ai_client.post(
+            "/api/investment/transactions/stage",
+            json=stage_body(instrument={"symbol": "AAPL"}, quantity=1),
+        ).json()
+        assert result["status"] == "REJECTED_VALIDATION"
+        assert any("kur" in b.lower() for b in result["blockers"])
+
+    def test_no_fx_block_is_invented(self, ai_client):
+        """A proposal cannot carry a rate nobody measured."""
+        from app.modules.investment import ai_service
+
+        assert ai_service._fx_block("USD", "TRY", {"TRY": 1.0}) is None
+        assert ai_service._fx_block("USD", "TRY", None) is None
+        assert ai_service._fx_block("TRY", "TRY", {"TRY": 1.0}) is None
+
+
+class TestSourceAccountResolution:
+    """`source_account_id` was stored but never validated, so the chat asked
+    for an id, accepted "1", and used it for nothing — then confirm could not
+    find the account and the transfer failed after the user had approved it."""
+
+    def _resolve(self, **kwargs):
+        from app.modules.investment.router import _resolve_source_account
+
+        defaults = dict(
+            db=MagicMock(spec=Session), requested=None, owner=None,
+            owner_id="user-1", transaction_type="BUY",
+        )
+        defaults.update(kwargs)
+        return _resolve_source_account(**defaults)
+
+    def _owner(self, number="TR-INV-1"):
+        return SimpleNamespace(id="acct-1", account_number=number)
+
+    def test_a_trade_defaults_to_the_investment_account(self):
+        assert self._resolve(owner=self._owner()) == "TR-INV-1"
+
+    def test_a_meaningless_id_is_replaced_not_trusted(self):
+        """"1" is what users typed when asked for an account id."""
+        assert self._resolve(requested="1", owner=self._owner()) == "TR-INV-1"
+
+    def test_the_users_own_account_number_is_honoured(self):
+        assert self._resolve(requested="TR-INV-1", owner=self._owner()) == "TR-INV-1"
+
+    def test_with_no_account_the_request_is_left_alone(self):
+        """Nothing to substitute; the tool's own validation reports it."""
+        assert self._resolve(requested="whatever", owner=None) == "whatever"
+
+    def test_a_transfer_uses_the_deposit_account(self, mocker):
+        from app.modules.banking import service as banking_service
+
+        mocker.patch.object(
+            banking_service, "ensure_account",
+            return_value=SimpleNamespace(account_number="1000000000001"),
+        )
+        assert self._resolve(transaction_type="TRANSFER") == "1000000000001"
+
+    def test_a_transfer_honours_a_deposit_account_the_user_owns(self, mocker):
+        from app.modules.banking import service as banking_service
+
+        mocker.patch.object(
+            banking_service, "find_account",
+            return_value=SimpleNamespace(account_number="1000000000009", user_id="user-1"),
+        )
+        assert self._resolve(
+            requested="1000000000009", transaction_type="TRANSFER"
+        ) == "1000000000009"
+
+    def test_a_transfer_from_someone_elses_account_falls_back_to_your_own(self, mocker):
+        """Silently substituting is safe here — the transfer service checks
+        ownership again and would refuse it anyway."""
+        from app.modules.banking import service as banking_service
+
+        mocker.patch.object(
+            banking_service, "find_account",
+            return_value=SimpleNamespace(account_number="1000000000002", user_id="someone-else"),
+        )
+        mocker.patch.object(
+            banking_service, "ensure_account",
+            return_value=SimpleNamespace(account_number="1000000000001"),
+        )
+        assert self._resolve(
+            requested="1000000000002", transaction_type="TRANSFER"
+        ) == "1000000000001"
+
+    def test_an_anonymous_transfer_keeps_what_was_asked_for(self, mocker):
+        assert self._resolve(
+            requested="1000000000002", owner_id=None, transaction_type="TRANSFER"
+        ) == "1000000000002"
+
+
+class TestTransferPricing:
+    """A transfer is not a brokerage order. Charging it commission and BSMV
+    priced a 200 TL transfer at 200,30 TL."""
+
+    def test_no_commission_or_tax_is_applied(self):
+        from app.modules.investment import ai_service
+
+        estimate = ai_service._estimate(
+            "TRANSFER", None, {"amount": 200.0, "currency": "TRY"}, None, None, "TRY"
+        )
+        assert estimate["net_amount"] == pytest.approx(200.0)
+        assert estimate["fees"] == []
+        assert estimate["taxes"] == []
+
+    def test_a_trade_still_carries_its_fees(self):
+        from app.modules.investment import ai_service
+
+        estimate = ai_service._estimate("BUY", 10, None, 100.0, None, "TRY")
+        assert estimate["net_amount"] > 1000.0
+        assert estimate["fees"]

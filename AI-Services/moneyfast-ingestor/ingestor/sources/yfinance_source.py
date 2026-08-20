@@ -138,6 +138,11 @@ def fetch_fundamentals(products: Iterable[dict[str, str]]) -> list[dict[str, Any
         rows.append(
             {
                 "symbol": product["symbol"],
+                # The company's real name. 84 of 97 products are stored with
+                # name = ticker, so "Aselsan" could not be resolved at all:
+                # 'ASELS' LIKE '%ASELSAN%' is false because the stored name is
+                # SHORTER than what the user typed.
+                "name": info.get("longName") or info.get("shortName") or None,
                 "pe_ratio": _clean_number(info.get("trailingPE")),
                 "pb_ratio": _clean_number(info.get("priceToBook")),
                 "market_cap": _int_or_none(info.get("marketCap")),

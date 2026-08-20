@@ -370,3 +370,97 @@ class TestAccountResolution:
         db = MagicMock(spec=Session)
         db.query.return_value.filter.return_value.first.return_value = None
         assert market_service.holdings(db, user_id="ghost") == []
+
+
+class TestAliasResolution:
+    """The names people actually type.
+
+    "XAU" is the ISO code for gold and the obvious thing to write, but the
+    product is XAUUSD named "Altın (Ons/USD)" — exact match, provider symbol
+    and name substring all miss it, so the request returned zero rows in
+    silence and the assistant said it had no data.
+    """
+
+    def _db(self, found=None):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = found
+        return db
+
+    @pytest.mark.parametrize(
+        "typed,expected",
+        [
+            ("XAU", "XAUUSD"), ("xau", "XAUUSD"), ("altın", "XAUUSD"),
+            ("ALTIN", "XAUUSD"), ("gold", "XAUUSD"), ("ons", "XAUUSD"),
+            ("dolar", "USDTRY"), ("Dolar", "USDTRY"), ("USD", "USDTRY"),
+            ("euro", "EURTRY"), ("EUR", "EURTRY"), ("avro", "EURTRY"),
+            ("bist100", "XU100"), ("BIST 100", "XU100"),
+        ],
+    )
+    def test_everyday_names_resolve(self, typed, expected):
+        target = product(expected)
+        db = self._db(found=target)
+        assert market_service.resolve_symbol(db, typed) is target
+
+    def test_the_alias_lookup_asks_for_the_right_symbol(self):
+        db = self._db(found=product("XAUUSD"))
+        market_service.resolve_symbol(db, "altın")
+        # The filter is built from the aliased symbol, not the typed word.
+        assert db.query.return_value.filter.called
+
+    def test_turkish_dotless_i_folds_the_same_either_way(self):
+        """`upper()` in Postgres folds ı/İ by collation, so the answer would
+        otherwise depend on how the database was created."""
+        assert market_service._fold("ALTIN") == market_service._fold("altın")
+        assert market_service._fold("İSTANBUL") == market_service._fold("istanbul")
+
+    def test_an_alias_whose_product_is_missing_falls_through(self):
+        """A seeded alias pointing at an instrument that is not in this
+        deployment must not shadow the normal lookup."""
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.side_effect = [None, None, None]
+        db.query.return_value.filter.return_value.limit.return_value.all.return_value = []
+        assert market_service.resolve_symbol(db, "gold") is None
+
+    def test_a_normal_ticker_is_unaffected(self):
+        target = product("THYAO")
+        assert market_service.resolve_symbol(Resolver(exact=target).db, "THYAO") is target
+
+
+class TestNameBackfill:
+    """84 of 97 products are stored with name = ticker, which made "Aselsan"
+    unresolvable: 'ASELS' LIKE '%ASELSAN%' is false because the stored name is
+    SHORTER than what the user typed."""
+
+    def _db(self, product):
+        db = MagicMock(spec=Session)
+        db.query.return_value.all.return_value = [product]
+        db.execute.return_value = SimpleNamespace(rowcount=1)
+        return db
+
+    def test_a_placeholder_name_is_replaced(self):
+        row = product("ASELS", name="ASELS")
+        market_service.upsert_fundamentals(
+            self._db(row), [{"symbol": "ASELS", "name": "Aselsan Elektronik"}]
+        )
+        assert row.name == "Aselsan Elektronik"
+
+    def test_a_real_name_is_never_overwritten(self):
+        """Six products carry curated Turkish names from migration 0005. The
+        provider's version must not clobber them."""
+        row = product("THYAO", name="Türk Hava Yolları A.O.")
+        market_service.upsert_fundamentals(
+            self._db(row), [{"symbol": "THYAO", "name": "Turkish Airlines Inc."}]
+        )
+        assert row.name == "Türk Hava Yolları A.O."
+
+    def test_a_missing_provider_name_leaves_the_placeholder(self):
+        row = product("ASELS", name="ASELS")
+        market_service.upsert_fundamentals(self._db(row), [{"symbol": "ASELS"}])
+        assert row.name == "ASELS"
+
+    def test_a_blank_provider_name_is_ignored(self):
+        row = product("ASELS", name="ASELS")
+        market_service.upsert_fundamentals(
+            self._db(row), [{"symbol": "ASELS", "name": "   "}]
+        )
+        assert row.name == "ASELS"

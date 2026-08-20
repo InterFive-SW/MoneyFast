@@ -105,3 +105,52 @@ class TestLazyLoading:
 
         assert first is second
         assert loads == ["sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"]
+
+
+class TestDoubleCheckedLocking:
+    """The second `if _model is None` inside the lock.
+
+    It exists because uvicorn serves concurrently: two cold requests can both
+    pass the outer check, and without the inner one the loser would load the
+    model a second time and overwrite the winner's instance. Driven
+    deterministically here — a real race would make the test flaky, which is
+    worse than not testing it.
+    """
+
+    def test_a_model_loaded_while_waiting_for_the_lock_is_reused(self, monkeypatch):
+        sentinel = object()
+
+        class LockThatLoadsFirst:
+            """Stands in for another thread finishing the load while this one
+            waits at the lock."""
+
+            def __enter__(self):
+                embeddings._model = sentinel
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(embeddings, "_model", None)
+        monkeypatch.setattr(embeddings, "_lock", LockThatLoadsFirst())
+
+        def _explode(*args, **kwargs):  # pragma: no cover - must not run
+            raise AssertionError("the model was loaded twice")
+
+        monkeypatch.setattr(embeddings, "model_name", _explode)
+
+        assert embeddings.get_model() is sentinel
+
+    def test_an_already_loaded_model_never_takes_the_lock(self, monkeypatch):
+        sentinel = object()
+        monkeypatch.setattr(embeddings, "_model", sentinel)
+
+        class LockThatMustNotBeUsed:
+            def __enter__(self):  # pragma: no cover - must not run
+                raise AssertionError("the lock was taken for a loaded model")
+
+            def __exit__(self, *exc):  # pragma: no cover - must not run
+                return False
+
+        monkeypatch.setattr(embeddings, "_lock", LockThatMustNotBeUsed())
+        assert embeddings.get_model() is sentinel

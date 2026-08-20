@@ -16,7 +16,7 @@ import { useChat } from '../context/ChatContext';
  */
 export default function Chat() {
   const { 
-    sessions, activeSessionId, messages, isTyping, currentThought, activeContext, 
+    sessions, activeSessionId, messages, isTyping, currentThought, activeContext, dismissContext,
     handleSendMessage, createNewSession, loadSession, deleteSession 
   } = useChat();
   
@@ -144,7 +144,7 @@ export default function Chat() {
       {/* Akıllı Bağlam Paneli (Sadece mesaj varsa ve Desktop'ta görünür) */}
       {hasMessages && activeContext && (
         <div className="hidden lg:block w-80 xl:w-96 h-full border-l border-white/10 bg-slate-900/50">
-          <ContextPanel contextTopic={activeContext} />
+          <ContextPanel symbol={activeContext} onClose={dismissContext} />
         </div>
       )}
       

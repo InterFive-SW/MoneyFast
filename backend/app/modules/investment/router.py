@@ -362,9 +362,13 @@ async def get_portfolio_positions_for_ai(
     # here rather than inside ai_service keeps that module free of database
     # concerns and unit-testable without a session.
     quotes = market_service.latest_quotes(db)
+    owner = market_service.account(db, user_id=user_id)
     payload, _ = ai_service.build_portfolio(
         user_id=user_id,
         holdings=market_service.holdings(db, user_id=user_id),
+        # Cash, so the assistant can answer "bakiyem ne kadar" instead of
+        # quoting the portfolio's market value as if it were a balance.
+        cash_balance=float(owner.cash_balance) if owner is not None else None,
         account_ids=account_ids,
         asset_classes=asset_classes,
         include_closed=include_closed,
@@ -431,6 +435,19 @@ async def stage_transaction(
     owner_id = authenticated_user_id or request.user_id
     owner = market_service.account(db, user_id=owner_id)
 
+    # The caller's own account, when they did not name one. `source_account_id`
+    # was previously stored without ever being validated, so the chat asked for
+    # an id, accepted "1", and used it for nothing. A user has one account of
+    # each kind; making them recite its number is friction with no purpose.
+    body["source_account_id"] = _resolve_source_account(
+        db, body.get("source_account_id"), owner, owner_id, body.get("transaction_type")
+    )
+
+    # Rates for the funds check and for the fx block recorded on the proposal.
+    # Same helper the portfolio view uses, so the two cannot disagree about
+    # what a dollar is worth.
+    rates = ai_service.fx_rates(market_service.latest_quotes(db))
+
     reference_price = None
     held_quantity = None
     currency = "TRY"
@@ -454,6 +471,8 @@ async def stage_transaction(
         resolved_symbol=product.symbol if product else None,
         currency=currency,
         available_cash=float(owner.cash_balance) if owner is not None else None,
+        cash_currency=(owner.currency_code if owner is not None else "TRY") or "TRY",
+        rates=rates,
     )
 
     # Persisted so the confirm step can be verified. Without a record,
@@ -463,7 +482,13 @@ async def stage_transaction(
     # Only confirmable proposals are stored: a rejected or incomplete one is
     # a message to the user, not something that can later be acted on.
     if proposal["status"] == "PENDING_USER_CONFIRMATION":
-        _persist_proposal(db, request, proposal, owner_id=authenticated_user_id)
+        _persist_proposal(
+            db, request, proposal,
+            owner_id=authenticated_user_id,
+            # The RESOLVED account, not what the caller typed. Persisting the
+            # raw value stored "1" and confirm then could not find it.
+            source_account_id=body.get("source_account_id"),
+        )
 
     return proposal
 
@@ -473,6 +498,7 @@ def _persist_proposal(
     request: StageTransactionRequest,
     proposal: dict,
     owner_id: Optional[str] = None,
+    source_account_id: Optional[str] = None,
 ) -> None:
     """`owner_id` doğrulanmış kimlik; yoksa gövdedeki değere düşer.
 
@@ -497,7 +523,7 @@ def _persist_proposal(
             transaction_type=summary.get("transaction_type") or request.transaction_type,
             symbol=summary.get("symbol"),
             quantity=summary.get("quantity"),
-            source_account_id=request.source_account_id,
+            source_account_id=source_account_id or request.source_account_id,
             destination_account_id=request.destination_account_id,
             order_type=summary.get("order_type") or request.order_type,
             payload=proposal,
@@ -562,6 +588,12 @@ async def confirm_transaction_proposal(
             detail="Bu önerinin süresi doldu. Lütfen işlemi yeniden hazırlatın.",
         )
 
+    # A transfer settles against the BANKING ledger, not the investment
+    # account. Routing it through securities settlement is what produced a
+    # "Satım" with a blank ticker.
+    if (proposal.transaction_type or "").upper() in ai_service.TRANSFER_TYPES:
+        return _confirm_transfer(db, proposal, user_id, now)
+
     # Settle before flipping the status, in ONE transaction. Marking a trade
     # confirmed and then failing to move the money would leave the order list
     # saying "Gerçekleşti" over an unchanged portfolio — the inconsistency this
@@ -591,6 +623,83 @@ async def confirm_transaction_proposal(
         "message": (
             f"İşlem onaylandı (Öneri No: {proposal.id}). "
             f"Kalan bakiye: {applied['cash_after']:,.2f} TL."
+        ),
+    }
+
+
+def _resolve_source_account(
+    db: Session,
+    requested: Optional[str],
+    owner,
+    owner_id: Optional[str],
+    transaction_type: Optional[str],
+) -> Optional[str]:
+    """The account this transaction draws on.
+
+    A transfer draws on the deposit account; a trade on the investment one.
+    An id the caller supplied is honoured only if it is genuinely theirs —
+    otherwise it is replaced rather than trusted, because it was never checked
+    before and "1" was accepted as a real account.
+    """
+    from app.modules.banking import service as banking_service
+
+    is_transfer = (transaction_type or "").upper() in ai_service.TRANSFER_TYPES
+
+    if is_transfer:
+        if requested:
+            named = banking_service.find_account(db, requested)
+            if named is not None and named.user_id == owner_id:
+                return named.account_number
+        if owner_id:
+            return banking_service.ensure_account(db, owner_id).account_number
+        return requested
+
+    if requested and owner is not None and requested == owner.account_number:
+        return requested
+    return owner.account_number if owner is not None else requested
+
+
+def _confirm_transfer(db: Session, proposal, user_id, now) -> Dict[str, str]:
+    """Apply a confirmed transfer through the banking ledger.
+
+    `banking.service.transfer` commits its own transaction (both legs plus the
+    transaction row), so the proposal's status is written immediately after and
+    committed separately. The ordering matters: a transfer that moved money but
+    left the proposal pending can be re-read from the ledger by its reference
+    number, whereas the reverse — a proposal marked confirmed with no ledger
+    entry — leaves nothing to reconcile against.
+    """
+    from app.modules.banking import service as banking_service
+
+    amount = ((proposal.payload or {}).get("estimate") or {}).get("net_amount")
+    if amount is None:
+        raise HTTPException(
+            status_code=409, detail="Bu transferin tutar bilgisi eksik."
+        )
+
+    try:
+        result = banking_service.transfer(
+            db,
+            user_id=proposal.user_id or user_id,
+            source_reference=proposal.source_account_id or "",
+            destination_reference=proposal.destination_account_id or "",
+            amount=float(amount),
+        )
+    except banking_service.TransferError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    proposal.confirmed_at = now
+    proposal.status = "CONFIRMED"
+    db.commit()
+
+    return {
+        "proposal_id": proposal.id,
+        "status": "confirmed",
+        "message": (
+            f"Transfer tamamlandı (Dekont No: {result['reference_number']}). "
+            f"Kalan bakiye: {result['source_balance_after']:,.2f} "
+            f"{result['currency']}."
         ),
     }
 

@@ -39,6 +39,15 @@ backend modülleri (auth, banking, investment, notification, analytics, market,
 risk, compliance) network sınırı olmadan, aynı process içinde, doğrudan Python
 import'uyla birbirini çağırır.
 
+`banking` artık gerçek: `banking.accounts` + `banking.transactions` +
+`banking.account_transactions` (migration 0008). Transfer, çift taraflı kayıt
+olarak yazılıyor — bir `transactions` satırı ve iki `account_transactions`
+bacağı (DEBIT/CREDIT), her biri `balance_before`/`balance_after` ile. Bakiyeleri
+saklamak, bir hesabın belirli bir andaki durumunu tüm geçmişi yeniden
+oynatmadan söyleyebilmeyi sağlıyor. Üçü **tek** transaction'da commit ediliyor:
+borcu yazıp alacağı yazamamak, bir hesaptan çıkıp hiçbir yere varmamış para
+demek.
+
 ```
 moneyfast/
 ├── backend/            ← ana monolit (FastAPI) + frontend'in derlenmiş statik dosyaları
@@ -75,6 +84,12 @@ Bu uç noktaları değiştirirken `AI-Services/.../mcp-server/*_tools.py` içind
 | `validate_compliance_rules` | `POST /api/compliance/validate` |
 | `rag_semantic_market_search` | `POST /search` — **backend'de değil, `rag` servisinde** |
 | `get_market_data` | `GET /api/market/instruments` — v2.2 ile eklendi |
+
+v2.3 ile `get_portfolio_positions` yanıtına `totals.cash_balance` ve
+`totals.total_value` eklendi. Öncesinde sözleşmede nakit yoktu, dolayısıyla
+"bakiyem ne kadar" sorusuna ajan ya pozisyonların piyasa değerini bakiye gibi
+söylüyor ya da "bu veri sette yok" diyordu. `null` = bilinmiyor; sıfır olarak
+raporlanmaz.
 
 `sort_by` yalnızca beş değer alır: `symbol`, `change_percent` (en çok
 yükselenler), `change_percent_asc` (en çok düşenler), `market_cap`, `pe_ratio`.
@@ -135,6 +150,19 @@ Alım, hem hazırlama (`ai_service.stage_transaction`) hem de onay anında bakiy
 karşı kontrol edilir. İki kez, çünkü aynı bakiyeye karşı iki öneri hazırlanıp
 sonra ikisi de onaylanabilir.
 
+**Para birimi hiçbir yerde varsayılmaz.** Enstrümanın para birimi ile hesabın
+para birimi ayrı şeyler: AAPL USD, hesap TRY. `net_amount` enstrümanın para
+biriminde hesaplanır; bakiye kontrolü ve takas, `ai_service._convert` ile
+hesabın para birimine çevirdikten sonra yapılır. Kur, önerinin üzerinde
+`estimate.fx` olarak saklanır ve takasta yeniden çekilmez — kullanıcı o kurla
+hesaplanmış bir maliyeti onayladı. Kur yoksa işlem **reddedilir**; 1.0
+varsaymak 15.098 TL'lik bir alımı 315 TL'ye yaptırıyor, 226.468 TL'lik bir
+satışı 4.723 TL'ye ödüyordu.
+
+`source_account_id` sorulmaz: kullanıcının kendi hesabı backend'de çözülür.
+Sorulduğu dönemde hiç doğrulanmıyordu ve gelen "1" değeri kabul edilip hiçbir
+yerde kullanılmıyordu.
+
 ## shared/ kuralı — DB modeli asla buraya girmez
 
 `shared/` çöp kutusu değil, sadece **domain'siz** ortak kod içindir: enum'lar
@@ -168,6 +196,12 @@ sınıfı import etmiyoruz — böylece modüller arası gizli bağımlılık a�
 - API key / secret asla kod içine hardcode edilmez. `.env` + `.env.example` + `.gitignore`.
 - Format/lint: Python'da `ruff` + `black`, frontend'de `eslint` + `prettier` — pre-commit
   hook olarak bağlı, farklı ajanların farklı stilde kod üretmesini önler.
+- **Testler: altı paketin altısı da %100 kapsama zorunlu** (backend, rag,
+  orchestrator, mcp, ingestor, frontend). Her paket çalıştığında `junit.xml`
+  (test sonuçları) ve `coverage.xml` (kapsama) üretir; frontend'de karşılığı
+  `coverage/cobertura-coverage.xml`. Eşikler `pytest.ini`/`vitest.config.ts`
+  içinde — Makefile'daki `coverage` hedefi değil, çünkü `make test` ve
+  Dockerfile'lar düz `pytest` çalıştırıyor.
 - Küçük, tek amaçlı PR'lar. Bir PR bir özellik/endpoint.
 - Test verisi üretirken gerçekçi ama açıkça sahte veri kullan (örn. "TEST-" prefix'li
   müşteri ID'leri, gerçek olmayan TC formatları).

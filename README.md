@@ -131,6 +131,13 @@ Detaylar için **[CLAUDE.md](CLAUDE.md)** — özet:
 - Frontend'de tip kontrolü `npm run typecheck` (ya da `npm run build`) ile
   çalışır. Kök `tsconfig.json` bir solution dosyası olduğu için düz `tsc`
   hiçbir şeye bakmıyordu; script `tsc -b`'ye çevrildi.
+- **Testler: altı paket, altısı da %100.** Beş Python paketi `pytest`, frontend
+  `npm test` (Vitest). Her çalıştırma `junit.xml` + kapsama XML'i yazar:
+
+```bash
+cd backend && pytest          # junit.xml + coverage.xml
+cd frontend && npm run coverage   # junit.xml + coverage/cobertura-coverage.xml
+```
 
 ## Durum
 
@@ -149,7 +156,9 @@ Detaylar için **[CLAUDE.md](CLAUDE.md)** — özet:
   `None` dönen dallar açılabilir
 - ✅ Analytics: Portföy Analizi (dağılım, trend, performans, işlem geçmişi)
 - ✅ Nakit takası: onaylanan işlem bakiyeyi ve pozisyonu gerçekten değiştirir
-- ⏳ Modül implementasyonları (banking, notification)
+- ✅ Banking: mevduat hesapları ve çift taraflı kayıtla para transferi
+  (kendi hesapların arasında ve başka kullanıcıya)
+- ⏳ Modül implementasyonları (notification)
 - ⏳ Kalan panel mock uç noktaları (heatmap, temettü, sektör dağılımı)
 
 Açık kararlar ve eksik altyapı parçaları için: **[docs/MIMARI_KARARLAR.md](docs/MIMARI_KARARLAR.md)**.

@@ -16,6 +16,7 @@ import pytest
 from ingestor import config
 from ingestor.sources import rss_source
 from conftest import FEED_XML
+from types import SimpleNamespace
 
 FEED_URL = "https://news.example/rss"
 
@@ -266,3 +267,37 @@ class TestSectionFilter:
         items = rss_source.fetch_feed(FEED_URL, client_for(feed_handler(body=body)))
         titles = [item["title"] for item in items]
         assert titles == ["BIST 100 yükseldi"]
+
+
+class TestPolitenessDelayBranches:
+    def test_no_sleep_when_enough_time_already_passed(self, monkeypatch):
+        """The delay exists to avoid hammering a host, not to slow down a run
+        that is already spaced out."""
+        slept = []
+        monkeypatch.setattr(rss_source.time, "sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(rss_source.config, "per_host_delay", lambda: 1.0)
+        rss_source._last_request["news.example"] = rss_source.time.monotonic() - 60
+        rss_source._wait_for_host(FEED_URL)
+        assert slept == []
+
+    def test_a_recent_request_waits(self, monkeypatch):
+        slept = []
+        monkeypatch.setattr(rss_source.time, "sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(rss_source.config, "per_host_delay", lambda: 5.0)
+        rss_source._last_request["news.example"] = rss_source.time.monotonic()
+        rss_source._wait_for_host(FEED_URL)
+        assert slept and slept[0] > 0
+
+
+class TestTickerTagFiltering:
+    def test_a_rejected_tag_does_not_stop_the_scan(self):
+        """The loop must keep going past a tag that fails the shape test —
+        otherwise a real ticker listed after a junk tag is lost."""
+        entry = SimpleNamespace(
+            tags=[{"term": "NOTATICKERATALL"}, {"term": "AAPL"}]
+        )
+        assert rss_source._tickers(entry) == ["AAPL"]
+
+    def test_tags_that_all_fail_yield_nothing(self):
+        entry = SimpleNamespace(tags=[{"term": "x"}, {"term": "12345"}])
+        assert rss_source._tickers(entry) == []

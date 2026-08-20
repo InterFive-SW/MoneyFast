@@ -104,7 +104,14 @@ async def get_portfolio_positions(
             opened_at (str): ISO 8601 date of first acquisition.
 
         totals (dict): total_market_value (float), total_cost_basis (float),
-            total_unrealized_pnl (float), position_count (int).
+            total_unrealized_pnl (float), position_count (int),
+            cash_balance (float | null), total_value (float | null).
+            cash_balance is UNINVESTED CASH and total_value is cash plus
+            positions. Use cash_balance for "how much money do I have",
+            "bakiyem ne kadar" and any spendable-funds question;
+            total_market_value answers only "what are my holdings worth". A
+            null means the balance is unknown -- say so, never report it as
+            zero.
         warnings (list[str]): Non-fatal issues such as a stale price on an illiquid
             instrument or a skipped unentitled account. MUST be surfaced when they
             materially affect the figures presented.
@@ -191,6 +198,11 @@ def _normalize(payload: dict[str, Any], requested_currency: str) -> dict[str, An
             "total_cost_basis": _num(totals, "total_cost_basis"),
             "total_unrealized_pnl": _num(totals, "total_unrealized_pnl"),
             "position_count": int(totals.get("position_count", len(positions))),
+            # v2.3. None when the backend could not resolve an account — a
+            # zero balance is a claim, and the wrong one. The agent must say
+            # it does not know rather than report the user has nothing.
+            "cash_balance": _opt_num(totals, "cash_balance"),
+            "total_value": _opt_num(totals, "total_value"),
         },
         "warnings": list(payload.get("warnings") or []),
     }
@@ -249,6 +261,17 @@ def _num(mapping: dict[str, Any], key: str) -> float:
     if value is None:
         raise ContractViolationError(f"{TOOL}: totals.{key} is missing.")
     return float(value)
+
+
+def _opt_num(mapping: dict[str, Any], key: str) -> Optional[float]:
+    """A total that may legitimately be unknown.
+
+    Distinct from `_num`, which treats absence as a contract violation. Cash is
+    None when no account resolved, and that is a real answer -- coercing it to
+    0.0 would tell the user their balance is empty.
+    """
+    value = mapping.get(key)
+    return None if value is None else float(value)
 
 
 def register(mcp: FastMCP) -> None:

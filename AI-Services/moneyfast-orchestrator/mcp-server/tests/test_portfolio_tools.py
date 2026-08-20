@@ -149,7 +149,10 @@ class TestHappyPath:
     async def test_totals_are_carried_through(self):
         totals = (await portfolio_tools.get_portfolio_positions("u_123"))["totals"]
         assert set(totals) == {
-            "total_market_value", "total_cost_basis", "total_unrealized_pnl", "position_count",
+            "total_market_value", "total_cost_basis", "total_unrealized_pnl",
+            "position_count",
+            # v2.3: cash, so "bakiyem ne kadar" has an answer.
+            "cash_balance", "total_value",
         }
         assert totals["position_count"] == 2
 
@@ -402,3 +405,51 @@ class TestRegistration:
         import inspect
 
         assert inspect.iscoroutinefunction(portfolio_tools.get_portfolio_positions)
+
+
+class TestCashInTotals:
+    """Contract v2.3. Before it, the portfolio tool exposed only position
+    values, so the assistant answered "how much money do I have" with the
+    market value of the holdings — or said the figure was not in its data."""
+
+    @pytest.mark.asyncio
+    async def test_cash_and_total_value_are_carried(self, fake_backend, portfolio_payload):
+        portfolio_payload["totals"]["cash_balance"] = 22142.58
+        portfolio_payload["totals"]["total_value"] = 1088042.52
+        fake_backend.json("portfolio", portfolio_payload)
+        totals = (await portfolio_tools.get_portfolio_positions("u_123"))["totals"]
+        assert totals["cash_balance"] == pytest.approx(22142.58)
+        assert totals["total_value"] == pytest.approx(1088042.52)
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_balance_stays_none_rather_than_zero(
+        self, fake_backend, portfolio_payload
+    ):
+        """A zero balance is a claim, and the wrong one: it tells the user
+        they have no money when the truth is that we could not look."""
+        portfolio_payload["totals"]["cash_balance"] = None
+        fake_backend.json("portfolio", portfolio_payload)
+        totals = (await portfolio_tools.get_portfolio_positions("u_123"))["totals"]
+        assert totals["cash_balance"] is None
+
+    @pytest.mark.asyncio
+    async def test_an_absent_balance_is_not_a_contract_violation(
+        self, fake_backend, portfolio_payload
+    ):
+        """Unlike the position totals, cash may legitimately be missing."""
+        portfolio_payload["totals"].pop("cash_balance", None)
+        fake_backend.json("portfolio", portfolio_payload)
+        totals = (await portfolio_tools.get_portfolio_positions("u_123"))["totals"]
+        assert totals["cash_balance"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_missing_position_total_is_still_a_violation(
+        self, fake_backend, portfolio_payload
+    ):
+        """The relaxation applies to cash only."""
+        from backend_client import ContractViolationError
+
+        portfolio_payload["totals"].pop("total_market_value")
+        fake_backend.json("portfolio", portfolio_payload)
+        with pytest.raises(ContractViolationError):
+            await portfolio_tools.get_portfolio_positions("u_123")

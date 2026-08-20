@@ -1,5 +1,5 @@
 // src/context/ChatContext.tsx
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { ChatMessage, ChatSession } from '../types/chat';
 import { api } from '../api/client';
 
@@ -10,6 +10,9 @@ interface ChatContextType {
   isTyping: boolean;
   currentThought?: string;
   activeContext: string | null;
+  /** Dismiss the context panel. Exposed so the panel can close itself —
+   *  without it there was no way to hide the panel short of reloading. */
+  dismissContext: () => void;
   handleSendMessage: (text: string) => void;
   createNewSession: () => void;
   loadSession: (sessionId: string) => void;
@@ -27,6 +30,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [isTyping, setIsTyping] = useState<boolean>(false);
   const [currentThought, setCurrentThought] = useState<string | undefined>();
   const [activeContext, setActiveContext] = useState<string | null>(null);
+  const dismissContext = useCallback(() => setActiveContext(null), []);
 
   // Başlangıçta localStorage'dan verileri çek
   useEffect(() => {
@@ -179,9 +183,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setCurrentThought(undefined);
       setIsTyping(false);
 
-      if (data.context_topic) {
-        setActiveContext(data.context_topic);
-      }
+      // Set AND cleared. The old guard only ever set it, so a panel opened by
+      // one turn stayed pinned for the rest of the session — showing an
+      // instrument nobody had mentioned in ten messages.
+      setActiveContext(data.context_topic ?? null);
 
       const aiResponse: ChatMessage = {
         id: data.id || ((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString()),
@@ -231,8 +236,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   return (
     <ChatContext.Provider value={{ 
-      sessions, activeSessionId, messages, isTyping, currentThought, activeContext, 
-      handleSendMessage, createNewSession, loadSession, deleteSession
+      sessions, activeSessionId, messages, isTyping, currentThought, activeContext,
+      dismissContext, handleSendMessage, createNewSession, loadSession, deleteSession
     }}>
       {children}
     </ChatContext.Provider>

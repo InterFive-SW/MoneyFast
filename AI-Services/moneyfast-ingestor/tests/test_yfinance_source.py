@@ -302,3 +302,85 @@ class TestNumberCoercion:
     def test_to_utc_handles_none_and_junk(self):
         assert yfinance_source._to_utc(None) is None
         assert yfinance_source._to_utc(12345) is None
+
+
+class TestFrameShapeGuards:
+    """yfinance returns different frame shapes depending on how many symbols
+    were requested and what the provider had. The guards exist because a shape
+    surprise must skip one ticker, not blank the whole batch of ninety-four."""
+
+    def _frame(self, closes):
+        """A DataFrame stand-in whose "Close" column is whatever we hand it."""
+        class Frame:
+            empty = False
+
+            def __contains__(self, key):
+                return key == "Close"
+
+            def __getitem__(self, key):
+                if key == "Close":
+                    return closes
+                raise KeyError(key)
+
+        return Frame()
+
+    def _run(self, monkeypatch, closes):
+        import sys
+        import types
+
+        index = SimpleNamespace()
+        fake_yf = types.ModuleType("yfinance")
+        fake_yf.download = lambda *a, **k: self._frame(closes)
+        monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
+        return yfinance_source.fetch_quotes([{"symbol": "THYAO", "data_symbol": "THYAO.IS"}])
+
+    def test_a_column_that_reports_membership_but_raises_on_access(self, monkeypatch):
+        """A MultiIndex frame can answer `in` truthfully and still raise when
+        indexed. Skipping that symbol keeps the other ninety-three."""
+
+        class HostileCloses:
+            index = [None]
+
+            def __contains__(self, key):
+                return True
+
+            def __getitem__(self, key):
+                raise KeyError(key)
+
+        assert self._run(monkeypatch, HostileCloses()) == []
+
+    def test_a_typeerror_is_treated_the_same_way(self, monkeypatch):
+        class WrongType:
+            index = [None]
+
+            def __contains__(self, key):
+                return True
+
+            def __getitem__(self, key):
+                raise TypeError("not indexable")
+
+        assert self._run(monkeypatch, WrongType()) == []
+
+
+class TestFundamentalsSelection:
+    def test_a_product_without_a_provider_symbol_is_skipped(self, monkeypatch):
+        """Three BIST names are seeded with data_symbol NULL because Yahoo no
+        longer quotes them. Requesting them would log an error every day
+        forever, for a symbol we already know has no data."""
+        import sys
+
+        asked = []
+
+        def _ticker(symbol):
+            asked.append(symbol)
+            return SimpleNamespace(info={})
+
+        monkeypatch.setitem(
+            sys.modules, "yfinance", SimpleNamespace(Ticker=_ticker)
+        )
+        yfinance_source.fetch_fundamentals([
+            {"symbol": "IPEKE"},
+            {"symbol": "KOZAL", "data_symbol": None},
+            {"symbol": "THYAO", "data_symbol": "THYAO.IS"},
+        ])
+        assert asked == ["THYAO.IS"], "only the quoted symbol should be requested"

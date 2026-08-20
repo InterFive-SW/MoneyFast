@@ -250,3 +250,85 @@ class TestOrderTypePrerequisites:
         )
         assert proposal["status"] == "PENDING_USER_CONFIRMATION"
         assert proposal["estimate"]["reference_price"] == pytest.approx(128.0)
+
+
+class TestAssetClass:
+    """Every position used to report EQUITY — gold, dollars and the index
+    included — because the class was a literal rather than a lookup."""
+
+    def _holding(self, symbol="XAUUSD", product_type="commodity", currency="USD"):
+        return {
+            "symbol": symbol, "name": symbol, "market": "COMEX",
+            "currency": currency, "product_type": product_type,
+            "quantity": 1.0, "avg_cost": 4000.0, "price": 4577.9,
+            "opened_at": None,
+        }
+
+    def _build(self, holdings, **kwargs):
+        payload, _ = ai_service.build_portfolio(
+            user_id="u1", holdings=holdings,
+            quotes={"USDTRY": {"price": 47.9479}}, **kwargs
+        )
+        return payload
+
+    @pytest.mark.parametrize(
+        "product_type,expected",
+        [("stock", "EQUITY"), ("fx", "FX"), ("commodity", "COMMODITY"),
+         ("index", "INDEX"), ("fund", "FUND"), ("bond", "FIXED_INCOME")],
+    )
+    def test_the_class_comes_from_the_product(self, product_type, expected):
+        payload = self._build([self._holding(product_type=product_type)])
+        assert payload["positions"][0]["asset_class"] == expected
+
+    def test_an_unknown_product_type_falls_back_to_equity(self):
+        payload = self._build([self._holding(product_type="warrant")])
+        assert payload["positions"][0]["asset_class"] == "EQUITY"
+
+    def test_a_missing_product_type_falls_back_rather_than_raising(self):
+        holding = self._holding()
+        holding.pop("product_type")
+        assert self._build([holding])["positions"][0]["asset_class"] == "EQUITY"
+
+    def test_filtering_by_fx_returns_fx_not_everything(self):
+        """Asking for FX used to return nothing, because the filter compared
+        every position against the literal EQUITY."""
+        holdings = [
+            self._holding("USDTRY", "fx", "TRY"),
+            self._holding("THYAO", "stock", "TRY"),
+        ]
+        payload = self._build(holdings, asset_classes=["FX"])
+        assert [p["symbol"] for p in payload["positions"]] == ["USDTRY"]
+
+    def test_filtering_by_equity_excludes_gold(self):
+        holdings = [
+            self._holding("XAUUSD", "commodity", "USD"),
+            self._holding("THYAO", "stock", "TRY"),
+        ]
+        payload = self._build(holdings, asset_classes=["EQUITY"])
+        assert [p["symbol"] for p in payload["positions"]] == ["THYAO"]
+
+
+class TestCashInPortfolio:
+    def _build(self, **kwargs):
+        payload, _ = ai_service.build_portfolio(
+            user_id="u1",
+            holdings=[{
+                "symbol": "THYAO", "name": "THYAO", "market": "BIST",
+                "currency": "TRY", "product_type": "stock", "quantity": 10.0,
+                "avg_cost": 300.0, "price": 310.0, "opened_at": None,
+            }],
+            quotes={"USDTRY": {"price": 47.9479}}, **kwargs
+        )
+        return payload["totals"]
+
+    def test_cash_and_total_value_are_reported(self):
+        totals = self._build(cash_balance=5000.0)
+        assert totals["cash_balance"] == pytest.approx(5000.0)
+        assert totals["total_value"] == pytest.approx(3100.0 + 5000.0)
+
+    def test_an_unknown_balance_is_none_not_zero(self):
+        """Reporting zero would tell the user they have no money when the
+        truth is that no account resolved."""
+        totals = self._build()
+        assert totals["cash_balance"] is None
+        assert totals["total_value"] is None

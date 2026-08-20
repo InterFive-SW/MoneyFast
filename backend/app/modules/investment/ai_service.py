@@ -62,6 +62,16 @@ def _iso(moment: datetime) -> str:
 
 _EXCHANGE_BY_MARKET = {"BIST": "XIST", "NASDAQ": "XNAS", "NYSE": "XNYS"}
 
+#: Product type to the contract's asset_class vocabulary.
+_ASSET_CLASSES = {
+    "stock": "EQUITY",
+    "fx": "FX",
+    "commodity": "COMMODITY",
+    "index": "INDEX",
+    "fund": "FUND",
+    "bond": "FIXED_INCOME",
+}
+
 
 def _convert(amount: float, from_currency: str, to_currency: str, rates: dict) -> float:
     """Convert through TRY.
@@ -90,6 +100,7 @@ def fx_rates(quotes: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
 def build_portfolio(
     user_id: str,
     holdings: Optional[List[Dict[str, Any]]] = None,
+    cash_balance: Optional[float] = None,
     account_ids: Optional[List[str]] = None,
     asset_classes: Optional[List[str]] = None,
     include_closed: bool = False,
@@ -136,7 +147,13 @@ def build_portfolio(
     for holding in holdings:
         # Every instrument in this universe is a listed share; index and FX
         # rows are not holdings.
-        if asset_classes and "EQUITY" not in asset_classes:
+        # The instrument's real class, not a constant. This filter used to
+        # compare every position against "EQUITY", so asking for FX returned
+        # nothing and asking for equities returned gold.
+        asset_class = _ASSET_CLASSES.get(
+            (holding.get("product_type") or "").lower(), "EQUITY"
+        )
+        if asset_classes and asset_class not in asset_classes:
             continue
 
         symbol = holding["symbol"]
@@ -165,7 +182,9 @@ def build_portfolio(
                 "symbol": symbol,
                 "isin": None,
                 "name": holding.get("name") or symbol,
-                "asset_class": "EQUITY",
+                # From the product, not a constant. Every position used to
+                # report EQUITY, including FX pairs and gold.
+                "asset_class": asset_class,
                 "exchange": _EXCHANGE_BY_MARKET.get(holding.get("market") or "", "XIST"),
                 "quantity": quantity,
                 "avg_cost": avg_cost,
@@ -216,6 +235,16 @@ def build_portfolio(
             "total_cost_basis": round(total_cost_basis, 2),
             "total_unrealized_pnl": round(total_market_value - total_cost_basis, 2),
             "position_count": len(rows),
+            # Cash, added in contract v2.3. Without it the assistant could not
+            # answer "bakiyem ne kadar" at all: it saw only position values, so
+            # it either quoted the market value as if it were a balance or
+            # said the figure was not in its data.
+            "cash_balance": round(cash_balance, 2) if cash_balance is not None else None,
+            "total_value": (
+                round(total_market_value + cash_balance, 2)
+                if cash_balance is not None
+                else None
+            ),
         },
         "warnings": warnings,
     }
@@ -240,7 +269,16 @@ def _estimate(
     reference_price: Optional[float],
     limit_price: Optional[float],
     currency: str,
+    settlement_currency: str = "TRY",
+    rates: Optional[Dict[str, float]] = None,
 ) -> Optional[Dict[str, Any]]:
+    """Cost of the trade in the INSTRUMENT's currency, plus the rate to the
+    account's.
+
+    The two currencies are kept apart deliberately. AAPL costs USD; the account
+    holds TRY. Collapsing them was the bug that made a 15.098 TL purchase debit
+    315 TL and a 226.468 TL sale credit 4.723 TL.
+    """
     price = limit_price if limit_price is not None else reference_price
 
     if notional_amount:
@@ -252,6 +290,21 @@ def _estimate(
         # Nothing to price. Returning a zeroed estimate would render as a
         # free trade.
         return None
+
+    if transaction_type.upper() in TRANSFER_TYPES:
+        # A transfer is not a brokerage order. Charging it commission and BSMV
+        # priced a 200 TL transfer at 200,30 TL and labelled it a securities
+        # sale; the banking module owns the transfer fee.
+        return {
+            "gross_amount": round(gross, 2),
+            "net_amount": round(gross, 2),
+            "currency": currency,
+            "price_certainty": "INDICATIVE",
+            "reference_price": None,
+            "fees": [],
+            "taxes": [],
+            "fx": _fx_block(currency, settlement_currency, rates),
+        }
 
     commission = round(gross * COMMISSION_RATE, 2)
     bsmv = round(commission * BSMV_RATE, 2)
@@ -268,7 +321,33 @@ def _estimate(
         "reference_price": price,
         "fees": [{"type": "COMMISSION", "amount": commission, "currency": currency}],
         "taxes": [{"type": "BSMV", "amount": bsmv, "currency": currency}],
-        "fx": None,
+        # The rate this trade settles at, recorded ON the proposal. Settlement
+        # must not re-fetch it: the user approved a cost computed at this rate,
+        # and a rate that moved between staging and confirming would silently
+        # change the amount they agreed to.
+        "fx": _fx_block(currency, settlement_currency, rates),
+    }
+
+
+def _fx_block(
+    from_currency: str,
+    to_currency: str,
+    rates: Optional[Dict[str, float]],
+) -> Optional[Dict[str, Any]]:
+    """The conversion applied when the instrument is not priced in the
+    account's currency. None when no conversion is needed."""
+    if from_currency == to_currency:
+        return None
+    if not rates:
+        return None
+    try:
+        rate = _convert(1.0, from_currency, to_currency, rates)
+    except KeyError:
+        return None
+    return {
+        "rate": round(rate, 6),
+        "from_currency": from_currency,
+        "to_currency": to_currency,
     }
 
 
@@ -279,6 +358,8 @@ def stage_transaction(
     resolved_symbol: Optional[str] = None,
     currency: str = "TRY",
     available_cash: Optional[float] = None,
+    cash_currency: str = "TRY",
+    rates: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """Validate and stage. Never executes; never returns a PASS by default.
 
@@ -351,12 +432,28 @@ def stage_transaction(
             reference_price,
             request.get("limit_price"),
             currency,
+            settlement_currency=cash_currency,
+            rates=rates,
         )
-        needed = provisional["net_amount"]
-        if needed > available_cash:
+        # Convert into the ACCOUNT's currency before comparing. Comparing a USD
+        # cost against a TRY balance made a foreign purchase look ~48x cheaper
+        # than it is, which is how an unaffordable order passed the check.
+        try:
+            needed = _convert(
+                provisional["net_amount"], provisional["currency"], cash_currency, rates or {}
+            )
+        except KeyError:
+            # No rate ingested. Refusing costs the user one retry; guessing at
+            # 1.0 would let them buy a 15.000 TL position for 315 TL.
             blockers.append(
-                f"Bakiye yetersiz: işlem masraflarla birlikte {needed:,.2f} {currency} "
-                f"tutuyor, kullanılabilir bakiye {available_cash:,.2f} {currency}."
+                f"{provisional['currency']}/{cash_currency} kuru şu anda alınamadığı için "
+                f"bu işlemin maliyeti hesaplanamıyor."
+            )
+            needed = None
+        if needed is not None and needed > available_cash:
+            blockers.append(
+                f"Bakiye yetersiz: işlem masraflarla birlikte {needed:,.2f} {cash_currency} "
+                f"tutuyor, kullanılabilir bakiye {available_cash:,.2f} {cash_currency}."
             )
 
     if order_type in ("LIMIT", "STOP_LIMIT") and request.get("limit_price") is None:
@@ -379,6 +476,8 @@ def stage_transaction(
             reference_price,
             request.get("limit_price"),
             currency,
+            settlement_currency=cash_currency,
+            rates=rates,
         )
         if status == "PENDING_USER_CONFIRMATION"
         else None

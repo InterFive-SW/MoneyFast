@@ -6,7 +6,7 @@
 PYTHON      ?= python3
 PIP         ?= $(PYTHON) -m pip
 PYTEST      ?= $(PYTHON) -m pytest
-COVERAGE_MIN ?= 95
+COVERAGE_MIN ?= 100
 
 .DEFAULT_GOAL := help
 .PHONY: help install install-test test test-fast coverage lint clean ci

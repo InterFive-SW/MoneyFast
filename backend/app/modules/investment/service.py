@@ -91,6 +91,42 @@ def _position(
     )
 
 
+def _cash_amount(estimate: dict, account: InvestmentAccount) -> float:
+    """`net_amount` expressed in the ACCOUNT's currency.
+
+    The instrument's currency and the account's are different things: AAPL is
+    priced in USD, the account holds TRY. Applying `net_amount` directly to
+    `cash_balance` debited 315 TL for a 15.098 TL purchase and — far worse —
+    credited 4.723 TL for a 226.468 TL sale.
+
+    The rate is read from the proposal, not fetched fresh: the user approved a
+    cost computed at staging time, and a rate that moved since then would change
+    the amount they agreed to.
+    """
+    amount = float(estimate["net_amount"])
+    trade_currency = estimate.get("currency") or account.currency_code
+    account_currency = account.currency_code or "TRY"
+    if trade_currency == account_currency:
+        return amount
+
+    fx = estimate.get("fx") or {}
+    rate = fx.get("rate")
+    if (
+        rate is None
+        or fx.get("from_currency") != trade_currency
+        or fx.get("to_currency") != account_currency
+    ):
+        # Without the rate the proposal was priced at, this trade cannot be
+        # applied at all. Refusing is the only safe outcome — settling at 1.0
+        # is what destroyed 97% of a foreign position's value.
+        raise SettlementError(
+            f"Bu öneri {trade_currency} cinsinden hazırlanmış ama hesabınız "
+            f"{account_currency}; uygulanacak kur bilgisi eksik olduğu için "
+            f"işlem tamamlanamadı."
+        )
+    return amount * float(rate)
+
+
 def settle(db: Session, proposal, account: InvestmentAccount) -> dict:
     """Apply a confirmed proposal to cash and holdings.
 
@@ -110,13 +146,19 @@ def settle(db: Session, proposal, account: InvestmentAccount) -> dict:
         # approved.
         raise SettlementError("Bu önerinin tutar bilgisi eksik, işlem uygulanamadı.")
 
-    net_amount = float(net_amount)
+    # Two amounts, deliberately kept apart:
+    #   cash_amount  -- the account's currency, the only thing cash_balance can
+    #                   be compared or added to.
+    #   native_amount -- the instrument's currency, which is what the cost
+    #                   basis is denominated in.
+    native_amount = float(net_amount)
+    cash_amount = _cash_amount(estimate, account)
     quantity = float(proposal.quantity or 0)
 
     if transaction_type in BUY_TYPES:
-        return _settle_buy(db, proposal, account, net_amount, quantity)
+        return _settle_buy(db, proposal, account, cash_amount, quantity, native_amount)
     if transaction_type in SELL_TYPES:
-        return _settle_sell(db, proposal, account, net_amount, quantity)
+        return _settle_sell(db, proposal, account, cash_amount, quantity)
 
     # Transfers and anything else reach confirm without a settlement path. The
     # banking module does not exist, so pretending one had run would be the
@@ -136,16 +178,22 @@ def _product(db: Session, symbol: str) -> InvestmentProduct:
 
 
 def _settle_buy(
-    db: Session, proposal, account: InvestmentAccount, net_amount: float, quantity: float
+    db: Session,
+    proposal,
+    account: InvestmentAccount,
+    net_amount: float,
+    quantity: float,
+    native_amount: Optional[float] = None,
 ) -> dict:
     cash = float(account.cash_balance)
     if net_amount > cash:
         # Checked again here, not only at staging. Two proposals can be staged
         # against the same balance before either is confirmed, and the second
         # one must not overdraw the account.
+        currency = account.currency_code or "TRY"
         raise SettlementError(
-            f"Bakiye yetersiz: işlem {net_amount:,.2f} TL tutuyor, "
-            f"hesabınızda {cash:,.2f} TL var."
+            f"Bakiye yetersiz: işlem {net_amount:,.2f} {currency} tutuyor, "
+            f"hesabınızda {cash:,.2f} {currency} var."
         )
 
     product = _product(db, proposal.symbol)
@@ -161,7 +209,7 @@ def _settle_buy(
                 # Cost basis is the reference price, not the all-in net. Fees
                 # are an expense, not part of what the shares are worth, and
                 # folding them in would overstate the break-even price.
-                average_buy_price=_reference_price(proposal, net_amount, quantity),
+                average_buy_price=_reference_price(proposal, native_amount, quantity),
                 opened_at=now,
                 updated_at=now,
             )
@@ -174,7 +222,7 @@ def _settle_buy(
         # history of what the position actually cost.
         position.average_buy_price = (
             float(position.average_buy_price) * held
-            + _reference_price(proposal, net_amount, quantity) * quantity
+            + _reference_price(proposal, native_amount, quantity) * quantity
         ) / new_quantity
         position.quantity = new_quantity
         position.updated_at = now
@@ -232,8 +280,12 @@ def _settle_sell(
     }
 
 
-def _reference_price(proposal, net_amount: float, quantity: float) -> float:
-    """Per-share price the proposal was costed at.
+def _reference_price(proposal, native_amount: Optional[float], quantity: float) -> float:
+    """Per-share price the proposal was costed at, in the INSTRUMENT's currency.
+
+    Deliberately not converted: `average_buy_price` sits beside a price feed
+    quoted in the instrument's own currency, and `build_portfolio` converts the
+    pair together at read time. Converting here would double-convert the P&L.
 
     Prefers the stored reference price; falls back to dividing the net by the
     quantity so a proposal missing that field still books a sane basis rather
@@ -243,4 +295,6 @@ def _reference_price(proposal, net_amount: float, quantity: float) -> float:
     price = estimate.get("reference_price")
     if price is not None:
         return float(price)
-    return net_amount / quantity if quantity else 0.0
+    if native_amount is None or not quantity:
+        return 0.0
+    return native_amount / quantity

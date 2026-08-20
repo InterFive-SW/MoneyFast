@@ -25,6 +25,8 @@ from typing import Any, Optional
 _CONFIRMABLE = "PENDING_USER_CONFIRMATION"
 
 _BUY_TYPES = frozenset({"BUY", "ALIS", "ALIŞ"})
+_SELL_TYPES = frozenset({"SELL", "SATIS", "SATIŞ"})
+_TRANSFER_TYPES = frozenset({"TRANSFER", "EFT", "HAVALE"})
 
 
 def _tr_amount(value: float) -> str:
@@ -92,7 +94,8 @@ def _action_widget(data: dict[str, Any]) -> tuple[Optional[dict[str, Any]], Opti
     quantity = summary.get("quantity")
     transaction_type = str(summary.get("transaction_type") or "").upper()
     is_buy = transaction_type in _BUY_TYPES
-    action_tr = "Alım" if is_buy else "Satım"
+    is_sell = transaction_type in _SELL_TYPES
+    is_transfer = transaction_type in _TRANSFER_TYPES
 
     estimate = data.get("estimate") or {}
     net = estimate.get("net_amount")
@@ -101,10 +104,28 @@ def _action_widget(data: dict[str, Any]) -> tuple[Optional[dict[str, Any]], Opti
     cost = f" · yaklaşık {_tr_amount(net)} {currency}" if net else ""
     amount_label = f"{quantity:g} adet " if quantity else ""
 
+    if is_transfer:
+        destination = summary.get("destination_account_id") or ""
+        message = f"{destination} hesabına {_tr_amount(net)} {currency} transfer önerisi"
+        action = "transfer"
+        # No instrument, so no context panel. The panel shows a live price and
+        # instrument news; a transfer has neither.
+        topic = None
+    else:
+        # Named explicitly rather than "buy or else sell": an unrecognised type
+        # used to render as "Satım", so a type nobody handled was displayed to
+        # the user as a sale.
+        action_tr = "Alım" if is_buy else "Satım" if is_sell else "İşlem"
+        message = f"{amount_label}{symbol} {action_tr} önerisi{cost}"
+        action = "buy" if is_buy else "sell" if is_sell else "unknown"
+        # Only a real ticker opens the panel. "İşlem" was being sent as a
+        # topic and rendered as though it were an instrument.
+        topic = symbol or None
+
     return {
         "type": "action",
         "payload": {
-            "message": f"{amount_label}{symbol} {action_tr} önerisi{cost}",
+            "message": message,
             "confirmLabel": "Onayla",
             "cancelLabel": "Vazgeç",
             # The real staged proposal, not a synthetic order id. This is what
@@ -113,10 +134,10 @@ def _action_widget(data: dict[str, Any]) -> tuple[Optional[dict[str, Any]], Opti
             "proposalId": proposal_id,
             "expiresAt": data.get("expires_at") or "",
             "asset": symbol,
-            "action": "buy" if is_buy else "sell",
+            "action": action,
             "amount": quantity or 0,
         },
-    }, symbol or "İşlem"
+    }, topic
 
 
 def _portfolio_widget(data: dict[str, Any]) -> tuple[Optional[dict[str, Any]], Optional[str]]:
@@ -148,4 +169,7 @@ def _portfolio_widget(data: dict[str, Any]) -> tuple[Optional[dict[str, Any]], O
                 for p in positions
             ],
         },
-    }, "Portföy"
+        # The portfolio widget is already rendered inline in the message. A
+        # context panel repeating it added nothing, and it opened showing a
+        # price for "Portföy" — which is not an instrument.
+    }, None

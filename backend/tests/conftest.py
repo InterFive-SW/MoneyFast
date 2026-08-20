@@ -96,17 +96,6 @@ def client() -> TestClient:
         app.dependency_overrides.pop(get_db, None)
 
 
-@pytest.fixture
-def no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`ai_assistant` router'ındaki `asyncio.sleep(1.5)`'i no-op'a çevirir."""
-    import asyncio
-
-    async def _instant_sleep(*_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr(asyncio, "sleep", _instant_sleep)
-
-
 @pytest.fixture(scope="session")
 def password_hash_factory() -> Callable[[str], str]:
     """Bcrypt hash'lemesi ~250ms sürüyor; testler arası sonucu yeniden

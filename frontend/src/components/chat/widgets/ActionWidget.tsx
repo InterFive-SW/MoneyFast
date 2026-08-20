@@ -1,5 +1,5 @@
 // src/components/chat/widgets/ActionWidget.tsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ActionWidgetPayload } from '../../../types/chat';
 import { api } from '../../../api/client';
 
@@ -27,21 +27,28 @@ export default function ActionWidget({ payload }: ActionWidgetProps) {
     setToastMessage(null);
 
     try {
-      // Backend'in bizden beklediği Pydantic şemasına tam uyumlu istek atıyoruz
-      await api.confirmOrder({
-        order_id: payload.actionId,
-        action: payload.action,
-        asset: payload.asset,
-        amount: payload.amount,
-      });
-      
+      // Confirms the REAL staged proposal by its id. This is the only place
+      // in the system where a transaction is authorised, and it is a user
+      // action by construction: the agent cannot reach this endpoint, and
+      // saying "evet" in the chat does not trigger it.
+      const result = await api.confirmProposal(payload.proposalId ?? payload.actionId);
+
       setStatus('confirmed');
-      setToastMessage({ type: 'success', message: 'İşlem başarıyla onaylandı ve sıraya alındı.' });
+      setToastMessage({ type: 'success', message: result?.message ?? 'İşlem onaylandı.' });
     } catch (error) {
       console.error("İşlem onayı sırasında hata oluştu:", error);
       setStatus('pending'); // Tekrar denemesi için pending'e çekiyoruz
-      setToastMessage({ type: 'error', message: 'İşlem onaylanırken bir hata oluştu. Lütfen tekrar deneyiniz.' });
-      
+
+      // An expired proposal is not a transient error, so retrying will not
+      // help; the user needs to ask for it to be prepared again.
+      const expired = error instanceof Error && error.message.includes('410');
+      setToastMessage({
+        type: 'error',
+        message: expired
+          ? 'Bu önerinin süresi doldu. Lütfen işlemi yeniden hazırlatın.'
+          : 'İşlem onaylanırken bir hata oluştu. Lütfen tekrar deneyiniz.',
+      });
+
       // Hata mesajını 5 saniye sonra gizle
       setTimeout(() => setToastMessage(null), 5000);
     }

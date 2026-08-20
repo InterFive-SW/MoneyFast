@@ -90,7 +90,7 @@ SELECT format(
 \gexec
 
 SELECT format(
-    'GRANT EXECUTE ON FUNCTION rag.match_chunks(vector, integer, double precision, text, text, text, text, timestamptz) TO %I',
+    'GRANT EXECUTE ON FUNCTION rag.match_chunks(vector, integer, double precision, text[], text[], text[], text[], timestamptz, timestamptz, text[]) TO %I',
     :'rag_user'
 )
 \gexec
@@ -99,11 +99,13 @@ REVOKE EXECUTE ON FUNCTION rag.match_chunks(
     vector,
     integer,
     double precision,
-    text,
-    text,
-    text,
-    text,
-    timestamptz
+    text[],
+    text[],
+    text[],
+    text[],
+    timestamptz,
+    timestamptz,
+    text[]
 ) FROM PUBLIC;
 
 SELECT format(

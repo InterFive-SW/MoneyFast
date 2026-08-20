@@ -1,14 +1,29 @@
 # filename: orchestrator_tools.py
 """Orchestrator domain tools.
 
-MoneyFast MCP server, mock skeleton.
+MoneyFast MCP server.
 Contracts are frozen against "MCP Tools Interface Definitions v2.1".
-All business logic is mocked; no network, database, or broker call is made.
-Mock values are deterministic so orchestrator routing tests are reproducible.
+
+`classify_and_route_intent` is a DETERMINISTIC SAFETY PRE-FILTER, not a
+classifier. Topic classification moved to the orchestrator, which has a Groq
+client; this module has neither an LLM nor network egress, and giving it both
+would put an API key in the process that evaluates model-supplied arguments.
+
+What stays here is the part that must NOT depend on a language model: the
+detection of distress, prompt injection and rule-bypass attempts. A safety
+gate implemented by the same provider it is guarding fails open the moment
+that provider has a bad day, and fails silently. Regex over a keyword list is
+auditable, free, and returns the same answer every time.
+
+The tool therefore returns safety_flags it is confident about and a
+conservative default route. The orchestrator calls it FIRST, then asks the
+model for the topic, then lets any flag found here override the model's
+choice. Flags can be added downstream; they can never be removed.
 """
 
 #from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -22,6 +37,84 @@ DEFAULT_AGENTS: list[str] = [
     "SMALLTALK_AGENT",
     "HUMAN_HANDOFF",
 ]
+
+
+#: Turkish and English distress markers. Deliberately broad: a false positive
+#: costs one over-cautious reply, a false negative costs someone in crisis a
+#: chatbot talking about portfolio weights. The asymmetry is the whole design.
+#:
+#: Matched on a normalised, casefolded string, so patterns are lowercase and
+#: dotless-i safe (see _normalise).
+_DISTRESS_PATTERNS = (
+    r"intihar",
+    r"kendime zarar",
+    r"yasamak istemiyorum",
+    r"olmek istiyorum",
+    r"canima kiy",
+    r"hayatima son",
+    r"her seyimi kaybettim",
+    r"batt[iı]m.*(borc|kredi|icra)",
+    r"borcumu odeyemiyorum.*(icra|haciz)",
+    r"kill myself",
+    r"end my life",
+    r"suicid",
+    r"self.?harm",
+)
+
+#: Attempts to make the assistant treat retrieved or user text as instructions.
+_INJECTION_PATTERNS = (
+    r"ignore (all|any|the) (previous|prior|above)",
+    r"disregard (your|the) (rules|instructions|prompt)",
+    r"onceki (tum )?talimatlari (yok say|unut|gormezden)",
+    r"talimatlarini (unut|yok say)",
+    r"you are now",
+    r"artik sen",
+    r"sistem promptunu",
+    r"system prompt",
+    r"reveal (your|the) (prompt|instructions)",
+    r"act as (?!a financial)",
+)
+
+#: Attempts to get the compliance or disclosure rules relaxed.
+_BYPASS_PATTERNS = (
+    r"(uyari|uyarilari|feragat|disclaimer)(lari)? (atla|gec|yazma|kaldir)",
+    r"sorumlulu[gğ]u ben (aliyorum|ustleniyorum)",
+    r"yatirim tavsiyesi (verebilirsin|ver)",
+    r"kural(lari|larini)? (yok say|es gec|bosver)",
+    r"skip the (disclaimer|warning|compliance)",
+    r"just tell me what to buy",
+    r"i take (full )?responsibility",
+)
+
+#: Turkish has two i's, and casefold() alone maps "İ" to "i̇" (i + combining
+#: dot), which then fails a plain "i" match. Diacritics are stripped so one
+#: pattern covers "battım", "battim" and "BATTIM".
+_FOLD = str.maketrans("ıİşŞğĞüÜöÖçÇâÂîÎûÛ", "iisSgGuUoOcCaAiIuU")
+
+
+def _normalise(text: str) -> str:
+    return text.translate(_FOLD).casefold()
+
+
+def _match_any(text: str, patterns: tuple) -> bool:
+    return any(re.search(p, text) for p in patterns)
+
+
+def detect_safety_flags(user_message: str) -> list[str]:
+    """Deterministic flags for one user turn. No model, no network.
+
+    Exposed separately from the tool so the orchestrator can call it directly
+    and so it can be unit-tested without an MCP session.
+    """
+    normalised = _normalise(user_message or "")
+    flags: list[str] = []
+    if _match_any(normalised, _DISTRESS_PATTERNS):
+        flags.append("DISTRESS_SIGNAL")
+    if _match_any(normalised, _INJECTION_PATTERNS):
+        flags.append("PROMPT_INJECTION_SUSPECTED")
+    if _match_any(normalised, _BYPASS_PATTERNS):
+        flags.append("REQUESTS_RULE_BYPASS")
+    return flags
 
 
 def classify_and_route_intent(
@@ -141,39 +234,58 @@ def classify_and_route_intent(
         - Do NOT skip this tool for messages that appear simple. Unrouted turns bypass
           the compliance gate by construction.
     """
-    # MOCK: replace with the classifier call.
-    # The mock always routes to PORTFOLIO_AGENT with high confidence and
-    # performs NO classification. Vary target_agent by hand to exercise
-    # each downstream branch of the graph.
+    # Deterministic pass only. Topic classification happens in the
+    # orchestrator, which has the model; see this module's docstring.
     agents = available_agents or DEFAULT_AGENTS
-    target = "PORTFOLIO_AGENT" if "PORTFOLIO_AGENT" in agents else agents[0]
+    flags = detect_safety_flags(user_message)
+
+    if "DISTRESS_SIGNAL" in flags and "HUMAN_HANDOFF" in agents:
+        # The one route this layer decides on its own. It is not a topic
+        # judgement and it must not be reachable by a model that is having an
+        # off day, so it is made here and marked non-overridable.
+        target = "HUMAN_HANDOFF"
+        intent = "DISTRESS"
+        confidence = 1.0
+        rationale = "Deterministic distress match; routing is not delegable."
+    else:
+        # No opinion on topic. EDUCATION_AGENT is the documented fallback and
+        # the safest place to land if the caller ignores the model's answer:
+        # it holds no user data and can emit no figures.
+        target = "EDUCATION_AGENT" if "EDUCATION_AGENT" in agents else agents[0]
+        intent = "UNCLASSIFIED"
+        confidence = 0.0
+        rationale = (
+            "Safety pre-filter only; topic classification is the caller's."
+        )
 
     return {
-        "primary_intent": "PORTFOLIO_INQUIRY",
-        "confidence": 0.93,
+        "primary_intent": intent,
+        "confidence": confidence,
         "target_agent": target,
-        "secondary_intents": [
-            {"intent": "RISK_ANALYSIS", "confidence": 0.21},
-        ],
+        "secondary_intents": [],
         "is_compound": False,
         "sub_requests": [],
+        # Entity extraction needs the model too. An empty set is honest;
+        # inventing a ticker here would put it in front of a tool call.
         "entities": {
-            "tickers": ["THYAO"],
+            "tickers": [],
             "company_names": [],
-            "asset_classes": ["EQUITY"],
-            "currencies": ["TRY"],
+            "asset_classes": [],
+            "currencies": [],
             "amounts": [],
             "quantities": [],
             "counterparties": [],
             "time_range": None,
         },
-        "required_tools": ["get_portfolio_positions"],
+        "required_tools": [],
         "needs_clarification": False,
         "clarifying_question": None,
-        "routing_rationale": (
-            "Message references owned instruments; portfolio lookup required."
-        ),
-        "safety_flags": [],
+        "routing_rationale": rationale,
+        "safety_flags": flags,
+        # Tells the caller whether it may substitute its own routing decision.
+        # False here means "safety decided this"; the orchestrator must not
+        # override it.
+        "is_overridable": target != "HUMAN_HANDOFF",
     }
 
 

@@ -72,7 +72,7 @@ def test_readyz_returns_503_when_the_mcp_server_is_unreachable(api_client, mocke
     client = mocker.MagicMock()
 
     async def _list_tools():
-        raise ConnectionError("no route to host mcp-market-data")
+        raise ConnectionError("no route to host mcp")
 
     client.list_tools = _list_tools
     mocker.patch.object(api, "get_mcp_client", return_value=client)
@@ -102,14 +102,18 @@ def test_chat_returns_the_final_output(api_client, patched_run_turn):
     assert response.json()["final_output"] == "Portföyünüzde 500 lot THYAO var."
 
 
-def test_chat_exposes_only_the_four_public_fields(api_client, patched_run_turn):
+def test_chat_exposes_only_the_public_fields(api_client, patched_run_turn):
     """Internal graph state must not cross the wire. draft_response can hold
-    text the compliance gate refused to emit."""
+    text the compliance gate refused to emit, and specialist_output carries
+    raw tool payloads."""
     body = api_client.post("/chat", json={"user_message": "x"}).json()
     assert set(body) == {
-        "final_output", "primary_intent", "target_agent", "compliance_verdict"
+        "final_output", "primary_intent", "target_agent", "compliance_verdict",
+        "widget", "context_topic",
     }
     assert "iç taslak" not in response_text(body)
+    # The widget is a projection of the tool payload, not the payload itself.
+    assert "specialist_output" not in body
 
 
 def response_text(body: dict) -> str:
@@ -286,12 +290,16 @@ def test_wrong_method_returns_405(api_client):
 
 def test_response_model_declares_the_public_contract():
     assert set(api.ChatResponse.model_fields) == {
-        "final_output", "primary_intent", "target_agent", "compliance_verdict"
+        "final_output", "primary_intent", "target_agent", "compliance_verdict",
+        "widget", "context_topic",
     }
 
 
 def test_request_model_defaults():
     request = api.ChatRequest(user_message="x")
-    assert request.user_id == "anonymous"
+    # None, not "anonymous": the backend resolves user_id from the bearer
+    # token and sends null when there is none. A placeholder string would be
+    # forwarded to a custodian lookup as though it were a real account.
+    assert request.user_id is None
     assert request.thread_id == "default"
     assert request.conversation_history == []

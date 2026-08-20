@@ -1,20 +1,42 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
 import type { Position } from '../../api/client'
+import { useLiveRows } from '../../hooks/useLiveRows'
 
 /**
  * Pozisyonlar Tablosu Bileşeni (Fintables tarzı)
  * Mevcut hisse/varlık portföyünü tabular-nums fontları ile veri-yoğun bir yapıda listeler.
+ *
+ * Adet ve maliyet açılışta bir kez çekilir; fiyat ve fiyata bağlı kolonlar
+ * (pozisyon değeri, günlük ve toplam getiri) canlı akıştan gelen her fiyatla
+ * yeniden hesaplanır. Yalnızca fiyat kolonunu güncelleyip yanındaki değeri
+ * dondurmak satırı kendi içinde tutarsız bırakırdı.
  */
 export default function PositionsWidget() {
-  const [positions, setPositions] = useState<Position[]>([])
+  const [fetched, setFetched] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
+
+  const positions = useLiveRows(fetched, (row, quote) => {
+    const totalValue = row.price * row.quantity
+    const cost = row.avgCost * row.quantity
+    const totalReturn = totalValue - cost
+    const previousClose = quote.change != null ? row.price - quote.change : null
+    return {
+      totalValue,
+      totalReturn,
+      // Sıfır maliyetli bir satırda yüzde tanımsızdır; 0 yazmak "başabaş"
+      // demek olurdu ki bu bir ölçüm değil, uydurma olurdu.
+      totalReturnPercent: cost ? round2((totalReturn / cost) * 100) : row.totalReturnPercent,
+      dailyReturn: previousClose != null ? round2((row.price - previousClose) * row.quantity) : row.dailyReturn,
+      dailyReturnPercent: quote.changePercent ?? row.dailyReturnPercent,
+    }
+  })
 
   useEffect(() => {
     async function loadData() {
       try {
         const data = await apiClient.getPositions()
-        setPositions(data)
+        setFetched(data)
       } catch (error) {
         console.error('Failed to load positions', error)
       } finally {
@@ -80,4 +102,9 @@ export default function PositionsWidget() {
       </div>
     </div>
   )
+}
+
+/** Kuruş hassasiyeti; kayan nokta artıklarının tabloya sızmasını önler. */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
 }

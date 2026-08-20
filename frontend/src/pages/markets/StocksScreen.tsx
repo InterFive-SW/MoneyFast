@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MOCK_MARKET_INSTRUMENTS, MOCK_NEWS } from '../../data/mockData'
+import { MOCK_MARKET_INSTRUMENTS, } from '../../data/mockData'
 import type { ColumnSetKey } from '../../data/columnSets'
 import NewsWidget from '../../components/widgets/NewsWidget'
 import MarketInstrumentsTable from '../../components/markets/MarketInstrumentsTable'
@@ -40,7 +40,7 @@ export default function StocksScreen() {
             <MarketMoversWidget instruments={filteredInstruments} />
           </div>
           <div className="h-[420px]">
-            <NewsWidget news={MOCK_NEWS} />
+            <NewsWidget />
           </div>
         </div>
       </div>

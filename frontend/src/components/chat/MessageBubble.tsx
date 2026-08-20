@@ -1,5 +1,4 @@
 // src/components/chat/MessageBubble.tsx
-import React from 'react';
 import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload, PortfolioWidgetPayload } from '../../types/chat';
 import ChartWidget from './widgets/ChartWidget';
 import ActionWidget from './widgets/ActionWidget';

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { apiClient } from '../../api/client'
 import type { AssetAllocationItem } from '../../api/client'
+import { toNumber, seriesName } from '../../lib/chartFormat'
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('tr-TR', {
@@ -68,7 +69,7 @@ export default function AssetAllocationWidget() {
                 ))}
               </Pie>
               <Tooltip 
-                formatter={(value: number, name: string, props: any) => [`%${value} - ${formatCurrency(props.payload.amount)}`, name]}
+                formatter={(value, name, item: any) => [`%${toNumber(value) ?? 0} - ${formatCurrency(item?.payload?.amount ?? 0)}`, seriesName(name)]}
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)', backgroundColor: 'rgba(255, 255, 255, 0.9)', backdropFilter: 'blur(8px)' }}
                 itemStyle={{ fontSize: '12px', fontWeight: 600, color: '#334155' }}
               />

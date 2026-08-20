@@ -1,5 +1,5 @@
 // src/context/ChatContext.tsx
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { ChatMessage, ChatSession } from '../types/chat';
 import { api } from '../api/client';
 
@@ -111,6 +111,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setActiveSessionId(currentSessionId);
     }
 
+    // Prior turns, captured before the state update. `sessions` inside this
+    // closure is the current render's value, so reading it later would be
+    // stale either way; taking it here makes that explicit.
+    const priorTurns = (sessions.find((session) => session.id === currentSessionId)?.messages ?? [])
+      .slice(-6)
+      .map((message) => ({
+        role: message.sender === 'user' ? 'user' : 'assistant',
+        content: message.text,
+      }));
+
     const messageId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString();
     const newUserMessage: ChatMessage = {
       id: messageId,
@@ -152,7 +162,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }, 800);
 
     try {
-      const data = await api.post<any>('/api/ai_orchestrator/chat', { user_message: text });
+      // Send the recent turns and the session id. Coreference resolution
+      // ("peki ya o?") depends on the history, and without a thread_id every
+      // session would map onto one stored conversation.
+      //
+      // For a signed-in user the backend prefers its OWN stored history over
+      // this copy: history decides which instrument a follow-up resolves to,
+      // so a client able to rewrite it could steer a tool call.
+      const data = await api.post<any>('/api/ai_orchestrator/chat', {
+        user_message: text,
+        thread_id: currentSessionId,
+        conversation_history: priorTurns,
+      });
       
       clearInterval(thoughtInterval);
       setCurrentThought(undefined);

@@ -155,7 +155,7 @@ async def calculate_portfolio_risk_metrics(
     if not positions:
         raise InvalidInputError(f"{TOOL}: positions is empty.")
 
-    # POST /risk/calculate. risk_free_rate is passed through as None when unset
+    # POST /risk/calculate on the backend. risk_free_rate is passed through as None when unset
     # so the backend resolves the policy rate and reports it in assumptions;
     # backend_client drops None keys, so the field is omitted rather than null.
     payload = await backend_client.request(

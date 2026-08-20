@@ -221,13 +221,13 @@ async def prepare_transaction_proposal(
     if not idempotency_key:
         raise InvalidInputError(f"{TOOL}: idempotency_key is required.")
 
-    # POST /transactions/stage. The key travels in the header as well as the
+    # POST /investment/transactions/stage. The key travels in the header as well as the
     # body: the header is what a gateway or proxy deduplicates on, and a retry
     # that creates a second proposal is the failure this endpoint most needs to
     # avoid.
     payload = await backend_client.request(
         "POST",
-        "/transactions/stage",
+        "/investment/transactions/stage",
         tool=TOOL,
         headers={"Idempotency-Key": idempotency_key},
         json_body={

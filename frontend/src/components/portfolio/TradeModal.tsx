@@ -10,15 +10,8 @@ interface TradeModalProps {
   onClose: () => void
 }
 
-interface ProposeResponse {
-  order_id: string
-  status: string
-}
-
-interface ConfirmResponse {
-  message: string
-  status: string
-}
+/** Panelin varsayılan yatırım hesabı; backend tek demo hesabı bu numarayla tutar. */
+const DEFAULT_ACCOUNT_ID = 'TR-DEMO-0001'
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('tr-TR', {
@@ -45,20 +38,49 @@ export default function TradeModal({ symbol, price, onClose }: TradeModalProps) 
     setStep('submitting')
     setErrorMessage('')
     try {
-      const propose = await apiClient.post<ProposeResponse>('/investment/orders/propose', {
-        asset: symbol,
-        action,
-        amount: quantity,
+      // İki adım: önce öneri hazırlanır (hiçbir emir iletilmez), sonra
+      // kullanıcının bu tıklamasıyla onaylanır. Sohbetteki akışla aynı yol.
+      // Kimin adına öneri hazırlandığı sunucuda token'dan doğrulanıyor;
+      // gövdedeki değerin onunla aynı olması gerekiyor, bu yüzden uydurulmuş
+      // bir sabit yerine oturumdaki gerçek kimlik okunuyor.
+      const me = await apiClient.getCurrentUser()
+
+      const proposal = await apiClient.stageTransaction({
+        user_id: me.id,
+        transaction_type: action === 'Alış' ? 'BUY' : 'SELL',
+        source_account_id: DEFAULT_ACCOUNT_ID,
+        // Aynı emrin çift gönderilmesini backend bu anahtarla eler.
+        idempotency_key: `ui-${symbol}-${Date.now()}`,
+        instrument: { symbol },
+        quantity,
+        order_type: limitEnabled ? 'LIMIT' : 'MARKET',
+        limit_price: limitEnabled ? limitPrice : null,
+        // Sözleşmede varsayılanı olan alanlar; açıkça gönderilir ki emrin
+        // geçerlilik süresi sunucu tarafında sessizce belirlenmesin.
+        time_in_force: 'DAY',
+        assumptions: [],
       })
-      const confirm = await apiClient.post<ConfirmResponse>('/investment/orders/confirm', {
-        order_id: propose.order_id,
-        action,
-      })
-      setConfirmMessage(confirm.message)
+
+      if (proposal.status !== 'PENDING_USER_CONFIRMATION') {
+        // Backend'in gerekçesi kullanıcının görmesi gereken şey; yerine genel
+        // bir hata yazmak reddin sebebini gizlerdi.
+        setErrorMessage(
+          proposal.blockers?.join(' ') || 'Bu emir doğrulanamadı, lütfen bilgileri kontrol edin.',
+        )
+        setStep('error')
+        return
+      }
+
+      const confirmed = await apiClient.confirmProposal(proposal.proposal_id)
+      setConfirmMessage(confirmed.message ?? 'Emir onaylandı.')
       setStep('success')
     } catch (error) {
       console.error('Trade order failed', error)
-      setErrorMessage('Emir iletilemedi, lütfen tekrar deneyin.')
+      setErrorMessage(
+        localStorage.getItem('access_token')
+          ? 'Emir iletilemedi, lütfen tekrar deneyin.'
+          : 'Emir vermek için oturum açmanız gerekiyor.',
+      )
       setStep('error')
     }
   }

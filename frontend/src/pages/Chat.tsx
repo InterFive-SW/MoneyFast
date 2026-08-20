@@ -1,5 +1,5 @@
 // src/pages/Chat.tsx
-import React, { useRef, useEffect, useLayoutEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import MessageBubble from '../components/chat/MessageBubble';
 import ChatInput from '../components/chat/ChatInput';
 import SuggestedPrompts from '../components/chat/SuggestedPrompts';

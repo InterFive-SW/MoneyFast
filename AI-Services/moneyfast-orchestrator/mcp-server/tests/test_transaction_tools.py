@@ -1,7 +1,7 @@
 """Unit tests for transaction_tools.
 
 Contract under test: Interface Definitions v2.1, prepare_transaction_proposal,
-now backed by POST /transactions/stage.
+now backed by POST /investment/transactions/stage.
 
 Two invariants dominate this file because both are ways a user could end up
 believing money moved:
@@ -102,7 +102,7 @@ class TestRequest:
     async def test_posts_to_the_staging_endpoint(self, fake_backend, stage_args):
         await stage(stage_args)
         assert fake_backend.last.method == "POST"
-        assert "/transactions/stage" in str(fake_backend.last.url)
+        assert "/investment/transactions/stage" in str(fake_backend.last.url)
 
     async def test_idempotency_key_travels_in_the_header_and_the_body(
         self, fake_backend, stage_args

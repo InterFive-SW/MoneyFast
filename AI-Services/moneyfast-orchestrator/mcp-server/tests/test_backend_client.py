@@ -31,17 +31,46 @@ TOOL = "test_tool"
 async def call(**kwargs):
     """Issue a request through the module under test."""
     kwargs.setdefault("tool", TOOL)
-    return await backend_client.request("GET", "/portfolio/u_1", **kwargs)
+    return await backend_client.request("GET", "/investment/portfolio/u_1", **kwargs)
 
 
 # ==========================================================================
 # Configuration
 # ==========================================================================
 class TestConfiguration:
+    def test_rag_base_url_defaults_to_the_rag_service(self):
+        """Semantic search does not go through the backend. The rag service
+        owns the vector database, so it is a separate host, not a path."""
+        assert backend_client.rag_base_url() == "http://rag:8100"
+
+    def test_rag_base_url_is_overridable(self, monkeypatch):
+        monkeypatch.setenv("RAG_API_BASE_URL", "http://rag-staging:9100/")
+        assert backend_client.rag_base_url() == "http://rag-staging:9100"
+
+    @pytest.mark.asyncio
+    async def test_base_override_redirects_a_single_call(self, fake_backend):
+        """The override changes the host and nothing else: the timeout, retry
+        budget and error mapping are shared on purpose, which is why the rag
+        call routes through here instead of a second hand-rolled client."""
+        fake_backend.set("search", httpx.Response(200, json={"ok": True}))
+        await backend_client.request(
+            "POST", "/search", tool="test_tool", base="http://rag:8100", json_body={"query": "x"}
+        )
+        assert str(fake_backend.last.url) == "http://rag:8100/search"
+
+    @pytest.mark.asyncio
+    async def test_base_override_ignores_the_backend_env_var(self, fake_backend, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_BASE_URL", "http://backend:8000/api")
+        fake_backend.set("search", httpx.Response(200, json={"ok": True}))
+        await backend_client.request(
+            "POST", "/search", tool="test_tool", base="http://rag:8100/", json_body={}
+        )
+        assert str(fake_backend.last.url) == "http://rag:8100/search"
+
     def test_base_url_defaults_to_the_container_service_name(self):
         """Inside Docker, localhost is this container. The default must be the
         compose service name or the tools silently talk to themselves."""
-        assert backend_client.base_url() == "http://backend:3000/api/v1"
+        assert backend_client.base_url() == "http://backend:8000/api"
 
     def test_base_url_comes_from_the_environment(self, monkeypatch):
         monkeypatch.setenv("BACKEND_API_BASE_URL", "http://other:9000/api/v2")
@@ -147,9 +176,11 @@ class TestSuccessfulRequests:
 
     @pytest.mark.asyncio
     async def test_url_is_base_plus_path(self, fake_backend, monkeypatch):
-        monkeypatch.setenv("BACKEND_API_BASE_URL", "http://backend:3000/api/v1")
+        monkeypatch.setenv("BACKEND_API_BASE_URL", "http://backend:8000/api")
         await call()
-        assert str(fake_backend.last.url).startswith("http://backend:3000/api/v1/portfolio/u_1")
+        assert str(fake_backend.last.url).startswith(
+            "http://backend:8000/api/investment/portfolio/u_1"
+        )
 
     @pytest.mark.asyncio
     async def test_query_parameters_are_sent_and_none_dropped(self, fake_backend):
@@ -332,7 +363,7 @@ class TestRetryPolicy:
         fake_backend.fail("portfolio", httpx.ConnectError("name resolution failed"))
         with pytest.raises(UpstreamUnavailableError) as info:
             await call()
-        assert "backend:3000" in str(info.value)
+        assert "backend:8000" in str(info.value)
 
     @pytest.mark.asyncio
     async def test_original_exception_is_chained(self, fake_backend):

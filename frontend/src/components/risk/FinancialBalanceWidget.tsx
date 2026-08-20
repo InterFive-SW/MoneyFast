@@ -1,4 +1,5 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { toNumber } from '../../lib/chartFormat'
 
 interface FinancialBalanceWidgetProps {
   income: number
@@ -43,7 +44,7 @@ export default function FinancialBalanceWidget({ income, expense, debt, debtToIn
             <Tooltip 
               cursor={{ fill: 'transparent' }}
               contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
-              formatter={(value: number) => [formatCurrency(value), 'Tutar']}
+              formatter={(value) => [formatCurrency(toNumber(value) ?? 0), 'Tutar']}
             />
             <Bar dataKey="value" radius={[6, 6, 0, 0]}>
               {data.map((entry, index) => (

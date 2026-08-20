@@ -85,24 +85,6 @@ function IconLogout({ className }: IconProps) {
   )
 }
 
-/** Sidebar daraltma/genişletme toggle ikonu */
-function IconChevron({ className, collapsed }: IconProps & { collapsed: boolean }) {
-  return (
-    <svg
-      className={`${className} transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="15 18 9 12 15 6" />
-    </svg>
-  )
-}
-
 // ─── Navigasyon Yapılandırması ────────────────────────────────────────────────
 
 const NAV_ITEMS: NavItem[] = [

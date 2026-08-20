@@ -1,5 +1,4 @@
 // src/components/chat/ContextPanel.tsx
-import React from 'react';
 
 interface ContextPanelProps {
   contextTopic: string | null;

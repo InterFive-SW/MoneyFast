@@ -21,7 +21,12 @@ export interface ActionWidgetPayload {
   message: string;
   confirmLabel: string;
   cancelLabel: string;
+  /** Kept for backwards compatibility; equals proposalId for chat proposals. */
   actionId: string;
+  /** The staged proposal this button confirms. Validated server-side. */
+  proposalId?: string;
+  /** ISO 8601. A proposal past this instant is refused with 410. */
+  expiresAt?: string;
   asset: string;
   amount: number;
   action: 'buy' | 'sell';

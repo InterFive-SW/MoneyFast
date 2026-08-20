@@ -1,7 +1,7 @@
 # MoneyFast Orchestrator
 
 LangGraph orchestrator for the MoneyFast multi-agent financial assistant.
-Talks to the `mcp-market-data` MCP server over SSE across a Docker network.
+Talks to the `mcp` MCP server over SSE across a Docker network.
 
 ## Layout
 
@@ -27,12 +27,17 @@ a bypass.
 
 ## Run
 
+The whole stack is defined in `infra/docker-compose.yml`; this directory no
+longer carries its own Compose file, because the orchestrator cannot run
+usefully without `mcp`, `backend` and `rag` alongside it.
+
 ```bash
 cp .env.example .env      # add GROQ_API_KEY
-docker compose up --build
-curl -s localhost:8080/readyz | jq
-curl -s localhost:8080/chat -H 'content-type: application/json' \
-  -d '{"user_message":"portföyüm ne durumda?","user_id":"u_1"}' | jq -r .final_output
+cd ../../infra && docker compose --env-file .env up -d --build
+# The orchestrator is not published to the host. Reach it through the backend:
+curl -s localhost:8000/api/ai_orchestrator/health | jq
+curl -s localhost:8000/api/ai_orchestrator/chat -H 'content-type: application/json' \
+  -d '{"user_message":"portföyüm ne durumda?","user_id":"TEST-USER-1"}' | jq -r .final_output
 ```
 
 Locally without Docker:

@@ -1,7 +1,7 @@
 """Unit tests for portfolio_tools.
 
 Contract under test: Interface Definitions v2.1, get_portfolio_positions,
-now backed by GET /portfolio/{user_id}.
+now backed by GET /investment/portfolio/{user_id}/positions.
 
 The dangerous failure here is not a crash, it is a plausible number. The
 normalizer sits between an unverified backend and a model that will narrate
@@ -33,7 +33,7 @@ class TestRequest:
     async def test_uses_get_on_the_user_scoped_path(self, fake_backend):
         await portfolio_tools.get_portfolio_positions("u_123")
         assert fake_backend.last.method == "GET"
-        assert "/portfolio/u_123" in str(fake_backend.last.url)
+        assert "/investment/portfolio/u_123/positions" in str(fake_backend.last.url)
 
     async def test_default_query_parameters(self, fake_backend):
         await portfolio_tools.get_portfolio_positions("u_123")

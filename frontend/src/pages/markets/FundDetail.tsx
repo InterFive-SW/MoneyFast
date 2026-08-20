@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { findFund, findInstrument } from '../../data/mockData'
+import { toNumber, seriesName } from '../../lib/chartFormat'
 
 type DetailTab = 'ozet' | 'portfoy' | 'getiri'
 
@@ -110,7 +111,7 @@ export default function FundDetail() {
                     <Pie data={holdingsWithColor} dataKey="weight" nameKey="symbol" cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} stroke="none">
                       {holdingsWithColor.map((h, i) => <Cell key={i} fill={h.color} />)}
                     </Pie>
-                    <Tooltip formatter={(value: number, name: string) => [`%${value}`, name]} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)' }} />
+                    <Tooltip formatter={(value, name) => [`%${toNumber(value) ?? 0}`, seriesName(name)]} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)' }} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>

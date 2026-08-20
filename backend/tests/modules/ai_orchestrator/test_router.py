@@ -69,7 +69,11 @@ def test_chat_happy_path_forwards_orchestrator_response(client, mocker):
     response = client.post("/api/ai_orchestrator/chat", json=CHAT_PAYLOAD)
 
     assert response.status_code == 200
-    assert response.json() == orchestrator_body
+    # The response model gained widget/context_topic/conversation_id, so a
+    # whole-body equality check would now assert the absence of features
+    # rather than the forwarding behaviour under test.
+    assert response.json() | orchestrator_body == response.json()
+    assert response.json()["widget"] is None
 
 
 def test_chat_returns_503_when_orchestrator_connection_refused(client, mocker):
@@ -81,12 +85,16 @@ def test_chat_returns_503_when_orchestrator_connection_refused(client, mocker):
     assert "unreachable" in response.json()["detail"]
 
 
-def test_chat_returns_503_when_orchestrator_times_out(client, mocker):
+def test_chat_returns_504_when_orchestrator_times_out(client, mocker):
+    """A timeout is not an outage. 503 sent the user looking for a service
+    that is up and simply slow -- usually a Groq 429 whose retry-after
+    exceeded our budget."""
     _install_async_client(mocker, post_exception=httpx.TimeoutException("timed out"))
 
     response = client.post("/api/ai_orchestrator/chat", json=CHAT_PAYLOAD)
 
-    assert response.status_code == 503
+    assert response.status_code == 504
+    assert "yoğunluk" in response.json()["detail"]
 
 
 def test_chat_returns_502_when_orchestrator_returns_error_status(client, mocker):

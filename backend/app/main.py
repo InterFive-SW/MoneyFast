@@ -1,5 +1,6 @@
 import importlib
 import pkgutil
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -41,6 +42,50 @@ def _discover_routers(application: FastAPI) -> None:
 
 
 _discover_routers(app)
+
+
+def configure_market_stream() -> None:
+    """Give the SSE fan-out a way to read quotes.
+
+    Injected rather than imported inside the stream module, so that module
+    holds no database dependency and can be tested without a session.
+    """
+    from app.core.database import SessionLocal
+    from app.modules.investment import market_service
+    from app.modules.market import stream
+
+    def read_frame():
+        db = SessionLocal()
+        try:
+            quotes = market_service.latest_quotes(db)
+            as_of, delay, is_delayed = market_service.freshness(quotes)
+            return {
+                "as_of": as_of.isoformat() if as_of else None,
+                "delay_minutes": delay,
+                "is_delayed": is_delayed,
+                "quotes": {
+                    symbol: {
+                        "price": row["price"],
+                        "change": row.get("change_amount"),
+                        "changePercent": row.get("change_percent"),
+                    }
+                    for symbol, row in quotes.items()
+                },
+            }
+        finally:
+            db.close()
+
+    stream.configure(read_frame)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # A lifespan handler rather than the deprecated @app.on_event("startup").
+    configure_market_stream()
+    yield
+
+
+app.router.lifespan_context = lifespan
 
 _static_dir = Path(__file__).parent.parent / "frontend" / "dist"
 

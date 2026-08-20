@@ -39,9 +39,9 @@ SELECT
     'HNSW test chunk for ' || d.ticker,
     (
         ARRAY[1::real, (substring(d.id::TEXT, 34, 3)::INTEGER / 1000.0)::real]
-        || array_fill(0::real, ARRAY[1534])
+        || array_fill(0::real, ARRAY[382])
     )::vector,
-    'text-embedding-3-small',
+    'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
     5
 FROM rag.documents AS d
 WHERE d.id::TEXT LIKE '10000000-0000-0000-0000-%';
@@ -53,8 +53,8 @@ SET LOCAL enable_seqscan = off;
 
 DO $$
 DECLARE
-    query_vector VECTOR(1536) :=
-        (ARRAY[1::real] || array_fill(0::real, ARRAY[1535]))::vector;
+    query_vector VECTOR(384) :=
+        (ARRAY[1::real] || array_fill(0::real, ARRAY[383]))::vector;
     plan JSON;
     result_count INTEGER;
 BEGIN
@@ -83,10 +83,10 @@ BEGIN
         query_vector,
         5,
         NULL,
-        'THYAO',
-        'company-report',
-        'tr',
-        'annual-report',
+        ARRAY['THYAO'],
+        ARRAY['company-report'],
+        ARRAY['tr'],
+        ARRAY['annual-report'],
         NULL
     );
 

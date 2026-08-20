@@ -34,6 +34,15 @@ Backend'de bir endpoint/model değiştiğinde, isteyen bu komutu tekrar çalış
 Zorunlu adım listesine dahil değil — küçük/stub sayfalarda elle tip yazmak da kabul
 edilebilir.
 
+**Tip kontrolü artık gerçekten çalışıyor.** Kök `tsconfig.json` bir "solution"
+dosyası (`files: []`) olduğu için `npm run build` içindeki düz `tsc` hiçbir
+dosyaya bakmıyordu; build yeşil görünürken 33 tip hatası birikmişti. Script
+`tsc -b`'ye çevrildi ve hatalar giderildi. Ayrı çalıştırmak için:
+
+```bash
+cd frontend && npm run typecheck
+```
+
 ## Backend ↔ ai-service
 
 ai-service, backend'in bazı endpoint'lerini (kullanıcı portföyü, hesap bilgisi, işlem
@@ -71,12 +80,47 @@ backend zaten tek codebase — asıl "sözleşme" ihtiyacı sadece dışarıya a
 sınırda var, bu da otomatik üretimle elle bakım yükü olmadan çözülüyor. Ekstra bir
 paket/versiyonlama katmanı bu ölçekte gereksiz karmaşıklık olurdu.
 
+## MCP sözleşme sürümü: v2.2
+
+MCP tool'larının gövde/yanıt şemaları "MCP Tools Interface Definitions"a karşı
+dondurulmuş. Sürüm geçmişi:
+
+| Sürüm | Değişiklik |
+|---|---|
+| v2.1 | Altı tool: `get_portfolio_positions`, `rag_semantic_market_search`, `calculate_portfolio_risk_metrics`, `prepare_transaction_proposal`, `validate_compliance_rules`, `route_user_request` |
+| **v2.2** | **`get_market_data` eklendi.** Mevcut altı tool'un şeması değişmedi. |
+
+`get_market_data` neden gerekti: altı tool portföy, doküman, risk, işlem
+hazırlama ve yönlendirmeyi kapsıyordu; hiçbiri **kullanıcının sahip olmadığı**
+bir enstrümanın fiyatını okuyamıyordu. "THYAO kaç lira?" ve "F/K'sı 10'un
+altındaki hisseler" soruları bu yüzden "veri bulunamadı" ile dönüyordu.
+
+Backend karşılığı `GET /api/market/instruments`. Eksik temel oran `null` döner
+ve öyle sunulur — 0 olarak göstermek, kârı açıklanmamış bir şirketi listenin en
+ucuzu yapardı.
+
 ## Kritik akış: chatbot işlem onayı
 
 FG-CB-02 (chatbot piyasa işlemi gerçekleştirebilmeli) ve FOG-03 (hassas işlemler için
 ek kimlik doğrulama) birlikte şunu gerektiriyor: ai-service bir işlemi *önerir*,
 gerçek gerçekleştirme backend'in investment modülünde, kullanıcının frontend'de açık
-onayından **sonra** olur. Bu akış OpenAPI şemasında iki ayrı endpoint olarak net
-görünmeli: `POST /investment/orders/propose` (ai-service çağırır, sadece öneri döner)
-ve `POST /investment/orders/confirm` (frontend, kullanıcı onayından sonra çağırır).
-Tek bir endpoint'e "öner ve hemen gerçekleştir" mantığını gömmeyin.
+onayından **sonra** olur. Tek bir endpoint'e "öner ve hemen gerçekleştir" mantığını
+gömmeyin.
+
+Akışın iki ucu:
+
+| Adım | Uç nokta | Kim çağırır |
+|---|---|---|
+| Öneri hazırla | `POST /api/investment/transactions/stage` | `mcp` (servis kimliğiyle) veya tarayıcı (kullanıcı token'ıyla) |
+| Onayla | `POST /api/investment/transactions/{proposal_id}/confirm` | **Yalnızca** tarayıcı, kullanıcının kendi tıklamasıyla |
+
+Eski `POST /investment/orders/propose` ve `/orders/confirm` uçları **kaldırıldı**.
+Sabit bir yanıt döndüren taslaklardı: sahiplik, süre ve tekillik denetimlerinin
+hiçbirini yapmıyorlardı, `confirm` her `order_id` için "onaylandı" diyordu.
+Gösterge panelindeki emir modalı da artık yukarıdaki gerçek yolu kullanıyor.
+
+Önerinin **kime ait olduğu** token'dan belirlenir: `stage` çağrısında token
+varsa gövdedeki `user_id` onunla eşleşmek zorunda, aksi halde 403. Token yoksa
+gövdedeki değer korunur — `mcp` bu uç noktayı servis kimliğiyle çağırır ve kimin
+adına çalıştığını gövdede bildirir. Gövdeye koşulsuz güvenmek, herhangi birinin
+bir başkasının emir listesinde öneri belirmesine izin verirdi.

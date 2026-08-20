@@ -37,6 +37,15 @@ export default function OrderHistoryWidget() {
     return type === 'Alış' ? 'text-emerald-600' : 'text-rose-600'
   }
 
+  if (loading) {
+    // Boş tablo "emir yok" demektir; yüklenirken bunu göstermek yanlış olurdu.
+    return (
+      <div className="flex flex-col h-full items-center justify-center bg-transparent rounded-2xl border border-transparent shadow-sm">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4">

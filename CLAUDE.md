@@ -12,20 +12,32 @@ işlemleri, yatırım/portföy yönetimi, RAG tabanlı piyasa/haber okuma ve ris
 değerlendirmesi sunuyor. Süre: 4 hafta. Gerçek müşteri verisi kullanılmıyor — tüm veri
 dummy/sentetik (TC kimlik no dahil, gerçekçi ama açıkça sahte formatta).
 
-## Mimari: backend+frontend birlikte, AI/RAG ayrı servis (2 Dockerfile)
+## Mimari: 7 container
 
-Güncelleme: Başlangıçta 3 ayrı servis (backend, frontend, ai-service) planlanmıştı;
+Başlangıçta 3 ayrı servis (backend, frontend, ai-service) planlanmıştı;
 PO ile yapılan değerlendirme sonrası **frontend backend'e birleştirildi** —
 aralarında gerçek bir izolasyon ihtiyacı yoktu (frontend statik dosya, CPU/bellek
 yükü yaratmıyor), birleştirme CORS'u ve bir deploy adımını ortadan kaldırdı.
-**ai-service ayrı kaldı** — bunun gerekçesi hâlâ geçerli: RAG/embedding
-kütüphaneleri farklı bağımlılık profiline sahip ve performans izolasyonu
-gerektiriyor (chatbot yavaşlarsa/çökerse bankacılık işlemleri etkilenmemeli —
-bkz. gereksinim FOG-04/FOG-05). Frontend çökerse zaten kullanıcı hiçbir şeye
-erişemez, bu yüzden onu izole etmenin gerçek bir koruma değeri yoktu.
+AI tarafı ise üç servise ayrıldı; gerekçe hâlâ aynı: RAG/embedding kütüphaneleri
+farklı bağımlılık profiline sahip ve performans izolasyonu gerektiriyor
+(chatbot yavaşlarsa/çökerse bankacılık işlemleri etkilenmemeli — bkz. gereksinim
+FOG-04/FOG-05).
 
-backend modülleri (auth, banking, investment, notification, analytics) network
-sınırı olmadan, aynı process içinde, doğrudan Python import'uyla birbirini çağırır.
+| Servis | Rol |
+|---|---|
+| `backend` | FastAPI monolit + derlenmiş frontend (tek dış giriş noktası) |
+| `base-db` | PostgreSQL 16 — uygulama verisi |
+| `vector-db` | pgvector — yalnızca `rag.documents` / `rag.chunks` |
+| `rag` | Retrieval servisi. Vektör DB kredensiyelini tutan **tek** bileşen; embedding'i yerel çalıştırır |
+| `mcp` | MCP tool sunucusu (SSE). Ajanların çağırdığı yedi tool |
+| `agents` | LangGraph orchestrator. Yönlendirme + uzman ajanlar; Groq'a çıkar |
+| `ingestor` | Fiyat (yfinance) ve haber (RSS) toplayıcı. DB kredensiyeli **taşımaz**, her şeyi HTTP ile iter |
+
+Ağ topolojisi ve hangi servisin hangi URL'i kullandığı: `docs/DOCKER_NETWORKING.md`.
+
+backend modülleri (auth, banking, investment, notification, analytics, market,
+risk, compliance) network sınırı olmadan, aynı process içinde, doğrudan Python
+import'uyla birbirini çağırır.
 
 ```
 moneyfast/
@@ -33,19 +45,67 @@ moneyfast/
 │   └── app/
 │       ├── main.py     ← modül router'larını otomatik keşfedip toplar + StaticFiles serve
 │       ├── core/        (config, DB bağlantısı, JWT middleware)
-│       ├── modules/      auth/, banking/, investment/, notification/, analytics/
+│       ├── modules/      auth/, banking/, investment/, notification/, analytics/,
+│       │                 market/, risk/, compliance/, ai_orchestrator/
 │       └── shared/      (SADECE domain'siz ortak kod — enum, exception, pagination.
 │                         DB modeli KOYMA, bkz. "shared/ kuralı" aşağıda)
-├── frontend/            ← React kaynak kodu (geliştirme sırasında ayrı, build sonrası backend'e kopyalanır)
-├── ai-service/         ← ayrı servis: chatbot, RAG, MCP, ajanlar
-├── infra/docker-compose.yml   ← backend (frontend dahil) + ai-service + postgres + redis
+├── frontend/            ← React kaynak kodu (build sonrası backend image'ına kopyalanır)
+├── AI-Services/
+│   ├── moneyfast-orchestrator/          ← `agents` servisi (LangGraph + Groq)
+│   │   └── mcp-server/                  ← `mcp` servisi (MCP tool sunucusu)
+│   ├── moneyfast-rag/                   ← `rag` servisi (fastembed + vector-db)
+│   └── moneyfast-ingestor/              ← `ingestor` servisi (yfinance + RSS)
+├── infra/docker-compose.yml   ← 7 servisin tamamı, tek kaynak
 └── docs/
 ```
+
+### AI uç noktaları backend'de nerede
+
+`mcp` içindeki tool'lar backend'e gerçek uç noktalar üzerinden gider. Bunların
+gövde/yanıt şemaları **"MCP Tools Interface Definitions v2.2"ye karşı dondurulmuş**
+— eksik bir alan default'lanmaz, tool katmanı `ContractViolationError` fırlatır.
+Bu uç noktaları değiştirirken `AI-Services/.../mcp-server/*_tools.py` içindeki
+`_normalize()` fonksiyonlarına bakılmalı.
+
+| Tool | Uç nokta |
+|---|---|
+| `get_portfolio_positions` | `GET /api/investment/portfolio/{user_id}/positions` |
+| `prepare_transaction_proposal` | `POST /api/investment/transactions/stage` |
+| `calculate_portfolio_risk_metrics` | `POST /api/risk/calculate` |
+| `validate_compliance_rules` | `POST /api/compliance/validate` |
+| `rag_semantic_market_search` | `POST /search` — **backend'de değil, `rag` servisinde** |
+| `get_market_data` | `GET /api/market/instruments` — v2.2 ile eklendi |
+
+Sohbet akışının kendisi `POST /api/ai_orchestrator/chat`. `user_id` gövdeden
+DEĞİL, bearer token'dan çözülür (`app/core/deps.py`); MCP sözleşmesi bu değerin
+yalnızca doğrulanmış oturumdan gelmesini şart koşuyor. İşlem onayı yalnızca
+`POST /api/investment/transactions/{proposal_id}/confirm` üzerinden, kullanıcının
+kendi eylemiyle verilir — sohbette "evet" demek onay sayılmaz.
+
+Frontend'in kullandığı `/api/investment/positions`, `/api/investment/watchlist`
+gibi uç noktalar bunlardan ayrı ve camelCase şemalarını koruyor; ikisi farklı
+tüketicilere hizmet ediyor ve farklı sebeplerle değişiyor. Emir verme yolu ise
+ortak: panel de sohbet de `transactions/stage` → `transactions/{id}/confirm`
+kullanıyor (eski `/orders/propose` ve `/orders/confirm` taslakları kaldırıldı,
+bkz. CONTRACT_WORKFLOW.md).
+
+### Canlı fiyat akışı
+
+`ingestor` 10 saniyede bir tek toplu yfinance isteğiyle ~95 enstrümanı çekip
+backend'e HTTP ile yazıyor. Frontend `GET /api/market/stream` (SSE) üzerinden
+dinliyor; `frontend/src/hooks/useMarketStream.ts` tüm uygulama için **tek**
+`EventSource` tutuyor, akış kurulamazsa 10 saniyelik yoklamaya düşüyor.
+Fiyata bağlı kolonları (pozisyon değeri, günlük/toplam getiri) yeniden hesaplama
+işi `useLiveRows` içinde; yalnızca fiyatı tazeleyip yanındaki değeri dondurmak
+satırı kendi içinde tutarsız bırakırdı.
 
 ## Teknoloji stack'i
 
 - Backend: Python + FastAPI + PostgreSQL (SQLAlchemy + Alembic)
-- AI servis: Python, RAG (Chroma), MCP, LLM sağlayıcı — karar için MIMARI_KARARLAR.md'ye bakın
+- AI servisleri: Python. RAG **pgvector** üzerinde (Chroma değil — karar ve
+  gerekçe için MIMARI_KARARLAR.md). Embedding yerel çalışıyor (fastembed/ONNX,
+  `paraphrase-multilingual-MiniLM-L12-v2`, 384 boyut, API anahtarı yok).
+  LLM çıkışı yalnızca `agents` servisinde ve yalnızca Groq'a.
 - Auth: ASP.NET Core Identity + JWT önerisi .NET dönemine aitti; Python'a dönüşle
   **FastAPI + python-jose (JWT) + passlib (parola hash)** kullanılıyor — Identity'nin
   Python karşılığı budur.

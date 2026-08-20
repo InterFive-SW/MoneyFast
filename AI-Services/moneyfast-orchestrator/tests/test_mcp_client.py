@@ -113,11 +113,11 @@ def patch_transport(mocker, session=None, connect_error=None, sessions=None):
 # Construction
 # --------------------------------------------------------------------------
 def test_defaults_come_from_the_environment(monkeypatch):
-    monkeypatch.setenv("MCP_SERVER_URL", "http://mcp-market-data:8000/sse")
+    monkeypatch.setenv("MCP_SERVER_URL", "http://mcp:8000/sse")
     monkeypatch.setenv("MCP_TIMEOUT_SECONDS", "12.5")
     monkeypatch.setenv("MCP_MAX_RETRIES", "3")
     client = MCPToolClient()
-    assert client.url == "http://mcp-market-data:8000/sse"
+    assert client.url == "http://mcp:8000/sse"
     assert client.timeout == 12.5
     assert client.max_retries == 3
 
@@ -129,7 +129,7 @@ def test_falls_back_to_the_container_service_name(monkeypatch):
     monkeypatch.delenv("MCP_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("MCP_MAX_RETRIES", raising=False)
     client = MCPToolClient()
-    assert client.url == "http://mcp-market-data:8000/sse"
+    assert client.url == "http://mcp:8000/sse"
     assert "localhost" not in client.url
     assert client.timeout == 30.0
     assert client.max_retries == 1
@@ -288,8 +288,8 @@ async def test_unavailable_error_names_the_url_and_chains_the_cause(mocker):
     patch_transport(mocker, connect_error=ConnectionError("name resolution failed"))
     mocker.patch.object(mcp_client.asyncio, "sleep", new=_instant_sleep())
     with pytest.raises(MCPUnavailable) as info:
-        await MCPToolClient(url="http://mcp-market-data:8000/sse", max_retries=1).call("t", {})
-    assert "mcp-market-data:8000" in str(info.value)
+        await MCPToolClient(url="http://mcp:8000/sse", max_retries=1).call("t", {})
+    assert "mcp:8000" in str(info.value)
     assert isinstance(info.value.__cause__, ConnectionError)
 
 
@@ -386,7 +386,7 @@ def test_get_mcp_client_is_a_singleton():
 
 
 def test_get_mcp_client_logs_the_bound_url_once(caplog, monkeypatch):
-    monkeypatch.setenv("MCP_SERVER_URL", "http://mcp-market-data:8000/sse")
+    monkeypatch.setenv("MCP_SERVER_URL", "http://mcp:8000/sse")
     with caplog.at_level("INFO", logger="moneyfast.mcp"):
         mcp_client.get_mcp_client()
         mcp_client.get_mcp_client()

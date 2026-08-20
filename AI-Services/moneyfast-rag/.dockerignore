@@ -1,0 +1,20 @@
+# NOTE: tests/ is deliberately NOT excluded. The Dockerfile's `test` stage does
+# `COPY tests/ ./tests/`, and ignoring the directory here would make that copy
+# silently produce nothing — the build would then fail inside `make test` with
+# a confusing "file or directory not found" rather than a test failure.
+#
+# The runtime stage never receives the tests: the `base` stage copies only the
+# four application modules by name.
+.env
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+coverage.xml
+.coverage

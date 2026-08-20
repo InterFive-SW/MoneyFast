@@ -13,6 +13,7 @@ from typing import Any, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+import widgets
 from mcp_client import get_mcp_client
 from orchestrator import run_turn
 
@@ -27,7 +28,10 @@ class Turn(BaseModel):
 
 class ChatRequest(BaseModel):
     user_message: str = Field(min_length=1, max_length=4000)
-    user_id: str = "anonymous"
+    # Resolved from the bearer token by the backend before it reaches here;
+    # see backend/app/core/deps.py. None means anonymous, which the portfolio
+    # tools correctly treat as "no holdings to read".
+    user_id: Optional[str] = None
     thread_id: str = "default"
     conversation_history: list[Turn] = []
 
@@ -37,6 +41,10 @@ class ChatResponse(BaseModel):
     primary_intent: Optional[str] = None
     target_agent: Optional[str] = None
     compliance_verdict: Optional[str] = None
+    # Built deterministically from the specialist's tool payload, never asked
+    # of the model. See widgets.py.
+    widget: Optional[dict[str, Any]] = None
+    context_topic: Optional[str] = None
 
 
 @app.get("/healthz")
@@ -57,15 +65,20 @@ async def readyz() -> dict[str, Any]:
 async def chat(req: ChatRequest) -> ChatResponse:
     state = await run_turn(
         req.user_message,
-        user_id=req.user_id,
+        user_id=req.user_id or "anonymous",
         conversation_history=[t.model_dump() for t in req.conversation_history],
         thread_id=req.thread_id,
     )
     # Internal fields (specialist_output, draft_response, tools_used) stay
-    # server side. The client sees only what the user may see.
+    # server side. The client sees only what the user may see -- which is why
+    # the widget is projected here rather than by shipping specialist_output
+    # across the boundary for the backend to interpret.
+    widget, context_topic = widgets.build(state)
     return ChatResponse(
         final_output=state.get("final_output") or "",
         primary_intent=state.get("primary_intent"),
         target_agent=state.get("target_agent"),
         compliance_verdict=state.get("compliance_verdict"),
+        widget=widget,
+        context_topic=context_topic,
     )

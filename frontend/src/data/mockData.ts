@@ -235,7 +235,7 @@ export interface FundReturns {
   daily:      number
   monthly:    number
   threeMonth: number
-  yearly:     number
+  yearly:     number | null // null = henüz 1 yıllık geçmişi yok ("NA")
   threeYear:  number | null // null = henüz 3 yıllık geçmişi yok ("NA")
   fiveYear:   number | null
 }

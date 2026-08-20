@@ -1,5 +1,4 @@
 // src/components/chat/widgets/PortfolioWidget.tsx
-import React from 'react';
 import { PortfolioWidgetPayload } from '../../../types/chat';
 
 interface Props {

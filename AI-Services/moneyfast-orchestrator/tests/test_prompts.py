@@ -31,6 +31,7 @@ def flat(text: str) -> str:
 
 SPECIALIST_KEYS = {
     "PORTFOLIO_AGENT",
+    "MARKET_DATA_AGENT",
     "MARKET_RESEARCH_AGENT",
     "RISK_STRATEGY_AGENT",
     "TRANSACTION_AGENT",
@@ -179,7 +180,7 @@ def test_default_table_columns_are_specified():
 # --------------------------------------------------------------------------
 # Specialist prompts
 # --------------------------------------------------------------------------
-def test_all_five_specialists_are_defined():
+def test_all_six_specialists_are_defined():
     assert set(prompts.SPECIALIST_PROMPTS) == SPECIALIST_KEYS
 
 

@@ -3,9 +3,10 @@
 Graph shape:
 
     START
-      -> router_node                 (classify_and_route_intent)
+      -> router_node                 (safety pre-filter, then Groq routing)
       -> one of:
            portfolio_node            (get_portfolio_positions)
+           market_data_node          (get_market_data)
            market_research_node      (rag_semantic_market_search)
            risk_node                 (positions, then risk metrics)
            transaction_node          (prepare_transaction_proposal, staging)
@@ -38,6 +39,8 @@ from mcp_client import MCPToolError, MCPUnavailable, get_mcp_client
 from prompts import (
     ORCHESTRATOR_SYSTEM_PROMPT,
     REVISION_TASK_TEMPLATE,
+    ROUTER_PROMPT,
+    ROUTER_TASK_TEMPLATE,
     SPECIALIST_PROMPTS,
     SYNTHESIS_TASK_TEMPLATE,
 )
@@ -63,6 +66,7 @@ DATA_FAILURE_TR = (
 
 AGENTS = [
     "PORTFOLIO_AGENT",
+    "MARKET_DATA_AGENT",
     "MARKET_RESEARCH_AGENT",
     "RISK_STRATEGY_AGENT",
     "TRANSACTION_AGENT",
@@ -151,10 +155,25 @@ def _parse_json(raw: str) -> dict[str, Any]:
 # Nodes
 # ---------------------------------------------------------------------------
 async def router_node(state: MoneyFastState) -> dict[str, Any]:
-    """Classify the turn. Deterministic tool call, no LLM guesswork."""
-    mcp = get_mcp_client()
+    """Classify the turn, in two passes with different trust levels.
+
+    Pass 1 is the MCP safety pre-filter: deterministic regex, no model. It
+    decides distress routing on its own, because a safety gate that depends on
+    the model it is guarding fails open exactly when the model misbehaves.
+
+    Pass 2 asks the model for the topic. Its answer is accepted for routing
+    only; it can add safety flags but never clear one, and it cannot override a
+    non-overridable decision from pass 1.
+
+    Failure is not fatal: an unreachable MCP server or an unparseable model
+    reply both degrade to EDUCATION_AGENT, which holds no user data and can
+    emit no figures. Guessing a specialist here would send an unclassified
+    turn at a tool that reads someone's holdings.
+    """
+    safety: dict[str, Any] = {}
+    errors: list[str] = []
     try:
-        result = await mcp.call(
+        safety = await get_mcp_client().call(
             "classify_and_route_intent",
             {
                 "user_message": state["user_message"],
@@ -165,21 +184,70 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
             },
         )
     except (MCPUnavailable, MCPToolError) as exc:
-        log.error("router failed: %s", exc)
+        # Losing the pre-filter is serious but not a reason to drop the turn:
+        # the model is still asked, and its own safety_flags still apply.
+        log.error("safety pre-filter unavailable: %s", exc)
+        errors.append(f"safety_prefilter: {exc}")
+
+    flags = list(safety.get("safety_flags") or [])
+
+    if safety.get("is_overridable") is False:
+        target = safety.get("target_agent") or "HUMAN_HANDOFF"
+        log.warning("routing fixed by safety pre-filter: agent=%s flags=%s", target, flags)
+        return {
+            "primary_intent": safety.get("primary_intent") or "DISTRESS",
+            "target_agent": target,
+            "entities": {},
+            "safety_flags": flags,
+            "needs_clarification": False,
+            "clarifying_question": None,
+            "tools_used": ["classify_and_route_intent"],
+            "revision_count": 0,
+            "errors": errors,
+        }
+
+    try:
+        result = await _llm_json(
+            ROUTER_PROMPT,
+            ROUTER_TASK_TEMPLATE.format(
+                user_message=state["user_message"],
+                conversation_summary=_history_summary(state) or "(none)",
+                available_agents=", ".join(AGENTS),
+                safety_flags=", ".join(flags) or "(none)",
+            ),
+            fast=True,
+        )
+    except Exception as exc:  # network, rate limit, malformed JSON
+        log.error("router classification failed: %s", exc)
         return {
             "primary_intent": "OUT_OF_SCOPE",
             "target_agent": "EDUCATION_AGENT",
-            "specialist_output": {"status": "ERROR", "error": str(exc)},
-            "errors": [f"router: {exc}"],
+            "entities": {},
+            "safety_flags": flags,
+            "needs_clarification": False,
+            "clarifying_question": None,
+            "tools_used": ["classify_and_route_intent"],
             "revision_count": 0,
+            "errors": errors + [f"router: {exc}"],
         }
 
-    flags = result.get("safety_flags") or []
-    target = result.get("target_agent") or "EDUCATION_AGENT"
+    target = result.get("target_agent")
+    if target not in AGENTS:
+        # A hallucinated agent name must not fall through to a real specialist.
+        log.warning("router returned unknown agent %r, falling back", target)
+        target = "EDUCATION_AGENT"
+
+    # Union, never replacement: the model may notice an injection attempt the
+    # regex missed, but it may not clear a flag the regex raised.
+    for flag in result.get("safety_flags") or []:
+        if flag not in flags:
+            flags.append(flag)
     if "DISTRESS_SIGNAL" in flags:
         target = "HUMAN_HANDOFF"
+
+    needs_clarification = bool(result.get("needs_clarification"))
     if float(result.get("confidence") or 0) < 0.60:
-        result["needs_clarification"] = True
+        needs_clarification = True
 
     log.info(
         "routed intent=%s agent=%s confidence=%s flags=%s",
@@ -190,11 +258,11 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
         "target_agent": target,
         "entities": result.get("entities") or {},
         "safety_flags": flags,
-        "needs_clarification": bool(result.get("needs_clarification")),
+        "needs_clarification": needs_clarification,
         "clarifying_question": result.get("clarifying_question"),
         "tools_used": ["classify_and_route_intent"],
         "revision_count": 0,
-        "errors": [],
+        "errors": errors,
     }
 
 
@@ -204,13 +272,37 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
     )
     args = plan.get("arguments") or {}
     args["user_id"] = state.get("user_id") or "unknown"
-    args.setdefault("base_currency", "TRY")
+    # Reporting currency follows the session locale, not the model. It is a
+    # presentation choice, and letting the model pick means a Turkish user can
+    # be shown their portfolio in USD because the plan happened to say so.
+    args["base_currency"] = "USD" if (state.get("locale") or DEFAULT_LOCALE).endswith("US") else "TRY"
     args.setdefault("valuation_mode", "LAST_CLOSE")
     args.setdefault("include_closed", False)
     return await _run_tool(
         state, "get_portfolio_positions", args,
         assumptions=plan.get("assumptions") or [],
         empty_when=lambda p: not p.get("positions"),
+    )
+
+
+async def market_data_node(state: MoneyFastState) -> dict[str, Any]:
+    """Current prices and valuation ratios, for any instrument."""
+    plan = await _llm_json(
+        SPECIALIST_PROMPTS["MARKET_DATA_AGENT"], _specialist_task(state), fast=True
+    )
+    args = plan.get("arguments") or {}
+    # A turn that named no instrument and no filter would otherwise screen the
+    # entire universe and hand the model 50 rows to summarise.
+    if not args.get("symbols") and not args.get("filters"):
+        entities = state.get("entities") or {}
+        tickers = entities.get("tickers") or []
+        if tickers:
+            args["symbols"] = tickers
+    args.setdefault("top_k", 20)
+    return await _run_tool(
+        state, "get_market_data", args,
+        assumptions=plan.get("assumptions") or [],
+        empty_when=lambda p: not p.get("instruments"),
     )
 
 
@@ -221,7 +313,17 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     args = plan.get("arguments") or {}
     args.setdefault("query", state["user_message"])
     args.setdefault("top_k", 8)
-    args.setdefault("min_similarity", 0.62)
+    # Cosine thresholds are a property of the embedding model, not a product
+    # constant. The tool contract documents 0.62, which is calibrated for E5;
+    # the corpus is embedded with paraphrase-multilingual-MiniLM, whose scores
+    # run lower. Measured against the live corpus: a clearly relevant article
+    # scores 0.43-0.72 and off-topic ones sit below 0.35, so 0.62 silently
+    # discarded good hits and the assistant reported "no sources found" for
+    # news it was holding.
+    #
+    # Overridden here rather than in the tool, because the caller owns this
+    # choice and the contract's default has to stay what it says.
+    args["min_similarity"] = float(os.getenv("RAG_MIN_SIMILARITY", "0.35"))
     args["conversation_context"] = (state.get("conversation_history") or [])[-6:]
     return await _run_tool(
         state, "rag_semantic_market_search", args,
@@ -419,7 +521,8 @@ async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
 # Conditional edges
 # ---------------------------------------------------------------------------
 SpecialistRoute = Literal[
-    "portfolio", "market_research", "risk", "transaction", "handoff", "synthesis"
+    "portfolio", "market_data",
+    "market_research", "risk", "transaction", "handoff", "synthesis"
 ]
 
 
@@ -431,6 +534,7 @@ def route_after_router(state: MoneyFastState) -> SpecialistRoute:
         return "handoff"
     return {
         "PORTFOLIO_AGENT": "portfolio",
+        "MARKET_DATA_AGENT": "market_data",
         "MARKET_RESEARCH_AGENT": "market_research",
         "RISK_STRATEGY_AGENT": "risk",
         "TRANSACTION_AGENT": "transaction",
@@ -454,6 +558,7 @@ def build_graph():
     g = StateGraph(MoneyFastState)
     g.add_node("router", router_node)
     g.add_node("portfolio", portfolio_node)
+    g.add_node("market_data", market_data_node)
     g.add_node("market_research", market_research_node)
     g.add_node("risk", risk_node)
     g.add_node("transaction", transaction_node)
@@ -467,6 +572,7 @@ def build_graph():
         route_after_router,
         {
             "portfolio": "portfolio",
+            "market_data": "market_data",
             "market_research": "market_research",
             "risk": "risk",
             "transaction": "transaction",
@@ -474,7 +580,7 @@ def build_graph():
             "synthesis": "synthesis",
         },
     )
-    for node in ("portfolio", "market_research", "risk", "transaction", "handoff"):
+    for node in ("portfolio", "market_data", "market_research", "risk", "transaction", "handoff"):
         g.add_edge(node, "synthesis")
     g.add_edge("synthesis", "compliance")
     g.add_conditional_edges(
@@ -507,6 +613,29 @@ async def run_turn(
         "conversation_history": conversation_history or [],
         "user_id": user_id,
         "locale": DEFAULT_LOCALE,
+        # Everything below is reset explicitly because the checkpointer keys
+        # state on thread_id and MERGES this input into whatever the previous
+        # turn left behind. Without the reset, a turn that runs no tool
+        # inherits the last one's specialist_output -- and synthesis reads
+        # that as its source of figures, so an unrelated later answer can
+        # quote an earlier question's holdings. The observed symptom was
+        # milder and just as wrong: a refusal rendered with the previous
+        # turn's transaction confirm button attached.
+        "primary_intent": "",
+        "target_agent": "",
+        "specialist_output": {},
+        "draft_response": "",
+        "final_output": "",
+        "compliance_verdict": "",
+        "compliance": {},
+        "blocked_reason": None,
+        "entities": {},
+        "safety_flags": [],
+        "needs_clarification": False,
+        "clarifying_question": None,
+        "tools_used": [],
+        "revision_count": 0,
+        "errors": [],
     }
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 25}
     return await get_graph().ainvoke(state, config=config)

@@ -19,9 +19,15 @@ export type PortfolioChartData = GetResponseType<paths['/api/investment/portfoli
 export type Position = GetResponseType<paths['/api/investment/positions']>[0];
 export type Order = GetResponseType<paths['/api/investment/orders']>[0];
 export type AssetAllocationItem = GetResponseType<paths['/api/investment/asset-allocation']>[0];
-export type OrderConfirmRequest = components['schemas']['OrderConfirmRequest'];
+export type StageTransactionRequest = components['schemas']['StageTransactionRequest'];
+export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
 export type MarketTicker = GetResponseType<paths['/api/market/tickers']>[0];
+// `instruments` şemada opsiyonel görünür (varsayılanı olan bir alan); satır
+// tipini almak için önce boş olmayan hâline daraltılır.
+export type MarketInstrument = NonNullable<
+    GetResponseType<paths['/api/market/instruments']>['instruments']
+>[0];
 export type NewsItem = GetResponseType<paths['/api/market/news']>[0];
 
 export type WatchlistItem = GetResponseType<paths['/api/investment/watchlist']>['bist'][0];
@@ -105,16 +111,52 @@ class ApiClient {
     }
 
     /**
-     * Kullanıcının onayladığı işlemi backend'e iletir.
-     * 
-     * @param request Onaylanacak siparişin detaylarını içeren veri modeli.
-     * @returns İşlem sonucu mesajını ve statüsünü döner.
+     * Bir işlemi öneri olarak hazırlar — hiçbir emir iletmez.
+     *
+     * Sohbet ve gösterge paneli aynı yolu kullanır: önce burada doğrulanıp
+     * maliyetlendirilen bir öneri oluşur, sonra kullanıcı `confirmProposal`
+     * ile onaylar. Panelin bir zamanlar kullandığı `/orders/propose` ve
+     * `/orders/confirm` uçları sabit bir yanıt döndüren taslaklardı: sahiplik,
+     * süre ve tekillik denetimlerinin hiçbirini yapmıyorlardı.
      */
-    confirmOrder(request: OrderConfirmRequest) {
-        return this.post<Record<string, string>>('/investment/orders/confirm', request);
+    stageTransaction(request: StageTransactionRequest) {
+        return this.post<StageTransactionOut>('/investment/transactions/stage', request);
+    }
+
+    /**
+     * Hazırlanmış bir işlem önerisini id'siyle onaylar; backend önerinin var
+     * olduğunu, süresinin dolmadığını ve çağıran kullanıcıya ait olduğunu
+     * doğrular.
+     *
+     * Onay yalnızca burada, kullanıcının kendi eylemiyle verilir. Ajan bu uç
+     * noktaya erişemez ve sohbette "evet" demek onay sayılmaz.
+     */
+    confirmProposal(proposalId: string) {
+        return this.post<Record<string, string>>(
+            `/investment/transactions/${encodeURIComponent(proposalId)}/confirm`,
+            {},
+        );
     }
 
     // Market endpoints
+    /**
+     * Enstrüman evreni — fiyat ve temel oranlar birlikte.
+     * `top_k` sunucuda sınırlanır; burada verilmezse sunucunun varsayılanı geçerli.
+     */
+    getInstruments(params?: { top_k?: number; sort_by?: string; market?: string }) {
+        const query = new URLSearchParams();
+        if (params?.top_k != null) query.set('top_k', String(params.top_k));
+        if (params?.sort_by) query.set('sort_by', params.sort_by);
+        if (params?.market) query.set('market', params.market);
+        const suffix = query.toString() ? `?${query}` : '';
+        return this.request<{ instruments: MarketInstrument[] }>(`/market/instruments${suffix}`);
+    }
+
+    /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */
+    getCurrentUser() {
+        return this.request<{ id: string; first_name: string; last_name: string }>('/auth/me');
+    }
+
     getMarketTickers() {
         return this.request<MarketTicker[]>('/market/tickers');
     }

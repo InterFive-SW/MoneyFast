@@ -136,11 +136,12 @@ async def get_portfolio_positions(
         - Any response containing these figures MUST pass validate_compliance_rules
           before emission.
     """
-    # GET /portfolio/{user_id}. List parameters are sent as repeated keys
-    # (account_ids=a&account_ids=b); httpx renders bools as true/false.
+    # GET /investment/portfolio/{user_id}/positions. List parameters are sent
+    # as repeated keys (account_ids=a&account_ids=b); httpx renders bools as
+    # true/false.
     payload = await backend_client.request(
         "GET",
-        f"/portfolio/{user_id}",
+        f"/investment/portfolio/{user_id}/positions",
         tool=TOOL,
         params={
             "account_ids": account_ids,

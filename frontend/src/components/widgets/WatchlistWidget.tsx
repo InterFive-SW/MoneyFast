@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
 import type { WatchlistItem } from '../../api/client'
+import { useLiveRows } from '../../hooks/useLiveRows'
 
 type Tab = 'bist' | 'us' | 'crypto'
 
+/**
+ * İzleme listesi. Sekme içerikleri açılışta bir kez çekilir, fiyatlar canlı
+ * akışla güncellenir; akışta karşılığı olmayan satır çekildiği hâliyle kalır.
+ */
 export default function WatchlistWidget() {
   const [data, setData] = useState<Record<string, WatchlistItem[]>>({})
   const [loading, setLoading] = useState(true)
@@ -23,6 +28,9 @@ export default function WatchlistWidget() {
     loadData()
   }, [])
 
+  // Hook'lar erken return'den önce çağrılmalı — React'in hook sırası kuralı.
+  const currentItems = useLiveRows(data[activeTab] || [])
+
   if (loading) {
     return (
       <div className="flex flex-col h-full items-center justify-center bg-transparent rounded-2xl border border-transparent shadow-sm">
@@ -30,8 +38,6 @@ export default function WatchlistWidget() {
       </div>
     )
   }
-
-  const currentItems = data[activeTab] || []
 
   return (
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">

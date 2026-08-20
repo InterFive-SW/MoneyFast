@@ -1,6 +1,6 @@
 # mcp-server
 
-Build context for the `mcp-market-data` container. Copy the six tool modules
+Build context for the `mcp` container. Copy the six tool modules
 and `server.py` from the MoneyFast MCP skeleton into this directory.
 
 `server.py` must serve SSE rather than stdio. With FastMCP that means:

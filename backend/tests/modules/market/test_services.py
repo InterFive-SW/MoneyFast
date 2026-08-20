@@ -1,0 +1,303 @@
+"""Market data storage.
+
+Both stores are write-heavy paths driven by an external feed, so the tests
+concentrate on what happens when the feed is wrong: an unknown symbol, a
+repeated article, a batch with nothing usable in it.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from sqlalchemy.orm import Session
+
+from app.modules.investment import market_service
+from app.modules.market import service as news_service
+
+NOW = datetime.now(timezone.utc)
+
+
+def db_with_products(*symbols) -> MagicMock:
+    db = MagicMock(spec=Session)
+    db.query.return_value.all.return_value = [
+        SimpleNamespace(symbol=symbol, id=f"prod-{symbol}") for symbol in symbols
+    ]
+    db.execute.return_value = SimpleNamespace(rowcount=len(symbols))
+    return db
+
+
+class TestUpsertQuotes:
+    def test_known_symbols_are_written(self):
+        db = db_with_products("TEST-THYAO")
+        written = market_service.upsert_quotes(
+            db, [{"symbol": "TEST-THYAO", "price": 295.5, "market_timestamp": NOW}]
+        )
+        assert written == 1
+        assert db.commit.called
+
+    def test_unknown_symbol_is_skipped_not_created(self):
+        """Creating a product from a ticker string would let a typo in a feed
+        become a tradable instrument."""
+        db = db_with_products("TEST-THYAO")
+        written = market_service.upsert_quotes(
+            db, [{"symbol": "NOT-A-PRODUCT", "price": 1.0, "market_timestamp": NOW}]
+        )
+        assert written == 0
+        assert db.add.called is False
+
+    def test_a_bad_row_does_not_stop_the_good_ones(self):
+        db = db_with_products("TEST-THYAO")
+        written = market_service.upsert_quotes(
+            db,
+            [
+                {"symbol": "NOT-A-PRODUCT", "price": 1.0, "market_timestamp": NOW},
+                {"symbol": "TEST-THYAO", "price": 295.5, "market_timestamp": NOW},
+            ],
+        )
+        assert written == 1
+
+
+class TestUpsertCandles:
+    def test_empty_batch_makes_no_query(self):
+        db = db_with_products("TEST-THYAO")
+        assert market_service.upsert_candles(db, []) == 0
+        assert db.execute.called is False
+
+    def test_batch_of_only_unknown_symbols_makes_no_query(self):
+        db = db_with_products("TEST-THYAO")
+        rows = [{"symbol": "NOPE", "timestamp": NOW, "open": 1, "high": 2, "low": 1, "close": 2}]
+        assert market_service.upsert_candles(db, rows) == 0
+        assert db.execute.called is False
+
+    def test_known_symbols_are_inserted_with_conflict_handling(self):
+        """ON CONFLICT DO NOTHING is what makes a nightly backfill re-runnable
+        without duplicating a single bar."""
+        db = db_with_products("TEST-THYAO")
+        rows = [
+            {"symbol": "TEST-THYAO", "timestamp": NOW, "open": 1, "high": 2, "low": 1, "close": 2}
+        ]
+        assert market_service.upsert_candles(db, rows) == 1
+        statement = str(db.execute.call_args.args[0])
+        assert "ON CONFLICT" in statement.upper()
+
+
+class TestFreshness:
+    """`as_of` is when we OBSERVED the price, not the bar's own timestamp.
+
+    The quote path requests daily bars, and a daily bar is stamped at the
+    start of its trading day. Measuring delay from that stamp once reported a
+    perfectly current price as 710 minutes stale, because the session had
+    opened eleven hours earlier.
+    """
+
+    def test_measures_from_observation_not_from_the_bar_date(self):
+        from datetime import timedelta
+
+        midnight = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+        quotes = {"A": {"market_timestamp": midnight, "received_at": NOW - timedelta(minutes=1)}}
+        _, delay, _ = market_service.freshness(quotes)
+        # One minute stale plus the declared provider floor — not eleven hours.
+        assert delay < 60
+
+    def test_uses_the_oldest_observation_in_the_set(self):
+        """A payload is only as current as its least current figure."""
+        from datetime import timedelta
+
+        quotes = {
+            "A": {"received_at": NOW - timedelta(minutes=5)},
+            "B": {"received_at": NOW - timedelta(minutes=45)},
+        }
+        as_of, delay, is_delayed = market_service.freshness(quotes)
+        assert delay >= 45 + market_service.PROVIDER_DELAY_FLOOR_MINUTES - 1
+        assert is_delayed is True
+
+    def test_the_provider_floor_is_always_added(self):
+        """We cannot observe the exchange's true tick time, so the feed's own
+        delay is declared rather than pretended away."""
+        quotes = {"A": {"received_at": NOW}}
+        _, delay, is_delayed = market_service.freshness(quotes)
+        assert delay >= market_service.PROVIDER_DELAY_FLOOR_MINUTES
+        assert is_delayed is True
+
+    def test_a_fresh_quote_is_still_reported_as_delayed(self):
+        """Free-tier BIST data is delayed by design. Claiming otherwise would
+        be false in the ordinary case, not the edge."""
+        assert market_service.freshness({"A": {"received_at": NOW}})[2] is True
+
+    def test_falls_back_to_the_bar_timestamp_when_unobserved(self):
+        quotes = {"A": {"market_timestamp": NOW}}
+        as_of, _, _ = market_service.freshness(quotes)
+        assert as_of is not None
+
+    def test_no_quotes_reports_delayed_rather_than_current(self):
+        as_of, delay, is_delayed = market_service.freshness({})
+        assert as_of is None
+        assert is_delayed is True
+
+    def test_naive_timestamp_is_treated_as_utc(self):
+        quotes = {"A": {"received_at": NOW.replace(tzinfo=None)}}
+        _, delay, _ = market_service.freshness(quotes)
+        assert delay >= 0
+
+
+class TestNewsStore:
+    def test_empty_batch_makes_no_query(self):
+        db = MagicMock(spec=Session)
+        assert news_service.upsert_news(db, []) == 0
+        assert db.execute.called is False
+
+    def test_articles_are_deduplicated_on_content_hash(self):
+        """Not on URL: the same wire story is republished under different
+        links, and a feed that renumbers would re-import its whole history."""
+        db = MagicMock(spec=Session)
+        db.execute.return_value = SimpleNamespace(rowcount=1)
+        written = news_service.upsert_news(
+            db,
+            [
+                {
+                    "content_hash": "a" * 64, "title": "Başlık", "source": "Dünya",
+                    "published_at": NOW,
+                }
+            ],
+        )
+        assert written == 1
+        statement = str(db.execute.call_args.args[0])
+        assert "ON CONFLICT" in statement.upper()
+        assert "content_hash" in statement
+
+    def test_rowcount_none_reports_zero_rather_than_raising(self):
+        db = MagicMock(spec=Session)
+        db.execute.return_value = SimpleNamespace(rowcount=None)
+        written = news_service.upsert_news(
+            db, [{"content_hash": "b" * 64, "title": "t", "source": "s", "published_at": NOW}]
+        )
+        assert written == 0
+
+
+class TestProductLookups:
+    def test_get_product_filters_by_symbol(self):
+        db = MagicMock(spec=Session)
+        expected = SimpleNamespace(symbol="TEST-THYAO", id="p-1")
+        db.query.return_value.filter.return_value.first.return_value = expected
+        assert market_service.get_product(db, "TEST-THYAO") is expected
+
+    def test_list_products_skips_instruments_with_no_feed(self):
+        """`data_symbol IS NULL` means "do not price this". Fetching it anyway
+        would ask the provider for a symbol it has never heard of on every
+        cycle."""
+        db = MagicMock(spec=Session)
+        chain = db.query.return_value.filter.return_value.filter.return_value
+        chain.order_by.return_value.all.return_value = [SimpleNamespace(symbol="TEST-THYAO")]
+        assert len(market_service.list_products(db)) == 1
+        assert db.query.return_value.filter.return_value.filter.called
+
+    def test_list_products_can_include_unpriced_ones(self):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+        assert market_service.list_products(db, only_priced=False) == []
+
+
+class TestLatestQuotes:
+    def test_rows_are_keyed_by_symbol_with_floats(self):
+        db = MagicMock(spec=Session)
+        quote = SimpleNamespace(
+            price=295.5, change_amount=4.5, change_percent=1.55,
+            previous_close=291.0, volume=1000,
+            market_timestamp=NOW, received_at=NOW, source="yfinance",
+        )
+        db.execute.return_value.all.return_value = [(quote, "TEST-THYAO", "TRY")]
+        out = market_service.latest_quotes(db)
+        assert out["TEST-THYAO"]["price"] == 295.5
+        assert out["TEST-THYAO"]["currency"] == "TRY"
+
+    def test_null_change_fields_stay_none(self):
+        db = MagicMock(spec=Session)
+        quote = SimpleNamespace(
+            price=295.5, change_amount=None, change_percent=None,
+            previous_close=None, volume=None, market_timestamp=NOW,
+            received_at=NOW, source="yfinance",
+        )
+        db.execute.return_value.all.return_value = [(quote, "TEST-THYAO", "TRY")]
+        out = market_service.latest_quotes(db)
+        assert out["TEST-THYAO"]["change_amount"] is None
+
+    def test_symbol_filter_is_applied(self):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        market_service.latest_quotes(db, ["USDTRY"])
+        assert "IN " in str(db.execute.call_args.args[0]).upper()
+
+
+class TestCandleCloses:
+    def test_unknown_product_yields_no_series(self):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = None
+        assert market_service.candle_closes(db, "NOPE") == []
+
+    def test_series_is_returned_oldest_first(self):
+        """Return calculations walk forward in time; a reversed series would
+        produce sign-flipped returns that still look plausible."""
+        from datetime import timedelta
+
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id="p-1")
+        rows = [
+            SimpleNamespace(timestamp=NOW, close_price=300.0),
+            SimpleNamespace(timestamp=NOW - timedelta(days=1), close_price=295.0),
+        ]
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = rows
+        series = market_service.candle_closes(db, "TEST-THYAO")
+        assert [price for _, price in series] == [295.0, 300.0]
+
+
+class TestLatestNews:
+    def test_orders_newest_first_and_applies_the_limit(self):
+        """Ties on published_at are broken by id so pagination is stable;
+        without it two articles stamped the same second can swap places
+        between requests."""
+        db = MagicMock(spec=Session)
+        rows = [SimpleNamespace(id="n-2"), SimpleNamespace(id="n-1")]
+        db.query.return_value.order_by.return_value.limit.return_value.all.return_value = rows
+        assert news_service.latest_news(db, limit=5) == rows
+        db.query.return_value.order_by.return_value.limit.assert_called_once_with(5)
+
+
+class TestNewsIdHelper:
+    def test_generated_ids_are_unique(self):
+        assert news_service._new_id() != news_service._new_id()
+
+
+class TestInstrumentFilters:
+    """Each filter has to reach SQL. A silently dropped one turns "no
+    matches" into a false statement about the market."""
+
+    def _db(self):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        db.query.return_value.filter.return_value.first.return_value = None
+        db.query.return_value.filter.return_value.limit.return_value.all.return_value = []
+        return db
+
+    @pytest.mark.parametrize(
+        "filters,expected",
+        [
+            ({"market": "BIST"}, "market"),
+            ({"product_type": "stock"}, "product_type"),
+            ({"sector": "Industrials"}, "sector"),
+            ({"min_pe": 5}, "pe_ratio"),
+            ({"max_pb": 2}, "pb_ratio"),
+        ],
+    )
+    def test_filter_reaches_the_query(self, filters, expected):
+        db = self._db()
+        market_service.list_instruments(db, filters=filters)
+        assert expected in str(db.execute.call_args.args[0])
+
+    def test_a_pb_filter_also_excludes_unknown_values(self):
+        db = self._db()
+        market_service.list_instruments(db, filters={"max_pb": 2})
+        assert "IS NOT NULL" in str(db.execute.call_args.args[0]).upper()

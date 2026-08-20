@@ -1,0 +1,225 @@
+services:
+  base-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${BASE_DB_USER:?Set BASE_DB_USER in infra/.env}
+      POSTGRES_PASSWORD: ${BASE_DB_PASSWORD:?Set BASE_DB_PASSWORD in infra/.env}
+      POSTGRES_DB: ${BASE_DB_NAME:-moneyfast}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: ${BASE_DB_MEMORY_LIMIT:?Set BASE_DB_MEMORY_LIMIT in infra/.env}
+    cpus: ${BASE_DB_CPU_LIMIT:?Set BASE_DB_CPU_LIMIT in infra/.env}
+    networks:
+      - base-db-net
+    restart: unless-stopped
+
+  vector-db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${VECTOR_DB_ADMIN_USER:?Set VECTOR_DB_ADMIN_USER in infra/.env}
+      POSTGRES_PASSWORD: ${VECTOR_DB_ADMIN_PASSWORD:?Set VECTOR_DB_ADMIN_PASSWORD in infra/.env}
+      POSTGRES_DB: ${VECTOR_DB_NAME:-moneyfast_rag}
+      # Consumed by 40-grants.sh during first-boot initialisation only. The
+      # official entrypoint runs /docker-entrypoint-initdb.d/* exactly once,
+      # when the data directory is empty, so these are not read again after
+      # the volume exists.
+      RAG_DB_USER: ${RAG_DB_USER:-rag_user}
+      RAG_DB_PASSWORD: ${RAG_DB_PASSWORD:-}
+      RAG_DB_PASSWORD_FILE: ${RAG_DB_PASSWORD_FILE:-}
+    volumes:
+      - vector_db_data:/var/lib/postgresql/data
+      # Schema initialisation. Mounted file-by-file rather than as a directory
+      # so the execution order is stated here rather than inferred from a
+      # listing, and so vector-migrations/optional/ stays excluded. Postgres
+      # runs *.sql and *.sh in lexical order as the superuser.
+      - ./vector-migrations/base/0001_create_vector_extension_and_rag_schema.sql:/docker-entrypoint-initdb.d/10-extension-and-schema.sql:ro
+      - ./vector-migrations/base/0002_create_documents_and_chunks.sql:/docker-entrypoint-initdb.d/20-documents-and-chunks.sql:ro
+      - ./vector-migrations/base/0003_create_exact_retrieval.sql:/docker-entrypoint-initdb.d/30-exact-retrieval.sql:ro
+      - ./vector-db-init-grants.sh:/docker-entrypoint-initdb.d/40-grants.sh:ro
+      - ./vector-db-grants.sql:/bootstrap/vector-db-grants.sql:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: ${VECTOR_DB_MEMORY_LIMIT:?Set VECTOR_DB_MEMORY_LIMIT in infra/.env}
+    cpus: ${VECTOR_DB_CPU_LIMIT:?Set VECTOR_DB_CPU_LIMIT in infra/.env}
+    networks:
+      - vector-db-net
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    env_file:
+      - ../backend/.env
+    environment:
+      DATABASE_URL: ${BASE_DATABASE_URL:?Set a URL-encoded BASE_DATABASE_URL in infra/.env}
+      AI_ORCHESTRATOR_URL: http://agents:8080
+      # Shared secret guarding the service-to-service ingest endpoints. When
+      # unset the guard REFUSES rather than opening them, so a missing value
+      # fails loudly instead of silently publishing a write endpoint.
+      BACKEND_API_KEY: ${BACKEND_API_KEY:?Set BACKEND_API_KEY in infra/.env}
+    ports:
+      - "8000:8000"
+    depends_on:
+      base-db:
+        condition: service_healthy
+    networks:
+      # web-ingress is what makes the `ports:` mapping above actually work.
+      # Docker cannot DNAT host traffic into a container attached only to
+      # `internal: true` networks -- the publish silently does nothing and the
+      # port never binds. The backend is the single host-facing service, so it
+      # is the only member.
+      - web-ingress
+      - base-db-net
+      - moneyfast-net
+    restart: unless-stopped
+
+  rag:
+    build:
+      context: ../AI-Services/moneyfast-rag
+    environment:
+      # The only service holding a vector-db credential. Built from RAG_DB_USER,
+      # never the vector administrator.
+      RAG_DATABASE_URL: ${RAG_DATABASE_URL:?Set a URL-encoded RAG_DATABASE_URL in infra/.env}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
+      RAG_CORPUS_VERSION: ${RAG_CORPUS_VERSION:-market_corpus_v1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    expose:
+      - "8100"
+    healthcheck:
+      # /readyz proves the embedding model is resident AND vector-db answers.
+      # A liveness-only check would let mcp start against a retriever that
+      # cannot retrieve.
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8100/readyz', timeout=3).status == 200 else 1)"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    depends_on:
+      vector-db:
+        condition: service_healthy
+    networks:
+      - vector-db-net
+      - moneyfast-net
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: ../AI-Services/moneyfast-orchestrator/mcp-server
+    environment:
+      MCP_TRANSPORT: sse
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8000"
+      # Container-internal port, not the host mapping. See docs/DOCKER_NETWORKING.md.
+      BACKEND_API_BASE_URL: http://backend:8000/api
+      RAG_API_BASE_URL: http://rag:8100
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c 'import socket; socket.create_connection(("127.0.0.1", 8000), 2).close()'
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      backend:
+        condition: service_started
+      rag:
+        condition: service_healthy
+    networks:
+      - moneyfast-net
+    restart: unless-stopped
+
+  ingestor:
+    build:
+      context: ../AI-Services/moneyfast-ingestor
+    environment:
+      BACKEND_API_BASE_URL: http://backend:8000/api
+      RAG_API_BASE_URL: http://rag:8100
+      BACKEND_API_KEY: ${BACKEND_API_KEY:?Set BACKEND_API_KEY in infra/.env}
+      NEWS_FEEDS: ${NEWS_FEEDS:-}
+      INGESTOR_QUOTE_INTERVAL_MINUTES: ${INGESTOR_QUOTE_INTERVAL_MINUTES:-15}
+      INGESTOR_NEWS_INTERVAL_MINUTES: ${INGESTOR_NEWS_INTERVAL_MINUTES:-15}
+      INGESTOR_HISTORY_DAYS: ${INGESTOR_HISTORY_DAYS:-400}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      backend:
+        condition: service_started
+      rag:
+        condition: service_healthy
+    networks:
+      # moneyfast-net to reach backend and rag; data-egress to reach the
+      # outside. It joins NEITHER database network and holds no DB credential,
+      # which is what keeps the one internet-facing collector away from the
+      # application data.
+      - moneyfast-net
+      - data-egress
+    restart: unless-stopped
+
+  agents:
+    build:
+      context: ../AI-Services/moneyfast-orchestrator
+      dockerfile: Dockerfile
+    env_file:
+      - ../AI-Services/moneyfast-orchestrator/.env
+    environment:
+      MCP_SERVER_URL: http://mcp:8000/sse
+      JURISDICTION: ${JURISDICTION:-TR}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-tr-TR}
+      MAX_COMPLIANCE_REVISIONS: ${MAX_COMPLIANCE_REVISIONS:-1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      mcp:
+        condition: service_healthy
+    expose:
+      - "8080"
+    networks:
+      - moneyfast-net
+      - ai-egress
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  vector_db_data:
+
+networks:
+  # The only network reachable from the host. Deliberately holds one service:
+  # a bridge network also grants outbound access, and the backend is the one
+  # component for which that is already true by virtue of being the ingress.
+  web-ingress:
+    driver: bridge
+  moneyfast-net:
+    internal: true
+  base-db-net:
+    internal: true
+  vector-db-net:
+    internal: true
+  ai-egress:
+    driver: bridge
+  # Outbound access for the data collector. Separate from ai-egress so the
+  # two services that reach the internet do so for stated, different reasons.
+  data-egress:
+    driver: bridge

@@ -1,0 +1,69 @@
+// src/components/chat/MessageBubble.tsx
+import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload, PortfolioWidgetPayload } from '../../types/chat';
+import ChartWidget from './widgets/ChartWidget';
+import ActionWidget from './widgets/ActionWidget';
+import PortfolioWidget from './widgets/PortfolioWidget';
+
+interface MessageBubbleProps {
+  message: ChatMessage;
+}
+
+/**
+ * MessageBubble Bileşeni
+ * 
+ * Kullanıcı ve yapay zeka mesajlarının arayüzdeki temsilidir.
+ * Mesaj tipine göre farklı stiller uygulanır ve widget varsa render edilir.
+ */
+export default function MessageBubble({ message }: MessageBubbleProps) {
+  const isUser = message.sender === 'user';
+  
+  // Saati formatla (HH:mm)
+  const timeString = message.timestamp.toLocaleTimeString('tr-TR', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  return (
+    <div className={`flex w-full my-4 ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div className={`flex max-w-[85%] md:max-w-[75%] gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+        
+        {/* Yapay Zeka Avatarı */}
+        {!isUser && (
+          <div className="w-8 h-8 rounded-full bg-brandBlue/20 flex items-center justify-center text-brandBlue font-bold text-xs shrink-0 mt-auto mb-1">
+            MF
+          </div>
+        )}
+
+        {/* Mesaj İçeriği */}
+        <div 
+          className={`flex flex-col px-4 py-3 ${
+            isUser 
+              ? 'bg-brandBlue text-white shadow-md rounded-2xl rounded-br-sm' 
+              : 'bg-slate-800/80 backdrop-blur-md border border-white/10 text-white shadow-xl rounded-2xl rounded-bl-sm'
+          }`}
+        >
+          <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{message.text}</p>
+          
+          {/* Widget Render Alanı */}
+          {message.widget && message.widget.type === 'chart' && (
+            <ChartWidget payload={message.widget.payload as ChartWidgetPayload} />
+          )}
+          {message.widget && message.widget.type === 'action' && (
+            <ActionWidget payload={message.widget.payload as ActionWidgetPayload} />
+          )}
+          {message.widget && message.widget.type === 'portfolio' && (
+            <PortfolioWidget payload={message.widget.payload as PortfolioWidgetPayload} />
+          )}
+
+          <span 
+            className={`text-[10px] mt-1 ${
+              isUser ? 'text-blue-200 self-end' : 'text-slate-400 self-start'
+            }`}
+          >
+            {timeString}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}

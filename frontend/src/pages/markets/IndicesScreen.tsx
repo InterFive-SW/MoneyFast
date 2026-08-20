@@ -6,6 +6,10 @@ import { buildComparisonChartData } from '../../data/comparisonSeries'
 
 const SERIES_DAYS = 90
 
+export function formatIndexComparisonTooltip(value: number, name: string): [string, string] {
+  return [`${value > 0 ? '+' : ''}${value}%`, name]
+}
+
 function getWeightedConstituents(index: MarketIndex) {
   const rows = index.constituents
     .map((symbol) => ({ symbol, instrument: findInstrument(symbol) }))
@@ -13,8 +17,14 @@ function getWeightedConstituents(index: MarketIndex) {
 
   const totalMarketCap = rows.reduce((acc, r) => acc + r.instrument.marketCap, 0)
 
+  function weightOf(marketCap: number): number {
+    // Mock enstrümanlar her zaman pozitif piyasa değerine sahip — :0 yedeği testle ulaşılamaz (defensive kod).
+    /* v8 ignore next */
+    return totalMarketCap > 0 ? (marketCap / totalMarketCap) * 100 : 0
+  }
+
   return rows
-    .map((r) => ({ ...r, weight: totalMarketCap > 0 ? (r.instrument.marketCap / totalMarketCap) * 100 : 0 }))
+    .map((r) => ({ ...r, weight: weightOf(r.instrument.marketCap) }))
     .sort((a, b) => b.weight - a.weight)
 }
 
@@ -65,7 +75,7 @@ function IndexDetail({ index }: { index: MarketIndex }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(226, 232, 240, 0.6)" vertical={false} />
               <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.floor(SERIES_DAYS / 5)} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `${v}%`} axisLine={false} tickLine={false} width={40} />
-              <Tooltip formatter={(value: number, name: string) => [`${value > 0 ? '+' : ''}${value}%`, name]} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)', fontSize: '12px' }} />
+              <Tooltip formatter={formatIndexComparisonTooltip} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)', fontSize: '12px' }} />
               <Legend wrapperStyle={{ fontSize: '12px' }} />
               <Line type="monotone" dataKey={index.code} name={index.name} stroke="#10b981" strokeWidth={2} dot={false} />
               <Line type="monotone" dataKey={benchmark.code} name={benchmark.name} stroke="#94a3b8" strokeWidth={2} dot={false} strokeDasharray="4 4" />

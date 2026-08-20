@@ -11,6 +11,10 @@ const MAX_SELECTION = 4
 const SERIES_DAYS = 90
 const PALETTE = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6']
 
+export function formatMarketComparisonTooltip(value: number, name: string): [string, string] {
+  return [`${value > 0 ? '+' : ''}${value}%`, name]
+}
+
 /**
  * Karşılaştırma modu — en fazla 4 enstrümanın normalize edilmiş (% değişim)
  * fiyat performansını aynı grafikte üst üste gösterir. Tamamen mock/seed'li veri,
@@ -22,6 +26,8 @@ export default function MarketComparisonChart({ instruments }: Props) {
   function toggleSymbol(symbol: string) {
     setSelected((prev) => {
       if (prev.includes(symbol)) return prev.filter((s) => s !== symbol)
+      // Butonlar zaten limitte disabled oluyor — bu ikinci koruma testle ulaşılamaz (defensive kod).
+      /* v8 ignore next */
       if (prev.length >= MAX_SELECTION) return prev
       return [...prev, symbol]
     })
@@ -72,7 +78,7 @@ export default function MarketComparisonChart({ instruments }: Props) {
               <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.floor(SERIES_DAYS / 6)} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `${v}%`} axisLine={false} tickLine={false} width={44} />
               <Tooltip
-                formatter={(value: number, name: string) => [`${value > 0 ? '+' : ''}${value}%`, name]}
+                formatter={formatMarketComparisonTooltip}
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)', fontSize: '12px' }}
               />
               <Legend wrapperStyle={{ fontSize: '12px' }} />

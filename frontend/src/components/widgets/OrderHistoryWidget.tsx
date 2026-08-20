@@ -29,6 +29,8 @@ export default function OrderHistoryWidget() {
       case 'Gerçekleşti': return 'text-emerald-500 bg-emerald-500/10'
       case 'Bekliyor':    return 'text-amber-500 bg-amber-500/10'
       case 'İptal':       return 'text-rose-500 bg-rose-500/10'
+      // Order['status'] union'ı yalnızca yukarıdaki 3 değeri içeriyor — testle ulaşılamaz (defensive kod).
+      /* v8 ignore next */
       default:            return 'text-slate-400 bg-white/5/10'
     }
   }

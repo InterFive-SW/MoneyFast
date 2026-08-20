@@ -25,8 +25,13 @@ function isSessionOpen(session: SessionWindow, now: Date): boolean {
     hourCycle: 'h23',
   }).formatToParts(now)
 
+  // Intl.DateTimeFormat, istenen weekday/hour/minute seçenekleriyle bu parçaları her zaman
+  // döner — ?? yedekleri testle ulaşılamayan savunma kodu.
+  /* v8 ignore next */
   const weekday = parts.find((p) => p.type === 'weekday')?.value ?? ''
+  /* v8 ignore next */
   const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0)
+  /* v8 ignore next */
   const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0)
 
   const isWeekday = !['Sat', 'Sun'].includes(weekday)

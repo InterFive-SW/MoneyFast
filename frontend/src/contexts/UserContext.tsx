@@ -108,6 +108,9 @@ function buildProfile(data: Partial<MeResponse>, tcNo: string): UserProfile {
   const firstName = (data.first_name ?? '').trim() || 'Kullanıcı'
   const lastName  = (data.last_name  ?? '').trim()
   const fullName  = [firstName, lastName].filter(Boolean).join(' ')
+  // firstName yukarıda her zaman 'Kullanıcı' fallback'iyle garanti dolu olduğundan
+  // initials asla boş olamaz — bu yüzden || 'KL' testle asla ulaşılamaz (defensive kod).
+  /* v8 ignore next */
   const initials  = [firstName[0], lastName[0]].filter(Boolean).join('').toUpperCase() || 'KL'
 
   return { firstName, lastName, fullName, tcNo, initials }

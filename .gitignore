@@ -48,6 +48,10 @@ coverage.xml
 *.cover
 *.py.cover
 .hypothesis/
+frontend/coverage/
+
+# Claude Code local/worktree state (settings.local.json, launch.json vb. makineye özel)
+.claude/
 .pytest_cache/
 cover/
 

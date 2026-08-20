@@ -11,6 +11,10 @@ const formatCurrency = (val: number) => {
   return new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(val)
 }
 
+export function formatFinancialBalanceTooltip(value: number): [string, string] {
+  return [formatCurrency(value), 'Tutar']
+}
+
 export default function FinancialBalanceWidget({ income, expense, debt, debtToIncomeRatio }: FinancialBalanceWidgetProps) {
   const data = [
     { name: 'Gelir', value: income, color: '#10b981' },   // emerald-500
@@ -43,7 +47,7 @@ export default function FinancialBalanceWidget({ income, expense, debt, debtToIn
             <Tooltip 
               cursor={{ fill: 'transparent' }}
               contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
-              formatter={(value: number) => [formatCurrency(value), 'Tutar']}
+              formatter={formatFinancialBalanceTooltip}
             />
             <Bar dataKey="value" radius={[6, 6, 0, 0]}>
               {data.map((entry, index) => (

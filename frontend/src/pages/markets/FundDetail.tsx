@@ -17,7 +17,11 @@ function fmtCompact(value: number): string {
   return new Intl.NumberFormat('tr-TR', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 }
 
-function fmtReturn(value: number | null): string {
+export function formatHoldingTooltip(value: number, name: string): [string, string] {
+  return [`%${value}`, name]
+}
+
+export function fmtReturn(value: number | null): string {
   if (value === null) return 'NA'
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`
 }
@@ -110,7 +114,7 @@ export default function FundDetail() {
                     <Pie data={holdingsWithColor} dataKey="weight" nameKey="symbol" cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} stroke="none">
                       {holdingsWithColor.map((h, i) => <Cell key={i} fill={h.color} />)}
                     </Pie>
-                    <Tooltip formatter={(value: number, name: string) => [`%${value}`, name]} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)' }} />
+                    <Tooltip formatter={formatHoldingTooltip} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)' }} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>

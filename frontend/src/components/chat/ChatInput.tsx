@@ -18,6 +18,8 @@ export default function ChatInput({ onSendMessage, disabled = false }: ChatInput
 
   // Metin kutusunun yüksekliğini içeriğe göre ayarla
   useEffect(() => {
+    // textarea koşulsuz render edildiği için ref her zaman dolu — testle ulaşılamaz (defensive kod).
+    /* v8 ignore next */
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 128)}px`;
@@ -28,6 +30,8 @@ export default function ChatInput({ onSendMessage, disabled = false }: ChatInput
     if (inputText.trim() && !disabled) {
       onSendMessage(inputText.trim());
       setInputText('');
+      // textarea koşulsuz render edildiği için ref her zaman dolu — testle ulaşılamaz (defensive kod).
+      /* v8 ignore next */
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }

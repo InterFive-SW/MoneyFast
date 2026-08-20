@@ -16,6 +16,10 @@ function formatCurrency(amount: number): string {
   }).format(amount)
 }
 
+export function formatAllocationTooltip(value: number, name: string, props: any): [string, string] {
+  return [`%${value} - ${formatCurrency(props.payload.amount)}`, name]
+}
+
 export default function AssetAllocationWidget() {
   const [items, setItems] = useState<AssetAllocationItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -67,8 +71,8 @@ export default function AssetAllocationWidget() {
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
-              <Tooltip 
-                formatter={(value: number, name: string, props: any) => [`%${value} - ${formatCurrency(props.payload.amount)}`, name]}
+              <Tooltip
+                formatter={formatAllocationTooltip}
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)', backgroundColor: 'rgba(255, 255, 255, 0.9)', backdropFilter: 'blur(8px)' }}
                 itemStyle={{ fontSize: '12px', fontWeight: 600, color: '#334155' }}
               />

@@ -32,6 +32,9 @@ export default function Risk() {
     )
   }
 
+  // setData ve setLoading(false) her zaman birlikte, aynı timer callback'inde çağrılır —
+  // loading false iken data'nın null olması testle ulaşılamaz (defensive kod).
+  /* v8 ignore next */
   if (!data) {
     return (
       <div className="p-6 sm:p-8 min-h-screen">

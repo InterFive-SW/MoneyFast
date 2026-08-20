@@ -129,9 +129,15 @@ function aggregate(candles: Candle[], bucketSeconds: number): Candle[] {
     bucket.high = Math.max(bucket.high, c.high)
     bucket.low = Math.min(bucket.low, c.low)
     bucket.close = c.close
+    // generateBaseSeries her muma her zaman bir value atadığı için ?? 0 dalları
+    // gerçek veriyle asla tetiklenmiyor — savunma amaçlı bırakıldı.
+    /* v8 ignore next */
     bucket.value = (bucket.value ?? 0) + (c.value ?? 0)
   }
 
+  // getSeries boş slice'ı aggregate'e hiç sokmuyor (bkz. yukarıdaki erken dönüş),
+  // bu yüzden döngüye en az bir mumla giriliyor ve bucket burada asla null olmuyor.
+  /* v8 ignore else */
   if (bucket) out.push(bucket)
 
   // Renkleri gruplanmış mumun kendi yönüne göre yeniden hesapla

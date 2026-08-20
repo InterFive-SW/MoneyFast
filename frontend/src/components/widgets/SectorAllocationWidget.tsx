@@ -3,6 +3,10 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { apiClient } from '../../api/client'
 import type { SectorAllocationItem } from '../../api/client'
 
+export function formatSectorTooltip(value: number): [string, string] {
+  return [`${value}%`, 'Oran']
+}
+
 export default function SectorAllocationWidget() {
   const [data, setData] = useState<SectorAllocationItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,8 +58,8 @@ export default function SectorAllocationWidget() {
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
-              <Tooltip 
-                formatter={(value: number) => [`${value}%`, 'Oran']}
+              <Tooltip
+                formatter={formatSectorTooltip}
                 contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
               />
             </PieChart>

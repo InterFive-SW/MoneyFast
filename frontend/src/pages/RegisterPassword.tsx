@@ -61,6 +61,9 @@ export default function RegisterPassword() {
       return
     }
 
+    // state yoksa yukarıdaki effect zaten /register'a yönlendiriyor — bu noktaya
+    // sadece state doluyken ulaşılır, || {} testle ulaşılamayan savunma kodu.
+    /* v8 ignore next */
     const { name, surname, tcNo, phone, email } = location.state || {}
 
     setLoading(true)

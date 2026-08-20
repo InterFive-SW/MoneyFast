@@ -85,24 +85,6 @@ function IconLogout({ className }: IconProps) {
   )
 }
 
-/** Sidebar daraltma/genişletme toggle ikonu */
-function IconChevron({ className, collapsed }: IconProps & { collapsed: boolean }) {
-  return (
-    <svg
-      className={`${className} transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="15 18 9 12 15 6" />
-    </svg>
-  )
-}
-
 // ─── Navigasyon Yapılandırması ────────────────────────────────────────────────
 
 const NAV_ITEMS: NavItem[] = [
@@ -197,6 +179,13 @@ export default function Sidebar() {
     navigate('/login')
   }
 
+  // isLoading burada her zaman false, o noktada profile hiçbir zaman null değil
+  // (UserProvider fallback profil garantiler) — ?? testle ulaşılamaz (defensive kod).
+  /* v8 ignore next */
+  const displayInitials = profile?.initials ?? 'K'
+  /* v8 ignore next */
+  const displayFullName = profile?.fullName ?? 'Kullanıcı'
+
   return (
     <aside
       onMouseEnter={() => setCollapsed(false)}
@@ -257,7 +246,7 @@ export default function Sidebar() {
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brandBlue to-primary-500 text-[14px] font-bold text-white shadow-sm"
                 aria-hidden="true"
               >
-                {profile?.initials ?? 'K'}
+                {displayInitials}
               </div>
             )}
 
@@ -275,7 +264,7 @@ export default function Sidebar() {
               ) : (
                 <>
                   <p className="text-[15px] font-bold leading-tight text-white">
-                    {profile?.fullName ?? 'Kullanıcı'}
+                    {displayFullName}
                   </p>
                   <p className="text-[13px] font-medium text-slate-400">Premium Üye</p>
                 </>

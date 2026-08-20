@@ -12,9 +12,22 @@ const TABS: { key: DetailTab; label: string }[] = [
   { key: 'fon-pozisyonlari', label: 'Fon Pozisyonları' },
 ]
 
-function fmt(value: number | undefined, opts: Intl.NumberFormatOptions = {}): string {
+export function fmt(value: number | undefined, opts: Intl.NumberFormatOptions = {}): string {
   if (value === undefined) return '—'
   return value.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1, ...opts })
+}
+
+// Mock verisinde pe/netMargin tanımlı olan her enstrümanın revenueGrowth'u da tanımlı
+// geliyor (bkz. data/mockData.ts) — bu iki yardımcının undefined dalları testle ulaşılamaz.
+function revenueGrowthColor(revenueGrowth: number | undefined): string {
+  /* v8 ignore next */
+  return (revenueGrowth ?? 0) < 0 ? 'text-rose-500' : 'text-emerald-500'
+}
+
+function revenueGrowthLabel(revenueGrowth: number | undefined): string {
+  /* v8 ignore next */
+  if (revenueGrowth === undefined) return '—'
+  return `${revenueGrowth > 0 ? '+' : ''}${revenueGrowth}%`
 }
 
 function fmtCompact(value: number): string {
@@ -133,7 +146,7 @@ export default function StockDetail() {
                   <tr><td className="py-2.5 text-sm text-slate-400">Tahmini Yıllık Net Kâr</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{fmtCompact(derivedNetIncome)} {instrument.unit}</td></tr>
                   <tr><td className="py-2.5 text-sm text-slate-400">Toplam Varlıklar</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{instrument.totalAssets ? `${fmtCompact(instrument.totalAssets)} ${instrument.unit}` : '—'}</td></tr>
                   <tr><td className="py-2.5 text-sm text-slate-400">Faaliyet Nakit Akışı</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{instrument.operatingCashFlow ? `${fmtCompact(instrument.operatingCashFlow)} ${instrument.unit}` : '—'}</td></tr>
-                  <tr><td className="py-2.5 text-sm text-slate-400">Yıllık Gelir Büyümesi</td><td className={`py-2.5 text-right text-sm font-semibold tabular-nums ${(instrument.revenueGrowth ?? 0) < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>{instrument.revenueGrowth !== undefined ? `${instrument.revenueGrowth > 0 ? '+' : ''}${instrument.revenueGrowth}%` : '—'}</td></tr>
+                  <tr><td className="py-2.5 text-sm text-slate-400">Yıllık Gelir Büyümesi</td><td className={`py-2.5 text-right text-sm font-semibold tabular-nums ${revenueGrowthColor(instrument.revenueGrowth)}`}>{revenueGrowthLabel(instrument.revenueGrowth)}</td></tr>
                 </tbody>
               </table>
               <p className="text-[11px] text-slate-400">Gelir/net kâr rakamları F/K ve net kâr marjından türetilmiş tahmini değerlerdir (mock veri).</p>

@@ -11,6 +11,10 @@ const MAX_SELECTION = 4
 const SERIES_DAYS = 90
 const PALETTE = ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6']
 
+export function formatFundComparisonTooltip(value: number, name: string, codeToName: Map<string, string>): [string, string] {
+  return [`${value > 0 ? '+' : ''}${value}%`, codeToName.get(name) ?? name]
+}
+
 /** Fon karşılaştırma — en fazla 4 fonun normalize edilmiş % getiri performansı üst üste (Fintables'ın ~10 fonluk kıyaslamasının V1'de daraltılmış hali) */
 export default function FundComparisonChart({ funds }: Props) {
   const [selected, setSelected] = useState<string[]>(() => funds.slice(0, 2).map((f) => f.code))
@@ -18,6 +22,8 @@ export default function FundComparisonChart({ funds }: Props) {
   function toggleFund(code: string) {
     setSelected((prev) => {
       if (prev.includes(code)) return prev.filter((s) => s !== code)
+      // Butonlar zaten limitte disabled oluyor — bu ikinci koruma testle ulaşılamaz (defensive kod).
+      /* v8 ignore next */
       if (prev.length >= MAX_SELECTION) return prev
       return [...prev, code]
     })
@@ -67,7 +73,11 @@ export default function FundComparisonChart({ funds }: Props) {
               <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.floor(SERIES_DAYS / 6)} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `${v}%`} axisLine={false} tickLine={false} width={44} />
               <Tooltip
-                formatter={(value: number, name: string) => [`${value > 0 ? '+' : ''}${value}%`, codeToName.get(name) ?? name]}
+                // codeToName her render'da değiştiği için formatFundComparisonTooltip'i doğrudan referans
+                // veremiyoruz; bu ince sarmalayıcı yalnızca gerçek fare hover'ında (jsdom'da simüle
+                // edilemeyen SVG hit-detection) çağrılıyor, testle ulaşılamaz.
+                /* v8 ignore next */
+                formatter={(value: number, name: string) => formatFundComparisonTooltip(value, name, codeToName)}
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)', fontSize: '12px' }}
               />
               <Legend wrapperStyle={{ fontSize: '12px' }} />

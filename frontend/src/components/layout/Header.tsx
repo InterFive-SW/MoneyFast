@@ -94,6 +94,13 @@ export default function Header({ pageTitle }: HeaderProps) {
     return () => clearTimeout(timer)
   }, [dateStr])
 
+  // isLoading burada her zaman false, ve o noktada profile hiçbir zaman null değil
+  // (UserProvider fallback profil garantiler) — ?? testle ulaşılamaz (defensive kod).
+  /* v8 ignore next */
+  const displayInitials = profile?.initials ?? 'KL'
+  /* v8 ignore next */
+  const displayFullName = profile?.fullName ?? 'Kullanıcı'
+
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/10 bg-slate-950/80 px-6 backdrop-blur-xl sm:px-8">
 
@@ -118,7 +125,7 @@ export default function Header({ pageTitle }: HeaderProps) {
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brandBlue to-primary-500 text-[10px] font-bold text-white"
               aria-hidden="true"
             >
-              {profile?.initials ?? 'KL'}
+              {displayInitials}
             </div>
           )}
 
@@ -132,7 +139,7 @@ export default function Header({ pageTitle }: HeaderProps) {
             ) : (
               <>
                 <p className="text-xs font-semibold leading-none text-white">
-                  {profile?.fullName ?? 'Kullanıcı'}
+                  {displayFullName}
                 </p>
                 <p className="mt-0.5 text-[10px] text-slate-400">Premium Üye</p>
               </>

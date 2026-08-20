@@ -275,9 +275,22 @@ and do NOT invent a ticker for a company you are unsure of.
 {"tool": "get_market_data", "arguments": {"symbols": [str]|null,
  "filters": {"sector": str, "market": str, "max_pe": float,
  "min_pe": float, "max_pb": float}|null, "top_k": int,
- "sort_by": str|null}, "assumptions": [str]}
+ "sort_by": "symbol"|"change_percent"|"change_percent_asc"|"market_cap"|"pe_ratio"|null},
+ "assumptions": [str]}
 
 Only those filter keys exist. Inventing one raises rather than being ignored.
+
+sort_by takes ONLY the five values listed above:
+  - "change_percent"      -> biggest risers first  ("en çok kazandıranlar",
+                             "en çok yükselenler", "top gainers")
+  - "change_percent_asc"  -> biggest fallers first ("en çok düşenler",
+                             "en çok kaybettirenler", "top losers")
+  - "market_cap"          -> largest first
+  - "pe_ratio"            -> lowest P/E first
+  - "symbol"              -> alphabetical (the default)
+Do NOT write "gainers", "losers", "top_gainers", "change_percent_desc" or a
+"-" prefix. There is no index filter: for "BIST 100" use
+filters={"market": "BIST"}, not {"index": ...}.
 
 HARD RULES: instruments == [] is a COMPLETE answer; never widen the filters to
 produce results and never substitute instruments that fail the criteria. A

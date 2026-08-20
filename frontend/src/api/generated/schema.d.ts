@@ -47,6 +47,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analytics/portfolio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portföy analizi (dağılım, trend, performans, işlem geçmişi)
+         * @description Portföy Analizi ekranının tek çağrısı.
+         *
+         *     Tek uç nokta olmasının sebebi User Story'deki 2 saniyelik yükleme bütçesi:
+         *     dağılım, trend ve performans için ayrı ayrı istek atmak, aynı pozisyon
+         *     listesini üç kez okumak demekti.
+         *
+         *     Kimliği doğrulanmamış çağıran demo hesabını görür; oturum açmış kullanıcı
+         *     yalnızca kendi verisini görür (İK-19).
+         */
+        get: operations["portfolio_analysis_api_analytics_portfolio_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analytics/health": {
         parameters: {
             query?: never;
@@ -697,6 +724,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market/candles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bir enstrümanın günlük mum verisi
+         * @description Gerçek günlük OHLCV barları — grafiklerin okuduğu yer.
+         *
+         *     Bu uç nokta olmadan karşılaştırma grafikleri tohumlanmış bir rastgele sayı
+         *     üretecinden besleniyordu: veriler zaten `market_candles` içindeydi, onları
+         *     dışarı veren bir yol yoktu.
+         *
+         *     Bilinmeyen sembol boş bir seri döndürür, hata değil: "bu enstrümanın
+         *     geçmişi yok" bir cevaptır ve grafik onu boş çizebilir.
+         */
+        get: operations["get_candles_api_market_candles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/market/stream": {
         parameters: {
             query?: never;
@@ -873,6 +927,43 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ActivitySummary
+         * @description Realised activity, from confirmed transaction proposals.
+         */
+        ActivitySummary: {
+            /**
+             * Confirmed Count
+             * @default 0
+             */
+            confirmed_count: number;
+            /**
+             * Buy Count
+             * @default 0
+             */
+            buy_count: number;
+            /**
+             * Sell Count
+             * @default 0
+             */
+            sell_count: number;
+            /**
+             * Total Traded Value
+             * @default 0
+             */
+            total_traded_value: number;
+            /** Last Transaction At */
+            last_transaction_at?: string | null;
+        };
+        /** AllocationSlice */
+        AllocationSlice: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+            /** Percentage */
+            percentage: number;
+        };
         /** AssetAllocationItem */
         AssetAllocationItem: {
             /** Assetclass */
@@ -922,6 +1013,39 @@ export interface components {
              */
             source: string;
         };
+        /**
+         * CandleOut
+         * @description One daily bar. All four prices, because a chart needs more than closes.
+         */
+        CandleOut: {
+            /**
+             * Timestamp
+             * Format: date-time
+             */
+            timestamp: string;
+            /** Open */
+            open: number;
+            /** High */
+            high: number;
+            /** Low */
+            low: number;
+            /** Close */
+            close: number;
+            /** Volume */
+            volume?: number | null;
+        };
+        /** CandleSeriesOut */
+        CandleSeriesOut: {
+            /** Symbol */
+            symbol: string;
+            /**
+             * Interval
+             * @default 1d
+             */
+            interval: string;
+            /** Candles */
+            candles?: components["schemas"]["CandleOut"][];
+        };
         /** CandlestickDataPoint */
         CandlestickDataPoint: {
             /** Time */
@@ -964,6 +1088,8 @@ export interface components {
         ChatResponse: {
             /** Final Output */
             final_output: string;
+            /** Disclosures */
+            disclosures?: string[];
             /** Primary Intent */
             primary_intent?: string | null;
             /** Target Agent */
@@ -1218,6 +1344,8 @@ export interface components {
              * Format: date-time
              */
             market_timestamp: string;
+            /** Received At */
+            received_at?: string | null;
             /** Pe Ratio */
             pe_ratio?: number | null;
             /** Pb Ratio */
@@ -1367,6 +1495,78 @@ export interface components {
             total: number;
             /** Date */
             date: string;
+        };
+        /**
+         * PerformanceSummary
+         * @description Portfolio-level return over the window actually covered by the data.
+         */
+        PerformanceSummary: {
+            /** Observations */
+            observations: number;
+            /** Start Value */
+            start_value?: number | null;
+            /** End Value */
+            end_value?: number | null;
+            /** Total Return Percent */
+            total_return_percent?: number | null;
+            /** Annualised Volatility */
+            annualised_volatility?: number | null;
+            /** Max Drawdown Percent */
+            max_drawdown_percent?: number | null;
+            /**
+             * Is Statistically Reliable
+             * @default false
+             */
+            is_statistically_reliable: boolean;
+        };
+        /** PortfolioAnalysis */
+        PortfolioAnalysis: {
+            /** As Of */
+            as_of?: string | null;
+            /**
+             * Is Delayed
+             * @default true
+             */
+            is_delayed: boolean;
+            /**
+             * Delay Minutes
+             * @default 0
+             */
+            delay_minutes: number;
+            /**
+             * Total Value
+             * @default 0
+             */
+            total_value: number;
+            /**
+             * Cash
+             * @default 0
+             */
+            cash: number;
+            /**
+             * Invested
+             * @default 0
+             */
+            invested: number;
+            /**
+             * Unrealised Pnl
+             * @default 0
+             */
+            unrealised_pnl: number;
+            /** Unrealised Pnl Percent */
+            unrealised_pnl_percent?: number | null;
+            /** Allocation */
+            allocation?: components["schemas"]["AllocationSlice"][];
+            /** Sectors */
+            sectors?: components["schemas"]["AllocationSlice"][];
+            /** Trend */
+            trend?: components["schemas"]["TrendPoint"][];
+            performance: components["schemas"]["PerformanceSummary"];
+            activity: components["schemas"]["ActivitySummary"];
+            /** Excluded Symbols */
+            excluded_symbols?: string[];
+            /** Warnings */
+            warnings?: string[];
         };
         /**
          * PortfolioPositionsOut
@@ -1708,6 +1908,16 @@ export interface components {
             /** Changepercent */
             changePercent: number;
         };
+        /** TrendPoint */
+        TrendPoint: {
+            /**
+             * Date
+             * Format: date-time
+             */
+            date: string;
+            /** Value */
+            value: number;
+        };
         /**
          * UserResponse
          * @description Kullanıcı verilerini güvenli bir şekilde (şifresiz) döndürmek için şema.
@@ -1835,6 +2045,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    portfolio_analysis_api_analytics_portfolio_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioAnalysis"];
                 };
             };
         };
@@ -2522,6 +2752,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InstrumentListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_candles_api_market_candles_get: {
+        parameters: {
+            query: {
+                symbol: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandleSeriesOut"];
                 };
             };
             /** @description Validation Error */

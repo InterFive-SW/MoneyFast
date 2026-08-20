@@ -42,6 +42,18 @@ def create_user(payload: RegisterRequest, db: Session) -> UserResponse:
         hashed_password=hash_password(payload.password),
     )
     db.add(user)
+    # Flush rather than commit: the user id is needed to hang the investment
+    # account off, and both rows should land in one transaction. A user
+    # without an account cannot trade, and committing separately leaves that
+    # state reachable if the second write fails.
+    db.flush()
+
+    # Modules call each other directly in this monolith; what stays inside the
+    # owning module is the MODEL, not the behaviour (see CLAUDE.md).
+    from app.modules.investment.service import ensure_account
+
+    ensure_account(db, str(user.id))
+
     db.commit()
     db.refresh(user)
     return UserResponse.model_validate(user)

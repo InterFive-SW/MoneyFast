@@ -143,9 +143,13 @@ Detaylar için **[CLAUDE.md](CLAUDE.md)** — özet:
 - ✅ Sohbet uçtan uca: yönlendirme, geçmiş, kalıcılık, widget'lar, işlem onayı
 - ✅ Canlı fiyatlar arayüzde: SSE akışı; şerit, izleme listesi, pozisyonlar ve
   mini kutucuklar aynı tek bağlantıdan besleniyor
+- ✅ Piyasalar > Hisseler / Sektörler canlı veriden; kaynağı olmayan ekranlar
+  (Fonlar, Endeksler, bazı Analizler) "Örnek veri" rozetiyle işaretli
 - ⏳ Gerçek risk metrikleri — mum verisi artık var, `risk/service.py`'deki
   `None` dönen dallar açılabilir
-- ⏳ Modül implementasyonları (banking, notification, analytics)
+- ✅ Analytics: Portföy Analizi (dağılım, trend, performans, işlem geçmişi)
+- ✅ Nakit takası: onaylanan işlem bakiyeyi ve pozisyonu gerçekten değiştirir
+- ⏳ Modül implementasyonları (banking, notification)
 - ⏳ Kalan panel mock uç noktaları (heatmap, temettü, sektör dağılımı)
 
 Açık kararlar ve eksik altyapı parçaları için: **[docs/MIMARI_KARARLAR.md](docs/MIMARI_KARARLAR.md)**.

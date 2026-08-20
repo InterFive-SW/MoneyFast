@@ -15,6 +15,7 @@ from . import service, stream
 from .schemas import (
     IngestResult,
     FundamentalsIngestRequest,
+    CandleSeriesOut,
     InstrumentListOut,
     MarketTicker,
     NewsIngestRequest,
@@ -141,17 +142,52 @@ async def list_instruments(
         "sector": sector, "market": market,
         "max_pe": max_pe, "min_pe": min_pe, "max_pb": max_pb,
     }
-    rows = market_service.list_instruments(
-        db,
-        symbols=symbols,
-        filters={k: v for k, v in filters.items() if v is not None},
-        limit=limit,
-        sort_by=sort_by,
-    )
+    try:
+        rows = market_service.list_instruments(
+            db,
+            symbols=symbols,
+            filters={k: v for k, v in filters.items() if v is not None},
+            limit=limit,
+            sort_by=sort_by,
+        )
+    except market_service.UnknownSortError as exc:
+        # 400, not 500: the request is malformed, and the message names the
+        # valid values so the caller can correct itself.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     # Wrapped in an object rather than returned as a bare array: every other
     # backend endpoint returns one, and the MCP client rejects a non-object
     # body as a contract violation.
     return {"instruments": rows}
+
+
+@router.get(
+    "/candles",
+    response_model=CandleSeriesOut,
+    summary="Bir enstrümanın günlük mum verisi",
+)
+async def get_candles(
+    symbol: str = Query(..., min_length=1),
+    limit: int = Query(default=180, ge=2, le=400),
+    db: Session = Depends(get_db),
+):
+    """
+    Gerçek günlük OHLCV barları — grafiklerin okuduğu yer.
+
+    Bu uç nokta olmadan karşılaştırma grafikleri tohumlanmış bir rastgele sayı
+    üretecinden besleniyordu: veriler zaten `market_candles` içindeydi, onları
+    dışarı veren bir yol yoktu.
+
+    Bilinmeyen sembol boş bir seri döndürür, hata değil: "bu enstrümanın
+    geçmişi yok" bir cevaptır ve grafik onu boş çizebilir.
+    """
+    product = market_service.resolve_symbol(db, symbol)
+    if product is None:
+        return {"symbol": symbol.upper(), "interval": "1d", "candles": []}
+    return {
+        "symbol": product.symbol,
+        "interval": "1d",
+        "candles": market_service.candle_series(db, product.symbol, limit=limit),
+    }
 
 
 @router.get(

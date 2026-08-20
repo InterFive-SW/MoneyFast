@@ -313,3 +313,55 @@ class TestExplicitNulls:
         fake_backend.set("instruments", httpx.Response(200, json={"instruments": []}))
         await market_data_tools.get_market_data(top_k=5)
         assert fake_backend.last.url.params["limit"] == "5"
+
+
+class TestSortVocabulary:
+    """The enum that broke "en çok kazandıranlar".
+
+    The planner is now told the legal values, but models still paraphrase. A
+    synonym is folded onto its canonical key; anything genuinely unreadable
+    still raises, naming the permitted set so the caller can correct itself.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "written,canonical",
+        [
+            ("gainers", "change_percent"),
+            ("top_gainers", "change_percent"),
+            ("change_percent_desc", "change_percent"),
+            ("-change_percent", "change_percent"),
+            ("losers", "change_percent_asc"),
+            ("top_losers", "change_percent_asc"),
+            ("CHANGE_PERCENT", "change_percent"),
+            ("  change_percent_asc  ", "change_percent_asc"),
+        ],
+    )
+    async def test_a_paraphrased_sort_is_folded_onto_its_canonical_key(
+        self, fake_backend, written, canonical
+    ):
+        fake_backend.set("instruments", httpx.Response(200, json={"instruments": []}))
+        await market_data_tools.get_market_data(sort_by=written)
+        assert fake_backend.last.url.params["sort_by"] == canonical
+
+    @pytest.mark.asyncio
+    async def test_the_descending_and_ascending_keys_are_distinct(self, fake_backend):
+        """Folding "losers" onto the descending key would answer a losers
+        question with gainers — the failure this whole change exists to fix."""
+        fake_backend.set("instruments", httpx.Response(200, json={"instruments": []}))
+        await market_data_tools.get_market_data(sort_by="losers")
+        assert fake_backend.last.url.params["sort_by"] == "change_percent_asc"
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_sort_still_raises_and_names_the_options(self, fake_backend):
+        with pytest.raises(InvalidInputError) as excinfo:
+            await market_data_tools.get_market_data(sort_by="by_vibes")
+        message = str(excinfo.value)
+        assert "by_vibes" in message
+        assert "change_percent_asc" in message, "the error must name the allowed set"
+
+    @pytest.mark.asyncio
+    async def test_no_sort_stays_unset(self, fake_backend):
+        fake_backend.set("instruments", httpx.Response(200, json={"instruments": []}))
+        await market_data_tools.get_market_data(sort_by=None)
+        assert fake_backend.last.url.params.get("sort_by", "") == ""

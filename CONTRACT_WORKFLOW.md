@@ -99,6 +99,21 @@ Backend karşılığı `GET /api/market/instruments`. Eksik temel oran `null` d�
 ve öyle sunulur — 0 olarak göstermek, kârı açıklanmamış bir şirketi listenin en
 ucuzu yapardı.
 
+## Zorunlu bildirimler nerede görünür
+
+`compliance` modülü bildirim metnini üretir, ama artık **her yanıta**
+eklenmiyor. `DISC-GENERAL` yalnızca turda finansal içerik varsa isteniyor: bir
+araç çalıştıysa, metinde rakam geçiyorsa ya da kişisel veri/işlem önerisi
+varsa. Selamlaşma ve hata mesajları hiçbir finansal iddia taşımadığı için
+bildirim de taşımıyor. (`classify_and_route_intent` her turda çalıştığından
+"araç çalıştı" sinyalinin dışında tutuldu — aksi halde koşul arka kapıdan
+tekrar "her zaman"a dönerdi.)
+
+Metin `ChatResponse.disclosures` alanında **ayrı** taşınıyor ve arayüzde balonun
+altında küçük punto dipnot olarak gösteriliyor. Kelimeler değişmedi, yalnızca
+yeri değişti: tek satırlık bir cevabın altına yapıştırılan üç cümlelik kalıp,
+okuyucuyu bildirimi gerçekten önemli olduğu yerde de atlamaya alıştırıyordu.
+
 ## Kritik akış: chatbot işlem onayı
 
 FG-CB-02 (chatbot piyasa işlemi gerçekleştirebilmeli) ve FOG-03 (hassas işlemler için

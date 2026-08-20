@@ -60,6 +60,15 @@ export interface ChatMessage {
   timestamp: Date;
   thoughtProcess?: ThoughtStep[];
   widget?: ChatWidget;
+  /**
+   * Zorunlu yasal bildirimler, kelimesi kelimesine.
+   *
+   * Mesaj metnine eklenmek yerine ayrı taşınıyor ve balonun altında küçük
+   * punto dipnot olarak gösteriliyor. Metin değişmiyor — yalnızca yeri.
+   * Her yanıtın sonuna yapıştırılan üç cümlelik kalıp, okuyucuya bildirimi
+   * gerçekten gerektiği yerde de atlatıyordu.
+   */
+  disclosures?: string[];
 }
 
 /**

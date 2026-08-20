@@ -7,6 +7,7 @@ returns is a contract surface, not an internal detail.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -214,3 +215,68 @@ class TestFundamentalsIngest:
     def test_it_is_guarded_like_the_other_ingests(self, client, monkeypatch):
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
         assert client.post("/api/market/fundamentals/ingest", json={"items": []}).status_code == 401
+
+
+class TestSortRejection:
+    def test_an_unknown_sort_is_a_400_not_a_500(self, client, mocker):
+        """A malformed request is the caller's to fix, and the message names
+        the valid values so it can."""
+        mocker.patch(
+            "app.modules.investment.market_service.list_instruments",
+            side_effect=market_service.UnknownSortError("gainers", ["change_percent", "symbol"]),
+        )
+        response = client.get("/api/market/instruments?sort_by=gainers")
+        assert response.status_code == 400
+        assert "change_percent" in response.json()["detail"]
+
+
+class TestCandlesEndpoint:
+    """Real bars for the charts. Before this the comparison charts ran on a
+    seeded PRNG — the data was in the database with no route to reach it."""
+
+    def test_bars_are_returned_for_a_known_symbol(self, client, mocker):
+        mocker.patch(
+            "app.modules.investment.market_service.resolve_symbol",
+            return_value=SimpleNamespace(symbol="THYAO"),
+        )
+        mocker.patch(
+            "app.modules.investment.market_service.candle_series",
+            return_value=[{
+                "timestamp": datetime(2026, 8, 20, tzinfo=timezone.utc),
+                "open": 300.0, "high": 305.0, "low": 299.0, "close": 304.0,
+                "volume": 1_000_000,
+            }],
+        )
+        body = client.get("/api/market/candles?symbol=THYAO").json()
+        assert body["symbol"] == "THYAO"
+        assert body["interval"] == "1d"
+        assert body["candles"][0]["close"] == 304.0
+
+    def test_an_unknown_symbol_is_an_empty_series_not_an_error(self, client, mocker):
+        """"This instrument has no history" is an answer; a chart can draw it
+        as empty."""
+        mocker.patch(
+            "app.modules.investment.market_service.resolve_symbol", return_value=None
+        )
+        response = client.get("/api/market/candles?symbol=NOPE")
+        assert response.status_code == 200
+        assert response.json()["candles"] == []
+
+    def test_the_symbol_is_resolved_not_taken_literally(self, client, mocker):
+        """"thyao" and "THYAO.IS" name the same instrument."""
+        resolve = mocker.patch(
+            "app.modules.investment.market_service.resolve_symbol",
+            return_value=SimpleNamespace(symbol="THYAO"),
+        )
+        mocker.patch(
+            "app.modules.investment.market_service.candle_series", return_value=[]
+        )
+        assert client.get("/api/market/candles?symbol=thyao").json()["symbol"] == "THYAO"
+        assert resolve.called
+
+    def test_the_limit_is_bounded(self, client):
+        """An unbounded limit would let one request pull every bar we hold."""
+        assert client.get("/api/market/candles?symbol=THYAO&limit=99999").status_code == 422
+
+    def test_a_missing_symbol_is_refused(self, client):
+        assert client.get("/api/market/candles").status_code == 422

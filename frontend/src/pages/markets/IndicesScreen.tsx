@@ -4,6 +4,7 @@ import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, X
 import { MOCK_INDICES, findInstrument, type MarketIndex } from '../../data/mockData'
 import { buildComparisonChartData } from '../../data/comparisonSeries'
 import { signedPercent, seriesName } from '../../lib/chartFormat'
+import SampleDataBadge from '../../components/markets/SampleDataBadge'
 
 const SERIES_DAYS = 90
 
@@ -26,6 +27,7 @@ function IndexDetail({ index }: { index: MarketIndex }) {
 
   return (
     <div className="mt-3 pt-4 border-t border-white/10 grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <SampleDataBadge reason="Canlı olarak yalnızca XU100 seviyesi var; XU030/XBANK gibi alt endeksler ve endeks bileşenleri için bir kaynak yok." />
       <div>
         <h4 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-3">Endeks Ağırlıkları</h4>
         <div className="flex flex-col gap-1.5">

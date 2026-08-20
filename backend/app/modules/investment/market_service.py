@@ -36,6 +36,22 @@ STALE_AFTER_MINUTES = 60
 PROVIDER_DELAY_FLOOR_MINUTES = 15
 
 
+class UnknownSortError(ValueError):
+    """An unrecognised `sort_by` reached the query builder.
+
+    Raised rather than defaulted. A caller that asked to rank by daily change
+    and silently received alphabetical order has no way to notice, and the
+    ranking it presents to the user is wrong without saying so.
+    """
+
+    def __init__(self, sort_by: str, allowed: list[str]) -> None:
+        self.sort_by = sort_by
+        self.allowed = allowed
+        super().__init__(
+            f"Bilinmeyen sıralama: {sort_by!r}. Geçerli değerler: {', '.join(allowed)}."
+        )
+
+
 def get_product(db: Session, symbol: str) -> Optional[InvestmentProduct]:
     """Exact match on the canonical symbol. Use resolve_symbol for user input."""
     return db.query(InvestmentProduct).filter(InvestmentProduct.symbol == symbol).first()
@@ -385,11 +401,20 @@ def list_instruments(
 
     ordering = {
         "change_percent": MarketQuote.change_percent.desc(),
+        # "En çok düşenler" needs the other direction. Without it the only
+        # change-based key ranked risers, so a losers question was answered
+        # with gainers -- confidently, and wrongly.
+        "change_percent_asc": MarketQuote.change_percent.asc(),
         "market_cap": InstrumentFundamentals.market_cap.desc(),
         "pe_ratio": InstrumentFundamentals.pe_ratio.asc(),
         "symbol": InvestmentProduct.symbol.asc(),
     }
-    statement = statement.order_by(ordering.get(sort_by or "symbol", InvestmentProduct.symbol.asc()))
+    if sort_by is not None and sort_by not in ordering:
+        # Falling back to alphabetical was worse than failing: a caller that
+        # asked to rank by change got symbol order and no indication that its
+        # sort had been ignored.
+        raise UnknownSortError(sort_by, sorted(ordering))
+    statement = statement.order_by(ordering[sort_by or "symbol"])
     statement = statement.limit(max(1, min(200, limit)))
 
     out = []
@@ -429,7 +454,11 @@ def _opt_float(row: Any, field: str) -> Optional[float]:
     return float(value) if value is not None else None
 
 
-def holdings(db: Session, account_number: str = "TR-DEMO-0001") -> list[dict[str, Any]]:
+def holdings(
+    db: Session,
+    user_id: Optional[str] = None,
+    account_number: Optional[str] = None,
+) -> list[dict[str, Any]]:
     """Positions joined with their product and current quote.
 
     Market value, P&L and weight are computed here from the live quote rather
@@ -437,15 +466,15 @@ def holdings(db: Session, account_number: str = "TR-DEMO-0001") -> list[dict[str
     total that no longer equals price x quantity the moment the price moves —
     which is precisely what the old fixtures did.
     """
+    owner = account(db, user_id=user_id, account_number=account_number)
+    if owner is None:
+        return []
+
     statement = (
         select(PortfolioPosition, InvestmentProduct, MarketQuote)
         .join(InvestmentProduct, InvestmentProduct.id == PortfolioPosition.product_id)
         .join(MarketQuote, MarketQuote.product_id == PortfolioPosition.product_id, isouter=True)
-        .join(
-            InvestmentAccount,
-            InvestmentAccount.id == PortfolioPosition.investment_account_id,
-        )
-        .where(InvestmentAccount.account_number == account_number)
+        .where(PortfolioPosition.investment_account_id == owner.id)
         .order_by(InvestmentProduct.symbol)
     )
 
@@ -481,12 +510,33 @@ def holdings(db: Session, account_number: str = "TR-DEMO-0001") -> list[dict[str
     return out
 
 
-def account(db: Session, account_number: str = "TR-DEMO-0001") -> Optional[InvestmentAccount]:
-    return (
-        db.query(InvestmentAccount)
-        .filter(InvestmentAccount.account_number == account_number)
-        .first()
-    )
+#: The account anonymous callers resolve to. Public endpoints work without a
+#: token, and they need something to read.
+DEMO_ACCOUNT_NUMBER = "TR-DEMO-0001"
+
+
+def account(
+    db: Session,
+    user_id: Optional[str] = None,
+    account_number: Optional[str] = None,
+) -> Optional[InvestmentAccount]:
+    """The caller's investment account.
+
+    Resolved by user first, because cash and holdings are per-user now — a
+    single shared account meant one person's purchase spent everybody's money.
+    An anonymous caller (no token) falls back to the demo account so the public
+    endpoints keep working.
+    """
+    query = db.query(InvestmentAccount)
+    if account_number is not None:
+        return query.filter(InvestmentAccount.account_number == account_number).first()
+    if user_id:
+        found = query.filter(InvestmentAccount.user_id == user_id).first()
+        if found is not None:
+            return found
+    return query.filter(
+        InvestmentAccount.account_number == DEMO_ACCOUNT_NUMBER
+    ).first()
 
 
 def candle_series(db: Session, symbol: str, limit: int = 400) -> list[dict[str, Any]]:

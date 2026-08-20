@@ -287,3 +287,86 @@ class TestAccount:
         expected = SimpleNamespace(account_number="TR-DEMO-0001")
         db.query.return_value.filter.return_value.first.return_value = expected
         assert market_service.account(db) is expected
+
+
+class TestSortOrdering:
+    """An unrecognised sort is refused rather than quietly ignored.
+
+    The endpoint used to accept any value and fall back to alphabetical, so a
+    caller that asked to rank by daily change received symbol order with no
+    indication its sort had been dropped — a wrong ranking presented as right.
+    """
+
+    def _db(self):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        return db
+
+    @pytest.mark.parametrize(
+        "sort_by", ["symbol", "change_percent", "change_percent_asc", "market_cap", "pe_ratio"]
+    )
+    def test_every_documented_sort_is_accepted(self, sort_by):
+        market_service.list_instruments(self._db(), sort_by=sort_by)
+
+    def test_the_falling_direction_exists(self):
+        """"En çok düşenler" was unanswerable while change_percent was
+        descending-only."""
+        db = self._db()
+        market_service.list_instruments(db, sort_by="change_percent_asc")
+        sql = str(db.execute.call_args.args[0]).upper()
+        assert "ORDER BY" in sql
+        assert "ASC" in sql
+
+    def test_the_rising_direction_is_descending(self):
+        db = self._db()
+        market_service.list_instruments(db, sort_by="change_percent")
+        assert "DESC" in str(db.execute.call_args.args[0]).upper()
+
+    def test_an_unknown_sort_is_refused(self):
+        with pytest.raises(market_service.UnknownSortError) as excinfo:
+            market_service.list_instruments(self._db(), sort_by="gainers")
+        assert "gainers" in str(excinfo.value)
+        assert "change_percent_asc" in str(excinfo.value)
+
+    def test_no_sort_defaults_to_symbol(self):
+        db = self._db()
+        market_service.list_instruments(db, sort_by=None)
+        assert "ORDER BY" in str(db.execute.call_args.args[0]).upper()
+
+
+class TestAccountResolution:
+    """Cash and holdings are per-user now. A single shared account meant one
+    person's purchase spent everybody's money."""
+
+    def test_a_user_gets_their_own_account(self):
+        db = MagicMock(spec=Session)
+        mine = SimpleNamespace(id="acct-mine")
+        db.query.return_value.filter.return_value.first.return_value = mine
+        assert market_service.account(db, user_id="user-1") is mine
+
+    def test_an_anonymous_caller_falls_back_to_the_demo_account(self):
+        """The public endpoints work without a token and need something to
+        read."""
+        db = MagicMock(spec=Session)
+        demo = SimpleNamespace(id="acct-demo")
+        db.query.return_value.filter.return_value.first.return_value = demo
+        assert market_service.account(db, user_id=None) is demo
+
+    def test_a_user_without_an_account_falls_back_rather_than_erroring(self):
+        db = MagicMock(spec=Session)
+        demo = SimpleNamespace(id="acct-demo")
+        db.query.return_value.filter.return_value.first.side_effect = [None, demo]
+        assert market_service.account(db, user_id="ghost") is demo
+
+    def test_an_explicit_account_number_wins(self):
+        db = MagicMock(spec=Session)
+        named = SimpleNamespace(id="acct-named")
+        db.query.return_value.filter.return_value.first.return_value = named
+        assert market_service.account(db, account_number="TR-DEMO-0001") is named
+
+    def test_holdings_for_a_caller_with_no_account_are_empty_not_everyones(self):
+        """Without the guard the query would drop its account filter and
+        return every position in the database."""
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = None
+        assert market_service.holdings(db, user_id="ghost") == []

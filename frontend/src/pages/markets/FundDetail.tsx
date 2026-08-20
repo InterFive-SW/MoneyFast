@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { findFund, findInstrument } from '../../data/mockData'
 import { toNumber, seriesName } from '../../lib/chartFormat'
+import SampleDataBadge from '../../components/markets/SampleDataBadge'
 
 type DetailTab = 'ozet' | 'portfoy' | 'getiri'
 
@@ -48,6 +49,7 @@ export default function FundDetail() {
 
   return (
     <div>
+      <SampleDataBadge reason="Fon verisi (TEFAS) için okunabilir bir kaynak yok." />
       <Link to="/investment/fonlar" className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-emerald-500 mb-4 transition-colors">
         <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
         Fonlar listesine dön

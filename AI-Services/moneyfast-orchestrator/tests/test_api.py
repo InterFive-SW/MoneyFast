@@ -109,7 +109,7 @@ def test_chat_exposes_only_the_public_fields(api_client, patched_run_turn):
     body = api_client.post("/chat", json={"user_message": "x"}).json()
     assert set(body) == {
         "final_output", "primary_intent", "target_agent", "compliance_verdict",
-        "widget", "context_topic",
+        "widget", "context_topic", "disclosures",
     }
     assert "iç taslak" not in response_text(body)
     # The widget is a projection of the tool payload, not the payload itself.
@@ -292,6 +292,9 @@ def test_response_model_declares_the_public_contract():
     assert set(api.ChatResponse.model_fields) == {
         "final_output", "primary_intent", "target_agent", "compliance_verdict",
         "widget", "context_topic",
+        # Added deliberately: mandatory notices travel as data so the chat can
+        # place them, rather than being concatenated into every reply.
+        "disclosures",
     }
 
 

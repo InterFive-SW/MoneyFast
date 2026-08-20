@@ -29,6 +29,7 @@ import FundDetail           from './pages/markets/FundDetail'
 import IndicesScreen        from './pages/markets/IndicesScreen'
 import SectorsScreen        from './pages/markets/SectorsScreen'
 import AnalysesScreen       from './pages/markets/AnalysesScreen'
+import Analytics from './pages/Analytics'
 
 export default function App() {
   return (
@@ -58,6 +59,7 @@ export default function App() {
               <Route path="dashboard"  element={<Dashboard />}  />
               <Route path="chat"       element={<Chat />}       />
               <Route path="portfolio"  element={<Portfolio />}  />
+              <Route path="analytics"  element={<Analytics />}  />
               <Route path="banking"    element={<Banking />}    />
               <Route path="investment" element={<Investment />}>
                 <Route index                element={<Navigate to="hisseler" replace />} />

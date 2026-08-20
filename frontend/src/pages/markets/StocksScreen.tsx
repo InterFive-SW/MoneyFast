@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { MOCK_MARKET_INSTRUMENTS, } from '../../data/mockData'
 import type { ColumnSetKey } from '../../data/columnSets'
+import { useInstruments } from '../../hooks/useInstruments'
 import NewsWidget from '../../components/widgets/NewsWidget'
 import MarketInstrumentsTable from '../../components/markets/MarketInstrumentsTable'
 import MarketMoversWidget from '../../components/markets/MarketMoversWidget'
@@ -12,15 +12,23 @@ export default function StocksScreen() {
   const [columnSet, setColumnSet] = useState<ColumnSetKey>('getiri')
   const [filters, setFilters] = useState<StockFilters>(EMPTY_STOCK_FILTERS)
 
-  const sectors = useMemo(
-    () => Array.from(new Set(MOCK_MARKET_INSTRUMENTS.map((i) => i.sector))).sort(),
-    []
-  )
+  // Canlı evren: açılışta bir kez çekilir, fiyatlar SSE ile güncellenir.
+  // Sektör listesi de buradan gelir — sabit bir listeyle canlı veride
+  // karşılığı olmayan sektörler süzgeçte görünürdü.
+  const { instruments, loading, sectors } = useInstruments()
 
   const filteredInstruments = useMemo(
-    () => applyStockFilters(MOCK_MARKET_INSTRUMENTS, filters),
-    [filters]
+    () => applyStockFilters(instruments, filters),
+    [instruments, filters]
   )
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+      </div>
+    )
+  }
 
   return (
     <div>

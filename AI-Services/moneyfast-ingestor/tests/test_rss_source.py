@@ -197,3 +197,72 @@ class TestRateLimiting:
         handler = feed_handler()
         rss_source.fetch_feed(FEED_URL, client_for(handler))
         assert "MoneyFastBot" in handler.calls[-1].headers["User-Agent"]
+
+
+class TestSectionFilter:
+    """Keeping football out of a finance app.
+
+    The feeds we can reach are site-wide: dunya.com and ekonomim.com serve
+    exam results and transfer news through the same RSS as their economy
+    coverage. The section in the article URL is the publisher's own filing,
+    which is the only per-item classification these feeds carry.
+    """
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.dunya.com/ekonomi/abdden-istihdam-surprizi",
+            "https://www.dunya.com/finans/merkez-bankasi-rezervleri",
+            "https://www.dunya.com/sirketler/turkcell-ar-ge",
+            "https://www.aa.com.tr/tr/ekonomi/merkez-bankasi",
+            "https://www.patronlardunyasi.com/borsa/bist-100",
+        ],
+    )
+    def test_financial_sections_are_kept(self, url):
+        assert rss_source.is_financial(url) is True
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://www.dunya.com/spor/erzurumspor-galatasaray-maci",
+            "https://www.dunya.com/gundem/yokdil-sonuclari-aciklandi",
+            "https://www.dunya.com/gundem/marmarada-170-deprem",
+            "https://www.ekonomim.com/foto-galeri/en-az-ariza-yapan-otomobiller",
+            "https://www.dunya.com/video-galeri/haftanin-ozeti",
+        ],
+    )
+    def test_off_topic_sections_are_dropped(self, url):
+        assert rss_source.is_financial(url) is False
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://example.com/haber/1",
+            "https://example.com/analiz/bist-degerlemesi",
+            "https://example.com/",
+            None,
+        ],
+    )
+    def test_an_unrecognised_section_is_kept(self, url):
+        """A denylist, not an allowlist: dropping everything unfamiliar would
+        silently lose a publisher that files finance news under a name we did
+        not anticipate, and a missing item is invisible in a way a football
+        headline is not."""
+        assert rss_source.is_financial(url) is True
+
+    def test_a_language_prefix_is_not_mistaken_for_the_section(self):
+        """AA nests everything under /tr/, so the real section is second."""
+        assert rss_source.is_financial("https://www.aa.com.tr/tr/spor/mac-sonucu") is False
+        assert rss_source.is_financial("https://www.aa.com.tr/tr/ekonomi/enflasyon") is True
+
+    def test_filtered_items_never_reach_the_feed_output(self, no_robots):
+        body = """<?xml version="1.0"?><rss version="2.0"><channel>
+          <title>Karışık Kaynak</title>
+          <item><title>BIST 100 yükseldi</title>
+            <link>https://example.com/ekonomi/bist-100-yukseldi</link></item>
+          <item><title>Fenerbahçe transferi açıkladı</title>
+            <link>https://example.com/spor/fenerbahce-transfer</link></item>
+        </channel></rss>"""
+        items = rss_source.fetch_feed(FEED_URL, client_for(feed_handler(body=body)))
+        titles = [item["title"] for item in items]
+        assert titles == ["BIST 100 yükseldi"]

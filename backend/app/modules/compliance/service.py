@@ -5,6 +5,7 @@ toward BLOCK. An unreachable or confused rule engine must cost a user one
 reply, not cost the firm a licence.
 """
 
+import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -22,6 +23,48 @@ class UnsupportedJurisdiction(Exception):
     """No rule pack for the requested code. Treated as BLOCK upstream."""
 
 
+#: A figure that could be read as a financial claim: an amount, a percentage,
+#: or a price. Deliberately broad — a false positive costs one extra line of
+#: boilerplate, a false negative omits a legally required disclosure.
+_FIGURE = re.compile(
+    r"(\d[\d.,]*\s*(?:%|tl|try|usd|eur|\$|₺|€|lira|adet|puan)"
+    r"|(?:%|\$|₺|€)\s*\d)",
+    re.IGNORECASE,
+)
+
+
+#: Routing is recorded as a tool on every single turn, but it only classifies
+#: the request -- it reaches no market data and produces no figure. Counting it
+#: as financial content would make the disclaimer unconditional again by the
+#: back door, which is exactly the behaviour being fixed.
+NON_FINANCIAL_TOOLS = frozenset({"classify_and_route_intent"})
+
+
+def has_financial_content(
+    draft: str,
+    contains_personal_data: bool,
+    contains_transaction_proposal: bool,
+    tools_used: List[str],
+) -> bool:
+    """Whether this draft makes a financial claim at all.
+
+    The general disclaimer used to be attached unconditionally, so a greeting
+    and a "I could not reach the data" message both carried three sentences
+    about past performance not guaranteeing future returns. Boilerplate under
+    text that asserts nothing does not inform anyone; it trains the reader to
+    skip the notice on the answers where it matters.
+
+    Note a failed tool call never reaches `tools_used` -- the orchestrator only
+    records a tool on success -- so an error message is correctly treated as
+    carrying no claim.
+    """
+    if contains_personal_data or contains_transaction_proposal:
+        return True
+    if any(tool not in NON_FINANCIAL_TOOLS for tool in tools_used):
+        return True
+    return bool(_FIGURE.search(draft or ""))
+
+
 def required_disclosures(
     draft: str,
     contains_personal_data: bool,
@@ -33,7 +76,12 @@ def required_disclosures(
     Presence is tested on the disclosure's own text, so a draft that already
     carries one is not asked to repeat it.
     """
-    needed: List[Dict[str, str]] = [rules.DISCLOSURES["DISC-GENERAL"]]
+    needed: List[Dict[str, str]] = []
+
+    if has_financial_content(
+        draft, contains_personal_data, contains_transaction_proposal, tools_used
+    ):
+        needed.append(rules.DISCLOSURES["DISC-GENERAL"])
 
     if contains_personal_data:
         needed.append(rules.DISCLOSURES["DISC-PERSONAL"])
@@ -41,9 +89,16 @@ def required_disclosures(
         needed.append(rules.DISCLOSURES["DISC-PROPOSAL"])
     # Any tool that carries an is_delayed flag can have produced delayed
     # figures; the orchestrator does not tell us which, so the disclosure is
-    # required whenever such a tool contributed.
+    # required whenever such a tool contributed. `get_market_data` belongs here
+    # for the plainest reason of all: it is the tool that returns is_delayed,
+    # and a bare price answer was going out with no delay notice at all.
     if any(
-        tool in {"get_portfolio_positions", "rag_semantic_market_search", "calculate_portfolio_risk_metrics"}
+        tool in {
+            "get_portfolio_positions",
+            "rag_semantic_market_search",
+            "calculate_portfolio_risk_metrics",
+            "get_market_data",
+        }
         for tool in tools_used
     ):
         needed.append(rules.DISCLOSURES["DISC-DELAYED"])

@@ -28,6 +28,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from functools import lru_cache
 from typing import Any, Literal, Optional, TypedDict
@@ -59,6 +60,15 @@ GENERIC_FAILURE_TR = (
     "Şu anda yanıtı hazırlayamadım. Kısa bir süre sonra tekrar deneyebilir "
     "misiniz?"
 )
+#: Transaction types the backend recognises as money transfers.
+TRANSFER_TYPES = frozenset({"TRANSFER", "EFT", "HAVALE", "TRANSFER_INTERNAL", "TRANSFER_EXTERNAL"})
+
+TRANSFER_UNSUPPORTED_TR = (
+    "Para transferi şu anda desteklenmiyor; bu asistan yalnızca yatırım "
+    "işlemlerini hazırlayabiliyor. Transferi bankacılık ekranından "
+    "yapmanız gerekiyor."
+)
+
 DATA_FAILURE_TR = (
     "Verilere şu anda ulaşamadım, bu yüzden sayı paylaşmayacağım. "
     "Birazdan tekrar denememi ister misiniz?"
@@ -89,6 +99,8 @@ class MoneyFastState(TypedDict, total=False):
     draft_response: str
     compliance_verdict: str
     final_output: str
+    #: Required notices, carried separately so the UI can place them.
+    disclosures: list[str]
     # Operational
     user_id: str
     locale: str
@@ -303,6 +315,7 @@ async def market_data_node(state: MoneyFastState) -> dict[str, Any]:
         state, "get_market_data", args,
         assumptions=plan.get("assumptions") or [],
         empty_when=lambda p: not p.get("instruments"),
+        repair_prompt=SPECIALIST_PROMPTS["MARKET_DATA_AGENT"],
     )
 
 
@@ -384,6 +397,42 @@ async def transaction_node(state: MoneyFastState) -> dict[str, Any]:
             }
         }
     args = dict(plan["arguments"])
+
+    # Money transfers are not supported. Banking is unimplemented, so a
+    # transfer staged here would be routed through the SECURITIES path: costed
+    # with brokerage commission and BSMV, rendered by the widget as a "Satım"
+    # with a blank ticker, and confirmed into a proposal that moves nothing.
+    # Declining is the honest answer; the previous behaviour looked like it
+    # worked, which is worse than a refusal.
+    if str(args.get("transaction_type", "")).upper() in TRANSFER_TYPES:
+        return {
+            "specialist_output": {
+                "agent": "TRANSACTION_AGENT",
+                "status": "UNSUPPORTED",
+                "tool": None,
+                "data": None,
+                "instruction": TRANSFER_UNSUPPORTED_TR,
+            }
+        }
+
+    # The amount must come from THIS turn. The planner sees the last six turns
+    # verbatim, and with no precedence rule it read "250 lira" from the
+    # previous message while the user had just said "200 lira at" -- staging a
+    # figure the user never asked for in the turn they were answering.
+    mismatch = _amount_not_in_current_turn(state, args)
+    if mismatch is not None:
+        return {
+            "specialist_output": {
+                "agent": "TRANSACTION_AGENT",
+                "status": "NEEDS_INPUT",
+                "missing_fields": ["quantity" if "quantity" in mismatch else "notional_amount"],
+                "clarification_request": (
+                    f"Tutarı bu mesajda göremedim ({mismatch}). Kaç adet ya da kaç TL "
+                    f"olduğunu tekrar yazar mısınız?"
+                ),
+            }
+        }
+
     args["user_id"] = state.get("user_id") or "unknown"
     args["idempotency_key"] = _idempotency_key(state)
     args["assumptions"] = plan.get("assumptions") or []
@@ -490,7 +539,8 @@ async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
         return {
             "compliance_verdict": "PASS",
             "compliance": verdict,
-            "final_output": _with_disclosures(draft, verdict),
+            "final_output": _without_disclosures(draft, verdict),
+            "disclosures": _disclosure_texts(verdict),
         }
     if decision == "REVISE":
         remediated = verdict.get("remediated_response") or ""
@@ -503,7 +553,8 @@ async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
         return {
             "compliance_verdict": "REVISE",
             "compliance": verdict,
-            "final_output": _with_disclosures(remediated, verdict),
+            "final_output": _without_disclosures(remediated, verdict),
+            "disclosures": _disclosure_texts(verdict),
         }
 
     # BLOCK
@@ -665,18 +716,123 @@ def _specialist_task(state: MoneyFastState) -> str:
     )
 
 
+#: Substrings identifying an error the CALLER can fix by rewriting its
+#: arguments, as opposed to one the caller can do nothing about (backend down,
+#: timeout). Only the former is worth a second attempt.
+_REPAIRABLE_MARKERS = ("unrecognised", "unrecognized", "invalid", "allowed:")
+
+
+def _is_repairable(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(marker in text for marker in _REPAIRABLE_MARKERS)
+
+
+async def _repair_args(
+    state: MoneyFastState, prompt: str, args: dict[str, Any], error: str
+) -> Optional[dict[str, Any]]:
+    """Ask the planner to fix arguments the tool rejected.
+
+    The tool's own error names the permitted values, so the model is being
+    corrected with the authoritative list rather than asked to guess again.
+    Returns None if the retry produced nothing usable.
+    """
+    task = json.dumps(
+        {
+            "task": state["user_message"],
+            "rejected_arguments": args,
+            "tool_error": error,
+            "instruction": (
+                "The tool rejected these arguments. Re-emit the SAME envelope with "
+                "only the offending value corrected to one the error permits. Do not "
+                "change the user's intent and do not drop a filter to make it pass."
+            ),
+        },
+        ensure_ascii=False,
+    )
+    try:
+        plan = await _llm_json(prompt, task, fast=True)
+    except Exception as exc:  # pragma: no cover - defensive, retry is best-effort
+        log.warning("argument repair failed: %s", exc)
+        return None
+    repaired = plan.get("arguments") or None
+    if not repaired:
+        return None
+    # Compare on the merged form: the node adds defaults (top_k) after the
+    # planner runs, so a repair that changed nothing still looks different
+    # from the arguments actually sent. Re-sending those would fail
+    # identically and cost another round trip.
+    merged = {**args, **repaired}
+    return merged if merged != args else None
+
+
+def _amount_not_in_current_turn(
+    state: MoneyFastState, args: dict[str, Any]
+) -> Optional[str]:
+    """Return the offending figure when it appears only in the history.
+
+    Deliberately narrow: it fires only when the number is absent from the
+    current message AND present in an earlier one. A figure the user did not
+    write anywhere (a quantity the model inferred from "hepsini sat") is left
+    alone, because that is a different question and the tool validates it.
+    """
+    message = (state.get("user_message") or "").replace(".", "").replace(",", "")
+    history = " ".join(
+        str(turn.get("content", "")) for turn in (state.get("conversation_history") or [])
+    ).replace(".", "").replace(",", "")
+
+    candidates: list[tuple[str, float]] = []
+    quantity = args.get("quantity")
+    if isinstance(quantity, (int, float)):
+        candidates.append(("quantity", float(quantity)))
+    notional = args.get("notional_amount")
+    if isinstance(notional, dict) and isinstance(notional.get("amount"), (int, float)):
+        candidates.append(("notional_amount", float(notional["amount"])))
+
+    for field, value in candidates:
+        # Compare as the user would have typed it: "250" not "250.0".
+        written = str(int(value)) if float(value).is_integer() else str(value)
+        if written not in message and written in history:
+            return f"{field}={written}"
+    return None
+
+
 async def _run_tool(
     state: MoneyFastState,
     tool: str,
     args: dict[str, Any],
     assumptions: Optional[list[str]] = None,
     empty_when=None,
+    repair_prompt: Optional[str] = None,
 ) -> dict[str, Any]:
     try:
         payload = await get_mcp_client().call(tool, args)
     except (MCPUnavailable, MCPToolError) as exc:
+        # One correction attempt, and only for an error the arguments can fix.
+        # Without it a single unrecognised enum value became "Verilere
+        # ulaşamadım" and the user had to type "tekrar dene" to re-roll the
+        # planner into a legal value.
+        if repair_prompt and _is_repairable(exc):
+            repaired = await _repair_args(state, repair_prompt, args, str(exc))
+            if repaired is not None:
+                log.info("retrying %s with repaired arguments", tool)
+                try:
+                    payload = await get_mcp_client().call(tool, repaired)
+                except (MCPUnavailable, MCPToolError) as retry_exc:
+                    return _tool_error(state, tool, retry_exc)
+                else:
+                    return _tool_success(state, tool, payload, assumptions, empty_when)
         return _tool_error(state, tool, exc)
 
+    return _tool_success(state, tool, payload, assumptions, empty_when)
+
+
+def _tool_success(
+    state: MoneyFastState,
+    tool: str,
+    payload: Any,
+    assumptions: Optional[list[str]],
+    empty_when,
+) -> dict[str, Any]:
     status = "EMPTY" if (empty_when and empty_when(payload)) else "OK"
     return {
         "specialist_output": {
@@ -703,6 +859,36 @@ def _tool_error(state: MoneyFastState, tool: str, exc: Exception) -> dict[str, A
         },
         "errors": (state.get("errors") or []) + [f"{tool}: {exc}"],
     }
+
+
+def _disclosure_texts(verdict: dict[str, Any]) -> list[str]:
+    """The disclosures this turn requires, as separate strings.
+
+    Returned alongside the answer rather than concatenated into it. The words
+    are unchanged and still mandatory; only their placement moves, so the chat
+    can render them as a footnote instead of three sentences of boilerplate
+    glued to a one-line reply.
+    """
+    out: list[str] = []
+    for item in verdict.get("required_disclosures") or []:
+        body = (item.get("text") or "").strip()
+        if body and body not in out:
+            out.append(body)
+    return out
+
+
+def _without_disclosures(text: str, verdict: dict[str, Any]) -> str:
+    """Remove disclosure sentences the compliance layer appended to the draft.
+
+    The backend's `remediated_response` arrives with them already inlined. They
+    are carried structurally instead, so leaving the copies in the prose would
+    show each notice twice.
+    """
+    cleaned = text
+    for body in _disclosure_texts(verdict):
+        cleaned = cleaned.replace(body, "")
+    # Collapse the blank lines the removals leave behind.
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
 def _with_disclosures(text: str, verdict: dict[str, Any]) -> str:

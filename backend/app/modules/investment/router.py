@@ -6,7 +6,7 @@ from typing import List, Dict, Optional
 
 from app.core.database import get_db
 from app.core.deps import get_optional_user_id
-from . import ai_service, market_service
+from . import ai_service, market_service, service
 from .models import TransactionProposal
 from .ai_schemas import (
     PortfolioPositionsOut, StageTransactionRequest, StageTransactionOut,
@@ -23,17 +23,20 @@ router = APIRouter(tags=["investment"])
 WATCHLIST_LIMIT = 8
 
 @router.get("/portfolio/summary", response_model=InvestmentBalance)
-async def get_portfolio_summary(db: Session = Depends(get_db)):
+async def get_portfolio_summary(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """
     Yatırım hesabının toplam bakiyesi ve kırılımı (nakit, BIST, ABD).
 
     Canlı fiyatlardan hesaplanır; saklanan bir toplam yok. Saklansaydı, fiyat
     her değiştiğinde pozisyonların toplamıyla uyuşmazdı.
     """
-    rows = market_service.holdings(db)
+    rows = market_service.holdings(db, user_id=user_id)
     quotes = market_service.latest_quotes(db)
     rates = ai_service.fx_rates(quotes)
-    account = market_service.account(db)
+    account = market_service.account(db, user_id=user_id)
     cash = float(account.cash_balance) if account else 0.0
 
     bist = sum(
@@ -96,7 +99,10 @@ async def get_portfolio_chart(
     }
 
 @router.get("/positions", response_model=List[Position])
-async def get_positions(db: Session = Depends(get_db)):
+async def get_positions(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """
     Açık yatırım pozisyonları.
 
@@ -104,7 +110,7 @@ async def get_positions(db: Session = Depends(get_db)):
     canlı. Sohbet botunun okuduğu `market_service.holdings()` fonksiyonunun
     aynısı, dolayısıyla iki yüzeyin farklı rakam göstermesi mümkün değil.
     """
-    return [_as_frontend_position(row) for row in market_service.holdings(db)]
+    return [_as_frontend_position(row) for row in market_service.holdings(db, user_id=user_id)]
 
 
 def _as_frontend_position(row: dict) -> dict:
@@ -146,12 +152,15 @@ async def get_orders(db: Session = Depends(get_db)):
 
 
 @router.get("/asset-allocation", response_model=List[AssetAllocationItem])
-async def get_asset_allocation(db: Session = Depends(get_db)):
+async def get_asset_allocation(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """Varlık sınıflarına göre dağılım: nakit, BIST hisseleri, yabancı hisseler."""
-    rows = market_service.holdings(db)
+    rows = market_service.holdings(db, user_id=user_id)
     quotes = market_service.latest_quotes(db)
     rates = ai_service.fx_rates(quotes)
-    account = market_service.account(db)
+    account = market_service.account(db, user_id=user_id)
 
     buckets = {
         "Nakit (TRY)": float(account.cash_balance) if account else 0.0,
@@ -249,14 +258,17 @@ async def get_dividends(db: Session = Depends(get_db)):
 
 
 @router.get("/sector-allocation", response_model=List[SectorAllocationItem])
-async def get_sector_allocation(db: Session = Depends(get_db)):
+async def get_sector_allocation(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """
     Portföyün sektörel dağılımı — `instrument_fundamentals` satırlarından.
 
     Sektörü bilinmeyen pozisyonlar "Bilinmiyor" altında toplanır; tahmin
     yürüterek sektör atamak, dağılımı olduğundan daha kesin gösterirdi.
     """
-    rows = market_service.holdings(db)
+    rows = market_service.holdings(db, user_id=user_id)
     sectors = market_service.sector_by_symbol(db)
 
     totals: Dict[str, float] = {}
@@ -282,9 +294,12 @@ async def get_sector_allocation(db: Session = Depends(get_db)):
 
 
 @router.get("/heatmap", response_model=List[HeatmapItem])
-async def get_heatmap(db: Session = Depends(get_db)):
+async def get_heatmap(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """Isı haritası: portföy ağırlığı ve günlük değişim."""
-    rows = [r for r in market_service.holdings(db) if r.get("price")]
+    rows = [r for r in market_service.holdings(db, user_id=user_id) if r.get("price")]
     sectors = market_service.sector_by_symbol(db)
     grand = sum(r["quantity"] * r["price"] for r in rows)
     return [
@@ -349,7 +364,7 @@ async def get_portfolio_positions_for_ai(
     quotes = market_service.latest_quotes(db)
     payload, _ = ai_service.build_portfolio(
         user_id=user_id,
-        holdings=market_service.holdings(db),
+        holdings=market_service.holdings(db, user_id=user_id),
         account_ids=account_ids,
         asset_classes=asset_classes,
         include_closed=include_closed,
@@ -410,6 +425,12 @@ async def stage_transaction(
     raw_symbol = (body.get("instrument") or {}).get("symbol")
     product = market_service.resolve_symbol(db, raw_symbol) if raw_symbol else None
 
+    # Whose portfolio and cash this proposal is measured against. The
+    # authenticated identity wins; `mcp` calls with a service identity and
+    # names the user in the body.
+    owner_id = authenticated_user_id or request.user_id
+    owner = market_service.account(db, user_id=owner_id)
+
     reference_price = None
     held_quantity = None
     currency = "TRY"
@@ -418,7 +439,11 @@ async def stage_transaction(
         quote = market_service.latest_quotes(db, [product.symbol]).get(product.symbol)
         reference_price = quote["price"] if quote else None
         held_quantity = next(
-            (h["quantity"] for h in market_service.holdings(db) if h["symbol"] == product.symbol),
+            (
+                h["quantity"]
+                for h in market_service.holdings(db, user_id=owner_id)
+                if h["symbol"] == product.symbol
+            ),
             0.0,
         )
 
@@ -428,6 +453,7 @@ async def stage_transaction(
         held_quantity=held_quantity,
         resolved_symbol=product.symbol if product else None,
         currency=currency,
+        available_cash=float(owner.cash_balance) if owner is not None else None,
     )
 
     # Persisted so the confirm step can be verified. Without a record,
@@ -536,6 +562,25 @@ async def confirm_transaction_proposal(
             detail="Bu önerinin süresi doldu. Lütfen işlemi yeniden hazırlatın.",
         )
 
+    # Settle before flipping the status, in ONE transaction. Marking a trade
+    # confirmed and then failing to move the money would leave the order list
+    # saying "Gerçekleşti" over an unchanged portfolio — the inconsistency this
+    # whole path exists to remove.
+    owner = market_service.account(db, user_id=proposal.user_id or user_id)
+    if owner is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Bu işlemi uygulayacak bir yatırım hesabı bulunamadı.",
+        )
+
+    try:
+        applied = service.settle(db, proposal, owner)
+    except service.SettlementError as exc:
+        db.rollback()
+        # 409, not 400: the request was well-formed and was valid when staged;
+        # the account state changed underneath it.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     proposal.confirmed_at = now
     proposal.status = "CONFIRMED"
     db.commit()
@@ -543,7 +588,10 @@ async def confirm_transaction_proposal(
     return {
         "proposal_id": proposal.id,
         "status": "confirmed",
-        "message": f"İşlem onaylandı (Öneri No: {proposal.id}).",
+        "message": (
+            f"İşlem onaylandı (Öneri No: {proposal.id}). "
+            f"Kalan bakiye: {applied['cash_after']:,.2f} TL."
+        ),
     }
 
 

@@ -130,6 +130,73 @@ def _tickers(entry: Any) -> list[str]:
     return sorted(set(out))
 
 
+#: Sections, taken from the article URL's first path segment, that a finance
+#: app has no business storing.
+#:
+#: Turkish news feeds mix sections: `dunya.com/rss?dunya` and
+#: `ekonomim.com/rss` are the SITE-WIDE feeds, so ingesting them brought in
+#: football transfers, exam results and earthquake bulletins alongside the
+#: economy stories. The section-specific query strings those sites appear to
+#: offer (`?finans`, `?borsa`) are ignored by the server -- all return the same
+#: homepage feed -- so the URL path is the only per-item section marker there
+#: is.
+#:
+#: A DENYLIST rather than an allowlist, deliberately. This is the publisher's
+#: own classification, and we can only name the sections we have seen; an
+#: allowlist would silently discard any publisher that files finance news under
+#: a name we did not think of (`/haber/`, `/analiz/`), and a missing news item
+#: is invisible in a way a football headline is not. So: drop what is
+#: positively identifiable as off-topic, keep everything else.
+NON_FINANCIAL_SECTIONS = frozenset(
+    {
+        "spor",
+        "gundem",
+        "magazin",
+        "saglik",
+        "egitim",
+        "yasam",
+        "kultur-sanat",
+        "kultur",
+        "sanat",
+        "otomobil",
+        "seyahat",
+        "astroloji",
+        "foto-galeri",
+        "video-galeri",
+        "galeri",
+        "video",
+    }
+)
+
+
+def _section(url: Optional[str]) -> Optional[str]:
+    """The publisher's section for an article, from its URL path.
+
+    Some sites nest under a language prefix (`aa.com.tr/tr/ekonomi/...`), so a
+    two-letter first segment is skipped.
+    """
+    if not url:
+        return None
+    parts = [segment for segment in urlparse(url).path.split("/") if segment]
+    if not parts:
+        return None
+    if len(parts[0]) == 2 and parts[0].isalpha():
+        parts = parts[1:]
+    return parts[0].lower() if parts else None
+
+
+def is_financial(url: Optional[str]) -> bool:
+    """Whether an article is something other than positively-identified noise.
+
+    An unknown or missing section is KEPT -- see NON_FINANCIAL_SECTIONS for why
+    the filter is shaped as a denylist.
+    """
+    section = _section(url)
+    if section is None:
+        return True
+    return section not in NON_FINANCIAL_SECTIONS
+
+
 def fetch_feed(url: str, client: httpx.Client) -> list[dict[str, Any]]:
     """One feed. Returns [] on any failure rather than raising.
 
@@ -169,10 +236,15 @@ def fetch_feed(url: str, client: httpx.Client) -> list[dict[str, Any]]:
 
     parsed = feedparser.parse(response.text)
     items = []
+    skipped = 0
     for entry in parsed.entries:
         title = (getattr(entry, "title", "") or "").strip()
         summary = (getattr(entry, "summary", "") or "").strip()
         if not title:
+            continue
+        link = getattr(entry, "link", None)
+        if not is_financial(link):
+            skipped += 1
             continue
         items.append(
             {
@@ -180,13 +252,15 @@ def fetch_feed(url: str, client: httpx.Client) -> list[dict[str, Any]]:
                 "title": title,
                 "summary": summary or None,
                 "source": (getattr(parsed.feed, "title", "") or urlparse(url).netloc).strip(),
-                "url": getattr(entry, "link", None),
+                "url": link,
                 "language": "tr",
                 "related_symbols": _tickers(entry),
                 "published_at": _published(entry),
             }
         )
-    log.info("fetched %d items from %s", len(items), url)
+    log.info(
+        "fetched %d items from %s (%d skipped as non-financial)", len(items), url, skipped
+    )
     return items
 
 

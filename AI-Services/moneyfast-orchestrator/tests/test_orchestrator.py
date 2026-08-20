@@ -1573,3 +1573,272 @@ class TestMarketDataNode:
         out = await orchestrator.router_node(base_state)
         assert out["target_agent"] == "MARKET_DATA_AGENT"
         assert orchestrator.route_after_router(out) == "market_data"
+
+
+class TestArgumentRepair:
+    """One correction attempt when the tool rejects an argument the caller can fix.
+
+    This is the failure the user actually hit: asking for "BIST 100'de en çok
+    kazandıranlar" produced "Verilere ulaşamadım", and typing "tekrar dene"
+    worked — because the retry re-rolled the planner onto a legal enum value.
+    The fix makes that correction happen inside one turn, using the tool's own
+    error, which names the permitted values.
+    """
+
+    def _failing_then_ok(self, fake_mcp, error, payload):
+        """First call raises, second succeeds."""
+        outcomes = [error, payload]
+
+        async def _call(name, arguments):
+            fake_mcp.calls.append((name, arguments))
+            outcome = outcomes.pop(0) if outcomes else payload
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        fake_mcp.call = _call
+
+    @pytest.mark.asyncio
+    async def test_a_rejected_sort_is_corrected_within_the_same_turn(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        self._failing_then_ok(
+            fake_mcp,
+            MCPToolError("get_market_data: unrecognised sort_by 'gainers'; allowed: change_percent, symbol."),
+            {"instruments": [{"symbol": "THYAO"}]},
+        )
+        patched_llm.set_responses([
+            '{"arguments": {"filters": {"market": "BIST"}, "sort_by": "gainers"}}',
+            '{"arguments": {"filters": {"market": "BIST"}, "sort_by": "change_percent"}}',
+        ])
+        out = await orchestrator.market_data_node(base_state)
+
+        assert out["specialist_output"]["status"] == "OK", "the user should not see a failure"
+        assert len(fake_mcp.calls) == 2
+        assert fake_mcp.calls[1][1]["sort_by"] == "change_percent"
+
+    @pytest.mark.asyncio
+    async def test_the_repair_prompt_carries_the_tool_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """The model is corrected with the authoritative list, not asked to
+        guess a second time."""
+        self._failing_then_ok(
+            fake_mcp,
+            MCPToolError("unrecognised sort_by 'losers'; allowed: change_percent_asc."),
+            {"instruments": []},
+        )
+        patched_llm.set_responses([
+            '{"arguments": {"sort_by": "losers"}}',
+            '{"arguments": {"sort_by": "change_percent_asc"}}',
+        ])
+        await orchestrator.market_data_node(base_state)
+        repair_call = patched_llm.calls[-1]
+        assert "change_percent_asc" in str(repair_call)
+        assert "losers" in str(repair_call)
+
+    @pytest.mark.asyncio
+    async def test_only_one_retry_is_attempted(self, fake_mcp, patched_llm, base_state):
+        """A model that keeps producing bad arguments must not loop."""
+        error = MCPToolError("get_market_data: unrecognised sort_by 'nope'; allowed: symbol.")
+        fake_mcp.responses["get_market_data"] = error
+        patched_llm.set_responses([
+            '{"arguments": {"sort_by": "nope"}}',
+            '{"arguments": {"sort_by": "still_nope"}}',
+        ])
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "ERROR"
+        assert len(fake_mcp.calls) == 2, "one original call plus exactly one retry"
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_backend_is_not_retried(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Rewriting arguments cannot fix a service that is down; retrying only
+        doubles the wait before the user is told."""
+        fake_mcp.responses["get_market_data"] = MCPUnavailable("connection refused")
+        patched_llm.set_response('{"arguments": {"symbols": ["THYAO"]}}')
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "ERROR"
+        assert len(fake_mcp.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_an_unchanged_repair_is_not_re_sent(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """If the model returns the same arguments, calling again would fail
+        identically — so it is reported rather than repeated."""
+        fake_mcp.responses["get_market_data"] = MCPToolError("unrecognised sort_by 'x'; allowed: symbol.")
+        patched_llm.set_responses([
+            '{"arguments": {"sort_by": "x"}}',
+            '{"arguments": {"sort_by": "x"}}',
+        ])
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "ERROR"
+        assert len(fake_mcp.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_repair_that_returns_nothing_reports_the_original_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["get_market_data"] = MCPToolError("unrecognised sort_by 'x'; allowed: symbol.")
+        patched_llm.set_responses([
+            '{"arguments": {"sort_by": "x"}}',
+            "not json at all",
+        ])
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "ERROR"
+
+
+class TestDisclosurePlacement:
+    """Required notices travel as data, not as three sentences appended to
+    every answer. The words are unchanged and still mandatory; only where they
+    are rendered moves."""
+
+    def _verdict(self, texts, remediated=None):
+        return {
+            "verdict": "REVISE",
+            "required_disclosures": [{"text": t, "placement": "APPEND"} for t in texts],
+            "remediated_response": remediated,
+        }
+
+    def test_disclosure_texts_are_extracted_verbatim(self):
+        verdict = self._verdict(["Bu içerik yatırım danışmanlığı değildir.", "Veriler gecikmelidir."])
+        assert orchestrator._disclosure_texts(verdict) == [
+            "Bu içerik yatırım danışmanlığı değildir.",
+            "Veriler gecikmelidir.",
+        ]
+
+    def test_a_duplicate_notice_is_listed_once(self):
+        verdict = self._verdict(["Aynı metin.", "Aynı metin."])
+        assert orchestrator._disclosure_texts(verdict) == ["Aynı metin."]
+
+    def test_no_disclosures_yields_an_empty_list(self):
+        assert orchestrator._disclosure_texts({"verdict": "PASS"}) == []
+
+    def test_the_inlined_copy_is_stripped_from_the_prose(self):
+        """The compliance layer returns the notice already appended. Leaving
+        that copy in place would show it twice — once inline, once as the
+        footnote."""
+        notice = "Bu içerik yatırım danışmanlığı değildir."
+        verdict = self._verdict([notice])
+        cleaned = orchestrator._without_disclosures(f"THYAO 301,25 TL.\n\n{notice}", verdict)
+        assert cleaned == "THYAO 301,25 TL."
+
+    def test_stripping_collapses_the_blank_lines_it_leaves(self):
+        notice = "Uyarı."
+        verdict = self._verdict([notice])
+        cleaned = orchestrator._without_disclosures(f"Cevap.\n\n{notice}\n\n{notice}", verdict)
+        assert cleaned == "Cevap."
+
+    def test_an_answer_without_the_notice_is_unchanged(self):
+        verdict = self._verdict(["Uyarı."])
+        assert orchestrator._without_disclosures("Cevap.", verdict) == "Cevap."
+
+
+class TestTransferRefusal:
+    """Banking is unimplemented. A transfer staged through the securities path
+    was costed with brokerage commission and BSMV, rendered by the widget as a
+    "Satım" with a blank ticker, and confirmed into a proposal that moved
+    nothing. It looked like it worked, which is worse than a refusal."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["TRANSFER", "EFT", "HAVALE", "TRANSFER_INTERNAL"])
+    async def test_a_transfer_is_declined_rather_than_staged(
+        self, fake_mcp, patched_llm, base_state, kind
+    ):
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "%s", "notional_amount": {"amount": 200, "currency": "TRY"},'
+            ' "source_account_id": "1", "destination_account_id": "2"}}' % kind
+        )
+        out = await orchestrator.transaction_node(base_state)
+        assert out["specialist_output"]["status"] == "UNSUPPORTED"
+        assert not fake_mcp.calls, "nothing may be staged"
+
+    @pytest.mark.asyncio
+    async def test_a_securities_order_is_unaffected(self, fake_mcp, patched_llm, base_state):
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True, "status": "PENDING_USER_CONFIRMATION",
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 10,'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        out = await orchestrator.transaction_node(base_state)
+        assert out["specialist_output"]["status"] == "OK"
+
+
+class TestCurrentTurnAmount:
+    """The 250/200 bug: the planner sees the last six turns verbatim, and with
+    no precedence rule it staged an amount from the PREVIOUS message while the
+    user had just named a different one."""
+
+    def _state(self, base_state, message, history):
+        return {
+            **base_state,
+            "user_message": message,
+            "conversation_history": [{"role": "user", "content": h} for h in history],
+        }
+
+    @pytest.mark.asyncio
+    async def test_an_amount_only_in_the_history_is_refused(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 250,'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        state = self._state(base_state, "200 adet al", ["250 adet alacaktım"])
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "NEEDS_INPUT"
+        assert not fake_mcp.calls, "a figure the user did not just say must not be staged"
+
+    @pytest.mark.asyncio
+    async def test_the_amount_from_the_current_turn_is_staged(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 200,'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        state = self._state(base_state, "200 adet al", ["250 adet alacaktım"])
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+        assert fake_mcp.calls[0][1]["quantity"] == 200
+
+    @pytest.mark.asyncio
+    async def test_a_thousands_separator_still_matches(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """The user writes "10.000", the planner emits 10000."""
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY",'
+            ' "notional_amount": {"amount": 10000, "currency": "TRY"},'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        state = self._state(base_state, "10.000 TL'lik al", ["5.000 TL demiştim"])
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_an_inferred_amount_in_neither_place_is_left_alone(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """"hepsini sat" has no number anywhere. That is a different question
+        and the tool validates it; blocking here would break the phrasing."""
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "SELL", "quantity": 120,'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        state = self._state(base_state, "THYAO'nun hepsini sat", ["portföyümü göster"])
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"

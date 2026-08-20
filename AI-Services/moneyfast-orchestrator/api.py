@@ -38,6 +38,9 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     final_output: str
+    #: Mandatory notices for this turn, verbatim. Sent as a list rather than
+    #: appended to `final_output` so the chat renders them as a footnote.
+    disclosures: list[str] = []
     primary_intent: Optional[str] = None
     target_agent: Optional[str] = None
     compliance_verdict: Optional[str] = None
@@ -79,6 +82,7 @@ async def chat(req: ChatRequest) -> ChatResponse:
         primary_intent=state.get("primary_intent"),
         target_agent=state.get("target_agent"),
         compliance_verdict=state.get("compliance_verdict"),
+        disclosures=state.get("disclosures") or [],
         widget=widget,
         context_topic=context_topic,
     )

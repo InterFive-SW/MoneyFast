@@ -105,3 +105,31 @@ make test          # 90% coverage gate; no network, no database
 
 The suite blocks real sockets. A test that forgets a stub would otherwise hit
 a live news site — slow, flaky, and rude.
+
+
+## Haber kaynakları ve neden bunlar
+
+Beslemeler **finans bölümü** olanlardan seçildi. `dunya.com/rss?dunya` ve
+`ekonomim.com/rss` site geneli akışlar: ekonomi haberlerinin yanında futbol
+transferi, YÖKDİL sonucu ve deprem bülteni de taşıyorlar. Bu sitelerin
+bölüm bazlı görünen adresleri (`?finans`, `?borsa`) sunucu tarafından yok
+sayılıyor — üçü de aynı ana sayfa akışını döndürüyor.
+
+Bu yüzden iki katman var:
+
+1. `patronlardunyasi.com/rss/{borsa,finans,sirketler,ekonomi}` ve AA'nın
+   `cat=ekonomi` akışı — hepsi finans, ek süzgeç gerekmiyor. `sirketler`
+   özellikle önemli: şirket bazlı haber ("Akbank ile ilgili haberler")
+   yalnızca oradan geliyor.
+2. Karışık akışlar için `rss_source.is_financial`: haberin bölümü **URL
+   yolundan** okunuyor (`/ekonomi/`, `/spor/`). Bu, yayıncının kendi
+   sınıflandırması — başlığa bakıp tahmin yürütmek değil.
+
+Süzgeç bir **denylist**: bölümü tanınmayan haber TUTULUR. Allowlist olsaydı,
+finans haberini beklenmedik bir bölüm adı altında yayınlayan bir kaynağı
+sessizce kaybederdik ve eksik bir haber, fazladan bir futbol başlığının aksine
+görünmez olurdu.
+
+BloombergHT denendi ve **çıkarıldı**: içeriği finansal ama akışı donmuş
+durumda (en yeni haberi iki hafta öncesine aitti). Canlı fiyatların yanında
+duran bayat bir kaynak, bir eksik kaynaktan daha kötü.

@@ -76,6 +76,14 @@ Bu uç noktaları değiştirirken `AI-Services/.../mcp-server/*_tools.py` içind
 | `rag_semantic_market_search` | `POST /search` — **backend'de değil, `rag` servisinde** |
 | `get_market_data` | `GET /api/market/instruments` — v2.2 ile eklendi |
 
+`sort_by` yalnızca beş değer alır: `symbol`, `change_percent` (en çok
+yükselenler), `change_percent_asc` (en çok düşenler), `market_cap`, `pe_ratio`.
+Bu liste hem `prompts.py`'deki uzman ajan sözleşmesinde hem de
+`market_data_tools.ALLOWED_SORTS`'ta yazılı; ikisi ayrışırsa ajan geçersiz bir
+değer üretir ve kullanıcı "veriye ulaşamadım" cevabı alır. Modelin sık yazdığı
+eşanlamlılar (`gainers`, `change_percent_desc`) `_SORT_SYNONYMS` ile kanonik
+hâle çevrilir; tanınmayan değer sessizce yok sayılmaz, hata verir.
+
 Sohbet akışının kendisi `POST /api/ai_orchestrator/chat`. `user_id` gövdeden
 DEĞİL, bearer token'dan çözülür (`app/core/deps.py`); MCP sözleşmesi bu değerin
 yalnızca doğrulanmış oturumdan gelmesini şart koşuyor. İşlem onayı yalnızca
@@ -112,6 +120,20 @@ satırı kendi içinde tutarsız bırakırdı.
 - Frontend: React + Vite + TypeScript + TailwindCSS
 - Servisler arası tek network sınırı: backend ↔ ai-service (HTTP). Sözleşme yönetimi
   için bkz. `CONTRACT_WORKFLOW.md`.
+
+### Nakit, takas ve hesaplar
+
+Her kullanıcının kendi `investment.investment_accounts` satırı var (migration
+0007). Onaylanan bir işlem `investment/service.py` içindeki `settle()` ile
+uygulanır: nakit `payload["estimate"]["net_amount"]` kadar azalır/artar,
+pozisyon **ağırlıklı ortalama maliyetle** güncellenir ve bunların hepsi
+önerinin durum değişikliğiyle **aynı transaction** içinde commit edilir. Ayrı
+commit'lemek, para hareket edip önerinin "beklemede" kalabildiği bir aralık
+bırakırdı.
+
+Alım, hem hazırlama (`ai_service.stage_transaction`) hem de onay anında bakiyeye
+karşı kontrol edilir. İki kez, çünkü aynı bakiyeye karşı iki öneri hazırlanıp
+sonra ikisi de onaylanabilir.
 
 ## shared/ kuralı — DB modeli asla buraya girmez
 

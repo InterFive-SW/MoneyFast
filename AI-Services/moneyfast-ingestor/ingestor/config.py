@@ -16,14 +16,29 @@ DEFAULT_RAG_URL = "http://rag:8100"
 #: bot check — see the README for why that matters.
 DEFAULT_FEEDS = ",".join(
     [
+        # Finance-only feeds. Every entry here was probed for status, item
+        # count, publication date and URL section before being added.
+        #
+        # patronlardunyasi publishes four separate finance sections that are
+        # genuinely distinct (unlike dunya.com, whose ?finans / ?borsa query
+        # strings are ignored and return the homepage feed). `sirketler` is the
+        # one that carries company-level news -- without it, "Akbank ile ilgili
+        # haberler" had nothing to match, because the general economy feeds
+        # only cover macro stories.
+        "https://www.patronlardunyasi.com/rss/borsa",
+        "https://www.patronlardunyasi.com/rss/finans",
+        "https://www.patronlardunyasi.com/rss/sirketler",
+        "https://www.patronlardunyasi.com/rss/ekonomi",
+        # Anadolu Ajansı's economy category: every item is filed under
+        # /tr/ekonomi/, so it needs no filtering.
+        "https://www.aa.com.tr/tr/rss/default?cat=ekonomi",
+        # Kept, but they are site-wide feeds -- the section filter in
+        # rss_source.is_financial is what keeps football and exam results out.
         "https://www.dunya.com/rss?dunya",
         "https://www.ekonomim.com/rss",
-        "https://www.aa.com.tr/tr/rss/default?cat=ekonomi",
-        # Bigpara planlanmıştı ama RSS uç noktası yok — denenen her yol 404
-        # döndü; site JS ile render ediliyor ve okunabilmesi için tarayıcı
-        # taklidi gerekirdi. BloombergHT aynı boşluğu dolduruyor: robots.txt
-        # yalnızca "User-agent: *" içeriyor, hiçbir kısıt tanımlamıyor.
-        "https://www.bloomberght.com/rss",
+        # BloombergHT was dropped: the content is financial but the feed is
+        # frozen -- its newest item was two weeks old when checked. A stale
+        # feed sitting beside live prices is worse than one fewer source.
     ]
 )
 

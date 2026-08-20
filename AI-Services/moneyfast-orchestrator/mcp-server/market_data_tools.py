@@ -40,7 +40,53 @@ DEFAULT_TOP_K = 20
 #: ignoring one turns "no matches" into a false statement about the market.
 ALLOWED_FILTERS = frozenset({"sector", "market", "max_pe", "min_pe", "max_pb"})
 
-ALLOWED_SORTS = frozenset({"symbol", "change_percent", "market_cap", "pe_ratio"})
+#: Canonical sort keys. `change_percent` ranks the biggest risers first and
+#: `change_percent_asc` the biggest fallers: without the ascending variant
+#: "en çok düşenler" was unanswerable, and the descending key silently served
+#: gainers for a losers question.
+ALLOWED_SORTS = frozenset(
+    {"symbol", "change_percent", "change_percent_asc", "market_cap", "pe_ratio"}
+)
+
+#: Shapes a planning model actually emits, folded onto the canonical keys.
+#:
+#: These are phrasings of the SAME intent, not guesses at a different one: a
+#: model asked for top gainers writes `gainers`, `top_gainers` or
+#: `change_percent_desc` about as often as it writes `change_percent`, and
+#: rejecting those made the answer depend on which synonym it happened to pick.
+#: Anything outside this table still raises — an argument we cannot read is not
+#: quietly reinterpreted.
+_SORT_SYNONYMS = {
+    "gainers": "change_percent",
+    "top_gainers": "change_percent",
+    "change_percent_desc": "change_percent",
+    "-change_percent": "change_percent",
+    "change_percent desc": "change_percent",
+    "losers": "change_percent_asc",
+    "top_losers": "change_percent_asc",
+    "change_percent asc": "change_percent_asc",
+    "market_cap_desc": "market_cap",
+    "-market_cap": "market_cap",
+    "pe": "pe_ratio",
+    "pe_ratio_asc": "pe_ratio",
+}
+
+
+def _canonical_sort(sort_by: Optional[str]) -> Optional[str]:
+    """Fold a model's phrasing onto a canonical key, or raise naming the set."""
+    if sort_by is None:
+        return None
+    candidate = str(sort_by).strip().lower().replace("-", "_").replace("  ", " ")
+    if candidate in ALLOWED_SORTS:
+        return candidate
+    # Look the raw form up too, so "-change_percent" is found before the dash
+    # is normalised away.
+    for key in (str(sort_by).strip().lower(), candidate, candidate.replace("_", " ")):
+        if key in _SORT_SYNONYMS:
+            return _SORT_SYNONYMS[key]
+    raise InvalidInputError(
+        f"{TOOL}: unrecognised sort_by {sort_by!r}; allowed: {', '.join(sorted(ALLOWED_SORTS))}."
+    )
 
 
 async def get_market_data(
@@ -147,10 +193,7 @@ async def get_market_data(
         - Any response containing these figures MUST pass validate_compliance_rules
           before emission.
     """
-    if sort_by is not None and sort_by not in ALLOWED_SORTS:
-        raise InvalidInputError(
-            f"{TOOL}: unrecognised sort_by {sort_by!r}; allowed: {', '.join(sorted(ALLOWED_SORTS))}."
-        )
+    sort_by = _canonical_sort(sort_by)
 
     filters = filters or {}
     unknown = sorted(set(filters) - ALLOWED_FILTERS)

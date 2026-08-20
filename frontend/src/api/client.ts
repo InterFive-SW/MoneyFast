@@ -25,6 +25,9 @@ export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 export type MarketTicker = GetResponseType<paths['/api/market/tickers']>[0];
 // `instruments` şemada opsiyonel görünür (varsayılanı olan bir alan); satır
 // tipini almak için önce boş olmayan hâline daraltılır.
+export type CandleSeries = GetResponseType<paths['/api/market/candles']>;
+export type Candle = NonNullable<CandleSeries['candles']>[0];
+export type PortfolioAnalysis = GetResponseType<paths['/api/analytics/portfolio']>;
 export type MarketInstrument = NonNullable<
     GetResponseType<paths['/api/market/instruments']>['instruments']
 >[0];
@@ -141,15 +144,46 @@ class ApiClient {
     // Market endpoints
     /**
      * Enstrüman evreni — fiyat ve temel oranlar birlikte.
-     * `top_k` sunucuda sınırlanır; burada verilmezse sunucunun varsayılanı geçerli.
+     *
+     * Parametre adı `limit`; bir süre `top_k` gönderildi ve FastAPI bilinmeyen
+     * query parametrelerini sessizce yok saydığı için istek her zaman
+     * varsayılan 20 satırla dönüyordu. "Takip edilen 20 enstrüman" yazısının
+     * sebebi buydu.
      */
-    getInstruments(params?: { top_k?: number; sort_by?: string; market?: string }) {
+    getInstruments(params?: {
+        limit?: number;
+        sort_by?: string;
+        market?: string;
+        sector?: string;
+        symbols?: string[];
+        max_pe?: number;
+        min_pe?: number;
+        max_pb?: number;
+    }) {
         const query = new URLSearchParams();
-        if (params?.top_k != null) query.set('top_k', String(params.top_k));
+        if (params?.limit != null) query.set('limit', String(params.limit));
         if (params?.sort_by) query.set('sort_by', params.sort_by);
         if (params?.market) query.set('market', params.market);
+        if (params?.sector) query.set('sector', params.sector);
+        if (params?.max_pe != null) query.set('max_pe', String(params.max_pe));
+        if (params?.min_pe != null) query.set('min_pe', String(params.min_pe));
+        if (params?.max_pb != null) query.set('max_pb', String(params.max_pb));
+        // Repeated key, not a comma list: FastAPI reads List[str] that way.
+        params?.symbols?.forEach((symbol) => query.append('symbols', symbol));
         const suffix = query.toString() ? `?${query}` : '';
         return this.request<{ instruments: MarketInstrument[] }>(`/market/instruments${suffix}`);
+    }
+
+    /** Bir enstrümanın gerçek günlük mum verisi. */
+    getCandles(symbol: string, limit = 180) {
+        return this.request<CandleSeries>(
+            `/market/candles?symbol=${encodeURIComponent(symbol)}&limit=${limit}`,
+        );
+    }
+
+    /** Portföy analizi — dağılım, trend, performans ve işlem geçmişi tek çağrıda. */
+    getPortfolioAnalysis() {
+        return this.request<PortfolioAnalysis>('/analytics/portfolio');
     }
 
     /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */

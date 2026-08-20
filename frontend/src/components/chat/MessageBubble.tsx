@@ -55,6 +55,22 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
             <PortfolioWidget payload={message.widget.payload as PortfolioWidgetPayload} />
           )}
 
+          {/*
+            Yasal bildirimler — kelimesi kelimesine, ama gövde metninin
+            parçası değil. Her cevabın sonuna yapıştırılan kalıp metin,
+            okuyucuyu bildirimi gerçekten önemli olduğu yerde de atlamaya
+            alıştırıyordu. Burada görünür ama cevabı boğmuyor.
+          */}
+          {!isUser && message.disclosures && message.disclosures.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-white/10 flex flex-col gap-1">
+              {message.disclosures.map((notice) => (
+                <p key={notice} className="text-[10px] leading-snug text-slate-400">
+                  {notice}
+                </p>
+              ))}
+            </div>
+          )}
+
           <span 
             className={`text-[10px] mt-1 ${
               isUser ? 'text-blue-200 self-end' : 'text-slate-400 self-start'

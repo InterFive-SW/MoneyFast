@@ -188,7 +188,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         text: data.final_output || data.text || "Yanıt alınamadı.",
         sender: 'ai',
         timestamp: new Date(),
-        widget: data.widget
+        widget: data.widget,
+        disclosures: data.disclosures ?? []
       };
 
       setSessions(prev => prev.map(session => {

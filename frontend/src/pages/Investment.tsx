@@ -20,7 +20,7 @@ export default function Investment() {
 
   useEffect(() => {
     apiClient
-      .getInstruments({ top_k: 200 })
+      .getInstruments({ limit: 200 })
       .then((response) => setInstruments(response.instruments ?? []))
       .catch((error) => console.error('Failed to load instruments', error))
     apiClient

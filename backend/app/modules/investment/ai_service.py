@@ -278,6 +278,7 @@ def stage_transaction(
     held_quantity: Optional[float] = None,
     resolved_symbol: Optional[str] = None,
     currency: str = "TRY",
+    available_cash: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Validate and stage. Never executes; never returns a PASS by default.
 
@@ -326,6 +327,36 @@ def stage_transaction(
             blockers.append(
                 f"Satılabilir miktar yetersiz: {symbol} için {held:g} adet mevcut, "
                 f"{quantity:g} adet talep edildi."
+            )
+
+    # The buy-side counterpart, which did not exist: a purchase was staged
+    # regardless of the balance, so an unaffordable order sat "pending
+    # confirmation" until confirm refused it. İK-07 states the rule for
+    # transfers -- balance must cover amount plus fee -- and a purchase is the
+    # same shape. Fees are included because they leave the account too.
+    #
+    # `available_cash is None` means the caller could not determine a balance
+    # (no account resolved). Blocking then would refuse every trade over a
+    # lookup failure, so the check is skipped and confirm re-checks anyway.
+    if (
+        transaction_type in BUY_TYPES
+        and available_cash is not None
+        and quantity is not None
+        and reference_price is not None
+    ):
+        provisional = _estimate(
+            transaction_type,
+            quantity,
+            notional,
+            reference_price,
+            request.get("limit_price"),
+            currency,
+        )
+        needed = provisional["net_amount"]
+        if needed > available_cash:
+            blockers.append(
+                f"Bakiye yetersiz: işlem masraflarla birlikte {needed:,.2f} {currency} "
+                f"tutuyor, kullanılabilir bakiye {available_cash:,.2f} {currency}."
             )
 
     if order_type in ("LIMIT", "STOP_LIMIT") and request.get("limit_price") is None:

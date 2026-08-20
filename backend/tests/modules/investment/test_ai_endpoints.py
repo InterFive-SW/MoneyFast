@@ -13,6 +13,7 @@ current quote.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -68,12 +69,26 @@ class Product:
 
 
 @pytest.fixture
-def ai_client(mocker, holdings, quotes, resolved):
+def cash() -> float:
+    """Opening balance for the staging tests.
+
+    Override it in a test that needs a purchase to be unaffordable — staging
+    now refuses a buy the balance cannot cover, so the balance is part of the
+    fixture rather than an incidental mock attribute.
+    """
+    return 1_000_000.0
+
+
+@pytest.fixture
+def ai_client(mocker, holdings, quotes, resolved, cash):
     from fastapi.testclient import TestClient
 
     mocker.patch.object(market_service, "holdings", return_value=holdings)
     mocker.patch.object(market_service, "latest_quotes", return_value=quotes)
     mocker.patch.object(market_service, "resolve_symbol", side_effect=resolved)
+    mocker.patch.object(
+        market_service, "account", return_value=SimpleNamespace(id="acct-1", cash_balance=cash)
+    )
     app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
     try:
         with TestClient(app) as client:
@@ -267,3 +282,40 @@ class TestFxRates:
     def test_unknown_currency_raises_rather_than_defaulting(self):
         with pytest.raises(KeyError):
             ai_service._convert(100.0, "GBP", "TRY", {"TRY": 1.0})
+
+
+class TestBuyingPower:
+    """The buy-side check that did not exist. A purchase used to be staged
+    regardless of the balance, so an unaffordable order sat "pending
+    confirmation" until confirm refused it — after the user had already been
+    shown a confirm button.
+    """
+
+    @pytest.fixture
+    def cash(self):
+        return 1000.0
+
+    def test_a_purchase_over_the_balance_is_rejected_at_staging(self, ai_client):
+        body = stage_body(transaction_type="BUY", quantity=100)
+        result = ai_client.post("/api/investment/transactions/stage", json=body).json()
+        assert result["status"] == "REJECTED_VALIDATION"
+        assert any("Bakiye yetersiz" in blocker for blocker in result["blockers"])
+
+    def test_the_blocker_names_both_figures(self, ai_client):
+        """"Insufficient" without the numbers leaves the user guessing how
+        much short they are."""
+        body = stage_body(transaction_type="BUY", quantity=100)
+        result = ai_client.post("/api/investment/transactions/stage", json=body).json()
+        blocker = next(b for b in result["blockers"] if "Bakiye yetersiz" in b)
+        assert "1,000.00" in blocker
+
+    def test_the_check_includes_fees_not_just_the_gross(self, ai_client, quotes):
+        """İK-07 in its codified form: the balance must cover the amount AND
+        the fee. A gross-only check would pass an order that overdraws once
+        commission and BSMV land."""
+        body = stage_body(transaction_type="BUY", quantity=100)
+        result = ai_client.post("/api/investment/transactions/stage", json=body).json()
+        blocker = next(b for b in result["blockers"] if "Bakiye yetersiz" in b)
+        quoted = float(blocker.split("birlikte ")[1].split(" ")[0].replace(",", ""))
+        gross = 100 * quotes["THYAO"]["price"]
+        assert quoted > gross, "fees must be part of what the balance has to cover"

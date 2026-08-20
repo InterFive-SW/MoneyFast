@@ -143,3 +143,22 @@ class InstrumentOut(BaseModel):
 
 class InstrumentListOut(BaseModel):
     instruments: List[InstrumentOut] = Field(default_factory=list)
+
+
+class CandleOut(BaseModel):
+    """One daily bar. All four prices, because a chart needs more than closes."""
+
+    timestamp: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    #: Yahoo does not always report it; missing stays missing rather than 0,
+    #: which would draw as a day nobody traded.
+    volume: Optional[int] = None
+
+
+class CandleSeriesOut(BaseModel):
+    symbol: str
+    interval: str = "1d"
+    candles: List[CandleOut] = Field(default_factory=list)

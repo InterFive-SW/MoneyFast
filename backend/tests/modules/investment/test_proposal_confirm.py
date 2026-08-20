@@ -31,6 +31,13 @@ def make_proposal(**overrides):
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=10),
         confirmed_at=None,
         cancelled_at=None,
+        # Settlement reads these. The tests in this file are about who may
+        # confirm and when — settlement itself is exercised in
+        # test_settlement.py against the real function.
+        transaction_type="BUY",
+        symbol="THYAO",
+        quantity=10,
+        payload={"estimate": {"net_amount": 3022.26, "reference_price": 301.75}},
     )
     for key, value in overrides.items():
         setattr(proposal, key, value)
@@ -38,12 +45,26 @@ def make_proposal(**overrides):
 
 
 @pytest.fixture
-def confirm_client(proposal_or_none, caller_id):
-    """TestClient whose db.get resolves to a staged proposal."""
+def confirm_client(proposal_or_none, caller_id, mocker):
+    """TestClient whose db.get resolves to a staged proposal.
+
+    Settlement is stubbed: these tests pin down authorization, expiry and
+    idempotency. What the settlement itself does to cash and holdings is
+    covered in test_settlement.py.
+    """
     from fastapi.testclient import TestClient
+    from app.modules.investment import market_service, service
 
     db = MagicMock(spec=Session)
     db.get.return_value = proposal_or_none
+    mocker.patch.object(
+        market_service, "account", return_value=SimpleNamespace(id="acct-1", cash_balance=25000.0)
+    )
+    mocker.patch.object(
+        service, "settle",
+        return_value={"direction": "BUY", "symbol": "THYAO", "quantity": 10,
+                      "cash_delta": -3022.26, "cash_after": 21977.74},
+    )
 
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_optional_user_id] = lambda: caller_id
@@ -163,6 +184,12 @@ class TestStagingPersistence:
             market_service, "holdings",
             return_value=[{"symbol": "THYAO", "quantity": 120.0}],
         )
+        # Staging now checks a buy against the balance, so the account has to
+        # be able to afford the order or nothing is persisted.
+        mocker.patch.object(
+            market_service, "account",
+            return_value=SimpleNamespace(id="acct-1", cash_balance=1_000_000.0),
+        )
         app.dependency_overrides[get_db] = lambda: db
         client = TestClient(app)
         client.db = db
@@ -233,3 +260,54 @@ class TestStagingPersistence:
             app.dependency_overrides.pop(get_db, None)
 
         assert client.db.add.called is False
+
+
+class TestSettlementFailuresAtConfirm:
+    """Confirm applies the trade. When it cannot, nothing may be marked done."""
+
+    @pytest.fixture
+    def settle_client(self, mocker):
+        from fastapi.testclient import TestClient
+        from app.modules.investment import market_service, service
+
+        db = MagicMock(spec=Session)
+        db.get.return_value = make_proposal(user_id=None)
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_optional_user_id] = lambda: None
+        self.db = db
+        self.market_service = market_service
+        self.service = service
+        try:
+            with TestClient(app) as client:
+                client.db = db
+                yield client
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_optional_user_id, None)
+
+    def test_no_account_is_a_409_and_the_proposal_stays_pending(self, settle_client, mocker):
+        mocker.patch.object(self.market_service, "account", return_value=None)
+        response = settle_client.post(URL.format("PROP-ABC123"))
+        assert response.status_code == 409
+        assert settle_client.db.get.return_value.status == "PENDING_USER_CONFIRMATION"
+        assert not settle_client.db.commit.called
+
+    def test_a_settlement_refusal_rolls_back_and_reports_the_reason(
+        self, settle_client, mocker
+    ):
+        """The balance can change between staging and confirming — a second
+        proposal staged against the same cash, for instance. The user is told
+        why rather than seeing a generic failure."""
+        mocker.patch.object(
+            self.market_service, "account",
+            return_value=SimpleNamespace(id="acct-1", cash_balance=10.0),
+        )
+        mocker.patch.object(
+            self.service, "settle",
+            side_effect=self.service.SettlementError("Bakiye yetersiz: ..."),
+        )
+        response = settle_client.post(URL.format("PROP-ABC123"))
+        assert response.status_code == 409
+        assert "Bakiye yetersiz" in response.json()["detail"]
+        assert settle_client.db.rollback.called
+        assert settle_client.db.get.return_value.status == "PENDING_USER_CONFIRMATION"

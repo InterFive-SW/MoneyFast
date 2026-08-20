@@ -25,6 +25,13 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     final_output: str
+
+    #: Zorunlu bildirimler, kelimesi kelimesine. `final_output`'a eklenmek
+    #: yerine ayrı taşınıyor: metin aynı kalıyor, yalnızca yeri değişiyor —
+    #: sohbet bunları balonun altında dipnot olarak gösteriyor. Her yanıtın
+    #: sonuna yapıştırılan üç cümlelik kalıp, okuyucuya bildirimi gerçekten
+    #: gerektiği yerde de atlatıyordu.
+    disclosures: list[str] = Field(default_factory=list)
     primary_intent: Optional[str] = None
     target_agent: Optional[str] = None
     compliance_verdict: Optional[str] = None

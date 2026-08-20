@@ -9,6 +9,18 @@ import { useNavigate } from 'react-router-dom'
  * Tıklanan işleme göre üst bileşene (Router) ilgili modalı veya alt sayfayı açması için sinyal gönderir.
  */
 
+// operations dizisindeki tüm isNew değerleri sabit false, bu yüzden gerçek
+// veriyle asla true olmuyor — true dalı doğrudan unit testle kapsanabilsin
+// diye ayrı, export edilen bir fonksiyona çıkarıldı.
+export function renderNewBadge(isNew: boolean) {
+  if (!isNew) return null
+  return (
+    <span className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-gradient-to-r from-red-500 to-rose-600 rounded-md shadow-lg shadow-red-500/20">
+      Yeni
+    </span>
+  )
+}
+
 interface BankingMenuProps {
   onNavigateToAccounts: () => void
   onOpenTransfer: () => void
@@ -61,12 +73,7 @@ export default function BankingMenu({
                 </span>
               </div>
               
-              {/* YENİ Etiketi */}
-              {op.isNew && (
-                <span className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-white bg-gradient-to-r from-red-500 to-rose-600 rounded-md shadow-lg shadow-red-500/20">
-                  Yeni
-                </span>
-              )}
+              {renderNewBadge(op.isNew)}
             </button>
           ))}
         </div>

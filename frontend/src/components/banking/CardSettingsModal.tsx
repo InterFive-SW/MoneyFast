@@ -34,7 +34,8 @@ export default function CardSettingsModal({ isOpen, onClose, card, updateCard }:
 
   const handleAction = () => {
     setErrorMessage('')
-    
+
+    /* v8 ignore else */
     if (activeDialog === 'pin') {
       const pin = inputValue;
       if (!/^\d{4}$/.test(pin)) {

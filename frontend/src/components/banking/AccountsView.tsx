@@ -25,6 +25,9 @@ export default function AccountsView() {
     if (accounts.length > prevLengthRef.current) {
       // Diziye yeni eleman eklendi, sonuncuyu (yeni olanı) seç
       const newAccount = accounts[accounts.length - 1]
+      // accounts.length arttıysa dizide en az bir eleman var demektir, newAccount
+      // burada asla undefined olmuyor.
+      /* v8 ignore next */
       if (newAccount) {
         setSelectedAccountId(newAccount.id)
       }

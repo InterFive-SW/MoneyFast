@@ -22,6 +22,8 @@ export default function NewCardWizard() {
   const [linkedAccountId, setLinkedAccountId] = useState<string>(accounts[0]?.id || '')
 
   const handleNext = () => {
+    // Devam Et butonu sadece step 1 ve 2'de render ediliyor, ikisi de step<3.
+    /* v8 ignore next */
     if (step < 3) setStep((prev) => (prev + 1) as 1 | 2 | 3 | 4)
   }
   
@@ -31,13 +33,19 @@ export default function NewCardWizard() {
   }
 
   const handleConfirm = () => {
+    // Başvuruyu Tamamla butonu sadece step 3'te, yani isStep1Valid (cardType dolu)
+    // geçildikten sonra render ediliyor.
+    /* v8 ignore next */
     if (!cardType) return
     handleCardCreate(
-      cardType, 
-      brand, 
-      cardType === 'credit' ? limit : 0, 
-      isDigital, 
-      cardName || (cardType === 'credit' ? 'Yeni Kredi Kartı' : 'Yeni Banka Kartı'), 
+      cardType,
+      brand,
+      cardType === 'credit' ? limit : 0,
+      isDigital,
+      // 2. adımdaki "Devam Et" butonu isStep2Valid (cardName dolu) olmadan geçişe izin
+      // vermiyor, bu yüzden boş isim fallback'ine gerçek akışla asla ulaşılamıyor.
+      /* v8 ignore next */
+      cardName || (cardType === 'credit' ? 'Yeni Kredi Kartı' : 'Yeni Banka Kartı'),
       cardType === 'debit' ? linkedAccountId : undefined
     )
     setStep(4)

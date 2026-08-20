@@ -45,26 +45,31 @@ export default function MoneyTransferWizard() {
   const numAmount = parseFloat(amount) || 0
   
   const handleNext = () => {
+    // DEVAM butonu her adımda sadece o adımdan bir sonrakine geçiş için render
+    // ediliyor, step 4'ten sonrasına asla çağrılmıyor.
+    /* v8 ignore next */
     if (step < 4) setStep((prev) => (prev + 1) as 1 | 2 | 3 | 4)
   }
-  
+
   const handleBack = () => {
     if (step > 1) setStep(s => (s - 1) as any)
     else navigate('/banking')
   }
 
   const handleConfirm = () => {
+    // ONAYLA butonu sadece step 4'te render ediliyor ve o noktaya isStep2Valid
+    // (senderAccountId dolu) olmadan geçiş yapılamıyor.
+    /* v8 ignore next */
     if (!senderAccountId) return
-    const finalIban = receiverTab === 'saved' 
-      ? (DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.iban || '')
-      : receiverIban
-      
     handleTransfer(numAmount, senderAccountId, receiverName || receiverIban, description)
     setStep(5)
   }
 
   const isStep1Valid = receiverTab === 'saved' ? !!selectedRecipientId : (receiverIban.length > 10 && receiverName.length > 2)
   const isStep2Valid = !!senderAccountId
+  // senderAccount seçili olduğunda balance her zaman tanımlı bir sayı — ?? 0
+  // dalı gerçek veriyle asla tetiklenmiyor.
+  /* v8 ignore next */
   const isStep3Valid = parseFloat(amount) > 0 && parseFloat(amount) <= (senderAccount?.balance || 0)
 
   return (

@@ -21,6 +21,9 @@ export default function NewAccountWizard() {
   }
 
   const handleCreate = () => {
+    // Hesabı Oluştur butonu zaten acceptedTerms false iken disabled oluyor,
+    // bu koruma UI üzerinden testle ulaşılamıyor.
+    /* v8 ignore next */
     if (!acceptedTerms) return
     const fakeIban = `TR${Math.floor(Math.random() * 90 + 10)} 0006 2001 0450 0006 6677 ${Math.floor(Math.random() * 90 + 10)}`
     handleAccountCreate(

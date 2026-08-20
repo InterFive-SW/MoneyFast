@@ -1,8 +1,14 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import PositionsWidget from './PositionsWidget'
 import { apiClient } from '../../api/client'
 import type { Position } from '../../api/client'
+
+const navigateMock = vi.fn()
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return { ...actual, useNavigate: () => navigateMock }
+})
 
 const positions: Position[] = [
   { symbol: 'THYAO', price: 295.5, quantity: 120, avgCost: 280, totalValue: 35_460, dailyReturn: 420, dailyReturnPercent: 1.2, totalReturn: 1_860, totalReturnPercent: 5.53 },
@@ -10,6 +16,7 @@ const positions: Position[] = [
 ]
 
 beforeEach(() => {
+  navigateMock.mockClear()
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -31,6 +38,9 @@ describe('PositionsWidget', () => {
     expect(screen.getByText('SISE')).toBeInTheDocument()
     expect(screen.getByText(/\+420,00 \(\+1\.2%\)/)).toBeInTheDocument()
     expect(screen.getByText(/-250,00 \(-0\.91%\)/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Pozisyonlar'))
+    expect(navigateMock).toHaveBeenCalledWith('/portfolio')
   })
 
   it('istek başarısız olursa hatayı loglar', async () => {

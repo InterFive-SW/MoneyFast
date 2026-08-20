@@ -3,6 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Dashboard from './Dashboard'
 import { apiClient } from '../api/client'
 
+// Bazı grid widget'ları (MiniTickerWidget, InvestmentBalanceWidget vb.) artık
+// useNavigate kullanıyor — Dashboard bir <Router> içinde render edilmediği için mocklanıyor.
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return { ...actual, useNavigate: () => vi.fn() }
+})
+
 // PortfolioChartWidget uses lightweight-charts directly — jsdom has no canvas, so we
 // fake the library the same way the other chart-widget test files do.
 vi.mock('lightweight-charts', () => ({

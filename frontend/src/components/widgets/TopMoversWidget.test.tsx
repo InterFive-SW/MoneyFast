@@ -4,12 +4,19 @@ import TopMoversWidget from './TopMoversWidget'
 import { apiClient } from '../../api/client'
 import type { TopMoverItem } from '../../api/client'
 
+const navigateMock = vi.fn()
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router-dom')>()
+  return { ...actual, useNavigate: () => navigateMock }
+})
+
 const response: Record<string, TopMoverItem[]> = {
   gainers: [{ symbol: 'SASA', price: 4.86, changePercent: 3.4 }],
   losers: [{ symbol: 'EREGL', price: 42.8, changePercent: -0.92 }],
 }
 
 beforeEach(() => {
+  navigateMock.mockClear()
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
@@ -41,6 +48,14 @@ describe('TopMoversWidget', () => {
 
     fireEvent.click(screen.getByText('Yükselenler'))
     expect(screen.getByText('SASA')).toBeInTheDocument()
+  })
+
+  it('başlığa tıklanınca /investment/hisseler\'e yönlendirir', async () => {
+    vi.spyOn(apiClient, 'getTopMovers').mockResolvedValue(response)
+    render(<TopMoversWidget />)
+    await waitFor(() => expect(screen.getByText('SASA')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Hareketliler'))
+    expect(navigateMock).toHaveBeenCalledWith('/investment/hisseler')
   })
 
   it('istek başarısız olursa hatayı loglar', async () => {

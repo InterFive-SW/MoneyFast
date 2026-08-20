@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { apiClient } from '../../api/client'
 import type { TopMoverItem } from '../../api/client'
 
 type Tab = 'gainers' | 'losers'
 
 export default function TopMoversWidget() {
+  const navigate = useNavigate()
   const [data, setData] = useState<Record<string, TopMoverItem[]>>({})
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<Tab>('gainers')
@@ -36,7 +38,12 @@ export default function TopMoversWidget() {
   return (
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Hareketliler</h3>
+        <h3 
+          className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 cursor-pointer hover:text-brandBlue transition-colors"
+          onClick={() => navigate('/investment/hisseler')}
+        >
+          Hareketliler <span className="text-[9px] opacity-70 ml-1">↗</span>
+        </h3>
         <div className="flex bg-white/5/10/80 p-1 rounded-lg backdrop-blur-sm">
           <button
             onClick={() => setActiveTab('gainers')}

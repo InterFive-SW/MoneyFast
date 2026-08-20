@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { InvestmentBalance } from '../../data/mockData'
 
 interface Props {
@@ -10,6 +11,7 @@ interface Props {
  * Toplam bakiyeyi TL ve Dolar cinsinden gösterir ve alt varlık dağılımını özetler.
  */
 export default function InvestmentBalanceWidget({ data }: Props) {
+  const navigate = useNavigate()
   const [currency, setCurrency] = useState<'TRY' | 'USD'>('TRY')
 
   const formattedTotal =
@@ -23,7 +25,12 @@ export default function InvestmentBalanceWidget({ data }: Props) {
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       {/* Üst Kısım: Başlık ve Para Birimi Geçişi */}
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Yatırım Hesabım</h3>
+        <h3 
+          className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 cursor-pointer hover:text-brandBlue transition-colors"
+          onClick={() => navigate('/portfolio')}
+        >
+          Yatırım Hesabım <span className="text-[9px] opacity-70 ml-1">↗</span>
+        </h3>
         <div className="flex bg-white/5/10/50 p-1 rounded-lg">
           <button
             onClick={() => setCurrency('TRY')}

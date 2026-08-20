@@ -17,6 +17,13 @@ export interface CreditCard {
   availableLimit: number
   dueDate: string
   color: string
+  isDigital?: boolean
+  settings?: {
+    onlineShopping: boolean
+    contactless: boolean
+    isFrozen: boolean
+  }
+  linkedAccountId?: string
 }
 
 export interface SavedContact {

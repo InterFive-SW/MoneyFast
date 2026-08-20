@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { apiClient } from '../../api/client'
 import type { Position } from '../../api/client'
 
@@ -7,6 +8,7 @@ import type { Position } from '../../api/client'
  * Mevcut hisse/varlık portföyünü tabular-nums fontları ile veri-yoğun bir yapıda listeler.
  */
 export default function PositionsWidget() {
+  const navigate = useNavigate()
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -35,7 +37,12 @@ export default function PositionsWidget() {
   return (
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Pozisyonlar</h3>
+        <h3 
+          className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 cursor-pointer hover:text-brandBlue transition-colors"
+          onClick={() => navigate('/portfolio')}
+        >
+          Pozisyonlar <span className="text-[9px] opacity-70 ml-1">↗</span>
+        </h3>
       </div>
 
       <div className="flex-1 overflow-x-auto">

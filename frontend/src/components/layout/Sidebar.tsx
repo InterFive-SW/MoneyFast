@@ -107,9 +107,9 @@ function IconChevron({ className, collapsed }: IconProps & { collapsed: boolean 
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard',  label: 'Genel Bakış',        icon: <IconDashboard  className="h-[18px] w-[18px] shrink-0" />, end: true },
+  { to: '/banking',    label: 'Banka İşlemleri',    icon: <IconBanking    className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/portfolio',  label: 'Portföyüm',          icon: <IconPortfolio  className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/investment', label: 'Piyasalar',          icon: <IconMarkets    className="h-[18px] w-[18px] shrink-0" /> },
-  { to: '/banking',    label: 'Banka İşlemleri',    icon: <IconBanking    className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/chat',       label: 'Yapay Zeka Asistan', icon: <IconChat       className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/risk',       label: 'Risk Analizi',       icon: <IconShield     className="h-[18px] w-[18px] shrink-0" /> },
 ]

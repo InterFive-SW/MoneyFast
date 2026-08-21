@@ -33,6 +33,9 @@ export interface ActionWidgetPayload {
 }
 
 export interface PortfolioPosition {
+  /** The instrument's own currency. `last_price` and `avg_cost` are in
+   *  this; the value columns are already converted to base_currency. */
+  instrument_currency?: string;
   symbol: string;
   quantity: number;
   avg_cost: number;
@@ -45,6 +48,8 @@ export interface PortfolioPosition {
 export interface PortfolioWidgetPayload {
   total_value: number;
   total_profit_loss: number;
+  /** Currency the TOTALS are expressed in — the backend converts them. */
+  base_currency?: string;
   positions: PortfolioPosition[];
 }
 

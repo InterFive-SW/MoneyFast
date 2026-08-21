@@ -62,9 +62,35 @@ class BankTransaction(Base):
     amount: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="TRY")
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: What the money was FOR. A ledger records that money moved, not why, so
+    #: this is the only place a spending breakdown can come from. Nullable: a
+    #: transfer between your own accounts has no spending category, and
+    #: forcing one would invent a fact.
+    category: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    counterparty: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SavingsGoal(Base):
+    """A target the user set. Intent, not an observation — so unlike every
+    other row in this schema it is not derived from a movement."""
+
+    __tablename__ = "savings_goals"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    target_amount: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    current_amount: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False, default=0)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="TRY")
+    icon: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    deadline: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
 class AccountTransaction(Base):

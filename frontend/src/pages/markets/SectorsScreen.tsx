@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CUSTOM_SECTOR_GROUPS, type MarketInstrument } from '../../data/mockData'
+import type { MarketInstrument } from '../../data/mockData'
+import { CUSTOM_SECTOR_GROUPS } from '../../data/sectorGroups'
 import { useInstruments } from '../../hooks/useInstruments'
 
 function fmt(value: number | undefined, suffix = ''): string {

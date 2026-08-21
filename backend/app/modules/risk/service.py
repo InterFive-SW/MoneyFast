@@ -66,10 +66,15 @@ def concentration(positions: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     by_asset_class: Dict[str, float] = defaultdict(float)
     by_currency: Dict[str, float] = defaultdict(float)
+    by_sector: Dict[str, float] = defaultdict(float)
     for position in positions:
         weight = weights[position["symbol"]]
         by_asset_class[position.get("asset_class") or "EQUITY"] += weight
         by_currency[position.get("instrument_currency") or "TRY"] += weight
+        # UNCLASSIFIED only when the caller genuinely has no sector for the
+        # instrument. It used to be hardcoded for every portfolio because the
+        # position contract did not carry the field; it does now.
+        by_sector[position.get("sector") or "UNCLASSIFIED"] += weight
 
     def top(count: int) -> float:
         return round(sum(weight for _, weight in ordered[:count]), 6)
@@ -86,10 +91,7 @@ def concentration(positions: List[Dict[str, Any]]) -> Dict[str, Any]:
             {"symbol": ordered[0][0], "weight": round(ordered[0][1], 6)} if ordered else None
         ),
         "by_asset_class": {key: round(value, 6) for key, value in by_asset_class.items()},
-        # Sector is not carried on the position contract, and this module must
-        # not reach into the investment module's fixtures to guess one. The
-        # contract's own instruction for unmapped instruments is UNCLASSIFIED.
-        "by_sector": {"UNCLASSIFIED": 1.0} if positions else {},
+        "by_sector": {key: round(value, 6) for key, value in by_sector.items()},
         "by_currency": {key: round(value, 6) for key, value in by_currency.items()},
     }
 

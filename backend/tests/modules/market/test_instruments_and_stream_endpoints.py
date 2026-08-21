@@ -237,7 +237,7 @@ class TestCandlesEndpoint:
     def test_bars_are_returned_for_a_known_symbol(self, client, mocker):
         mocker.patch(
             "app.modules.investment.market_service.resolve_symbol",
-            return_value=SimpleNamespace(symbol="THYAO"),
+            return_value=SimpleNamespace(symbol="THYAO", currency_code="TRY"),
         )
         mocker.patch(
             "app.modules.investment.market_service.candle_series",
@@ -266,7 +266,7 @@ class TestCandlesEndpoint:
         """"thyao" and "THYAO.IS" name the same instrument."""
         resolve = mocker.patch(
             "app.modules.investment.market_service.resolve_symbol",
-            return_value=SimpleNamespace(symbol="THYAO"),
+            return_value=SimpleNamespace(symbol="THYAO", currency_code="TRY"),
         )
         mocker.patch(
             "app.modules.investment.market_service.candle_series", return_value=[]

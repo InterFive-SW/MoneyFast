@@ -1,16 +1,31 @@
-import { useState } from 'react'
-import type { InvestmentBalance } from '../../data/mockData'
-
-interface Props {
-  data: InvestmentBalance
-}
+import { useEffect, useState } from 'react'
+import { apiClient, type InvestmentBalance } from '../../api/client'
 
 /**
  * Yatırım Hesabım (Investment Balance) Bileşeni
- * Toplam bakiyeyi TL ve Dolar cinsinden gösterir ve alt varlık dağılımını özetler.
+ *
+ * Kendi verisini çeker. Bir süre `MOCK_INVESTMENT_BALANCE` sabitiyle
+ * besleniyordu — oysa `/api/investment/portfolio/summary` tam olarak bu şekli
+ * canlı fiyatlardan hesaplayıp döndürüyordu ve hiçbir yerden çağrılmıyordu.
  */
-export default function InvestmentBalanceWidget({ data }: Props) {
+export default function InvestmentBalanceWidget() {
   const [currency, setCurrency] = useState<'TRY' | 'USD'>('TRY')
+  const [data, setData] = useState<InvestmentBalance | null>(null)
+
+  useEffect(() => {
+    apiClient
+      .getPortfolioSummary()
+      .then(setData)
+      .catch((error) => console.error('Failed to load investment balance', error))
+  }, [])
+
+  if (!data) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center bg-transparent">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+      </div>
+    )
+  }
 
   const formattedTotal =
     currency === 'TRY'

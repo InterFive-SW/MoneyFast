@@ -319,3 +319,189 @@ class TestTimestampRendering:
         from app.modules.risk import service as risk_service
 
         assert risk_service._iso("2026-08-20") == "2026-08-20"
+
+
+# ---------------------------------------------------------------------------
+# GET /profile — the Risk page.
+#
+# Distinct from /calculate above, which is frozen against the MCP contract and
+# takes positions in the body. This one resolves them from the SESSION: the
+# page shows the caller's own risk, and a position list a client could rewrite
+# would let anyone render someone else's portfolio.
+# ---------------------------------------------------------------------------
+PROFILE_URL = "/api/risk/profile"
+
+
+@pytest.fixture()
+def as_user(client):
+    """Sign the request in and stub the data the profile reads."""
+    from app.core.deps import get_current_user_id
+    from app.main import app
+
+    app.dependency_overrides[get_current_user_id] = lambda: "user-1"
+    try:
+        yield client
+    finally:
+        app.dependency_overrides.pop(get_current_user_id, None)
+
+
+def _stub(mocker, holdings, income=0.0, spending=None):
+    from app.modules.banking import service as banking_service
+    from app.modules.investment import market_service
+
+    mocker.patch.object(market_service, "holdings", return_value=holdings)
+    mocker.patch.object(market_service, "candle_closes", return_value=[])
+    mocker.patch.object(banking_service, "income_total", return_value=income)
+    mocker.patch.object(
+        banking_service, "spending_by_category", return_value=spending or []
+    )
+
+
+def _holding(symbol="THYAO", price=300.0, sector="Industrials", quantity=10):
+    return {
+        "symbol": symbol, "quantity": quantity, "price": price,
+        "sector": sector, "currency": "TRY", "avg_cost": price,
+    }
+
+
+def test_profile_requires_a_session(client):
+    """Unauthenticated it would have to guess whose risk to report."""
+    assert client.get(PROFILE_URL).status_code == 401
+
+
+def test_profile_reports_the_score_and_its_components(as_user, mocker):
+    _stub(mocker, [_holding(), _holding("ASELS", 400.0)])
+    body = as_user.get(PROFILE_URL).json()
+    assert body["position_count"] == 2
+    assert {c["name"] for c in body["components"]} == {
+        "volatility", "concentration", "drawdown"
+    }
+
+
+def test_an_unpriced_holding_is_named_rather_than_dropped_silently(as_user, mocker):
+    _stub(mocker, [_holding(), _holding("BERA", price=None)])
+    body = as_user.get(PROFILE_URL).json()
+    assert body["position_count"] == 1
+    assert any("BERA" in warning for warning in body["warnings"])
+
+
+def test_an_empty_portfolio_says_so_instead_of_scoring_zero(as_user, mocker):
+    """A score of 0 would read as "maximum risk" for someone holding nothing."""
+    _stub(mocker, [])
+    body = as_user.get(PROFILE_URL).json()
+    assert body["score"] is None
+    assert body["position_count"] == 0
+    assert body["warnings"]
+
+
+def test_cashflow_comes_from_the_ledger(as_user, mocker):
+    _stub(
+        mocker, [_holding()],
+        income=54286.0,
+        spending=[{"category": "Market", "amount": 12000.0},
+                  {"category": "Kira", "amount": 8000.0}],
+    )
+    cashflow = as_user.get(PROFILE_URL).json()["cashflow"]
+    assert cashflow["monthly_income"] == pytest.approx(54286.0)
+    assert cashflow["monthly_expense"] == pytest.approx(20000.0)
+    assert cashflow["savings_rate"] == pytest.approx((54286.0 - 20000.0) / 54286.0, rel=1e-4)
+
+
+def test_no_income_leaves_the_savings_rate_unknown(as_user, mocker):
+    """0% would claim they spent exactly what they earned."""
+    _stub(mocker, [_holding()], income=0.0,
+          spending=[{"category": "Market", "amount": 500.0}])
+    assert as_user.get(PROFILE_URL).json()["cashflow"]["savings_rate"] is None
+
+
+def test_the_raw_metrics_are_returned_alongside_the_score(as_user, mocker):
+    """Nothing on the page should be unverifiable."""
+    _stub(mocker, [_holding()])
+    body = as_user.get(PROFILE_URL).json()
+    assert "concentration" in body["metrics"]
+
+
+class TestConcentrationBuckets:
+    """The breakdowns were reporting facts about a portfolio nobody owned.
+
+    `by_sector` was hardcoded to `{"UNCLASSIFIED": 1.0}` because the position
+    contract did not carry a sector; it does now. `by_currency` reads
+    `instrument_currency`, which the profile endpoint was not sending. And the
+    weights themselves were taken from unconverted values, so a 481-dollar
+    holding was weighed against a 404-lira one as though they were the same
+    size.
+    """
+
+    def test_sectors_are_bucketed_from_the_positions(self):
+        result = service.concentration([
+            {"symbol": "AAPL", "market_value": 750.0, "sector": "Technology"},
+            {"symbol": "GARAN", "market_value": 250.0, "sector": "Financial Services"},
+        ])
+        assert result["by_sector"] == {"Technology": 0.75, "Financial Services": 0.25}
+
+    def test_an_instrument_without_a_sector_is_unclassified(self):
+        result = service.concentration([
+            {"symbol": "AAPL", "market_value": 500.0, "sector": "Technology"},
+            {"symbol": "XAUUSD", "market_value": 500.0},
+        ])
+        assert result["by_sector"] == {"Technology": 0.5, "UNCLASSIFIED": 0.5}
+
+    def test_currencies_are_bucketed(self):
+        result = service.concentration([
+            {"symbol": "AAPL", "market_value": 800.0, "instrument_currency": "USD"},
+            {"symbol": "GARAN", "market_value": 200.0, "instrument_currency": "TRY"},
+        ])
+        assert result["by_currency"] == {"USD": 0.8, "TRY": 0.2}
+
+
+def test_profile_weights_are_taken_from_converted_values(as_user, mocker):
+    """A dollar holding and a lira holding are not comparable numbers.
+
+    Unconverted, MSFT at 481 USD and ASELS at 404 TRY look like a balanced
+    portfolio. Converted, MSFT is 98% of it — and concentration is computed
+    from exactly these weights.
+    """
+    from app.modules.investment import ai_service, market_service
+    from app.modules.banking import service as banking_service
+
+    mocker.patch.object(market_service, "holdings", return_value=[
+        {"symbol": "MSFT", "quantity": 1, "price": 481.0, "currency": "USD",
+         "sector": "Technology", "avg_cost": 481.0},
+        {"symbol": "ASELS", "quantity": 1, "price": 404.0, "currency": "TRY",
+         "sector": "Industrials", "avg_cost": 402.0},
+    ])
+    mocker.patch.object(market_service, "latest_quotes", return_value={})
+    mocker.patch.object(market_service, "candle_closes", return_value=[])
+    # TRY: 1.0 is the conversion target and `_convert` requires it, exactly
+    # as the real fx_rates() supplies it.
+    mocker.patch.object(ai_service, "fx_rates", return_value={"TRY": 1.0, "USD": 48.0})
+    mocker.patch.object(banking_service, "income_total", return_value=0.0)
+    mocker.patch.object(banking_service, "spending_by_category", return_value=[])
+
+    body = as_user.get(PROFILE_URL).json()
+    concentration = body["metrics"]["concentration"]
+
+    assert concentration["largest_position"]["symbol"] == "MSFT"
+    assert concentration["top_1_weight"] > 0.9
+    assert set(concentration["by_sector"]) == {"Technology", "Industrials"}
+    assert set(concentration["by_currency"]) == {"USD", "TRY"}
+
+
+def test_a_holding_with_no_exchange_rate_is_named_not_guessed(as_user, mocker):
+    from app.modules.investment import ai_service, market_service
+    from app.modules.banking import service as banking_service
+
+    mocker.patch.object(market_service, "holdings", return_value=[
+        {"symbol": "MSFT", "quantity": 1, "price": 481.0, "currency": "USD",
+         "sector": "Technology", "avg_cost": 481.0},
+    ])
+    mocker.patch.object(market_service, "latest_quotes", return_value={})
+    mocker.patch.object(market_service, "candle_closes", return_value=[])
+    # No USD rate: the dollar value cannot be stated in lira at all.
+    mocker.patch.object(ai_service, "fx_rates", return_value={"TRY": 1.0})
+    mocker.patch.object(banking_service, "income_total", return_value=0.0)
+    mocker.patch.object(banking_service, "spending_by_category", return_value=[])
+
+    body = as_user.get(PROFILE_URL).json()
+    assert body["position_count"] == 0
+    assert any("MSFT" in w and "kur" in w for w in body["warnings"])

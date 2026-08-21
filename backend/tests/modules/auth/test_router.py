@@ -196,3 +196,32 @@ def test_auth_health_reports_module_name(client):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "module": "auth"}
+
+
+def test_refresh_endpoint_returns_a_new_access_token(client, mocker):
+    """The endpoint that keeps a session alive past ACCESS_TOKEN_EXPIRE_MINUTES.
+
+    Its absence is what let an expired session degrade to an anonymous one
+    instead of ending, which in turn let the chat stage trades nobody owned.
+    """
+    from app.core.security import ACCESS_TOKEN_TYPE, create_access_token
+    from app.modules.auth import service
+    from app.modules.auth.schemas import TokenResponse
+
+    mocker.patch.object(
+        service,
+        "refresh_access_token",
+        side_effect=lambda token, db: TokenResponse(
+            access_token=create_access_token(data={"sub": "12345678901"})
+        ),
+    )
+
+    response = client.post("/api/auth/refresh", json={"refresh_token": "a-refresh-token"})
+
+    assert response.status_code == 200
+    assert response.json()["token_type"] == "bearer"
+    assert response.json()["refresh_token"] is None
+
+
+def test_refresh_requires_a_token_in_the_body(client):
+    assert client.post("/api/auth/refresh", json={}).status_code == 422

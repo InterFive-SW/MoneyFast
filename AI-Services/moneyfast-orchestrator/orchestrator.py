@@ -97,6 +97,11 @@ class MoneyFastState(TypedDict, total=False):
     final_output: str
     #: Required notices, carried separately so the UI can place them.
     disclosures: list[str]
+    #: Crisis resources for a distress turn. Set by the handoff node and
+    #: merged into `disclosures` on EVERY compliance branch, including BLOCK.
+    #: Left to the model these appeared about half the time; a safety control
+    #: that depends on a sampled token is not a control.
+    crisis_notices: list[str]
     # Operational
     user_id: str
     locale: str
@@ -448,20 +453,80 @@ async def transaction_node(state: MoneyFastState) -> dict[str, Any]:
     return out
 
 
+#: Verbatim crisis resources. Hardcoded rather than generated: asked to
+#: produce them the model once offered "ALO 182", which is the MHRS health
+#: APPOINTMENT line, not a crisis line. A hallucinated resource is worse than
+#: none, because someone may actually dial it.
+CRISIS_RESOURCES_TR = (
+    "Acil bir tehlike varsa 112'yi arayın. "
+    "Sosyal Destek Hattı 183, 7/24 ücretsizdir ve psikososyal destek sağlar."
+)
+
+#: Being threatened by someone else is a police matter, not a budgeting one.
+COERCION_RESOURCES_TR = (
+    "Can güvenliğiniz tehlikedeyse 112'yi arayın. "
+    "Kolluk ihbarı için 155 (Polis) veya 156 (Jandarma) aranabilir."
+)
+
+#: What the assistant may say once distress is detected. Split by category:
+#: these were ONE instruction written for the financial case, so "ölmek
+#: istiyorum" was answered with a lecture about how borrowed money raises
+#: risk. Self-harm now gets no financial content at all.
+_HANDOFF_INSTRUCTIONS = {
+    "SELF_HARM_RISK": (
+        "The user may be at risk of self-harm. This is not a financial turn. "
+        "Respond briefly and warmly in Turkish: acknowledge what they said, "
+        "say they do not have to face it alone, and encourage contacting "
+        "someone they trust or a professional. "
+        "Do NOT mention markets, portfolios, debt, budgeting, investing or "
+        "risk tolerance. Do NOT analyse their finances. "
+        "Do NOT offer to connect them to an adviser or specialist -- this "
+        "product cannot do that, and the offer was previously made and then "
+        "refused when accepted. "
+        "Do not state phone numbers yourself; they are appended verbatim. "
+        "No emoji, no humour, at most four sentences."
+    ),
+    "COERCION_RISK": (
+        "The user reports being threatened or coerced by another person. "
+        "This is a safety matter, not an investment one. Respond briefly in "
+        "Turkish, take it seriously, and encourage contacting the "
+        "authorities or someone they trust. "
+        "Do NOT suggest trades, instruments or ways to raise money quickly -- "
+        "urgency plus threat is exactly how people are pushed into ruinous "
+        "positions. Do not state phone numbers yourself; they are appended. "
+        "No emoji, no humour, at most four sentences."
+    ),
+    "FINANCIAL_DISTRESS": (
+        "Do not screen, list instruments, or give a strategy. State "
+        "plainly that borrowed money and recovery pressure make risk "
+        "materially worse. Offer budgeting basics. Do NOT offer to connect "
+        "them to a human adviser -- this product cannot do that. "
+        "No emoji, no humour."
+    ),
+}
+
+
 async def handoff_node(state: MoneyFastState) -> dict[str, Any]:
     """Unsafe or distress. No tools, no screens, no instruments."""
+    flags = state.get("safety_flags") or []
+    # Self-harm outranks the others: a turn carrying both is answered as the
+    # more serious one.
+    if "SELF_HARM_RISK" in flags:
+        category, notices = "SELF_HARM_RISK", [CRISIS_RESOURCES_TR]
+    elif "COERCION_RISK" in flags:
+        category, notices = "COERCION_RISK", [COERCION_RESOURCES_TR]
+    else:
+        category, notices = "FINANCIAL_DISTRESS", []
+
     return {
+        "crisis_notices": notices,
         "specialist_output": {
             "agent": "HUMAN_HANDOFF",
             "status": "HANDOFF",
-            "safety_flags": state.get("safety_flags") or [],
-            "instruction": (
-                "Do not screen, list instruments, or give a strategy. State "
-                "plainly that borrowed money and recovery pressure make risk "
-                "materially worse. Offer budgeting basics or a human handoff. "
-                "No emoji, no humour."
-            ),
-        }
+            "safety_flags": flags,
+            "handoff_category": category,
+            "instruction": _HANDOFF_INSTRUCTIONS[category],
+        },
     }
 
 
@@ -494,14 +559,29 @@ async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
     return {"draft_response": draft}
 
 
+def _keep_crisis(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
+    """Ensure a distress turn carries its resources out of the gate.
+
+    Applied to every branch, BLOCK included. A blocked crisis turn used to end
+    at a generic failure string with nothing actionable in it, which is the
+    worst moment to hand someone a dead end.
+    """
+    notices = state.get("crisis_notices") or []
+    if not notices:
+        return out
+    existing = out.get("disclosures") or []
+    out["disclosures"] = existing + [n for n in notices if n not in existing]
+    return out
+
+
 async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
     """Deterministic gate. Fail closed on any error."""
     draft = state.get("draft_response") or ""
     if not draft:
-        return {
+        return _keep_crisis(state, {
             "compliance_verdict": "BLOCK",
             "final_output": state.get("final_output") or GENERIC_FAILURE_TR,
-        }
+        })
 
     specialist = state.get("specialist_output") or {}
     try:
@@ -523,11 +603,11 @@ async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
         )
     except (MCPUnavailable, MCPToolError) as exc:
         log.error("compliance unavailable, failing closed: %s", exc)
-        return {
+        return _keep_crisis(state, {
             "compliance_verdict": "BLOCK",
             "final_output": GENERIC_FAILURE_TR,
             "errors": (state.get("errors") or []) + [f"compliance: {exc}"],
-        }
+        })
 
     decision = (verdict.get("verdict") or "BLOCK").upper()
     log.info(
@@ -536,36 +616,36 @@ async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
     )
 
     if decision == "PASS":
-        return {
+        return _keep_crisis(state, {
             "compliance_verdict": "PASS",
             "compliance": verdict,
             "final_output": _without_disclosures(draft, verdict),
             "disclosures": _disclosure_texts(verdict),
-        }
+        })
     if decision == "REVISE":
         remediated = verdict.get("remediated_response") or ""
         if not remediated:
-            return {
+            return _keep_crisis(state, {
                 "compliance_verdict": "BLOCK",
                 "compliance": verdict,
                 "final_output": GENERIC_FAILURE_TR,
-            }
-        return {
+            })
+        return _keep_crisis(state, {
             "compliance_verdict": "REVISE",
             "compliance": verdict,
             "final_output": _without_disclosures(remediated, verdict),
             "disclosures": _disclosure_texts(verdict),
-        }
+        })
 
     # BLOCK
     reason = verdict.get("blocked_reason_user_facing") or GENERIC_FAILURE_TR
-    return {
+    return _keep_crisis(state, {
         "compliance_verdict": "BLOCK",
         "compliance": verdict,
         "blocked_reason": reason,
         "final_output": reason,
         "revision_count": int(state.get("revision_count") or 0) + 1,
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -653,12 +733,13 @@ def get_graph():
     return build_graph()
 
 
-async def run_turn(
+def _initial_state(
     user_message: str,
-    user_id: str = "anonymous",
-    conversation_history: Optional[list[dict[str, str]]] = None,
-    thread_id: str = "default",
-) -> dict[str, Any]:
+    user_id: str,
+    conversation_history: Optional[list[dict[str, str]]],
+) -> MoneyFastState:
+    """The turn's starting state. Shared by the buffered and streaming runs so
+    the two can never drift on what gets reset."""
     state: MoneyFastState = {
         "user_message": user_message,
         "conversation_history": conversation_history or [],
@@ -679,6 +760,12 @@ async def run_turn(
         "final_output": "",
         "compliance_verdict": "",
         "compliance": {},
+        # Both were missing from this reset. The BLOCK branch does not set
+        # `disclosures`, so a blocked turn rendered the PREVIOUS turn's
+        # notices; and crisis resources would otherwise follow a distress
+        # turn into the next unrelated question about a share price.
+        "disclosures": [],
+        "crisis_notices": [],
         "blocked_reason": None,
         "entities": {},
         "safety_flags": [],
@@ -688,8 +775,77 @@ async def run_turn(
         "revision_count": 0,
         "errors": [],
     }
-    config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 25}
-    return await get_graph().ainvoke(state, config=config)
+    return state
+
+
+def _graph_config(thread_id: str) -> dict[str, Any]:
+    return {"configurable": {"thread_id": thread_id}, "recursion_limit": 25}
+
+
+async def run_turn(
+    user_message: str,
+    user_id: str = "anonymous",
+    conversation_history: Optional[list[dict[str, str]]] = None,
+    thread_id: str = "default",
+) -> dict[str, Any]:
+    state = _initial_state(user_message, user_id, conversation_history)
+    return await get_graph().ainvoke(state, config=_graph_config(thread_id))
+
+
+#: What each graph node is doing, in the user's language.
+#:
+#: These replace a hardcoded 800ms ticker on the client that cycled four
+#: captions regardless of what ran -- it announced "Risk modeli
+#: güncelleniyor..." for "what is the capital of Turkey". Naming a stage the
+#: system did not enter is the same class of error as showing a price the
+#: system did not fetch.
+STAGE_LABELS_TR = {
+    "router": "Talebiniz sınıflandırılıyor...",
+    "portfolio": "Portföyünüz okunuyor...",
+    "market_data": "Piyasa verileri çekiliyor...",
+    "market_research": "Kaynaklar taranıyor...",
+    "risk": "Risk ölçütleri hesaplanıyor...",
+    "transaction": "İşlem önerisi hazırlanıyor...",
+    "handoff": "Yanıt hazırlanıyor...",
+    "synthesis": "Yanıt yazılıyor...",
+    "compliance_gate": "Uygunluk kontrolü yapılıyor...",
+}
+
+
+async def run_turn_streaming(
+    user_message: str,
+    user_id: str = "anonymous",
+    conversation_history: Optional[list[dict[str, str]]] = None,
+    thread_id: str = "default",
+):
+    """Yield ("stage", label) as each node completes, then ("state", final).
+
+    Only the STAGES stream. The answer itself is emitted once, after the
+    compliance gate has passed it.
+
+    That ordering is the whole point. The graph is
+    router -> specialist -> synthesis -> compliance_gate, and it is
+    fail-closed: a draft that compliance BLOCKs must never reach the user.
+    Streaming synthesis tokens as they were generated would put text on screen
+    that the gate might then retract, so the guarantee would hold only until
+    the first block. The client gets real progress while the turn runs and
+    types out the APPROVED text afterwards.
+    """
+    state = _initial_state(user_message, user_id, conversation_history)
+    # Seeded from the initial state, not empty: `updates` mode yields only the
+    # keys a node returned, so `user_message` and friends would be missing
+    # from the accumulated result that widgets.build() reads.
+    final: dict[str, Any] = dict(state)
+    async for update in get_graph().astream(
+        state, config=_graph_config(thread_id), stream_mode="updates"
+    ):
+        for node, patch in (update or {}).items():
+            if isinstance(patch, dict):
+                final.update(patch)
+            label = STAGE_LABELS_TR.get(node)
+            if label:
+                yield "stage", label
+    yield "state", final
 
 
 # ---------------------------------------------------------------------------

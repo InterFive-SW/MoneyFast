@@ -23,9 +23,12 @@ TOOL_KEYS = {
     "as_of", "source", "is_delayed", "delay_minutes",
     "instruments", "filters_echo", "warnings",
 }
+#: v2.6 adds `volume`. Additive: the field was stored on every quote row and
+#: projected by nothing, so a screening table's turnover column was
+#: structurally empty rather than occasionally unknown.
 INSTRUMENT_KEYS = {
     "symbol", "name", "market", "currency", "price", "change", "change_percent",
-    "pe_ratio", "pb_ratio", "market_cap", "dividend_yield", "sector",
+    "volume", "pe_ratio", "pb_ratio", "market_cap", "dividend_yield", "sector",
     "week52_high", "week52_low", "as_of",
 }
 

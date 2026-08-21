@@ -351,3 +351,132 @@ def _stage_body(user_id: str) -> dict:
         "time_in_force": "DAY",
         "assumptions": [],
     }
+
+
+class TestAssetAllocationCurrency:
+    """The buckets used to split on `market == "BIST"` and multiply everything
+    else by the dollar rate — correct only while every foreign holding was
+    American — and `rates.get("USD", 0.0)` zeroed them all in silence when the
+    rate had not been ingested."""
+
+    def _client(self, mocker, holdings, quotes):
+        from app.modules.investment import market_service
+
+        mocker.patch.object(market_service, "holdings", return_value=holdings)
+        mocker.patch.object(market_service, "latest_quotes", return_value=quotes)
+        mocker.patch.object(
+            market_service, "account",
+            return_value=SimpleNamespace(id="a1", cash_balance=1000.0,
+                                         currency_code="TRY", account_number="TR-1"),
+        )
+
+    def _row(self, symbol, currency, market, quantity, price):
+        return {
+            "symbol": symbol, "currency": currency, "market": market,
+            "quantity": quantity, "price": price, "avg_cost": price,
+        }
+
+    def test_a_euro_holding_is_not_converted_at_the_dollar_rate(self, client, mocker):
+        self._client(
+            mocker,
+            [self._row("SAP", "EUR", "XETRA", 10, 100.0)],
+            {"USDTRY": {"price": 40.0}, "EURTRY": {"price": 50.0}},
+        )
+        body = client.get("/api/investment/asset-allocation").json()
+        # XETRA is not one of the named venues, so it lands in the catch-all
+        # rather than vanishing from the chart.
+        foreign = next(b for b in body if b["assetClass"] == "Diğer")
+        assert foreign["amount"] == pytest.approx(10 * 100 * 50.0)
+
+    def test_a_holding_with_no_rate_is_left_out_rather_than_zeroed(self, client, mocker):
+        """No USD rate means the dollar value cannot be stated in lira. It is
+        omitted, not converted at 1.0 and not counted as zero lira."""
+        self._client(mocker, [self._row("AAPL", "USD", "NASDAQ", 10, 100.0)], {})
+        body = client.get("/api/investment/asset-allocation").json()
+        assert all(bucket["assetClass"] != "ABD Hisse" for bucket in body)
+        # Only the cash bucket survives, and it is untouched by the failure.
+        assert [b["assetClass"] for b in body] == ["Nakit (TRY)"]
+        assert body[0]["amount"] == pytest.approx(1000.0)
+
+    def test_a_us_holding_lands_in_the_us_bucket(self, client, mocker):
+        self._client(
+            mocker, [self._row("AAPL", "USD", "NASDAQ", 10, 100.0)],
+            {"USDTRY": {"price": 40.0}},
+        )
+        body = client.get("/api/investment/asset-allocation").json()
+        us = next(b for b in body if b["assetClass"] == "ABD Hisse")
+        assert us["amount"] == pytest.approx(10 * 100 * 40.0)
+
+    def test_gold_is_not_counted_as_a_foreign_share(self, client, mocker):
+        """It is quoted in dollars, which is why bucketing by CURRENCY put an
+        ounce of gold in the foreign-equities slice."""
+        self._client(
+            mocker, [self._row("XAUUSD", "USD", "COMEX", 2, 4000.0)],
+            {"USDTRY": {"price": 40.0}},
+        )
+        body = client.get("/api/investment/asset-allocation").json()
+        assert all(b["assetClass"] != "ABD Hisse" for b in body)
+        commodity = next(b for b in body if b["assetClass"] == "Emtia / Döviz")
+        assert commodity["amount"] == pytest.approx(2 * 4000 * 40.0)
+
+    def test_a_lira_holding_lands_in_the_domestic_bucket(self, client, mocker):
+        self._client(
+            mocker, [self._row("THYAO", "TRY", "BIST", 100, 300.0)],
+            {"USDTRY": {"price": 40.0}},
+        )
+        body = client.get("/api/investment/asset-allocation").json()
+        domestic = next(b for b in body if b["assetClass"] == "BIST Hisse")
+        assert domestic["amount"] == pytest.approx(30000.0)
+
+
+class TestStagingRequiresAnIdentifiedOwner:
+    """A proposal nobody owns is worse than no proposal.
+
+    The chat degrades an expired token to an anonymous session so general
+    questions keep working. Staging inherited that: the orchestrator named the
+    user "anonymous", the account lookup fell through to the shared demo
+    account, and the row was stored with an owner the confirm endpoint could
+    never match. The user was shown a fully costed Onayla button that returned
+    404 every time it was pressed.
+    """
+
+    def test_an_anonymous_owner_is_refused(self, client):
+        response = client.post(
+            "/api/investment/transactions/stage",
+            json=_stage_body(user_id="anonymous"),
+        )
+        assert response.status_code == 401
+
+    def test_an_empty_owner_is_refused(self, client):
+        response = client.post(
+            "/api/investment/transactions/stage",
+            json=_stage_body(user_id=""),
+        )
+        assert response.status_code == 401
+
+    def test_an_owner_without_an_account_does_not_borrow_the_demo_one(self, client):
+        """`market_service.account` hands anonymous readers the demo account.
+        Reading it is harmless; pricing a trade against it is not."""
+        from app.main import app
+        from app.modules.investment import market_service
+
+        calls: list = []
+
+        def _account(db, user_id=None, account_number=None, allow_demo_fallback=True):
+            calls.append(allow_demo_fallback)
+            return None
+
+        original = market_service.account
+        market_service.account = _account
+        try:
+            response = client.post(
+                "/api/investment/transactions/stage",
+                json=_stage_body(user_id="user-with-no-account"),
+            )
+        finally:
+            market_service.account = original
+
+        # The staging lookup is the FIRST one; later helpers may resolve an
+        # account for other reasons.
+        assert calls and calls[0] is False
+        assert response.status_code != 200 or response.json()["status"] != "PENDING_USER_CONFIRMATION"

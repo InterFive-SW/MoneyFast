@@ -8,15 +8,18 @@ user, and resolving a user at all when the token is bad.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import jwt
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core import deps
-from app.core.security import create_access_token
+from app.core.config import settings
+from app.core.security import create_access_token, create_refresh_token
 
 
 def make_db(user) -> MagicMock:
@@ -119,3 +122,22 @@ class TestGetOptionalUserId:
     def test_unknown_user_degrades_to_anonymous(self):
         token = create_access_token(data={"sub": "00000000000"})
         assert deps.get_optional_user_id(token=token, db=make_db(None)) is None
+
+
+class TestRefreshTokensAreNotAccessTokens:
+    def test_refresh_token_is_rejected_as_a_bearer_credential(self):
+        """Otherwise a week-long token would open every endpoint."""
+        token = create_refresh_token(data={"sub": "98765432109"})
+        with pytest.raises(HTTPException) as excinfo:
+            deps.get_current_user(token=token, db=make_db(ACTIVE_USER))
+        assert excinfo.value.status_code == 401
+
+    def test_untyped_legacy_token_is_still_accepted(self):
+        """Tokens minted before `typ` existed carry no claim. Rejecting them
+        would sign every live session out on deploy."""
+        legacy = jwt.encode(
+            {"sub": "98765432109", "exp": datetime.now(timezone.utc) + timedelta(minutes=5)},
+            settings.SECRET_KEY,
+            algorithm=settings.ALGORITHM,
+        )
+        assert deps.get_current_user(token=legacy, db=make_db(ACTIVE_USER)) is ACTIVE_USER

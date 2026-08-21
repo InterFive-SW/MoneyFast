@@ -288,3 +288,65 @@ class TestDrawdown:
 
         result = build(holdings=[holding(quantity=1, price=120)], closes_for=rising)
         assert result["performance"]["max_drawdown_percent"] is None
+
+
+class TestCurrencyConversion:
+    """Values are converted before they are summed.
+
+    Adding a dollar holding straight into a lira total counted it at roughly
+    1/48th: this page reported ₺404.467 while /portfolio/summary reported
+    ₺1.087.834 for the same portfolio.
+    """
+
+    RATES = {"TRY": 1.0, "USD": 47.9479}
+
+    def _usd(self, symbol="AAPL", quantity=10.0, price=300.0, avg_cost=250.0):
+        return {
+            "symbol": symbol, "name": symbol, "market": "NASDAQ", "currency": "USD",
+            "product_type": "stock", "quantity": quantity, "price": price,
+            "avg_cost": avg_cost, "opened_at": None,
+        }
+
+    def _build(self, holdings, **kwargs):
+        kwargs.setdefault("rates", self.RATES)
+        return build(holdings=holdings, closes_for=closes({}), **kwargs)
+
+    def test_a_dollar_holding_is_counted_at_its_lira_value(self):
+        result = self._build([self._usd(quantity=10, price=300)], cash=0.0)
+        # 10 x 300 USD = 3.000 USD = 143.843,70 TRY
+        assert result["invested"] == pytest.approx(3000 * 47.9479, rel=1e-6)
+
+    def test_a_lira_holding_is_not_converted_twice(self):
+        result = self._build([holding("THYAO", 100, 300)], cash=0.0)
+        assert result["invested"] == pytest.approx(30000.0)
+
+    def test_mixed_currencies_sum_in_the_base_currency(self):
+        result = self._build(
+            [holding("THYAO", 100, 300), self._usd(quantity=10, price=300)], cash=0.0,
+        )
+        assert result["invested"] == pytest.approx(30000 + 3000 * 47.9479, rel=1e-6)
+
+    def test_a_holding_with_no_rate_is_excluded_and_named(self):
+        """Converting at an invented rate is how the number went wrong in the
+        first place; leaving it out and saying so is the honest alternative."""
+        result = self._build(
+            [self._usd("AAPL")], cash=0.0, rates={"TRY": 1.0},
+        )
+        assert result["invested"] == 0.0
+        assert any("AAPL" in w for w in result["warnings"])
+
+    def test_the_report_declares_its_currency(self):
+        result = self._build([holding()], cash=0.0)
+        assert result["base_currency"] == "TRY"
+
+    def test_allocation_slices_use_converted_values(self):
+        result = self._build([self._usd(quantity=10, price=300)], cash=0.0)
+        slice_ = next(s for s in result["allocation"] if s["label"] == "AAPL")
+        assert slice_["value"] == pytest.approx(3000 * 47.9479, rel=1e-6)
+
+    def test_sector_totals_use_converted_values(self):
+        result = self._build(
+            [self._usd(quantity=10, price=300)], cash=0.0,
+            sector_map={"AAPL": "Technology"},
+        )
+        assert result["sectors"][0]["value"] == pytest.approx(3000 * 47.9479, rel=1e-6)

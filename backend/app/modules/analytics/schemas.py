@@ -52,6 +52,9 @@ class ActivitySummary(BaseModel):
 
 
 class PortfolioAnalysis(BaseModel):
+    #: Currency every figure below is expressed in. Without it the page had to
+    #: assume, and it assumed TRY over a sum that mixed TRY and USD.
+    base_currency: str = "TRY"
     as_of: Optional[datetime] = None
     is_delayed: bool = True
     delay_minutes: int = 0

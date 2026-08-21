@@ -68,6 +68,9 @@ def configure_market_stream() -> None:
                         "price": row["price"],
                         "change": row.get("change_amount"),
                         "changePercent": row.get("change_percent"),
+                        # Carried so the live overlay cannot strip the unit off
+                        # a row it updates.
+                        "currency": row.get("currency") or "TRY",
                     }
                     for symbol, row in quotes.items()
                 },

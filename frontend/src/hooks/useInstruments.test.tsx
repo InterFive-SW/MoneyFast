@@ -25,7 +25,7 @@ function apiRow(overrides = {}) {
 function mockApi(rows: unknown[]) {
   vi.spyOn(apiClient, 'getInstruments').mockResolvedValue({ instruments: rows } as never)
   vi.spyOn(stream, 'useMarketStream').mockReturnValue({
-    asOf: null, isDelayed: true, delayMinutes: 0, quotes: {}, transport: 'connecting',
+    asOf: null, isDelayed: true, delayMinutes: 0, quotes: {}, rates: {}, transport: 'connecting',
   })
 }
 
@@ -100,7 +100,7 @@ describe('useInstruments', () => {
     vi.spyOn(apiClient, 'getInstruments').mockRejectedValue(new Error('down'))
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.spyOn(stream, 'useMarketStream').mockReturnValue({
-      asOf: null, isDelayed: true, delayMinutes: 0, quotes: {}, transport: 'connecting',
+      asOf: null, isDelayed: true, delayMinutes: 0, quotes: {}, rates: {}, transport: 'connecting',
     })
     const { result } = renderHook(() => useInstruments())
     await waitFor(() => expect(result.current.loading).toBe(false))

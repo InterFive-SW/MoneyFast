@@ -367,7 +367,12 @@ def portfolio_top_level_keys() -> frozenset[str]:
 def position_keys() -> frozenset[str]:
     return frozenset(
         {
-            "symbol", "isin", "name", "asset_class", "exchange", "quantity",
+            # v2.6 adds `sector` and `market`. Both additive. The risk engine
+            # buckets exposure by sector and reported every portfolio as 100%
+            # UNCLASSIFIED, not because sectors were unknown but because the
+            # positions handed to it never carried the field.
+            "symbol", "isin", "name", "asset_class", "sector", "market",
+            "exchange", "quantity",
             "avg_cost", "instrument_currency", "last_price", "market_value",
             "cost_basis", "unrealized_pnl", "unrealized_pnl_pct", "weight",
             "available_quantity", "opened_at",

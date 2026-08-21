@@ -5,6 +5,7 @@ Kimlik doğrulama ve kullanıcı yönetimi için Veri Transfer Nesneleri (DTO'la
 Pydantic V2 kullanarak girdi verilerini sıkı bir şekilde doğrular.
 """
 
+from typing import Optional
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
@@ -72,3 +73,13 @@ class TokenResponse(BaseModel):
 
     access_token: str
     token_type: str = "bearer"
+    #: Kısa ömürlü access token'ı yenilemek için kullanılır. Yalnızca
+    #: `/auth/refresh` kabul eder. Optional: yenileme uç noktası yalnızca
+    #: access token döndürür, yeni bir refresh token üretmez.
+    refresh_token: Optional[str] = None
+
+
+class RefreshRequest(BaseModel):
+    """`/auth/refresh` gövdesi."""
+
+    refresh_token: str

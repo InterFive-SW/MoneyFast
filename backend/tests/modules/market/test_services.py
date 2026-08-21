@@ -301,3 +301,19 @@ class TestInstrumentFilters:
         db = self._db()
         market_service.list_instruments(db, filters={"max_pb": 2})
         assert "IS NOT NULL" in str(db.execute.call_args.args[0]).upper()
+
+
+class TestFundamentalsNameField:
+    def test_the_company_name_survives_the_ingest_boundary(self):
+        """Pydantic drops undeclared fields, so the ingestor sent `name` and
+        the backfill never received it — 84 of 97 instruments stayed named
+        after their ticker and "Aselsan" would not resolve."""
+        from app.modules.market.schemas import FundamentalsIn
+
+        parsed = FundamentalsIn(symbol="ASELS", name="ASELSAN Elektronik")
+        assert parsed.name == "ASELSAN Elektronik"
+
+    def test_a_missing_name_stays_none(self):
+        from app.modules.market.schemas import FundamentalsIn
+
+        assert FundamentalsIn(symbol="ASELS").name is None

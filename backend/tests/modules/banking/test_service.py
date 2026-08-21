@@ -7,6 +7,7 @@ every refusal leaving both accounts exactly as they were.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -14,6 +15,9 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.modules.banking import service
+from app.modules.banking import service as banking_service
+
+NOW = datetime(2026, 8, 21, tzinfo=timezone.utc)
 
 
 def bank_account(
@@ -315,3 +319,108 @@ class TestModelDefaults:
         from app.modules.banking import models
 
         assert models._now().tzinfo is not None
+
+
+class TestSpendingReport:
+    """Spending is derived from the ledger, never stored as its own total."""
+
+    def _db(self, rows, accounts=None):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = (
+            accounts if accounts is not None else [bank_account()]
+        )
+        db.execute.return_value.all.return_value = rows
+        return db
+
+    def test_categories_are_totalled(self):
+        db = self._db([("Market", 5416.65), ("Kira", 14000.0)])
+        result = service.spending_by_category(db, "user-1", since=NOW)
+        assert result == [
+            {"category": "Market", "amount": 5416.65},
+            {"category": "Kira", "amount": 14000.0},
+        ]
+
+    def test_a_user_with_no_account_spends_nothing(self):
+        assert service.spending_by_category(self._db([], accounts=[]), "ghost", since=NOW) == []
+
+    def test_only_debits_are_counted(self):
+        """A transfer between your own accounts writes both a debit and a
+        credit; counting the debit would make moving your own money look like
+        an expense."""
+        db = self._db([])
+        service.spending_by_category(db, "user-1", since=NOW)
+        sql = str(db.execute.call_args.args[0]).upper()
+        assert "DIRECTION" in sql
+
+    def test_uncategorised_movements_are_excluded(self):
+        """Salary and transfers carry no category; including them would make
+        income read as spending."""
+        db = self._db([])
+        service.spending_by_category(db, "user-1", since=NOW)
+        assert "IS NOT NULL" in str(db.execute.call_args.args[0]).upper()
+
+
+class TestBalanceHistory:
+    def _db(self, rows, accounts=None):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = (
+            accounts if accounts is not None else [bank_account()]
+        )
+        db.execute.return_value.all.return_value = rows
+        return db
+
+    def test_points_are_returned_oldest_first(self):
+        """The query reads newest-first for the LIMIT; a chart draws left to
+        right."""
+        db = self._db([(NOW, 300.0), (NOW, 200.0), (NOW, 100.0)])
+        points = service.balance_history(db, "user-1")
+        assert [p["balance"] for p in points] == [100.0, 200.0, 300.0]
+
+    def test_the_stored_balance_is_read_not_replayed(self):
+        db = self._db([(NOW, 48195.0)])
+        service.balance_history(db, "user-1")
+        assert "BALANCE_AFTER" in str(db.execute.call_args.args[0]).upper()
+
+    def test_no_account_means_no_history(self):
+        assert service.balance_history(self._db([], accounts=[]), "ghost") == []
+
+
+class TestSavingsGoals:
+    def test_goals_are_read_for_the_user(self):
+        db = MagicMock(spec=Session)
+        goals = [SimpleNamespace(id="g1", name="Araba")]
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = goals
+        assert service.goals_for(db, "user-1") == goals
+
+
+SINCE = datetime(2026, 7, 22, tzinfo=timezone.utc)
+
+
+class TestIncomeTotal:
+    """Income is the mirror of spending, and it has the same trap reversed.
+
+    Moving your own money between two of your own accounts writes a CREDIT
+    leg. Counting that as income would let anyone raise their apparent salary
+    by shuffling funds back and forth, which would then flow straight into the
+    savings rate on the Risk page.
+    """
+
+    def test_no_accounts_means_no_income(self, mock_db, mocker):
+        mocker.patch.object(banking_service, "accounts_for", return_value=[])
+        assert banking_service.income_total(mock_db, "user-1", SINCE) == 0.0
+
+    def test_sums_external_credits(self, mock_db, mocker):
+        mocker.patch.object(
+            banking_service, "accounts_for",
+            return_value=[SimpleNamespace(id="acct-1")],
+        )
+        mock_db.execute.return_value.scalar.return_value = 54286.0
+        assert banking_service.income_total(mock_db, "user-1", SINCE) == 54286.0
+
+    def test_no_movements_reports_zero_not_none(self, mock_db, mocker):
+        mocker.patch.object(
+            banking_service, "accounts_for",
+            return_value=[SimpleNamespace(id="acct-1")],
+        )
+        mock_db.execute.return_value.scalar.return_value = None
+        assert banking_service.income_total(mock_db, "user-1", SINCE) == 0.0

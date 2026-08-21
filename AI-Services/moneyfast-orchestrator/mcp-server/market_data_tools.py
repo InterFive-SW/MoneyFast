@@ -159,6 +159,7 @@ async def get_market_data(
             price (float): Last traded or last close.
             change (float | None), change_percent (float | None): Versus previous
                 close. None means UNKNOWN, not unchanged.
+            volume (int | None): Last session's traded volume, in shares.
             pe_ratio, pb_ratio, dividend_yield, market_cap, sector,
             week52_high, week52_low: All nullable. **null means the provider does
                 not publish it.** Report it as "veri yok". NEVER render a null as
@@ -290,6 +291,10 @@ def _normalize_instrument(raw: Any) -> dict[str, Any]:
         "price": float(raw["price"]),
         "change": _opt_float(raw.get("change")),
         "change_percent": _opt_float(raw.get("change_percent")),
+        # Daily traded volume. The backend stored it on every quote and
+        # exposed it nowhere, so a screening table's turnover column was
+        # structurally empty rather than occasionally unknown.
+        "volume": int(raw["volume"]) if raw.get("volume") is not None else None,
         "pe_ratio": _opt_float(raw.get("pe_ratio")),
         "pb_ratio": _opt_float(raw.get("pb_ratio")),
         "market_cap": int(raw["market_cap"]) if raw.get("market_cap") is not None else None,

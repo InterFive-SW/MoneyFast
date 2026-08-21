@@ -30,6 +30,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ai_orchestrator/chat/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Chat Stream
+         * @description Sohbetin akış (SSE) sürümü. Kimlik çözümü `/chat` ile birebir aynı.
+         *
+         *     Yanıt tek parça değil: graf düğümleri ilerledikçe `stage` olayları,
+         *     sonunda tek bir `done` olayı gönderilir. Model çıktısı token token
+         *     akmaz — uygunluk kapısı fail-closed çalışıyor ve engellediği bir taslak
+         *     kullanıcıya ulaşmamalı; ekrana yazılmış bir metni geri almak bu güvenceyi
+         *     anlamsız kılardı.
+         *
+         *     Tur, tıpkı `/chat`'te olduğu gibi bitiminde kaydedilir; akış sürümünde
+         *     kayıt `done` olayı üretildikten sonra yapılır.
+         */
+        post: operations["chat_stream_api_ai_orchestrator_chat_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ai_orchestrator/health": {
         parameters: {
             query?: never;
@@ -148,6 +177,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Yenileme token'ı ile yeni bir access token al
+         * @description Süresi dolmuş bir access token'ı, uzun ömürlü yenileme token'ıyla tazeler.
+         *
+         *     Bu uç nokta olmadan oturum 30 dakikada sessizce düşüyordu: kullanıcı
+         *     çıkışa yönlendirilmiyor, anonim çağırana dönüşüyordu. Sohbet çalışmaya
+         *     devam ettiği için fark edilmiyordu, ama hazırladığı işlem önerileri
+         *     `user_id="anonymous"` ile kaydediliyor ve onay adımında kalıcı olarak
+         *     404 alıyordu.
+         */
+        post: operations["refresh_api_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/forgot-password": {
         parameters: {
             query?: never;
@@ -212,6 +267,141 @@ export interface paths {
         get: operations["health_check_api_auth_health_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/banking/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Hesaplarım
+         * @description Kullanıcının mevduat hesapları. Yoksa açılır.
+         */
+        get: operations["list_accounts_api_banking_accounts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/banking/transfers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Para transferi
+         * @description Bir hesaptan diğerine para gönderir.
+         *
+         *     İki bacak (DEBIT/CREDIT) ve işlem kaydı **tek** transaction içinde yazılır:
+         *     borcu yazıp alacağı yazamamak, bir hesaptan çıkıp hiçbir yere varmamış para
+         *     demek olurdu.
+         *
+         *     `source` verilmezse kullanıcının kendi mevduat hesabı kullanılır — tek
+         *     hesabı olan birine hesap numarasını sordurmak amaçsız bir sürtünme.
+         */
+        post: operations["create_transfer_api_banking_transfers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/banking/accounts/{account_number}/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Hesap hareketleri
+         * @description Hesabın hareket dökümü (FG-B-05).
+         */
+        get: operations["statement_api_banking_accounts__account_number__statement_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/banking/spending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Aylık harcama özeti
+         * @description Kategorilere göre harcama — yalnızca DEBIT bacaklarından.
+         *
+         *     Kendi hesapları arasındaki transfer hem borç hem alacak bacağı üretir;
+         *     borç bacağını harcama saymak, kendi parasını taşımayı gider gibi
+         *     gösterirdi. Kategorisi olmayan hareketler toplama girmez.
+         */
+        get: operations["spending_summary_api_banking_spending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/banking/balance-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bakiye geçmişi
+         * @description Her hareketten sonraki bakiye — `balance_after` sütunundan okunuyor.
+         *
+         *     Hareketleri yeniden oynatarak hesaplamak yerine saklanan değeri okumak,
+         *     o sütunun var olma sebebi.
+         */
+        get: operations["balance_history_api_banking_balance_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/banking/savings-goals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Birikim hedefleri
+         * @description Kullanıcının koyduğu hedefler. Gözlem değil, niyet.
+         */
+        get: operations["list_savings_goals_api_banking_savings_goals_get"];
+        put?: never;
+        /** Birikim hedefi ekle */
+        post: operations["create_savings_goal_api_banking_savings_goals_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -906,6 +1096,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/risk/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kullanıcının risk profili (Risk sayfası)
+         * @description Risk sayfasının okuduğu profil: puan, puanı oluşturan bulgular ve nakit
+         *     akışı.
+         *
+         *     `POST /calculate` MCP sözleşmesine dondurulmuş ve ham metrik döner; bu uç
+         *     nokta ekrana göre şekillendirilmiştir ve **kullanıcıya bağlıdır** — pozisyon
+         *     listesini gövdeden almaz, oturumdan çözer.
+         *
+         *     Sayfa daha önce tamamen sabit bir fixture'dan besleniyordu: 68 puan, dört
+         *     uydurma bulgu ve hiç ölçülmemiş bir borç/gelir oranı. Buradaki her sayı
+         *     `risk/service.calculate` çıktısına kadar izlenebilir; ham metrikler de
+         *     `metrics` alanında aynen döner.
+         */
+        get: operations["risk_profile_api_risk_profile_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/risk/health": {
         parameters: {
             query?: never;
@@ -975,6 +1195,55 @@ export interface components {
             /** Color */
             color: string;
         };
+        /** BalanceHistoryOut */
+        BalanceHistoryOut: {
+            /**
+             * Currency Code
+             * @default TRY
+             */
+            currency_code: string;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Change Amount
+             * @default 0
+             */
+            change_amount: number;
+            /** Change Percent */
+            change_percent?: number | null;
+            /** Points */
+            points?: components["schemas"]["BalancePointOut"][];
+        };
+        /** BalancePointOut */
+        BalancePointOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Balance */
+            balance: number;
+        };
+        /** BankAccountOut */
+        BankAccountOut: {
+            /** Id */
+            id: string;
+            /** Account Number */
+            account_number: string;
+            /** Iban */
+            iban: string;
+            /** Account Type */
+            account_type: string;
+            /** Currency Code */
+            currency_code: string;
+            /** Balance */
+            balance: number;
+            /** Status */
+            status: string;
+        };
         /** Body_forgot_password_api_auth_forgot_password_post */
         Body_forgot_password_api_auth_forgot_password_post: {
             /**
@@ -1039,6 +1308,11 @@ export interface components {
             /** Symbol */
             symbol: string;
             /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            /**
              * Interval
              * @default 1d
              */
@@ -1062,6 +1336,35 @@ export interface components {
             value?: number | null;
             /** Color */
             color?: string | null;
+        };
+        /**
+         * CashflowOut
+         * @description Income against expense, from the banking ledger.
+         *
+         *     The page previously showed a debt-to-income ratio built from a fixture.
+         *     There is no loan model in this system, so debt is not reported at all
+         *     rather than invented.
+         */
+        CashflowOut: {
+            /** Period */
+            period: string;
+            /**
+             * Currency Code
+             * @default TRY
+             */
+            currency_code: string;
+            /**
+             * Monthly Income
+             * @default 0
+             */
+            monthly_income: number;
+            /**
+             * Monthly Expense
+             * @default 0
+             */
+            monthly_expense: number;
+            /** Savings Rate */
+            savings_rate?: number | null;
         };
         /**
          * ChatRequest
@@ -1224,6 +1527,11 @@ export interface components {
             amount: number;
             /** Yieldpercent */
             yieldPercent: number;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
         };
         /**
          * FundamentalsIn
@@ -1236,6 +1544,8 @@ export interface components {
         FundamentalsIn: {
             /** Symbol */
             symbol: string;
+            /** Name */
+            name?: string | null;
             /** Pe Ratio */
             pe_ratio?: number | null;
             /** Pb Ratio */
@@ -1273,6 +1583,11 @@ export interface components {
             changePercent: number;
             /** Sector */
             sector: string;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
         };
         /** IngestResult */
         IngestResult: {
@@ -1339,6 +1654,8 @@ export interface components {
             change?: number | null;
             /** Change Percent */
             change_percent?: number | null;
+            /** Volume */
+            volume?: number | null;
             /**
              * Market Timestamp
              * Format: date-time
@@ -1401,12 +1718,40 @@ export interface components {
         MarketTicker: {
             /** Symbol */
             symbol: string;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
             /** Price */
             price: number;
             /** Change */
             change: number;
             /** Changepercent */
             changePercent: number;
+        };
+        /**
+         * MovementOut
+         * @description One leg of a transfer, from this account's point of view.
+         */
+        MovementOut: {
+            /** Reference Number */
+            reference_number: string;
+            /** Direction */
+            direction: string;
+            /** Amount */
+            amount: number;
+            /** Balance After */
+            balance_after: number;
+            /** Counterparty Iban */
+            counterparty_iban?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** NewsIngestRequest */
         NewsIngestRequest: {
@@ -1495,6 +1840,11 @@ export interface components {
             total: number;
             /** Date */
             date: string;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
         };
         /**
          * PerformanceSummary
@@ -1521,6 +1871,11 @@ export interface components {
         };
         /** PortfolioAnalysis */
         PortfolioAnalysis: {
+            /**
+             * Base Currency
+             * @default TRY
+             */
+            base_currency: string;
             /** As Of */
             as_of?: string | null;
             /**
@@ -1595,6 +1950,10 @@ export interface components {
         };
         /** PortfolioTotals */
         PortfolioTotals: {
+            /** Cash Balance */
+            cash_balance?: number | null;
+            /** Total Value */
+            total_value?: number | null;
             /** Total Market Value */
             total_market_value: number;
             /** Total Cost Basis */
@@ -1624,6 +1983,11 @@ export interface components {
             totalReturn: number;
             /** Totalreturnpercent */
             totalReturnPercent: number;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
         };
         /**
          * PositionIn
@@ -1722,6 +2086,14 @@ export interface components {
             candles?: components["schemas"]["CandleIn"][];
         };
         /**
+         * RefreshRequest
+         * @description `/auth/refresh` gövdesi.
+         */
+        RefreshRequest: {
+            /** Refresh Token */
+            refresh_token: string;
+        };
+        /**
          * RegisterRequest
          * @description Sıkı doğrulamalarla yeni bir kullanıcı kaydetmek için şema.
          */
@@ -1757,6 +2129,46 @@ export interface components {
              * @description Şifre en az 8 karakter olmalı, 1 büyük harf ve 1 rakam içermelidir
              */
             password: string;
+        };
+        /** RiskFinding */
+        RiskFinding: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Impact */
+            impact: string;
+            /** Value */
+            value?: number | null;
+        };
+        /** RiskProfileOut */
+        RiskProfileOut: {
+            /** As Of */
+            as_of: string;
+            /** Score */
+            score?: number | null;
+            /** Level */
+            level?: string | null;
+            /** Components */
+            components?: components["schemas"]["ScoreComponent"][];
+            /** Findings */
+            findings?: components["schemas"]["RiskFinding"][];
+            /** Suggestions */
+            suggestions?: components["schemas"]["RiskSuggestion"][];
+            cashflow?: components["schemas"]["CashflowOut"] | null;
+            /** Metrics */
+            metrics?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Position Count
+             * @default 0
+             */
+            position_count: number;
+            /** Warnings */
+            warnings?: string[];
         };
         /** RiskRequest */
         RiskRequest: {
@@ -1803,6 +2215,70 @@ export interface components {
             };
             data_quality: components["schemas"]["DataQuality"];
         };
+        /** RiskSuggestion */
+        RiskSuggestion: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Actionlabel */
+            actionLabel: string;
+            /** Priority */
+            priority: string;
+        };
+        /** SavingsGoalIn */
+        SavingsGoalIn: {
+            /** Name */
+            name: string;
+            /** Target Amount */
+            target_amount: number;
+            /**
+             * Current Amount
+             * @default 0
+             */
+            current_amount: number;
+            /** Icon */
+            icon?: string | null;
+            /** Color */
+            color?: string | null;
+            /** Deadline */
+            deadline?: string | null;
+        };
+        /** SavingsGoalOut */
+        SavingsGoalOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Target Amount */
+            target_amount: number;
+            /** Current Amount */
+            current_amount: number;
+            /**
+             * Currency Code
+             * @default TRY
+             */
+            currency_code: string;
+            /** Icon */
+            icon?: string | null;
+            /** Color */
+            color?: string | null;
+            /** Deadline */
+            deadline?: string | null;
+        };
+        /** ScoreComponent */
+        ScoreComponent: {
+            /** Name */
+            name: string;
+            /** Measured */
+            measured?: number | null;
+            /** Weight */
+            weight: number;
+            /** Penalty */
+            penalty?: number | null;
+        };
         /** SectorAllocationItem */
         SectorAllocationItem: {
             /** Sector */
@@ -1811,6 +2287,35 @@ export interface components {
             percentage: number;
             /** Color */
             color: string;
+        };
+        /** SpendingCategoryOut */
+        SpendingCategoryOut: {
+            /** Category */
+            category: string;
+            /** Amount */
+            amount: number;
+        };
+        /**
+         * SpendingSummaryOut
+         * @description What went out, by category, over a window.
+         */
+        SpendingSummaryOut: {
+            /** Period */
+            period: string;
+            /**
+             * Currency Code
+             * @default TRY
+             */
+            currency_code: string;
+            /**
+             * Total Expense
+             * @default 0
+             */
+            total_expense: number;
+            /** Change Percent */
+            change_percent?: number | null;
+            /** Categories */
+            categories?: components["schemas"]["SpendingCategoryOut"][];
         };
         /** StageTransactionOut */
         StageTransactionOut: {
@@ -1856,7 +2361,7 @@ export interface components {
             /** Transaction Type */
             transaction_type: string;
             /** Source Account Id */
-            source_account_id: string;
+            source_account_id?: string | null;
             /** Idempotency Key */
             idempotency_key: string;
             instrument?: components["schemas"]["Instrument"] | null;
@@ -1886,6 +2391,17 @@ export interface components {
             /** Assumptions */
             assumptions?: string[];
         };
+        /** StatementOut */
+        StatementOut: {
+            /** Account Number */
+            account_number: string;
+            /** Balance */
+            balance: number;
+            /** Currency Code */
+            currency_code: string;
+            /** Movements */
+            movements?: components["schemas"]["MovementOut"][];
+        };
         /**
          * TokenResponse
          * @description JWT token yanıtı için şema.
@@ -1898,6 +2414,8 @@ export interface components {
              * @default bearer
              */
             token_type: string;
+            /** Refresh Token */
+            refresh_token?: string | null;
         };
         /** TopMoverItem */
         TopMoverItem: {
@@ -1907,6 +2425,39 @@ export interface components {
             price: number;
             /** Changepercent */
             changePercent: number;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+        };
+        /** TransferOut */
+        TransferOut: {
+            /** Reference Number */
+            reference_number: string;
+            /** Status */
+            status: string;
+            /** Amount */
+            amount: number;
+            /** Fee */
+            fee: number;
+            /** Currency */
+            currency: string;
+            /** Source Balance After */
+            source_balance_after: number;
+            /** Destination Account */
+            destination_account: string;
+        };
+        /** TransferRequest */
+        TransferRequest: {
+            /** Source */
+            source?: string | null;
+            /** Destination */
+            destination: string;
+            /** Amount */
+            amount: number;
+            /** Description */
+            description?: string | null;
         };
         /** TrendPoint */
         TrendPoint: {
@@ -1975,6 +2526,11 @@ export interface components {
             change: number;
             /** Changepercent */
             changePercent: number;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
         };
         /** Window */
         Window: {
@@ -2016,6 +2572,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChatResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chat_stream_api_ai_orchestrator_chat_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -2155,6 +2744,39 @@ export interface operations {
             };
         };
     };
+    refresh_api_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     forgot_password_api_auth_forgot_password_post: {
         parameters: {
             query?: never;
@@ -2224,6 +2846,207 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_accounts_api_banking_accounts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankAccountOut"][];
+                };
+            };
+        };
+    };
+    create_transfer_api_banking_transfers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransferOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    statement_api_banking_accounts__account_number__statement_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                account_number: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatementOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    spending_summary_api_banking_spending_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpendingSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    balance_history_api_banking_balance_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BalanceHistoryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_savings_goals_api_banking_savings_goals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsGoalOut"][];
+                };
+            };
+        };
+    };
+    create_savings_goal_api_banking_savings_goals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavingsGoalIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavingsGoalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2982,6 +3805,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RiskResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    risk_profile_api_risk_profile_get: {
+        parameters: {
+            query?: {
+                lookback?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskProfileOut"];
                 };
             };
             /** @description Validation Error */

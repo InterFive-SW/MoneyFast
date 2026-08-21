@@ -18,6 +18,27 @@ export interface QuoteFrame {
   price: number;
   change: number | null;
   changePercent: number | null;
+  /** The instrument's own currency, so an overlay cannot strip the unit. */
+  currency?: string;
+}
+
+/** Which instrument quotes the rate for which currency. */
+const FX_SYMBOLS: Record<string, string> = { USD: 'USDTRY', EUR: 'EURTRY' };
+
+/**
+ * Conversion rates into lira, read out of the frame itself.
+ *
+ * Derived rather than sent separately: USDTRY and EURTRY are instruments like
+ * any other and are already in every frame, so a separate `fx` field could
+ * drift from the quotes beside it.
+ */
+function ratesFrom(quotes: Record<string, QuoteFrame>): Record<string, number> {
+  const rates: Record<string, number> = {};
+  for (const [currency, symbol] of Object.entries(FX_SYMBOLS)) {
+    const quote = quotes[symbol];
+    if (quote && typeof quote.price === 'number') rates[currency] = quote.price;
+  }
+  return rates;
 }
 
 export interface MarketSnapshot {
@@ -25,6 +46,8 @@ export interface MarketSnapshot {
   isDelayed: boolean;
   delayMinutes: number;
   quotes: Record<string, QuoteFrame>;
+  /** Lira conversion rates, derived from the FX quotes in the same frame. */
+  rates: Record<string, number>;
   /** 'live' while the stream is connected, 'polling' after it gave up. */
   transport: 'connecting' | 'live' | 'polling';
 }
@@ -34,6 +57,7 @@ const EMPTY: MarketSnapshot = {
   isDelayed: true,
   delayMinutes: 0,
   quotes: {},
+  rates: {},
   transport: 'connecting',
 };
 
@@ -57,31 +81,35 @@ function publish(next: MarketSnapshot) {
 }
 
 function applyFrame(raw: any, transport: MarketSnapshot['transport']) {
+  const quotes = raw?.quotes ?? {};
   publish({
     asOf: raw?.as_of ?? null,
     isDelayed: Boolean(raw?.is_delayed),
     delayMinutes: Number(raw?.delay_minutes ?? 0),
-    quotes: raw?.quotes ?? {},
+    quotes,
+    rates: ratesFrom(quotes),
     transport,
   });
 }
 
 async function pollOnce() {
   try {
-    const response = await fetch('/api/market/tickers');
+    // The whole universe, not the four-symbol ticker strip. Polling /tickers
+    // silently narrowed the snapshot from ~95 instruments to 4, so after
+    // three SSE failures every live table froze while the strip kept moving.
+    const response = await fetch('/api/market/instruments?limit=200');
     if (!response.ok) return;
-    const rows = await response.json();
-    // The polling endpoint returns the strip rather than the full frame, so
-    // the shape is normalised here to match what subscribers already read.
+    const body = await response.json();
     const quotes: Record<string, QuoteFrame> = {};
-    for (const row of rows) {
+    for (const row of body?.instruments ?? []) {
       quotes[row.symbol] = {
         price: row.price,
-        change: row.change,
-        changePercent: row.changePercent,
+        change: row.change ?? null,
+        changePercent: row.change_percent ?? null,
+        currency: row.currency,
       };
     }
-    publish({ ...snapshot, quotes, transport: 'polling' });
+    publish({ ...snapshot, quotes, rates: ratesFrom(quotes), transport: 'polling' });
   } catch {
     // Leave the last known snapshot in place. Blanking the dashboard on one
     // failed poll would be a worse lie than showing a slightly stale price.

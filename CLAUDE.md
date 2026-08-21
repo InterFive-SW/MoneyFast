@@ -105,6 +105,86 @@ yalnızca doğrulanmış oturumdan gelmesini şart koşuyor. İşlem onayı yaln
 `POST /api/investment/transactions/{proposal_id}/confirm` üzerinden, kullanıcının
 kendi eylemiyle verilir — sohbette "evet" demek onay sayılmaz.
 
+`POST /api/ai_orchestrator/chat/stream` aynı turu SSE ile yürütür: graf
+düğümleri ilerledikçe `stage` olayları, sonunda tek bir `done`. **Model
+çıktısı token token akmaz.** Graf fail-closed: uygunluk kapısının engellediği
+bir taslak kullanıcıya ulaşmamalı, ekrana yazılmış metin ise geri alınamaz.
+Bu yüzden yalnızca ilerleme akar; onaylanmış metin istemcide daktilo
+efektiyle gösterilir (`useTypewriter`). Akış kurulamazsa istemci tamponlu
+`/chat` uç noktasına düşer.
+
+### Oturum ömrü
+
+Access token 30 dakika yaşar ve `get_optional_user_id` süresi dolmuş bir
+token'ı **anonim** sayar — okuma uçları için doğru, para hareketi için değil.
+Bu ikisi bir süre karışmıştı: oturum sessizce anonime düşüyor, sohbet
+çalışmaya devam ediyor, ama hazırladığı öneriler `user_id="anonymous"` ile
+kaydediliyordu. Bu öneriler DEMO hesabına karşı fiyatlanıyor ve onay adımının
+sahiplik denetimini hiçbir zaman geçemiyordu: kullanıcı, her basışta 404
+dönen bir "Onayla" düğmesi görüyordu.
+
+İki taraflı çözüldü: `POST /api/auth/refresh` (uzun ömürlü yenileme token'ı,
+`typ` claim'i ile access token'dan ayrılır; biri diğerinin yerine
+kullanılamaz) oturumu sessizce tazeler, ve `transactions/stage` sahibi
+belirsiz bir öneriyi **401 ile reddeder**. `market_service.account` artık
+`allow_demo_fallback=False` alabiliyor — demo portföyünü okumak zararsız,
+ona karşı işlem fiyatlamak değil.
+
+### İki piyasa
+
+Evren 88 BIST + 3 ABD hissesiydi; o üçü yalnızca demo portföyü onları tuttuğu
+için vardı. Migration 0010 ile **Nasdaq-100** eklendi (96 sembol; ANSS ve EA
+sağlayıcıda fiyat döndürmediği için listeden çıkarıldı — fiyatlanamayan bir
+adı tohumlamak, olmayan bir enstrümanı varmış gibi göstermek olurdu). Üyelik
+listesi 0006'daki BIST listesi gibi elle yazılı ve tarihli: endeks üyeliği
+lisanslı bir üründür ve altından sessizce değişen bir tohum, diff'te
+okunabilenden kötüdür.
+
+Ekranlarda BIST / ABD / Tümü süzgeci var; sohbette `get_market_data`'nın
+`market` filtresi kullanılıyor (aksi hâlde "en çok yükselen ABD hisseleri"
+listesinin başında bir Türk hissesi çıkıyordu). Alım-satım yolu ortak: ABD
+emri USD cinsinden fiyatlanır, öneride saklanan kurla TRY'ye çevrilir ve
+bakiye kontrolü hesabın para biriminde yapılır.
+
+**Bir pozisyon satırında iki para birimi vardır.** `last_price` ve `avg_cost`
+enstrümanın kendi para biriminde; `market_value`, `cost_basis` ve
+`unrealized_pnl` ise zaten `base_currency`'ye çevrilmiş. Bunu söyleyen bir
+kural yoktu ve 481 dolarlık bir MSFT pozisyonu "23.068,69 USD" olarak
+yazıldı — TL değeri, yanlış birimle, yaklaşık kırk kat abartılmış.
+
+### Sütunlar hangi araçtan geldiyse ona uyar
+
+Tek bir varsayılan sütun seti vardı ve bu bir TARAMA setiydi:
+`| Hisse | Sektör | Fiyat (TL) | 1.000 TL ile lot | Günlük ciro | F/K |`.
+"portföyümü göstersene" sorusuna portföy verisiyle bu sütunlar dolduruldu;
+portföy aracı bu alanların hiçbirini döndürmediği için tablonun tamamı
+"veri yok" oldu. Veri eksik değildi — sektör 94 enstrümanın 90'ında, F/K
+64'ünde vardı.
+
+`Günlük ciro` ise yapısal olarak boştu: hacim her `market_quotes` satırında
+DOLU saklanıyor ama hiçbir uç nokta dışarı vermiyordu. Artık veriliyor.
+
+`veri yok`, o satırda eksik olan bir değeri işaretler; aracın hiç döndürmediği
+bir alan için kullanılmaz, o sütun hiç yazılmaz.
+
+### Kriz ve güvenlik sinyalleri
+
+`detect_safety_flags` üç ayrı kategori üretir: `SELF_HARM_RISK`,
+`COERCION_RISK`, `FINANCIAL_DISTRESS` (üçü de `DISTRESS_SIGNAL` ile birlikte,
+yönlendirme onu okuyor). Tek bir listeydiler ve besledikleri tek yönerge
+finansal sıkıntı için yazılmıştı; sonuç, "ölmek istiyorum" diyen birine
+borçla yatırımın riski anlatmaktı.
+
+Kriz kaynakları **modelden istenmez**, `crisis_notices` olarak koda gömülüdür
+ve `_keep_crisis` ile uygunluk kapısının HER dalında — BLOCK dahil —
+`disclosures`'a eklenir. Modelin unutabildiği bir kaynak bloğu güvenlik
+denetimi değildir; ölçüldüğünde yaklaşık yarı yarıya çıkıyordu. Numaralar
+sabit: model bir kez "ALO 182" (MHRS randevu hattı) önermişti.
+
+Ürün bir uzmana yönlendirme yapamıyor, bu yüzden **teklif de etmez**. Eskiden
+"sizi bir uzmana yönlendirebilirim" deyip, kullanıcı kabul edince
+"yönlendirme yapamıyorum" diyordu.
+
 Frontend'in kullandığı `/api/investment/positions`, `/api/investment/watchlist`
 gibi uç noktalar bunlardan ayrı ve camelCase şemalarını koruyor; ikisi farklı
 tüketicilere hizmet ediyor ve farklı sebeplerle değişiyor. Emir verme yolu ise
@@ -114,8 +194,30 @@ bkz. CONTRACT_WORKFLOW.md).
 
 ### Canlı fiyat akışı
 
-`ingestor` 10 saniyede bir tek toplu yfinance isteğiyle ~95 enstrümanı çekip
-backend'e HTTP ile yazıyor. Frontend `GET /api/market/stream` (SSE) üzerinden
+**Tek fiyat kuralı:** her fiyat `investment.market_quotes`'tan gelir ve arayüzde
+paylaşılan SSE akışıyla tazelenir. Bir ekranın veriyi bir kez çekip bırakması,
+yanındaki şeridin oynadığı bir tabloda donmuş fiyat demekti; hisse detay sayfası
+ise `mockData.ts`'ten okuduğu için tıklanan satırla asla aynı fiyatı
+göstermiyordu. `market_candles` ayrı bir seri (gecelik iş) — grafikler onu
+okur, anlık fiyat asla oradan gelmez.
+
+`ingestor` 30 saniyede bir, ~190 enstrümanı 40'lık parçalara bölerek çekiyor
+ve backend'e HTTP ile yazıyor. Tek parça ve 10 saniyeydi; evren iki borsaya
+çıkınca yetmedi. `yf.download` sembol başına hatayı YUTUYOR ve yine bir frame
+döndürüyor, dolayısıyla zaman aşımları istisna olarak değil yalnızca geçen
+süre olarak görünüyordu: ölçülen bir turda 61 saniye, 10 saniyelik bütçeye
+karşı, ve arada her koşu "skipped" olarak loglanıyordu. Üç değişiklik:
+istek başına gerçek bir timeout, parçalama, ve kısa dönen bir partiyi
+(`MISSING_TOLERANCE`) yavaşlama sinyali sayıp mevcut backoff merdivenini
+besleme.
+
+**Piyasa saatleri artık borsa başına.** `open_markets()` o an işlem gören
+piyasalar kümesini döner (BIST 10-18, NASDAQ/NYSE 16-23, FX/COMEX 7/24) ve
+yalnızca onların enstrümanları çekilir. Tek bir BIST kapısı vardı; ABD
+hisseleri eklenince bu, saat 18:00'den sonra ABD fiyatlarının hiç
+tazelenmemesi demekti — yani ABD seansının neredeyse tamamı. Tanımadığı bir
+borsadaki enstrüman düşürülmez, çekilir: eksik bir `MARKET_HOURS` girdisi,
+hiç fiyatlanmayan bir enstrümandan çok daha kolay fark edilir. Frontend `GET /api/market/stream` (SSE) üzerinden
 dinliyor; `frontend/src/hooks/useMarketStream.ts` tüm uygulama için **tek**
 `EventSource` tutuyor, akış kurulamazsa 10 saniyelik yoklamaya düşüyor.
 Fiyata bağlı kolonları (pozisyon değeri, günlük/toplam getiri) yeniden hesaplama
@@ -149,6 +251,27 @@ bırakırdı.
 Alım, hem hazırlama (`ai_service.stage_transaction`) hem de onay anında bakiyeye
 karşı kontrol edilir. İki kez, çünkü aynı bakiyeye karşı iki öneri hazırlanıp
 sonra ikisi de onaylanabilir.
+
+### Para birimi kuralı
+
+**Bir fiyat, para birimi olmadan taşınmaz.** Enstrümanın para birimi
+(`investment_products.currency_code`) `Position`, `WatchlistItem`,
+`TopMoverItem`, `DividendItem`, `HeatmapItem`, `Order`, `MarketTicker` ve
+`CandleSeriesOut` yanıtlarının hepsinde yer alıyor. Bir dönem düşürülüyordu ve
+arayüzün tahmin etmekten başka seçeneği yoktu: AAPL'in 314,88 USD'lik fiyatı
+gösterge panelinde "₺314,88" olarak görünüyordu.
+
+**Farklı para birimleri toplanmadan önce çevrilir.** `ai_service.holding_value`
+tek uygulama; `/portfolio/summary`, `/asset-allocation`, `/sector-allocation`,
+`/heatmap` ve `analytics/service.build` hepsi onu kullanıyor. Çevirmeden
+toplamak, Analiz sayfasının portföyü 404.467 TL, özet kartının aynı portföyü
+1.087.834 TL göstermesine yol açıyordu. Kuru olmayan pozisyon toplama
+katılmaz ve adı uyarıda geçer — 1.0 varsaymaz.
+
+Arayüzde tek biçimlendirici var: `frontend/src/lib/money.ts`. Yedi ayrı
+TRY'ye sabitlenmiş `formatCurrency` kopyasının yerini aldı. Yabancı bir fiyat
+`314,88 $ · ≈₺15.097,83` biçiminde, kendi para birimi ve yaklaşık TL karşılığı
+ile gösteriliyor.
 
 **Para birimi hiçbir yerde varsayılmaz.** Enstrümanın para birimi ile hesabın
 para birimi ayrı şeyler: AAPL USD, hesap TRY. `net_amount` enstrümanın para

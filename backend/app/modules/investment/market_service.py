@@ -494,6 +494,10 @@ def list_instruments(
                 "change_percent": (
                     float(quote.change_percent) if quote.change_percent is not None else None
                 ),
+                # Stored on every quote row and, until now, projected by
+                # nothing: the chat's "Günlük ciro" column could never be
+                # anything but "veri yok".
+                "volume": quote.volume,
                 "market_timestamp": quote.market_timestamp,
                 # When we observed the price, as distinct from the bar's own
                 # stamp. Daily bars are stamped at the session open, so
@@ -535,15 +539,20 @@ def holdings(
         return []
 
     statement = (
-        select(PortfolioPosition, InvestmentProduct, MarketQuote)
+        select(PortfolioPosition, InvestmentProduct, MarketQuote, InstrumentFundamentals)
         .join(InvestmentProduct, InvestmentProduct.id == PortfolioPosition.product_id)
         .join(MarketQuote, MarketQuote.product_id == PortfolioPosition.product_id, isouter=True)
+        .join(
+            InstrumentFundamentals,
+            InstrumentFundamentals.product_id == PortfolioPosition.product_id,
+            isouter=True,
+        )
         .where(PortfolioPosition.investment_account_id == owner.id)
         .order_by(InvestmentProduct.symbol)
     )
 
     out = []
-    for position, product, quote in db.execute(statement).all():
+    for position, product, quote, fundamentals in db.execute(statement).all():
         quantity = float(position.quantity)
         avg_cost = float(position.average_buy_price)
         price = float(quote.price) if quote is not None else None
@@ -558,6 +567,11 @@ def holdings(
                 "name": product.name,
                 "market": product.market,
                 "currency": product.currency_code,
+                # The risk engine buckets exposure by sector and reported
+                # `{"UNCLASSIFIED": 1.0}` for every portfolio -- not because
+                # the sector was unknown (90 of 94 instruments have one) but
+                # because the positions handed to it never carried the field.
+                "sector": getattr(fundamentals, "sector", None),
                 # Carried so the MCP contract can report a real asset_class;
                 # every position used to be labelled EQUITY, gold included.
                 "product_type": product.product_type,
@@ -586,6 +600,7 @@ def account(
     db: Session,
     user_id: Optional[str] = None,
     account_number: Optional[str] = None,
+    allow_demo_fallback: bool = True,
 ) -> Optional[InvestmentAccount]:
     """The caller's investment account.
 
@@ -593,6 +608,12 @@ def account(
     single shared account meant one person's purchase spent everybody's money.
     An anonymous caller (no token) falls back to the demo account so the public
     endpoints keep working.
+
+    `allow_demo_fallback=False` is for the paths that MOVE money. Reading the
+    demo portfolio when nobody is signed in is harmless; pricing a trade
+    against it is not. An expired session named its user "anonymous", matched
+    no account, and silently staged against the shared demo balance — so the
+    proposal was costed from a portfolio the user did not own.
     """
     query = db.query(InvestmentAccount)
     if account_number is not None:
@@ -601,6 +622,8 @@ def account(
         found = query.filter(InvestmentAccount.user_id == user_id).first()
         if found is not None:
             return found
+    if not allow_demo_fallback:
+        return None
     return query.filter(
         InvestmentAccount.account_number == DEMO_ACCOUNT_NUMBER
     ).first()
@@ -650,7 +673,12 @@ def dividend_rows(db: Session, limit: int = 20) -> list[dict[str, Any]]:
     """
     held = {row["symbol"] for row in holdings(db)}
     statement = (
-        select(InvestmentProduct.symbol, InstrumentFundamentals.dividend_yield, MarketQuote.price)
+        select(
+            InvestmentProduct.symbol,
+            InstrumentFundamentals.dividend_yield,
+            MarketQuote.price,
+            InvestmentProduct.currency_code,
+        )
         .join(InstrumentFundamentals,
               InstrumentFundamentals.product_id == InvestmentProduct.id)
         .join(MarketQuote, MarketQuote.product_id == InvestmentProduct.id, isouter=True)
@@ -661,12 +689,13 @@ def dividend_rows(db: Session, limit: int = 20) -> list[dict[str, Any]]:
     return [
         {
             "symbol": symbol,
+            "currency": currency or "TRY",
             "exDate": "",
             "paymentDate": "",
             "amount": round(float(price) * float(yield_) / 100, 4) if price else 0.0,
             "yieldPercent": round(float(yield_), 2),
         }
-        for symbol, yield_, price in db.execute(statement).all()
+        for symbol, yield_, price, currency in db.execute(statement).all()
         if symbol in held or not held
     ]
 
@@ -700,6 +729,10 @@ def recent_orders(db: Session, limit: int = 20) -> list[dict[str, Any]]:
             {
                 "id": row.id,
                 "symbol": row.symbol or "-",
+                # The currency the order was priced in, from the proposal
+                # itself — an order's currency is fixed at staging time and
+                # must not be re-read from today's product row.
+                "currency": estimate.get("currency") or "TRY",
                 "status": status_tr.get(row.status, "Bekliyor"),
                 "type": "Alış" if row.transaction_type.upper() in {"BUY", "ALIS", "ALIŞ"} else "Satış",
                 "quantity": quantity,

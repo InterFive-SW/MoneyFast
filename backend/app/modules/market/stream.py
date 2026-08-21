@@ -25,8 +25,11 @@ from typing import Any, Optional
 
 log = logging.getLogger("moneyfast.market.stream")
 
-#: How often the shared poller reads the quotes table. Matches the ingest
-#: cadence; polling faster only re-reads rows that have not changed.
+#: How often the shared poller reads the quotes table. Deliberately faster than
+#: the ingest cycle (INGESTOR_QUOTE_INTERVAL_SECONDS, 30s) so a new price
+#: reaches subscribers within one tick of being written, at the cost of
+#: re-reading unchanged rows in between. The comment previously claimed the
+#: ingest ran every 10s; it did not even then.
 POLL_SECONDS = 5.0
 
 #: Comment frames keep intermediaries from closing an idle connection.
@@ -34,6 +37,10 @@ HEARTBEAT_SECONDS = 20.0
 
 #: Frames buffered per subscriber before the oldest is dropped.
 QUEUE_SIZE = 8
+
+#: Republish an unchanged frame at least this often, so the age the browser
+#: displays keeps growing while the market is closed.
+FRESHNESS_REFRESH_SECONDS = 60.0
 
 _subscribers: set[asyncio.Queue] = set()
 _poller: Optional[asyncio.Task] = None
@@ -102,14 +109,24 @@ async def _poll_forever() -> None:
     global _poller
     current = asyncio.current_task()
     previous: Optional[str] = None
+    last_published = 0.0
     try:
         while _subscribers:
             try:
                 frame = _reader() if _reader else None
                 if frame:
                     fingerprint = repr(sorted(frame.get("quotes", {}).items()))
-                    if fingerprint != previous:
+                    now = asyncio.get_running_loop().time()
+                    # Prices unchanged is the normal state outside session
+                    # hours, and suppressing every frame then meant `as_of`
+                    # and `delay_minutes` froze in the browser: the UI claimed
+                    # "15 dk gecikmeli" all weekend while the data aged for
+                    # days. A periodic frame refreshes the age even when no
+                    # price moved.
+                    aged_out = (now - last_published) >= FRESHNESS_REFRESH_SECONDS
+                    if fingerprint != previous or aged_out:
                         previous = fingerprint
+                        last_published = now
                         publish(frame)
             except Exception as exc:
                 # A database hiccup must not kill the stream for everyone; the

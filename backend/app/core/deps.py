@@ -22,7 +22,11 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.security import decode_access_token, oauth2_scheme
+from app.core.security import (
+    ACCESS_TOKEN_TYPE,
+    decode_access_token,
+    oauth2_scheme,
+)
 
 #: The shared `oauth2_scheme` rejects a missing Authorization header with a
 #: 401 before the endpoint runs. The chat endpoint wants the opposite: no
@@ -59,6 +63,14 @@ def get_current_user(
     payload = decode_access_token(token)
     tc_no: Optional[str] = payload.get("sub") if payload else None
     if not tc_no:
+        raise CREDENTIALS_ERROR
+
+    # A refresh token is valid for days and is only ever meant to buy a new
+    # access token. Accepting one here would make a leaked refresh token
+    # equivalent to the password for a week. Tokens minted before `typ`
+    # existed carry no claim and are treated as access tokens so live
+    # sessions are not invalidated by the deploy.
+    if payload.get("typ", ACCESS_TOKEN_TYPE) != ACCESS_TOKEN_TYPE:
         raise CREDENTIALS_ERROR
 
     user = db.query(User).filter(User.tc_no == tc_no).first()

@@ -1,7 +1,14 @@
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    REFRESH_TOKEN_TYPE,
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
 from app.modules.auth.models import User
 from app.modules.auth.schemas import LoginRequest, RegisterRequest, TokenResponse, UserResponse
 
@@ -14,8 +21,42 @@ def authenticate_user(payload: LoginRequest, db: Session) -> TokenResponse:
             detail="TC Kimlik No veya şifre hatalı",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = create_access_token(data={"sub": user.tc_no})
-    return TokenResponse(access_token=token)
+    return TokenResponse(
+        access_token=create_access_token(data={"sub": user.tc_no}),
+        refresh_token=create_refresh_token(data={"sub": user.tc_no}),
+    )
+
+
+def refresh_access_token(refresh_token: str, db: Session) -> TokenResponse:
+    """Yenileme token'ından yeni bir access token üretir.
+
+    Sunulan token'ın gerçekten bir REFRESH token olması şart: aksi halde
+    kısa ömürlü bir access token süresiz olarak kendini yenileyebilirdi ve
+    kısa ömür anlamını kaybederdi.
+
+    Kullanıcı hâlâ var ve aktif mi, her yenilemede yeniden denetlenir; devre
+    dışı bırakılan bir hesabın oturumu bir sonraki yenilemede sona erer.
+    """
+    payload = decode_access_token(refresh_token)
+    tc_no = payload.get("sub") if payload else None
+    if not tc_no or payload.get("typ") != REFRESH_TOKEN_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Yenileme token'ı geçersiz veya süresi dolmuş.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = db.query(User).filter(User.tc_no == tc_no).first()
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Yenileme token'ı geçersiz veya süresi dolmuş.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Yeni bir refresh token verilmez: verilseydi oturum sonsuza kadar
+    # uzatılabilirdi ve refresh token'ın süresi hiç dolmazdı.
+    return TokenResponse(access_token=create_access_token(data={"sub": user.tc_no}))
 
 
 def create_user(payload: RegisterRequest, db: Session) -> UserResponse:

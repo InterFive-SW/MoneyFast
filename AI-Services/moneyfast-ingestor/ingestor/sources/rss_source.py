@@ -161,6 +161,11 @@ NON_FINANCIAL_SECTIONS = frozenset(
         "otomobil",
         "seyahat",
         "astroloji",
+        # Bir gazetenin hafta sonu eki: futbol, seyahat, portre. Ölçüldü --
+        # bu bölümden gelen dört haberin dördü de finans dışıydı (Süper Lig,
+        # Düzce gezisi, genç piyanist, Bodrum). Kullanıcının şikâyet ettiği
+        # "Fenerbahçe" içeriği buradan geliyordu.
+        "dunya-plus",
         "foto-galeri",
         "video-galeri",
         "galeri",

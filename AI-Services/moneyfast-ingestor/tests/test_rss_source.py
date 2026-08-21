@@ -230,10 +230,28 @@ class TestSectionFilter:
             "https://www.dunya.com/gundem/marmarada-170-deprem",
             "https://www.ekonomim.com/foto-galeri/en-az-ariza-yapan-otomobiller",
             "https://www.dunya.com/video-galeri/haftanin-ozeti",
+            # The weekend supplement. Measured against the live feed: four of
+            # four items were football, travel and a portrait.
+            "https://www.dunya.com/dunya-plus/super-ligde-bol-kepce-sezonu",
         ],
     )
     def test_off_topic_sections_are_dropped(self, url):
         assert rss_source.is_financial(url) is False
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            # The international desk of an economics paper carries Brent crude
+            # and Fed commentary alongside general world news. Denylisting it
+            # to remove the occasional political story would cost real market
+            # coverage, so it stays.
+            "https://www.dunya.com/dunya/petrol-fiyatlari-geriledi-brent-93-dolar",
+            "https://www.dunya.com/sektorler/otomotivde-otv-geliri-dustu",
+            "https://www.dunya.com/ekonomik-veriler/tuketici-guven-endeksi",
+        ],
+    )
+    def test_mixed_sections_that_carry_market_news_are_kept(self, url):
+        assert rss_source.is_financial(url) is True
 
     @pytest.mark.parametrize(
         "url",

@@ -39,16 +39,22 @@ async def get_portfolio_summary(
     account = market_service.account(db, user_id=user_id)
     cash = float(account.cash_balance) if account else 0.0
 
+    # Split by the holding's own currency, not by whether its market is BIST.
+    # The old test was right only while every foreign holding happened to be
+    # American; a EUR instrument was converted at the dollar rate.
     bist = sum(
-        r["quantity"] * r["price"] for r in rows
-        if r.get("price") and r.get("market") == "BIST"
+        value for value in (
+            ai_service.holding_value(r, rates) for r in rows
+            if (r.get("currency") or "TRY") == "TRY"
+        ) if value is not None
     )
-    foreign_native = sum(
-        r["quantity"] * r["price"] for r in rows
-        if r.get("price") and r.get("market") != "BIST"
+    foreign_try = sum(
+        value for value in (
+            ai_service.holding_value(r, rates) for r in rows
+            if (r.get("currency") or "TRY") != "TRY"
+        ) if value is not None
     )
     usd_rate = rates.get("USD")
-    foreign_try = foreign_native * usd_rate if usd_rate else 0.0
 
     total_try = cash + bist + foreign_try
     return {
@@ -127,6 +133,10 @@ def _as_frontend_position(row: dict) -> dict:
     daily = (price - previous) * quantity if (previous and price) else 0.0
     return {
         "symbol": row["symbol"],
+        # Carried through. `holdings()` had it all along; dropping it here is
+        # why the dashboard rendered a dollar price under a "Pozisyon (₺)"
+        # heading.
+        "currency": row.get("currency") or "TRY",
         "price": round(price, 4),
         "quantity": quantity,
         "avgCost": round(avg_cost, 4),
@@ -162,19 +172,49 @@ async def get_asset_allocation(
     rates = ai_service.fx_rates(quotes)
     account = market_service.account(db, user_id=user_id)
 
+    # Bucketed by the instrument's MARKET, not by its currency. Currency was a
+    # workable proxy while the only foreign instrument was American, but gold
+    # is quoted in dollars and is not a foreign share -- it was being counted
+    # as one. Values are still converted through `holding_value`, which skips
+    # a holding whose rate is unknown rather than assuming 1.0.
+    #: Venue to bucket. Anything unlisted falls to "Diğer" rather than being
+    #: dropped: a holding that disappears from an allocation chart is far
+    #: harder to notice than one in a catch-all slice.
+    by_market = {
+        "BIST": "BIST Hisse",
+        "NASDAQ": "ABD Hisse",
+        "NYSE": "ABD Hisse",
+        "COMEX": "Emtia / Döviz",
+        "FX": "Emtia / Döviz",
+    }
+
     buckets = {
         "Nakit (TRY)": float(account.cash_balance) if account else 0.0,
-        "BIST Hisse": sum(
-            r["quantity"] * r["price"] for r in rows
-            if r.get("price") and r.get("market") == "BIST"
-        ),
-        "Yabancı Hisse": sum(
-            r["quantity"] * r["price"] * rates.get("USD", 0.0) for r in rows
-            if r.get("price") and r.get("market") != "BIST"
-        ),
+        "BIST Hisse": 0.0,
+        "ABD Hisse": 0.0,
+        "Emtia / Döviz": 0.0,
+        "Diğer": 0.0,
     }
+    for row in rows:
+        value = ai_service.holding_value(row, rates)
+        if value is None:
+            continue
+        buckets[by_market.get(row.get("market") or "", "Diğer")] += value
     grand = sum(buckets.values())
-    palette = {"Nakit (TRY)": "#64748b", "BIST Hisse": "#0ea5e9", "Yabancı Hisse": "#22c55e"}
+    palette = {
+        "Nakit (TRY)": "#64748b",
+        "BIST Hisse": "#0ea5e9",
+        "ABD Hisse": "#22c55e",
+        "Emtia / Döviz": "#f59e0b",
+        "Diğer": "#a855f7",
+    }
+    # An empty bucket is noise on a pie chart; cash is kept even at zero
+    # because "no cash" is itself worth seeing.
+    buckets = {
+        name: amount
+        for name, amount in buckets.items()
+        if amount or name == "Nakit (TRY)"
+    }
     return [
         {
             "assetClass": name,
@@ -208,6 +248,7 @@ async def get_watchlist(db: Session = Depends(get_db)):
         groups[bucket].append(
             {
                 "symbol": symbol,
+                "currency": quote.get("currency") or "TRY",
                 "price": round(quote["price"], 4),
                 "change": round(quote.get("change_amount") or 0.0, 4),
                 "changePercent": round(quote["change_percent"], 2),
@@ -231,6 +272,7 @@ async def get_top_movers(db: Session = Depends(get_db), limit: int = Query(defau
     rows = [
         {
             "symbol": symbol,
+            "currency": quote.get("currency") or "TRY",
             "price": quote["price"],
             "changePercent": round(float(quote["change_percent"]), 2),
         }
@@ -270,12 +312,16 @@ async def get_sector_allocation(
     """
     rows = market_service.holdings(db, user_id=user_id)
     sectors = market_service.sector_by_symbol(db)
+    rates = ai_service.fx_rates(market_service.latest_quotes(db))
 
     totals: Dict[str, float] = {}
     for row in rows:
-        if not row.get("price"):
+        # Converted before summing. Adding a USD position straight into a TRY
+        # total made every percentage on this chart wrong whenever the user
+        # held a foreign name.
+        value = ai_service.holding_value(row, rates)
+        if value is None:
             continue
-        value = row["quantity"] * row["price"]
         sector = sectors.get(row["symbol"]) or "Bilinmiyor"
         totals[sector] = totals.get(sector, 0.0) + value
 
@@ -299,17 +345,26 @@ async def get_heatmap(
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
     """Isı haritası: portföy ağırlığı ve günlük değişim."""
-    rows = [r for r in market_service.holdings(db, user_id=user_id) if r.get("price")]
     sectors = market_service.sector_by_symbol(db)
-    grand = sum(r["quantity"] * r["price"] for r in rows)
+    rates = ai_service.fx_rates(market_service.latest_quotes(db))
+
+    # Weights are shares of one total, so every value must be in one currency.
+    valued = []
+    for row in market_service.holdings(db, user_id=user_id):
+        value = ai_service.holding_value(row, rates)
+        if value is not None:
+            valued.append((row, value))
+
+    grand = sum(value for _, value in valued)
     return [
         {
             "symbol": row["symbol"],
-            "weight": round(row["quantity"] * row["price"] / grand * 100, 2) if grand else 0.0,
+            "currency": row.get("currency") or "TRY",
+            "weight": round(value / grand * 100, 2) if grand else 0.0,
             "changePercent": round(row.get("change_percent") or 0.0, 2),
             "sector": sectors.get(row["symbol"]) or "Bilinmiyor",
         }
-        for row in rows
+        for row, value in valued
     ]
 
 
@@ -433,7 +488,28 @@ async def stage_transaction(
     # authenticated identity wins; `mcp` calls with a service identity and
     # names the user in the body.
     owner_id = authenticated_user_id or request.user_id
-    owner = market_service.account(db, user_id=owner_id)
+
+    # A proposal needs a real owner, and "anonymous" is not one.
+    #
+    # The chat degrades an expired token to an anonymous session so general
+    # questions keep working (core/deps.py). That is right for READING and
+    # wrong here: the orchestrator then names the user as "anonymous", the
+    # account lookup below falls through to the shared DEMO account, and the
+    # proposal is priced against a portfolio that is not the caller's. It is
+    # then stored with user_id="anonymous", which the confirm endpoint's
+    # ownership check can never match -- so the user is shown an Onayla button
+    # that is guaranteed to 404. Refuse at the point the bad row would be
+    # created.
+    if owner_id in (None, "", "anonymous"):
+        raise HTTPException(
+            status_code=401,
+            detail="Oturum doğrulanamadı. İşlem hazırlamak için tekrar giriş yapın.",
+        )
+
+    # No demo fallback here: `account()` returns the shared demo account for a
+    # caller it cannot place, which is fine for reading and wrong for pricing
+    # a trade.
+    owner = market_service.account(db, user_id=owner_id, allow_demo_fallback=False)
 
     # The caller's own account, when they did not name one. `source_account_id`
     # was previously stored without ever being validated, so the chat asked for

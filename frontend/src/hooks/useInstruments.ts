@@ -27,7 +27,7 @@ const MARKET_LABELS: Record<string, MarketInstrument['market']> = {
 
 const CURRENCY_UNITS: Record<string, string> = { TRY: '₺', USD: '$', EUR: '€' };
 
-function adapt(row: ApiInstrument): MarketInstrument {
+export function adaptInstrument(row: ApiInstrument): MarketInstrument {
   return {
     symbol: row.symbol,
     name: row.name,
@@ -35,9 +35,10 @@ function adapt(row: ApiInstrument): MarketInstrument {
     price: row.price,
     unit: CURRENCY_UNITS[row.currency] ?? row.currency,
     changePercent: row.change_percent ?? 0,
-    // Volume is per-bar, not per-quote; the table reads it from the daily
-    // candle instead. Zero here would read as "nobody traded today".
-    volume: 0,
+    // Now carried on the quote itself. It was always stored and never
+    // projected, so this read 0 for every row -- which renders as "nobody
+    // traded today" rather than as the missing field it actually was.
+    volume: row.volume ?? 0,
     marketCap: row.market_cap ?? 0,
     sector: row.sector ?? 'Bilinmiyor',
     week52Low: row.week52_low ?? 0,
@@ -69,7 +70,7 @@ export function useInstruments(limit = 200): InstrumentsState {
   useEffect(() => {
     apiClient
       .getInstruments({ limit })
-      .then((response) => setFetched((response.instruments ?? []).map(adapt)))
+      .then((response) => setFetched((response.instruments ?? []).map(adaptInstrument)))
       .catch((error) => console.error('Failed to load instruments', error))
       .finally(() => setLoading(false));
   }, [limit]);

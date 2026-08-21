@@ -70,6 +70,7 @@ async def get_market_tickers(db: Session = Depends(get_db)):
     return [
         {
             "symbol": symbol,
+            "currency": quotes[symbol].get("currency") or "TRY",
             "price": quotes[symbol]["price"],
             "change": quotes[symbol]["change_amount"] or 0.0,
             "changePercent": quotes[symbol]["change_percent"] or 0.0,
@@ -182,9 +183,10 @@ async def get_candles(
     """
     product = market_service.resolve_symbol(db, symbol)
     if product is None:
-        return {"symbol": symbol.upper(), "interval": "1d", "candles": []}
+        return {"symbol": symbol.upper(), "currency": "TRY", "interval": "1d", "candles": []}
     return {
         "symbol": product.symbol,
+        "currency": product.currency_code or "TRY",
         "interval": "1d",
         "candles": market_service.candle_series(db, product.symbol, limit=limit),
     }

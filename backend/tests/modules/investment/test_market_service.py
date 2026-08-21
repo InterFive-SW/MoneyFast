@@ -131,10 +131,10 @@ class TestListInstruments:
         db.query.return_value.filter.return_value.first.return_value = product()
         return db
 
-    def _row(self, pe=8.2, pb=1.4, sector="Industrials"):
+    def _row(self, pe=8.2, pb=1.4, sector="Industrials", volume=1_250_000):
         quote = SimpleNamespace(
             price=304.0, change_amount=3.0, change_percent=1.0,
-            market_timestamp=NOW, received_at=NOW,
+            volume=volume, market_timestamp=NOW, received_at=NOW,
         )
         fundamentals = SimpleNamespace(
             pe_ratio=pe, pb_ratio=pb, market_cap=1000, dividend_yield=2.29,
@@ -148,10 +148,20 @@ class TestListInstruments:
         assert rows[0]["price"] == 304.0
         assert rows[0]["pe_ratio"] == pytest.approx(8.2)
 
+    def test_volume_is_projected(self):
+        """Stored on every quote row and exposed by nothing, so the chat's
+        turnover column could only ever say "veri yok"."""
+        rows = market_service.list_instruments(self._db([self._row()]))
+        assert rows[0]["volume"] == 1_250_000
+
+    def test_a_quote_without_volume_reports_none(self):
+        rows = market_service.list_instruments(self._db([self._row(volume=None)]))
+        assert rows[0]["volume"] is None
+
     def test_instrument_without_fundamentals_still_appears(self):
         """Dropping it would hide the gap rather than report it."""
         quote = SimpleNamespace(price=304.0, change_amount=None, change_percent=None,
-                                market_timestamp=NOW, received_at=NOW)
+                                volume=None, market_timestamp=NOW, received_at=NOW)
         rows = market_service.list_instruments(self._db([(product(), quote, None)]))
         assert rows[0]["pe_ratio"] is None
         assert rows[0]["price"] == 304.0
@@ -190,20 +200,32 @@ class TestHoldings:
         db.execute.return_value.all.return_value = rows
         return db
 
-    def _row(self, price=304.0):
+    def _row(self, price=304.0, sector="Industrials"):
         position = SimpleNamespace(quantity=120, average_buy_price=280.0, opened_at=NOW)
         quote = (
             SimpleNamespace(price=price, previous_close=301.0, change_percent=1.0,
                             market_timestamp=NOW, received_at=NOW)
             if price is not None else None
         )
-        return (position, product(), quote)
+        fundamentals = SimpleNamespace(sector=sector) if sector is not None else None
+        return (position, product(), quote, fundamentals)
 
     def test_joins_position_product_and_quote(self):
         rows = market_service.holdings(self._db([self._row()]))
         assert rows[0]["symbol"] == "THYAO"
         assert rows[0]["quantity"] == 120
         assert rows[0]["price"] == 304.0
+
+    def test_sector_is_carried_for_the_risk_engine(self):
+        """Absent it, the risk engine bucketed every portfolio as 100%
+        UNCLASSIFIED -- not because sectors were unknown, but because the
+        positions handed to it never carried the field."""
+        rows = market_service.holdings(self._db([self._row()]))
+        assert rows[0]["sector"] == "Industrials"
+
+    def test_an_unclassified_instrument_reports_no_sector(self):
+        rows = market_service.holdings(self._db([self._row(sector=None)]))
+        assert rows[0]["sector"] is None
 
     def test_a_holding_with_no_quote_reports_a_null_price(self):
         """Not zero: zero renders as a holding that lost all its value."""
@@ -250,8 +272,8 @@ class TestBreakdownHelpers:
         someone trade against it."""
         db = MagicMock(spec=Session)
         db.execute.return_value.all.side_effect = [
-            [(SimpleNamespace(quantity=1, average_buy_price=1, opened_at=NOW), product(), None)],
-            [("THYAO", 2.29, 304.0)],
+            [(SimpleNamespace(quantity=1, average_buy_price=1, opened_at=NOW), product(), None, None)],
+            [("THYAO", 2.29, 304.0, "TRY")],
         ]
         rows = market_service.dividend_rows(db)
         assert rows[0]["exDate"] == ""
@@ -357,6 +379,18 @@ class TestAccountResolution:
         demo = SimpleNamespace(id="acct-demo")
         db.query.return_value.filter.return_value.first.side_effect = [None, demo]
         assert market_service.account(db, user_id="ghost") is demo
+
+    def test_the_demo_fallback_can_be_switched_off(self):
+        """Reading the demo portfolio when nobody is signed in is harmless.
+        Pricing a TRADE against it is not: an expired session named its user
+        "anonymous", matched no account, and staged against the shared demo
+        balance."""
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.side_effect = [None, "demo"]
+        assert (
+            market_service.account(db, user_id="ghost", allow_demo_fallback=False)
+            is None
+        )
 
     def test_an_explicit_account_number_wins(self):
         db = MagicMock(spec=Session)

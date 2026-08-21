@@ -9,6 +9,10 @@ interface ChatContextType {
   messages: ChatMessage[];
   isTyping: boolean;
   currentThought?: string;
+  /** Bu oturumda az önce gelen yanıtın id'si. Yalnızca o mesaj yazılıyormuş
+   *  gibi gösterilir; "son mesaj" ölçütü kullanılsaydı, kayıtlı bir sohbet
+   *  her açılışta baştan canlanırdı. */
+  justAnsweredId: string | null;
   activeContext: string | null;
   /** Dismiss the context panel. Exposed so the panel can close itself —
    *  without it there was no way to hide the panel short of reloading. */
@@ -29,6 +33,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   
   const [isTyping, setIsTyping] = useState<boolean>(false);
   const [currentThought, setCurrentThought] = useState<string | undefined>();
+  const [justAnsweredId, setJustAnsweredId] = useState<string | null>(null);
   const [activeContext, setActiveContext] = useState<string | null>(null);
   const dismissContext = useCallback(() => setActiveContext(null), []);
 
@@ -149,22 +154,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }));
 
     setIsTyping(true);
+    setCurrentThought(undefined);
 
-    let step = 0;
-    const thoughts = [
-      "Kullanıcı talebi analiz ediliyor...",
-      "Canlı piyasa verileri çekiliyor...",
-      "Risk modeli güncelleniyor...",
-      "Yanıt oluşturuluyor..."
-    ];
-
-    const thoughtInterval = setInterval(() => {
-      if (step < thoughts.length) {
-        setCurrentThought(thoughts[step]);
-        step++;
-      }
-    }, 800);
-
+    // Bu satırlar eskiden 800ms'de bir dönen sabit bir listeydi ve grafın ne
+    // yaptığından bağımsızdı: "Türkiye'nin başkenti neresi" sorusunda bile
+    // "Risk modeli güncelleniyor..." yazıyordu. Artık her satır gerçekten
+    // girilen bir düğümden geliyor.
     try {
       // Send the recent turns and the session id. Coreference resolution
       // ("peki ya o?") depends on the history, and without a thread_id every
@@ -173,13 +168,23 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       // For a signed-in user the backend prefers its OWN stored history over
       // this copy: history decides which instrument a follow-up resolves to,
       // so a client able to rewrite it could steer a tool call.
-      const data = await api.post<any>('/api/ai_orchestrator/chat', {
+      const requestBody = {
         user_message: text,
         thread_id: currentSessionId,
         conversation_history: priorTurns,
+      };
+
+      // Akış önce denenir; kurulamazsa tamponlu uç noktaya düşülür, böylece
+      // sohbetin çalışması akışa bağlı kalmaz.
+      let data: any = null;
+      const streamed = await api.streamChat(requestBody, {
+        onStage: (label) => setCurrentThought(label),
+        onDone: (payload) => { data = payload; },
       });
-      
-      clearInterval(thoughtInterval);
+      if (!streamed || !data) {
+        data = await api.post<any>('/api/ai_orchestrator/chat', requestBody);
+      }
+
       setCurrentThought(undefined);
       setIsTyping(false);
 
@@ -197,6 +202,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         disclosures: data.disclosures ?? []
       };
 
+      setJustAnsweredId(aiResponse.id);
       setSessions(prev => prev.map(session => {
         if (session.id === currentSessionId) {
           return {
@@ -210,7 +216,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       
     } catch (error) {
       console.error("AI Error:", error);
-      clearInterval(thoughtInterval);
       setCurrentThought(undefined);
       setIsTyping(false);
       
@@ -236,7 +241,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
   return (
     <ChatContext.Provider value={{ 
-      sessions, activeSessionId, messages, isTyping, currentThought, activeContext,
+      sessions, activeSessionId, messages, isTyping, currentThought, justAnsweredId, activeContext,
       dismissContext, handleSendMessage, createNewSession, loadSession, deleteSession
     }}>
       {children}

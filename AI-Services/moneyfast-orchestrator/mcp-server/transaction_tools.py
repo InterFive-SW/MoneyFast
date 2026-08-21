@@ -42,10 +42,10 @@ async def prepare_transaction_proposal(
     notional_amount: Optional[dict[str, Any]] = None,
     destination_account_id: Optional[str] = None,
     beneficiary: Optional[dict[str, Any]] = None,
-    order_type: str = "MARKET",
+    order_type: Optional[str] = "MARKET",
     limit_price: Optional[float] = None,
     stop_price: Optional[float] = None,
-    time_in_force: str = "DAY",
+    time_in_force: Optional[str] = "DAY",
     assumptions: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """
@@ -212,6 +212,21 @@ async def prepare_transaction_proposal(
           validate_compliance_rules with contains_transaction_proposal=True before
           emission.
     """
+    time_in_force = time_in_force or "DAY"
+    order_type = order_type or "MARKET"
+    # An unidentified caller cannot stage a trade. "anonymous" is the sentinel
+    # the orchestrator substitutes when the backend resolved no user from the
+    # bearer token -- an expired session, in practice. Staging anyway produced
+    # a proposal owned by nobody: priced against the shared demo account, and
+    # rejected forever by the confirm endpoint's ownership check. The user saw
+    # a complete buy/sell card whose only button was guaranteed to fail.
+    if user_id in (None, "", "anonymous"):
+        raise InvalidInputError(
+            f"{TOOL}: the session is not authenticated, so no transaction can "
+            f"be prepared. Tell the user their session has expired and they "
+            f"need to sign in again. Do not present a proposal."
+        )
+
     # Client-side validation first. These are contradictions no backend should
     # have to reject, and catching them here keeps a malformed order off the
     # staging path entirely.

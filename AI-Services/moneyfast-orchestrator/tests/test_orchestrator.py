@@ -702,6 +702,82 @@ class TestHandoffNode:
         out = await orchestrator.handoff_node(base_state)
         assert out["specialist_output"]["safety_flags"] == []
 
+    @pytest.mark.asyncio
+    async def test_self_harm_gets_crisis_resources_and_no_money_talk(
+        self, fake_mcp, base_state
+    ):
+        """The log's worst turn: "ölmek istiyorum" was answered with a lecture
+        on how borrowed money raises risk, because one instruction served both
+        categories."""
+        out = await orchestrator.handoff_node(
+            {**base_state, "safety_flags": ["DISTRESS_SIGNAL", "SELF_HARM_RISK"]}
+        )
+        assert out["crisis_notices"] == [orchestrator.CRISIS_RESOURCES_TR]
+        instruction = out["specialist_output"]["instruction"]
+        assert out["specialist_output"]["handoff_category"] == "SELF_HARM_RISK"
+        assert "not a financial turn" in instruction
+        for banned in ("budgeting", "portfolios", "debt"):
+            assert banned in instruction  # named only to be forbidden
+        assert "Do NOT offer to connect" in instruction
+
+    @pytest.mark.asyncio
+    async def test_coercion_points_at_law_enforcement_not_a_budget(
+        self, fake_mcp, base_state
+    ):
+        out = await orchestrator.handoff_node(
+            {**base_state, "safety_flags": ["DISTRESS_SIGNAL", "COERCION_RISK"]}
+        )
+        assert out["crisis_notices"] == [orchestrator.COERCION_RESOURCES_TR]
+        assert "155" in orchestrator.COERCION_RESOURCES_TR
+        assert out["specialist_output"]["handoff_category"] == "COERCION_RISK"
+
+    @pytest.mark.asyncio
+    async def test_financial_distress_keeps_the_budgeting_answer(
+        self, fake_mcp, base_state
+    ):
+        """Unchanged behaviour for the case the original instruction was
+        actually written for -- and no crisis line, which would be noise."""
+        out = await orchestrator.handoff_node(
+            {**base_state, "safety_flags": ["DISTRESS_SIGNAL", "FINANCIAL_DISTRESS"]}
+        )
+        assert out["crisis_notices"] == []
+        assert "Do not screen" in out["specialist_output"]["instruction"]
+
+    def test_crisis_resources_name_real_lines(self):
+        """A hallucinated helpline is worse than none: the model once offered
+        ALO 182, the health-appointment line."""
+        assert "112" in orchestrator.CRISIS_RESOURCES_TR
+        assert "183" in orchestrator.CRISIS_RESOURCES_TR
+        assert "182" not in orchestrator.CRISIS_RESOURCES_TR
+
+
+class TestKeepCrisis:
+    """Crisis resources must leave the compliance gate on every branch."""
+
+    def test_notices_are_appended_to_disclosures(self):
+        out = orchestrator._keep_crisis(
+            {"crisis_notices": ["ACIL"]}, {"disclosures": ["yasal"]}
+        )
+        assert out["disclosures"] == ["yasal", "ACIL"]
+
+    def test_block_branch_still_carries_them(self):
+        """The worst moment to hand someone a dead end is a blocked crisis
+        turn, which previously ended at a generic failure string."""
+        out = orchestrator._keep_crisis(
+            {"crisis_notices": ["ACIL"]}, {"final_output": "engellendi"}
+        )
+        assert out["disclosures"] == ["ACIL"]
+
+    def test_not_duplicated_when_already_present(self):
+        out = orchestrator._keep_crisis(
+            {"crisis_notices": ["ACIL"]}, {"disclosures": ["ACIL"]}
+        )
+        assert out["disclosures"] == ["ACIL"]
+
+    def test_ordinary_turn_is_untouched(self):
+        payload = {"disclosures": ["yasal"]}
+        assert orchestrator._keep_crisis({}, payload) is payload
+
 
 # ==========================================================================
 # synthesis_node
@@ -1243,6 +1319,109 @@ class TestGraph:
         with caplog.at_level("INFO", logger="moneyfast.graph"):
             assert orchestrator.build_graph() is not None
         assert any("no checkpointer" in r.getMessage() for r in caplog.records)
+
+
+class TestRunTurnStreaming:
+    """Progress streams; the answer does not.
+
+    The graph is fail-closed -- a draft the compliance gate blocks must never
+    be shown -- so synthesis tokens cannot be emitted as they are produced.
+    The stages are real node transitions, which is the point: the captions
+    they replace were a fixed 800ms client-side loop that announced "Risk
+    modeli güncelleniyor..." even for "what is the capital of Turkey".
+    """
+
+    @pytest.mark.asyncio
+    async def test_stages_name_the_nodes_actually_entered(
+        self, route_as, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
+    ):
+        fake_mcp.responses.update({
+            "get_portfolio_positions": positions_payload,
+            "validate_compliance_rules": pass_verdict,
+        })
+        route_as(routing_payload)
+        patched_llm.set_responses(["{}", "Portföyünüzde 500 lot THYAO var."])
+
+        events = [
+            item
+            async for item in orchestrator.run_turn_streaming(
+                "portföyüm ne durumda?", user_id="u_123"
+            )
+        ]
+
+        stages = [value for kind, value in events if kind == "stage"]
+        assert orchestrator.STAGE_LABELS_TR["portfolio"] in stages
+        # The risk node never ran, so its caption must not appear.
+        assert orchestrator.STAGE_LABELS_TR["risk"] not in stages
+
+    @pytest.mark.asyncio
+    async def test_the_last_event_carries_the_finished_state(
+        self, route_as, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
+    ):
+        fake_mcp.responses.update({
+            "get_portfolio_positions": positions_payload,
+            "validate_compliance_rules": pass_verdict,
+        })
+        route_as(routing_payload)
+        patched_llm.set_responses(["{}", "Portföyünüzde 500 lot THYAO var."])
+
+        events = [
+            item
+            async for item in orchestrator.run_turn_streaming("portföyüm?", user_id="u_1")
+        ]
+
+        kind, final = events[-1]
+        assert kind == "state"
+        assert "THYAO" in final["final_output"]
+        assert final["compliance_verdict"] == "PASS"
+        # Seeded from the initial state: `updates` mode yields only the keys a
+        # node returned, so this would be missing if the accumulator started
+        # empty -- and widgets.build() reads it.
+        assert final["user_message"] == "portföyüm?"
+
+    @pytest.mark.asyncio
+    async def test_a_node_yielding_no_patch_is_survived(self, mocker):
+        """LangGraph yields a dict per node today. A None would otherwise
+        crash the turn at the accumulator rather than degrade."""
+
+        class _FakeGraph:
+            async def astream(self, *_args, **_kwargs):
+                yield {"router": None}
+                yield {"synthesis": {"final_output": "Merhaba"}}
+
+        mocker.patch.object(orchestrator, "get_graph", return_value=_FakeGraph())
+
+        events = [item async for item in orchestrator.run_turn_streaming("selam")]
+
+        assert ("stage", orchestrator.STAGE_LABELS_TR["router"]) in events
+        assert events[-1][1]["final_output"] == "Merhaba"
+
+    @pytest.mark.asyncio
+    async def test_streaming_and_buffered_runs_agree(
+        self, route_as, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
+    ):
+        """Two entry points, one graph. If they diverged, the streamed answer
+        and the fallback answer would differ for the same question."""
+        def _setup():
+            fake_mcp.responses.update({
+                "get_portfolio_positions": positions_payload,
+                "validate_compliance_rules": pass_verdict,
+            })
+            route_as(routing_payload)
+            patched_llm.set_responses(["{}", "Portföyünüzde 500 lot THYAO var."])
+
+        _setup()
+        buffered = await orchestrator.run_turn("portföyüm?", user_id="u_1", thread_id="a")
+        _setup()
+        streamed = [
+            item
+            async for item in orchestrator.run_turn_streaming(
+                "portföyüm?", user_id="u_1", thread_id="b"
+            )
+        ][-1][1]
+
+        assert streamed["final_output"] == buffered["final_output"]
+        assert streamed["target_agent"] == buffered["target_agent"]
 
 
 class TestRunTurn:

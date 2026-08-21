@@ -158,6 +158,9 @@ cd frontend && npm run coverage   # junit.xml + coverage/cobertura-coverage.xml
 - ✅ Nakit takası: onaylanan işlem bakiyeyi ve pozisyonu gerçekten değiştirir
 - ✅ Banking: mevduat hesapları ve çift taraflı kayıtla para transferi
   (kendi hesapların arasında ve başka kullanıcıya)
+- ✅ Banking: harcama kategorileri, birikim hedefleri, bakiye geçmişi
+- ✅ Tek fiyat: her ekran aynı canlı akıştan besleniyor
+- ✅ Para birimi: her fiyat kendi birimiyle, yanında TL karşılığıyla
 - ⏳ Modül implementasyonları (notification)
 - ⏳ Kalan panel mock uç noktaları (heatmap, temettü, sektör dağılımı)
 

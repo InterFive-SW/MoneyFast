@@ -155,7 +155,10 @@ class TestPortfolioWidget:
             state_for("PORTFOLIO_AGENT", {"positions": [{"symbol": "X"}], "totals": {}})
         )
         assert widget["payload"]["positions"][0] == {
-            "symbol": "X", "quantity": 0.0, "avg_cost": 0.0, "last_price": 0.0,
+            "symbol": "X",
+            # Defaults to lira when the contract omits it, like every other
+            # field here — never guessed from the symbol.
+            "instrument_currency": "TRY", "quantity": 0.0, "avg_cost": 0.0, "last_price": 0.0,
             "market_value": 0.0, "unrealized_pnl": 0.0, "unrealized_pnl_pct": 0.0,
         }
 

@@ -453,3 +453,25 @@ class TestCashInTotals:
         fake_backend.json("portfolio", portfolio_payload)
         with pytest.raises(ContractViolationError):
             await portfolio_tools.get_portfolio_positions("u_123")
+
+
+class TestNullDefaults:
+    """A model that emits `null` for an optional parameter must not kill the call.
+
+    Observed in production: the planner sent `valuation_mode: null` for an
+    ordinary "portföyümü göstersene", the bare `str` annotation rejected it
+    before the tool ran, and the user was told
+    "portföy verilerinize ulaşamadım" — as though the backend were down.
+    A null means "no preference", which is exactly what the default is for.
+    """
+
+    async def test_null_valuation_mode_falls_back_to_the_default(self, fake_backend, portfolio_payload):
+        fake_backend.json("portfolio", portfolio_payload)
+        payload = await portfolio_tools.get_portfolio_positions("u_123", valuation_mode=None)
+        assert payload["positions"]
+        assert "valuation_mode=LAST_CLOSE" in str(fake_backend.last.url)
+
+    async def test_null_base_currency_falls_back_to_the_default(self, fake_backend, portfolio_payload):
+        fake_backend.json("portfolio", portfolio_payload)
+        await portfolio_tools.get_portfolio_positions("u_123", base_currency=None)
+        assert "base_currency=TRY" in str(fake_backend.last.url)

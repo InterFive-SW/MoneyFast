@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { apiClient } from '../../api/client'
+import { formatWithBase } from '../../lib/money'
+import { useMarketStream, useQuote } from '../../hooks/useMarketStream'
 
 type TradeAction = 'Alış' | 'Satış'
 type Step = 'form' | 'submitting' | 'success' | 'error'
@@ -7,22 +9,21 @@ type Step = 'form' | 'submitting' | 'success' | 'error'
 interface TradeModalProps {
   symbol: string
   price: number
+  /** The instrument's own currency. Without it this modal priced a dollar
+   *  stock in lira — AAPL showed "₺314,88" for a $314.88 share. */
+  currency?: string
   onClose: () => void
 }
 
 /** Panelin varsayılan yatırım hesabı; backend tek demo hesabı bu numarayla tutar. */
 const DEFAULT_ACCOUNT_ID = 'TR-DEMO-0001'
 
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('tr-TR', {
-    style: 'currency',
-    currency: 'TRY',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount)
-}
-
-export default function TradeModal({ symbol, price, onClose }: TradeModalProps) {
+export default function TradeModal({ symbol, price, currency = 'TRY', onClose }: TradeModalProps) {
+  // The live quote, so the confirm screen and the ticker cannot disagree about
+  // what you are about to pay. The price prop is only the opening value.
+  const quote = useQuote(symbol)
+  const { rates } = useMarketStream()
+  const livePrice = quote?.price ?? price
   const [action, setAction] = useState<TradeAction>('Alış')
   const [quantity, setQuantity] = useState(1)
   const [limitEnabled, setLimitEnabled] = useState(false)
@@ -31,7 +32,7 @@ export default function TradeModal({ symbol, price, onClose }: TradeModalProps) 
   const [confirmMessage, setConfirmMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
 
-  const effectivePrice = limitEnabled ? limitPrice : price
+  const effectivePrice = limitEnabled ? limitPrice : livePrice
   const estimatedTotal = quantity * effectivePrice
 
   async function handleConfirm() {
@@ -121,7 +122,7 @@ export default function TradeModal({ symbol, price, onClose }: TradeModalProps) 
               </button>
             </div>
 
-            <p className="tabular-nums text-2xl font-bold text-white mb-4">{formatCurrency(price)}</p>
+            <p className="tabular-nums text-2xl font-bold text-white mb-4">{formatWithBase(livePrice, currency, rates)}</p>
 
             <div className="flex gap-2 mb-4">
               <button
@@ -185,7 +186,7 @@ export default function TradeModal({ symbol, price, onClose }: TradeModalProps) 
 
             <div className="flex items-center justify-between mb-4 px-1">
               <span className="text-xs text-slate-400">Tahmini Tutar</span>
-              <span className="tabular-nums text-sm font-semibold text-slate-200">{formatCurrency(estimatedTotal)}</span>
+              <span className="tabular-nums text-sm font-semibold text-slate-200">{formatWithBase(estimatedTotal, currency, rates)}</span>
             </div>
 
             {step === 'error' && <p className="text-sm text-rose-500 mb-3">{errorMessage}</p>}

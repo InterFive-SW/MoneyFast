@@ -46,6 +46,26 @@ DEFAULT_FEEDS = ",".join(
 MARKET_OPEN_HOUR = 10
 MARKET_CLOSE_HOUR = 18
 
+#: Trading hours per market, as [open, close) in Europe/Istanbul, weekdays.
+#:
+#: One global BIST-hours gate used to decide the whole cycle. That was fine
+#: while every instrument was Turkish; with US equities in the universe it
+#: means their prices stop refreshing at 18:00 TRT, which is half an hour
+#: BEFORE the US session even opens.
+#:
+#: FX and gold trade nearly around the clock; they are given the full weekday
+#: rather than pretending they follow an exchange session.
+MARKET_HOURS: dict[str, tuple[int, int]] = {
+    "BIST": (MARKET_OPEN_HOUR, MARKET_CLOSE_HOUR),
+    # 09:30-16:00 America/New_York is 16:30-23:00 TRT. Whole hours only, so
+    # the window opens at 16:00 -- half an hour of pre-open quotes costs one
+    # request per cycle and avoids modelling US daylight saving separately.
+    "NASDAQ": (16, 23),
+    "NYSE": (16, 23),
+    "FX": (0, 24),
+    "COMEX": (0, 24),
+}
+
 
 def backend_url() -> str:
     return os.getenv("BACKEND_API_BASE_URL", DEFAULT_BACKEND_URL).rstrip("/")
@@ -109,7 +129,11 @@ def quote_interval_seconds() -> int:
     batched request (measured 3.3-5.4s for ~95 symbols). The floor of 5s is a
     guard against a config typo turning this into a request flood.
     """
-    return max(5, _int("INGESTOR_QUOTE_INTERVAL_SECONDS", 10))
+    # 30s, not 10s. Measured with ~190 symbols across two markets: a clean
+    # cycle is a handful of seconds, but a chunk that has to time out pushes
+    # it past ten, and every overrun was logged as a skipped run. A budget the
+    # cycle can actually meet is worth more than a number that looks live.
+    return max(5, _int("INGESTOR_QUOTE_INTERVAL_SECONDS", 30))
 
 
 def news_interval_minutes() -> int:

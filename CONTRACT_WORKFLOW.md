@@ -89,7 +89,29 @@ dondurulmuş. Sürüm geçmişi:
 |---|---|
 | v2.1 | Altı tool: `get_portfolio_positions`, `rag_semantic_market_search`, `calculate_portfolio_risk_metrics`, `prepare_transaction_proposal`, `validate_compliance_rules`, `route_user_request` |
 | **v2.2** | **`get_market_data` eklendi.** Mevcut altı tool'un şeması değişmedi. |
+| **v2.6** | `get_market_data` → enstrüman başına `volume`. `get_portfolio_positions` → pozisyon başına `sector` ve `market`. Üçü de eklemeli. Varsayılanı olan string parametreler (`valuation_mode`, `base_currency`, `order_type`, `time_in_force`, `lookback`, `jurisdiction`, `strictness`, `locale`, `rebalance_assumption`) artık `null` kabul edip varsayılana düşer. |
+| **v2.5** | `prepare_transaction_proposal` artık kimliği belirsiz bir çağıranı (`user_id` yok / boş / `"anonymous"`) **reddeder** — backend `/transactions/stage` 401 döner. Kırıcı değil: geçerli bir `user_id` ile davranış aynı. Eklemeli: `POST /api/auth/refresh`, `POST /api/ai_orchestrator/chat/stream` (SSE). |
+| **v2.4** | Frontend yanıtlarına `currency` eklendi (Position, WatchlistItem, TopMoverItem, DividendItem, HeatmapItem, Order, MarketTicker, CandleSeriesOut). `PortfolioAnalysis` → `base_currency`. Portföy widget'ında pozisyon başına `instrument_currency`. Hepsi eklemeli. |
 | **v2.3** | `get_portfolio_positions` → `totals.cash_balance` ve `totals.total_value` (eklemeli). `prepare_transaction_proposal` → `source_account_id` artık opsiyonel. |
+
+v2.6 neden gerekti: `volume` her fiyat satırında saklanıyor ama hiçbir uç
+nokta vermiyordu, dolayısıyla taramadaki "Günlük ciro" sütunu bazen değil
+HER ZAMAN boştu. `sector` ise risk motorunun sektör kırılımını besliyor;
+alan taşınmadığı için her portföy `{"UNCLASSIFIED": 1.0}` olarak raporlanıyordu.
+
+`null` toleransı bir üretim hatasından geldi: planlayıcı sıradan bir
+"portföyümü göstersene" turunda `valuation_mode: null` gönderdi, çıplak `str`
+anotasyonu çağrıyı araç çalışmadan reddetti ve kullanıcıya sanki backend
+çökmüş gibi "portföy verilerinize ulaşamadım" denildi. `null` = "tercihim yok"
+demektir; varsayılan tam olarak bunun içindir.
+
+v2.5 neden gerekti: süresi dolmuş bir oturum sessizce anonime düşüyor,
+orchestrator kullanıcıyı `"anonymous"` olarak adlandırıyor, hesap araması
+paylaşılan DEMO hesabına düşüyordu. Öneri, kullanıcının olmayan bir portföye
+göre fiyatlanıyor ve `user_id="anonymous"` ile kaydediliyordu; onay adımının
+sahiplik denetimi bunu asla eşleştiremediği için düğme kalıcı olarak 404
+veriyordu. Sahibi olmayan bir öneri hiçbir işe yaramaz, o yüzden hiç
+oluşturulmuyor.
 
 v2.3 neden gerekti: sözleşmede **nakit yoktu**. `totals` yalnızca piyasa
 değeri, maliyet, K/Z ve pozisyon sayısı taşıyordu, dolayısıyla "bakiyem ne

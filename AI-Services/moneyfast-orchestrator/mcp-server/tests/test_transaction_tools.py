@@ -40,6 +40,20 @@ async def stage(stage_args, **overrides):
 # Client-side validation, before any request
 # ==========================================================================
 class TestPreflightValidation:
+    @pytest.mark.parametrize("user_id", ["anonymous", "", None])
+    async def test_an_unidentified_caller_cannot_stage(
+        self, fake_backend, stage_args, user_id
+    ):
+        """"anonymous" is the sentinel the orchestrator substitutes when the
+        backend resolved no user from the bearer token -- an expired session.
+        Staging anyway produced a proposal owned by nobody: priced against the
+        shared demo account and rejected forever by the confirm endpoint, so
+        the user got a complete buy/sell card whose only button always failed.
+        """
+        with pytest.raises(InvalidInputError, match="not authenticated"):
+            await stage(stage_args, user_id=user_id)
+        assert fake_backend.attempts == 0
+
     async def test_quantity_and_notional_are_mutually_exclusive(
         self, fake_backend, stage_args
     ):

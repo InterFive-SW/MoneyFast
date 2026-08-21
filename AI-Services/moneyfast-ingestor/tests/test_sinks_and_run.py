@@ -152,9 +152,27 @@ class TestProductFetch:
 
 class TestMarketHours:
     @pytest.mark.parametrize("hour,expected", [(9, False), (10, True), (17, True), (18, False)])
-    def test_continuous_session_window(self, hour, expected):
+    def test_bist_continuous_session_window(self, hour, expected):
         moment = datetime(2026, 8, 20, hour, 0, tzinfo=run.ISTANBUL)
-        assert run.market_is_open(moment) is expected
+        assert ("BIST" in run.open_markets(moment)) is expected
+
+    @pytest.mark.parametrize("hour,expected", [(15, False), (16, True), (22, True), (23, False)])
+    def test_us_session_is_tracked_separately(self, hour, expected):
+        """A single BIST-hours gate froze every US price at 18:00 TRT, half an
+        hour before the US session even opens."""
+        moment = datetime(2026, 8, 20, hour, 0, tzinfo=run.ISTANBUL)
+        assert ("NASDAQ" in run.open_markets(moment)) is expected
+
+    def test_fx_and_gold_trade_around_the_clock(self):
+        night = datetime(2026, 8, 20, 3, 0, tzinfo=run.ISTANBUL)
+        assert run.open_markets(night) == {"FX", "COMEX"}
+
+    def test_market_is_open_means_any_market(self):
+        """09:00 TRT: BIST shut, FX trading. The old gate called this closed
+        and skipped the cycle."""
+        nine = datetime(2026, 8, 20, 9, 0, tzinfo=run.ISTANBUL)
+        assert run.market_is_open(nine) is True
+        assert "BIST" not in run.open_markets(nine)
 
     def test_weekend_is_closed(self):
         saturday = datetime(2026, 8, 22, 12, 0, tzinfo=run.ISTANBUL)
@@ -174,13 +192,53 @@ class TestJobGuards:
 
         assert "error" in run._guard("quotes", boom, None)
 
-    def test_quotes_are_skipped_when_the_market_is_closed(self, monkeypatch):
+    def test_quotes_are_skipped_when_every_market_is_closed(self, monkeypatch):
         """Polling a closed market rewrites the same closing price forever."""
-        monkeypatch.setattr(run, "market_is_open", lambda: False)
+        monkeypatch.setattr(run, "open_markets", lambda: set())
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [])
         assert run.run_quotes(None) == {"skipped": True}
 
+    def test_only_the_open_markets_are_priced(self, monkeypatch):
+        """The whole point of the split: at 12:00 TRT the US is shut, so its
+        96 symbols must not cost a request."""
+        seen = {}
+        monkeypatch.setattr(run, "open_markets", lambda: {"BIST", "FX"})
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [
+            {"symbol": "THYAO", "data_symbol": "THYAO.IS", "market": "BIST"},
+            {"symbol": "AAPL", "data_symbol": "AAPL", "market": "NASDAQ"},
+            {"symbol": "USDTRY", "data_symbol": "USDTRY=X", "market": "FX"},
+        ])
+
+        def _capture(products):
+            seen["symbols"] = [p["symbol"] for p in products]
+            return [{"symbol": p["symbol"]} for p in products]
+
+        monkeypatch.setattr(run.yfinance_source, "fetch_quotes", _capture)
+        monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": len(q)})
+        run.run_quotes(None)
+        assert seen["symbols"] == ["THYAO", "USDTRY"]
+
+    def test_an_unknown_venue_is_priced_rather_than_dropped(self, monkeypatch):
+        """A venue missing from MARKET_HOURS is a gap in configuration. One
+        extra request is far easier to notice than an instrument that silently
+        never gets a price."""
+        seen = {}
+        monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [
+            {"symbol": "MYSTERY", "data_symbol": "MYST", "market": "XETRA"},
+        ])
+
+        def _capture(products):
+            seen["symbols"] = [p["symbol"] for p in products]
+            return [{"symbol": "MYSTERY"}]
+
+        monkeypatch.setattr(run.yfinance_source, "fetch_quotes", _capture)
+        monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": 1})
+        run.run_quotes(None)
+        assert seen["symbols"] == ["MYSTERY"]
+
     def test_force_overrides_the_market_hours_check(self, monkeypatch):
-        monkeypatch.setattr(run, "market_is_open", lambda: False)
+        monkeypatch.setattr(run, "open_markets", lambda: set())
         monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [])
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda products: [])
         monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": 0})
@@ -311,10 +369,10 @@ class TestRateLimitBackoff:
         run._backoff_step = 0
 
     def test_interval_starts_at_the_configured_value(self):
-        assert run.current_interval_seconds() == 10
+        assert run.current_interval_seconds() == 30
 
     def test_a_rate_limit_widens_the_interval(self, monkeypatch):
-        monkeypatch.setattr(run, "market_is_open", lambda: True)
+        monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
         monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [])
 
         def _rate_limited(_products):
@@ -323,21 +381,21 @@ class TestRateLimitBackoff:
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", _rate_limited)
         result = run.run_quotes(None, force=True)
         assert result == {"rate_limited": True}
-        assert run.current_interval_seconds() > 10
+        assert run.current_interval_seconds() > 30
 
     def test_backoff_is_bounded(self, monkeypatch):
         for _ in range(10):
             run._note_rate_limit()
-        assert run.current_interval_seconds() == 10 * run.config.BACKOFF_LADDER[-1]
+        assert run.current_interval_seconds() == 30 * run.config.BACKOFF_LADDER[-1]
 
     def test_a_clean_cycle_resets_the_interval(self, monkeypatch):
         run._note_rate_limit()
-        monkeypatch.setattr(run, "market_is_open", lambda: True)
+        monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
         monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [])
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda p: [])
         monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": 0})
         run.run_quotes(None, force=True)
-        assert run.current_interval_seconds() == 10
+        assert run.current_interval_seconds() == 30
 
     def test_a_non_rate_limit_error_still_propagates(self, monkeypatch):
         """Only a 429 means "slow down". Everything else is a real fault and
@@ -427,17 +485,18 @@ class TestCycleBudget:
     out loud."""
 
     def test_an_overrunning_cycle_is_logged(self, monkeypatch, caplog):
-        monkeypatch.setattr(run, "market_is_open", lambda: True)
+        monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
         monkeypatch.setattr(run, "current_interval_seconds", lambda: 0)
-        monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [])
-        monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda products: [])
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [
+            {"symbol": "THYAO", "data_symbol": "THYAO.IS", "market": "BIST"}])
+        monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda products: [{"symbol": "THYAO"}])
         monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": 0})
         with caplog.at_level("WARNING"):
             run.run_quotes(None)
         assert any("longer than its interval" in r.message for r in caplog.records)
 
     def test_a_cycle_inside_its_budget_says_nothing(self, monkeypatch, caplog):
-        monkeypatch.setattr(run, "market_is_open", lambda: True)
+        monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
         monkeypatch.setattr(run, "current_interval_seconds", lambda: 3600)
         monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [])
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda products: [])
@@ -527,3 +586,53 @@ class TestFundamentalsDelivery:
 
         assert sinks.push_fundamentals(client_for(handler), []) is None
         assert not calls
+
+
+class TestPartialBatches:
+    """`yf.download` swallows per-symbol failures and still returns a frame,
+    so a struggling provider shows up as a SHORT batch, never an exception.
+    Counting that as success is what let the cycle run six times over budget
+    while the backoff ladder sat at step zero."""
+
+    def setup_method(self):
+        run._backoff_step = 0
+
+    def teardown_method(self):
+        run._backoff_step = 0
+
+    def _products(self, count):
+        return [
+            {"symbol": f"S{i}", "data_symbol": f"S{i}.IS", "market": "BIST"}
+            for i in range(count)
+        ]
+
+    def test_a_mostly_empty_batch_widens_the_interval(self, monkeypatch):
+        monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: self._products(100))
+        monkeypatch.setattr(run.yfinance_source, "fetch_quotes",
+                            lambda p: [{"symbol": "S0"}] * 10)
+        monkeypatch.setattr(run.sinks, "push_market_data",
+                            lambda c, q, k: {"quotes_written": len(q)})
+
+        run.run_quotes(None)
+
+        assert run.current_interval_seconds() > 30
+
+    def test_a_few_delisted_tickers_are_tolerated(self, monkeypatch):
+        """Some symbols never have prices. That is normal, not a signal."""
+        monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: self._products(100))
+        monkeypatch.setattr(run.yfinance_source, "fetch_quotes",
+                            lambda p: [{"symbol": "S0"}] * 95)
+        monkeypatch.setattr(run.sinks, "push_market_data",
+                            lambda c, q, k: {"quotes_written": len(q)})
+
+        run.run_quotes(None)
+
+        assert run.current_interval_seconds() == 30
+
+    def test_no_instruments_in_the_open_markets_is_a_skip(self, monkeypatch):
+        monkeypatch.setattr(run, "open_markets", lambda: {"NASDAQ"})
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "THYAO", "data_symbol": "THYAO.IS", "market": "BIST"}])
+        assert run.run_quotes(None) == {"skipped": True}

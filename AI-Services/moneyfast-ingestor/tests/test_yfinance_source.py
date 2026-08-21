@@ -115,8 +115,84 @@ class TestQuotes:
         monkeypatch.setitem(sys.modules, "yfinance",
                             SimpleNamespace(download=_download, Ticker=lambda s: None))
         rows = yfinance_source.fetch_quotes(PRODUCTS)
-        assert len(calls) == 1, "one batch, not one request per symbol"
+        assert len(calls) == 1, "a small universe still fits one request"
         assert len(rows) == 2
+
+    def test_the_universe_is_split_into_chunks(self, monkeypatch):
+        """One request for ~190 symbols means one stalled symbol stalls
+        everything. Chunking bounds what a single timeout can cost."""
+        import sys
+        from types import SimpleNamespace
+
+        calls = []
+        many = [
+            {"symbol": f"S{i}", "data_symbol": f"S{i}.IS"}
+            for i in range(yfinance_source.CHUNK_SIZE * 2 + 5)
+        ]
+
+        def _download(symbols, **kwargs):
+            calls.append(symbols.split())
+            return frame_for({s: [1.0, 2.0] for s in symbols.split()})
+
+        monkeypatch.setitem(sys.modules, "yfinance",
+                            SimpleNamespace(download=_download, Ticker=lambda s: None))
+        rows = yfinance_source.fetch_quotes(many)
+
+        assert len(calls) == 3
+        assert all(len(c) <= yfinance_source.CHUNK_SIZE for c in calls)
+        assert len(rows) == len(many)
+
+    def test_a_request_carries_a_timeout(self, monkeypatch):
+        """Without one, curl's own default applies and a single unreachable
+        symbol eats the entire cycle budget."""
+        import sys
+        from types import SimpleNamespace
+
+        seen = {}
+
+        def _download(symbols, **kwargs):
+            seen.update(kwargs)
+            return frame_for({"THYAO.IS": [290.0, 300.0]})
+
+        monkeypatch.setitem(sys.modules, "yfinance",
+                            SimpleNamespace(download=_download, Ticker=lambda s: None))
+        yfinance_source.fetch_quotes([PRODUCTS[0]])
+        assert seen["timeout"] == yfinance_source.REQUEST_TIMEOUT_SECONDS
+
+    def test_one_failing_chunk_does_not_lose_the_others(self, monkeypatch):
+        """The symbols in the dead chunk go unpriced this round and are
+        reported as missing; the rest of the universe still updates."""
+        import sys
+        from types import SimpleNamespace
+
+        many = [
+            {"symbol": f"S{i}", "data_symbol": f"S{i}.IS"}
+            for i in range(yfinance_source.CHUNK_SIZE + 3)
+        ]
+        state = {"n": 0}
+
+        def _download(symbols, **kwargs):
+            state["n"] += 1
+            if state["n"] == 1:
+                raise TimeoutError("curl 28")
+            return frame_for({s: [1.0, 2.0] for s in symbols.split()})
+
+        monkeypatch.setitem(sys.modules, "yfinance",
+                            SimpleNamespace(download=_download, Ticker=lambda s: None))
+        rows = yfinance_source.fetch_quotes(many)
+
+        assert len(rows) == 3, "the surviving chunk still produced prices"
+
+    def test_every_chunk_failing_returns_nothing(self, monkeypatch):
+        import sys
+        from types import SimpleNamespace
+
+        def _download(symbols, **kwargs):
+            raise TimeoutError("curl 28")
+
+        monkeypatch.setitem(sys.modules, "yfinance",
+                            SimpleNamespace(download=_download, Ticker=lambda s: None))
+        assert yfinance_source.fetch_quotes([PRODUCTS[0]]) == []
 
     def test_timestamp_comes_from_the_provider_bar(self, monkeypatch):
         """Not our clock: the backend derives the disclosed delay from this,

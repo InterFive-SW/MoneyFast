@@ -147,3 +147,107 @@ class TestStatement:
     def test_the_limit_is_bounded(self, bank_client):
         response = bank_client.get("/api/banking/accounts/1000000000001/statement?limit=99999")
         assert response.status_code == 422
+
+
+class TestSpendingEndpoint:
+    def test_categories_and_total_are_reported(self, bank_client, mocker):
+        mocker.patch.object(
+            service, "spending_by_category",
+            side_effect=[
+                [{"category": "Market", "amount": 5000.0}],
+                [{"category": "Market", "amount": 9000.0}],  # both windows
+            ],
+        )
+        body = bank_client.get("/api/banking/spending").json()
+        assert body["total_expense"] == 5000.0
+        assert body["categories"][0]["category"] == "Market"
+
+    def test_the_trend_compares_against_the_previous_window(self, bank_client, mocker):
+        # Current 5.000; both windows 9.000 → earlier 4.000 → +25%.
+        mocker.patch.object(
+            service, "spending_by_category",
+            side_effect=[
+                [{"category": "Market", "amount": 5000.0}],
+                [{"category": "Market", "amount": 9000.0}],
+            ],
+        )
+        assert bank_client.get("/api/banking/spending").json()["change_percent"] == 25.0
+
+    def test_a_first_window_reports_no_trend_rather_than_zero(self, bank_client, mocker):
+        """0% claims spending was flat; None says there is nothing to compare."""
+        mocker.patch.object(service, "spending_by_category", side_effect=[[], []])
+        assert bank_client.get("/api/banking/spending").json()["change_percent"] is None
+
+    def test_the_window_is_bounded(self, bank_client):
+        assert bank_client.get("/api/banking/spending?days=9999").status_code == 422
+
+
+class TestBalanceHistoryEndpoint:
+    def _points(self, mocker, points, balance=132785.38):
+        mocker.patch.object(service, "balance_history", return_value=points)
+        mocker.patch.object(
+            service, "accounts_for",
+            return_value=[SimpleNamespace(balance=balance, currency_code="TRY")],
+        )
+
+    def test_the_sparkline_and_total_are_returned(self, bank_client, mocker):
+        self._points(mocker, [{"at": NOW, "balance": 100000.0}, {"at": NOW, "balance": 132785.38}])
+        body = bank_client.get("/api/banking/balance-history").json()
+        assert body["total"] == 132785.38
+        assert len(body["points"]) == 2
+
+    def test_the_change_is_measured_from_the_oldest_point(self, bank_client, mocker):
+        self._points(mocker, [{"at": NOW, "balance": 100000.0}], balance=110000.0)
+        body = bank_client.get("/api/banking/balance-history").json()
+        assert body["change_amount"] == 10000.0
+        assert body["change_percent"] == 10.0
+
+    def test_a_negative_opening_balance_yields_no_percentage(self, bank_client, mocker):
+        """Dividing by a negative opening balance produces a percentage that
+        reads backwards."""
+        self._points(mocker, [{"at": NOW, "balance": -5000.0}], balance=1000.0)
+        assert bank_client.get("/api/banking/balance-history").json()["change_percent"] is None
+
+    def test_no_history_is_not_an_error(self, bank_client, mocker):
+        self._points(mocker, [])
+        body = bank_client.get("/api/banking/balance-history").json()
+        assert body["points"] == []
+        assert body["change_amount"] == 0.0
+
+
+class TestSavingsGoalsEndpoint:
+    def test_goals_are_listed(self, bank_client, mocker):
+        mocker.patch.object(
+            service, "goals_for",
+            return_value=[SimpleNamespace(
+                id="g1", name="Araba", target_amount=500000.0, current_amount=150000.0,
+                currency_code="TRY", icon="🚗", color="#10b981", deadline="2028-01",
+            )],
+        )
+        body = bank_client.get("/api/banking/savings-goals").json()
+        assert body[0]["name"] == "Araba"
+        assert body[0]["target_amount"] == 500000.0
+
+    def test_a_goal_can_be_created(self, bank_client):
+        # A real session populates the client-side column defaults at flush;
+        # the double has to stand in for that or the response cannot validate.
+        def _refresh(goal):
+            goal.id = goal.id or "g-new"
+            goal.currency_code = goal.currency_code or "TRY"
+
+        bank_client.db.refresh.side_effect = _refresh
+
+        response = bank_client.post(
+            "/api/banking/savings-goals",
+            json={"name": "Tatil", "target_amount": 80000, "current_amount": 1000},
+        )
+        assert response.status_code == 200
+        assert response.json()["name"] == "Tatil"
+        assert bank_client.db.add.called
+
+    def test_a_goal_must_have_a_positive_target(self, bank_client):
+        """A zero target makes the progress bar divide by zero."""
+        response = bank_client.post(
+            "/api/banking/savings-goals", json={"name": "X", "target_amount": 0},
+        )
+        assert response.status_code == 422

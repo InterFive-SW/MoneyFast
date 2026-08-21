@@ -16,6 +16,7 @@ function withQuotes(quotes: Record<string, { price: number; change: number | nul
     isDelayed: true,
     delayMinutes: 15,
     quotes,
+    rates: {},
     transport: 'live',
   })
 }

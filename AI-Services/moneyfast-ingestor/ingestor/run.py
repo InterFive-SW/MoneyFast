@@ -34,18 +34,37 @@ log = logging.getLogger("moneyfast.ingestor")
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 
 
-def market_is_open(moment: datetime | None = None) -> bool:
-    """Borsa İstanbul continuous session, weekdays only.
+def open_markets(moment: datetime | None = None) -> set[str]:
+    """Which markets are trading right now, weekdays only.
 
     Polling a closed market just rewrites the same closing price every cycle,
     which costs the provider requests and buys nobody anything. Holidays are
     not modelled — the cost of polling on one is a handful of unchanged rows.
+
+    Per market rather than one global gate: BIST closes at 18:00 TRT and the
+    US session runs to 23:00, so a single gate left every US price frozen for
+    the whole American afternoon.
     """
     moment = (moment or datetime.now(timezone.utc)).astimezone(ISTANBUL)
     if moment.weekday() >= 5:
-        return False
-    return config.MARKET_OPEN_HOUR <= moment.hour < config.MARKET_CLOSE_HOUR
+        return set()
+    return {
+        market
+        for market, (opens, closes) in config.MARKET_HOURS.items()
+        if opens <= moment.hour < closes
+    }
 
+
+def market_is_open(moment: datetime | None = None) -> bool:
+    """Whether ANY market is trading. Kept for callers that only need a
+    yes/no, and for the daily jobs that do not care which venue."""
+    return bool(open_markets(moment))
+
+
+#: The share of a batch that may come back empty before the cycle counts as
+#: degraded. A handful of delisted tickers is normal; a third of the universe
+#: missing means the provider is struggling and hammering it will not help.
+MISSING_TOLERANCE = 0.25
 
 #: Index into config.BACKOFF_LADDER. Widened on a rate limit, reset on a
 #: clean cycle.
@@ -76,12 +95,26 @@ def _note_success() -> None:
 
 
 def run_quotes(client: httpx.Client, force: bool = False) -> dict:
-    if not force and not market_is_open():
-        log.info("market closed, skipping quote cycle")
-        return {"skipped": True}
-
     started = time.monotonic()
     products = sinks.fetch_products(client)
+
+    if not force:
+        trading = open_markets()
+        if not trading:
+            log.info("all markets closed, skipping quote cycle")
+            return {"skipped": True}
+        # An instrument whose market we do not recognise is polled rather than
+        # dropped: an unknown venue is a gap in MARKET_HOURS, and silently
+        # never pricing it would be much harder to notice than one extra
+        # request.
+        products = [
+            p for p in products
+            if p.get("market") in trading or p.get("market") not in config.MARKET_HOURS
+        ]
+        if not products:
+            log.info("no instruments in the open markets %s", sorted(trading))
+            return {"skipped": True}
+
     try:
         quotes = yfinance_source.fetch_quotes(products)
     except Exception as exc:
@@ -92,8 +125,20 @@ def run_quotes(client: httpx.Client, force: bool = False) -> dict:
             return {"rate_limited": True}
         raise
 
+    # `yf.download` swallows per-symbol failures and still returns a frame, so
+    # a stalled provider shows up as a SHORT batch rather than an exception.
+    # Treating that as success is what let the cycle run 6x over budget
+    # without the backoff ladder ever engaging.
+    requested = sum(1 for p in products if p.get("data_symbol"))
+    missing = requested - len(quotes)
+    degraded = requested > 0 and missing > requested * MISSING_TOLERANCE
+
     result = sinks.push_market_data(client, quotes, []) or {}
-    _note_success()
+    if degraded:
+        log.warning("%d/%d symbols came back empty", missing, requested)
+        _note_rate_limit()
+    else:
+        _note_success()
     elapsed = time.monotonic() - started
     log.info(
         "quote cycle: %d fetched, %s written, %.2fs (budget %ds)",

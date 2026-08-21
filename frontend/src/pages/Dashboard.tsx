@@ -9,7 +9,6 @@ const AnyGridLayout = GridLayout as any
 
 import type { DashboardLayoutState, WidgetType, DashboardTemplate, GridLayoutItem, CustomLayoutState } from '../types/dashboard'
 import { DASHBOARD_TEMPLATES, DEFAULT_TEMPLATE_ID } from '../data/templates'
-import { MOCK_INVESTMENT_BALANCE } from '../data/mockData'
 
 import InvestmentBalanceWidget from '../components/widgets/InvestmentBalanceWidget'
 import PositionsWidget from '../components/widgets/PositionsWidget'
@@ -18,6 +17,7 @@ import OrderHistoryWidget from '../components/widgets/OrderHistoryWidget'
 import PortfolioChartWidget from '../components/widgets/PortfolioChartWidget'
 import NewsWidget from '../components/widgets/NewsWidget'
 import MiniTickerWidget from '../components/widgets/MiniTickerWidget'
+import ErrorBoundary from '../components/ErrorBoundary'
 import TotalBalanceWidget from '../components/widgets/TotalBalanceWidget'
 import RecentTransactionsWidget from '../components/widgets/RecentTransactionsWidget'
 import SpendingOverviewWidget from '../components/widgets/SpendingOverviewWidget'
@@ -94,8 +94,16 @@ function saveCustomLayout(layout: CustomLayoutState) {
 
 // ─── Widget Render Motoru ─────────────────────────────────────────────────────
 function renderWidgetContent(type: WidgetType, w?: number, h?: number): JSX.Element | null {
+  const content = renderWidget(type, w, h)
+  if (content === null) return null
+  // Per widget, not per page: a crash here should cost one tile, not the
+  // whole dashboard.
+  return <ErrorBoundary label={type}>{content}</ErrorBoundary>
+}
+
+function renderWidget(type: WidgetType, w?: number, h?: number): JSX.Element | null {
   switch (type) {
-    case 'investment-balance': return <InvestmentBalanceWidget data={MOCK_INVESTMENT_BALANCE} />
+    case 'investment-balance': return <InvestmentBalanceWidget />
     case 'positions': return <PositionsWidget />
     case 'asset-allocation': return <AssetAllocationWidget />
     case 'order-history': return <OrderHistoryWidget />
@@ -105,11 +113,11 @@ function renderWidgetContent(type: WidgetType, w?: number, h?: number): JSX.Elem
     case 'mini-ticker-eur': return <MiniTickerWidget symbol="EURTRY" label="EUR/TRY" />
     case 'mini-ticker-gold': return <MiniTickerWidget symbol="XAUUSD" label="Altın (ons)" />
     case 'mini-ticker-bist100': return <MiniTickerWidget symbol="XU100" label="BIST 100" />
-    case 'total-balance': return <TotalBalanceWidget data={{ period: 'Bu Ay', total: 145000, changePercent: 5.2, changeAmount: 7500, sparklinePoints: [100, 102, 98, 105, 110] }} />
-    case 'recent-transactions': return <RecentTransactionsWidget transactions={[]} />
-    case 'spending-overview': return <SpendingOverviewWidget data={{ month: 'Ağustos', totalExpense: 12500, changePercent: -2.1, categories: [{ label: 'Market', amount: 4000, color: '#10b981', icon: '🛒' }] }} />
+    case 'total-balance': return <TotalBalanceWidget />
+    case 'recent-transactions': return <RecentTransactionsWidget />
+    case 'spending-overview': return <SpendingOverviewWidget />
     case 'quick-actions': return <QuickActionsWidget />
-    case 'savings-goal': return <SavingsGoalWidget goals={[{ id: 'g1', name: 'Araba', target: 500000, current: 150000, icon: '🚗', deadline: '2027', color: '#10b981' }]} />
+    case 'savings-goal': return <SavingsGoalWidget />
     case 'watchlist': return <WatchlistWidget />
     case 'top-movers': return <TopMoversWidget />
     case 'dividend-calendar': return <DividendCalendarWidget />

@@ -6,6 +6,8 @@ class MarketTicker(BaseModel):
     Piyasa verisi (hisse, döviz, kripto vb.) anlık durum modeli.
     """
     symbol: str
+    #: The instrument's own currency — XAUUSD is dollars, XU100 is index points.
+    currency: str = "TRY"
     price: float
     change: float
     changePercent: float
@@ -91,6 +93,10 @@ class FundamentalsIn(BaseModel):
     """
 
     symbol: str
+    #: The provider's company name, used to backfill instruments stored with
+    #: name = ticker. Without this field Pydantic dropped it at the boundary,
+    #: so the ingestor sent it and the backfill never saw it.
+    name: Optional[str] = None
     pe_ratio: Optional[float] = None
     pb_ratio: Optional[float] = None
     market_cap: Optional[int] = None
@@ -127,6 +133,11 @@ class InstrumentOut(BaseModel):
     price: float
     change: Optional[float] = None
     change_percent: Optional[float] = None
+    #: Son seansın işlem hacmi (adet). Veritabanında 94/94 satırda DOLUYDU ama
+    #: hiçbir uç nokta dışarı vermiyordu, dolayısıyla sohbetteki "Günlük ciro"
+    #: sütunu her zaman "veri yok" yazıyordu — eksik olan veri değil, alanın
+    #: kendisiydi.
+    volume: Optional[int] = None
     market_timestamp: datetime
     #: Fiyatı gözlemlediğimiz an. `market_timestamp` barın kendi damgası ve
     #: günlük barlarda seans açılışını gösterir; tazeliği ondan ölçmek güncel
@@ -160,5 +171,7 @@ class CandleOut(BaseModel):
 
 class CandleSeriesOut(BaseModel):
     symbol: str
+    #: Currency the bars are priced in.
+    currency: str = "TRY"
     interval: str = "1d"
     candles: List[CandleOut] = Field(default_factory=list)

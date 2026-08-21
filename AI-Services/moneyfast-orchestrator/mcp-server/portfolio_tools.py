@@ -30,8 +30,14 @@ async def get_portfolio_positions(
     account_ids: Optional[list[str]] = None,
     asset_classes: Optional[list[str]] = None,
     include_closed: bool = False,
-    base_currency: str = "TRY",
-    valuation_mode: str = "LAST_CLOSE",
+    # Optional[...] with a default, not a bare `str`. The model routinely emits
+    # `null` for a parameter it has no opinion about, and a bare `str`
+    # annotation rejects that before the tool runs -- the user saw
+    # "portföy verilerinize ulaşamadım" for an ordinary "show my portfolio".
+    # A null here means "no preference", which is exactly what the default is
+    # for.
+    base_currency: Optional[str] = "TRY",
+    valuation_mode: Optional[str] = "LAST_CLOSE",
 ) -> dict[str, Any]:
     """
     Retrieves the authenticated user's open (and optionally closed) positions from the
@@ -87,6 +93,8 @@ async def get_portfolio_positions(
             isin (str | None): ISIN when available.
             name (str): Instrument legal or display name.
             asset_class (str): See allowed values above.
+            sector (str | None): e.g. "Technology". None when unclassified.
+            market (str | None): Venue, e.g. "BIST", "NASDAQ".
             exchange (str): MIC code, e.g. "XIST".
             quantity (float): Signed. Negative indicates a short position.
             avg_cost (float): Weighted average acquisition cost per unit, in
@@ -112,6 +120,11 @@ async def get_portfolio_positions(
             total_market_value answers only "what are my holdings worth". A
             null means the balance is unknown -- say so, never report it as
             zero.
+            cash_balance is NOT DELAYED. as_of and delay_minutes describe the
+            PRICE feed; the balance is read from the ledger at request time.
+            Do NOT attach the quote delay to it -- reporting a current balance
+            as "225 dakika gecikmeli" teaches the user to distrust a figure
+            that is exactly right.
         warnings (list[str]): Non-fatal issues such as a stale price on an illiquid
             instrument or a skipped unentitled account. MUST be surfaced when they
             materially affect the figures presented.
@@ -143,6 +156,12 @@ async def get_portfolio_positions(
         - Any response containing these figures MUST pass validate_compliance_rules
           before emission.
     """
+    # A null from the model means "no preference", which is what the default
+    # is for. Coalesced here rather than left to the annotation so the tool
+    # cannot be rejected before it runs.
+    base_currency = base_currency or "TRY"
+    valuation_mode = valuation_mode or "LAST_CLOSE"
+
     # GET /investment/portfolio/{user_id}/positions. List parameters are sent
     # as repeated keys (account_ids=a&account_ids=b); httpx renders bools as
     # true/false.
@@ -229,6 +248,11 @@ def _normalize_position(raw: dict[str, Any]) -> dict[str, Any]:
         "isin": raw.get("isin"),
         "name": str(raw.get("name", raw["symbol"])),
         "asset_class": str(raw.get("asset_class", "EQUITY")),
+        # Sector and venue pass through as None when the provider has not
+        # classified the instrument. Defaulting either would let the agent
+        # report a guess as a fact.
+        "sector": raw.get("sector"),
+        "market": raw.get("market"),
         "exchange": str(raw.get("exchange", "XIST")),
         "quantity": quantity,
         "avg_cost": float(raw["avg_cost"]),

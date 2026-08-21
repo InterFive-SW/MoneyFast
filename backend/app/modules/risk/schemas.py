@@ -67,3 +67,71 @@ class RiskResponse(BaseModel):
     metrics: Dict[str, Any]
     assumptions: Dict[str, Any]
     data_quality: DataQuality
+
+
+# ---------------------------------------------------------------------------
+# The user-facing profile, for the Risk page.
+#
+# Distinct from RiskResponse above, which is frozen against the MCP contract
+# and speaks in raw metrics. This one is shaped for a screen: a score, the
+# findings behind it, and what to look at next.
+# ---------------------------------------------------------------------------
+class ScoreComponent(BaseModel):
+    name: str
+    #: The raw metric, so the UI can show what produced the sub-score.
+    measured: Optional[float] = None
+    weight: float
+    #: 0..1, or None when the input could not be measured. Never coalesced to
+    #: zero: an unmeasurable drawdown is not the same as no drawdown.
+    penalty: Optional[float] = None
+
+
+class RiskFinding(BaseModel):
+    id: str
+    title: str
+    description: str
+    impact: str
+    #: The number the finding was derived from. A finding the user cannot
+    #: trace back to a measurement is an opinion.
+    value: Optional[float] = None
+
+
+class RiskSuggestion(BaseModel):
+    id: str
+    title: str
+    description: str
+    actionLabel: str
+    priority: str
+
+
+class CashflowOut(BaseModel):
+    """Income against expense, from the banking ledger.
+
+    The page previously showed a debt-to-income ratio built from a fixture.
+    There is no loan model in this system, so debt is not reported at all
+    rather than invented.
+    """
+
+    period: str
+    currency_code: str = "TRY"
+    monthly_income: float = 0.0
+    monthly_expense: float = 0.0
+    #: None when there was no income to divide by — a savings rate of 0%
+    #: would claim they spent everything they earned.
+    savings_rate: Optional[float] = None
+
+
+class RiskProfileOut(BaseModel):
+    as_of: str
+    #: None when nothing could be measured. Refusing to score is honest; a
+    #: default of 50 is a number the user could act on.
+    score: Optional[float] = None
+    level: Optional[str] = None
+    components: List[ScoreComponent] = Field(default_factory=list)
+    findings: List[RiskFinding] = Field(default_factory=list)
+    suggestions: List[RiskSuggestion] = Field(default_factory=list)
+    cashflow: Optional[CashflowOut] = None
+    #: The raw engine output, so nothing on the page is unverifiable.
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    position_count: int = 0
+    warnings: List[str] = Field(default_factory=list)

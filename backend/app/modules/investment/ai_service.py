@@ -25,6 +25,12 @@ from typing import Any, Dict, List, Optional, Tuple
 #: through it, so the chatbot and the dashboard use one number by construction.
 FX_PRODUCT = "USDTRY"
 
+#: Every quoted currency pair we can convert through, keyed by the currency it
+#: prices. EURTRY is ingested and quoted but was never read here, so a
+#: EUR-denominated instrument raised KeyError in `_convert` and dropped out of
+#: every total in silence.
+FX_PRODUCTS = {"USD": "USDTRY", "EUR": "EURTRY"}
+
 SUPPORTED_BASE_CURRENCIES = frozenset({"TRY", "USD"})
 
 #: The one custody account in this build. Positions hang off it.
@@ -84,6 +90,36 @@ def _convert(amount: float, from_currency: str, to_currency: str, rates: dict) -
     return amount * rates[from_currency] / rates[to_currency]
 
 
+def holding_value(
+    row: Dict[str, Any],
+    rates: Dict[str, float],
+    base_currency: str = "TRY",
+    field: str = "price",
+) -> Optional[float]:
+    """One holding's value in `base_currency`, or None when unconvertible.
+
+    Every surface that totals a portfolio needs this, and each used to inline
+    its own version. Two of them bucketed by `market == "BIST"` and multiplied
+    everything else by the USD rate — right only for as long as the only
+    foreign market was American. The rest simply added USD to TRY.
+
+    None rather than a fallback: a holding priced in a currency we have no rate
+    for is excluded and reported, never converted at an invented rate.
+    """
+    price = row.get(field)
+    if price is None:
+        return None
+    try:
+        return _convert(
+            float(row["quantity"]) * float(price),
+            row.get("currency") or base_currency,
+            base_currency,
+            rates,
+        )
+    except KeyError:
+        return None
+
+
 def fx_rates(quotes: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
     """Conversion rates into TRY, from the live USD/TRY quote.
 
@@ -92,8 +128,10 @@ def fx_rates(quotes: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
     an invented rate — a made-up exchange rate is a made-up portfolio total.
     """
     rates = {"TRY": 1.0}
-    if quotes and FX_PRODUCT in quotes:
-        rates["USD"] = float(quotes[FX_PRODUCT]["price"])
+    for currency, symbol in FX_PRODUCTS.items():
+        quote = (quotes or {}).get(symbol)
+        if quote and quote.get("price") is not None:
+            rates[currency] = float(quote["price"])
     return rates
 
 
@@ -185,6 +223,10 @@ def build_portfolio(
                 # From the product, not a constant. Every position used to
                 # report EQUITY, including FX pairs and gold.
                 "asset_class": asset_class,
+                # Feeds the risk engine's sector bucketing, which reported
+                # every portfolio as 100% UNCLASSIFIED while this was absent.
+                "sector": holding.get("sector"),
+                "market": holding.get("market"),
                 "exchange": _EXCHANGE_BY_MARKET.get(holding.get("market") or "", "XIST"),
                 "quantity": quantity,
                 "avg_cost": avg_cost,

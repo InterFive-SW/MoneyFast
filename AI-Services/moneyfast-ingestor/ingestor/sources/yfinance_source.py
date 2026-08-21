@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Iterator, Optional
 
 log = logging.getLogger("moneyfast.ingestor.yfinance")
 
@@ -32,18 +32,40 @@ def _to_utc(value: Any) -> Optional[datetime]:
     return moment.astimezone(timezone.utc)
 
 
+#: Seconds any single provider request may take. Without it the underlying
+#: curl uses its own generous default, and one unreachable symbol cost ~10s of
+#: a 10s cycle -- observed as `quote cycle: 89 fetched ... 61.39s (budget 10s)`
+#: with the scheduler skipping every run in between.
+REQUEST_TIMEOUT_SECONDS = 8
+
+#: Symbols per request. A single batch of the whole universe means one slow
+#: chunk stalls everything; at ~190 symbols that is the difference between a
+#: cycle that fits its budget and one that never does. Small enough to fail
+#: cheaply, large enough that the request count stays far below the rate limit.
+CHUNK_SIZE = 40
+
+
+def _chunks(items: list[str], size: int) -> Iterator[list[str]]:
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
 def fetch_quotes(products: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
-    """Latest price per product, in ONE batched request.
+    """Latest price per product, in batched requests.
 
     Measured on the ~95-symbol universe: a `period="2d", interval="1d"` batch
-    takes 3.3-5.4s, while the same batch with minute bars takes 6.8-11.4s and
-    does not fit a ten-second cycle. Two daily bars is exactly what is needed —
-    during an open session the last row is today's partially formed bar whose
-    close tracks the current price, and the row before it is yesterday's close.
+    takes 3.3-5.4s, while the same batch with minute bars takes 6.8-11.4s.
+    Two daily bars is exactly what is needed — during an open session the last
+    row is today's partially formed bar whose close tracks the current price,
+    and the row before it is yesterday's close.
 
-    The per-symbol alternative (`Ticker(s).fast_info` in a loop) would be ~95
-    HTTP requests every ten seconds, or 34,000 an hour, which is how you get
-    rate limited and then blocked.
+    The per-symbol alternative (`Ticker(s).fast_info` in a loop) would be one
+    HTTP request per symbol per cycle, which is how you get rate limited and
+    then blocked.
+
+    Chunked rather than one request for the lot: `yf.download` swallows
+    per-symbol failures and still returns a frame, so a stalled symbol shows
+    up only as elapsed time. Chunking bounds what one stall can cost.
     """
     import yfinance as yf
 
@@ -51,19 +73,38 @@ def fetch_quotes(products: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
     if not catalogue:
         return []
 
-    frame = yf.download(
-        " ".join(catalogue),
-        period="2d",
-        interval="1d",
-        progress=False,
-        threads=True,
-        auto_adjust=True,
-        group_by="column",
-    )
-    if frame is None or frame.empty:
+    closes = None
+    volumes = None
+    stamp = datetime.now(timezone.utc)
+    frames = []
+    for chunk in _chunks(list(catalogue), CHUNK_SIZE):
+        try:
+            part = yf.download(
+                " ".join(chunk),
+                period="2d",
+                interval="1d",
+                progress=False,
+                threads=True,
+                auto_adjust=True,
+                group_by="column",
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # One bad chunk is not a failed cycle. The symbols in it simply go
+            # unpriced this round and are reported as missing, which the
+            # caller reads as a slow-down signal.
+            log.warning("chunk of %d symbols failed: %s", len(chunk), exc)
+            continue
+        if part is not None and not part.empty:
+            frames.append(part)
+
+    if not frames:
         log.warning("batch quote download returned nothing")
         return []
 
+    import pandas as pd
+
+    frame = frames[0] if len(frames) == 1 else pd.concat(frames, axis=1)
     closes = frame["Close"]
     volumes = frame["Volume"] if "Volume" in frame else None
     stamp = _to_utc(closes.index[-1]) or datetime.now(timezone.utc)
@@ -107,7 +148,10 @@ def fetch_quotes(products: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
             }
         )
 
-    log.info("batched %d/%d symbols in one request", len(rows), len(catalogue))
+    log.info(
+        "batched %d/%d symbols in %d request(s)",
+        len(rows), len(catalogue), (len(catalogue) + CHUNK_SIZE - 1) // CHUNK_SIZE,
+    )
     return rows
 
 

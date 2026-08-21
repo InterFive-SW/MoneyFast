@@ -1,5 +1,6 @@
 // src/components/chat/widgets/PortfolioWidget.tsx
 import { PortfolioWidgetPayload } from '../../../types/chat';
+import { BASE_CURRENCY, formatMoney } from '../../../lib/money'
 
 interface Props {
   payload: PortfolioWidgetPayload;
@@ -12,15 +13,6 @@ interface Props {
  * verilerini listeleyen ve toplam durumu gösteren widget.
  */
 export default function PortfolioWidget({ payload }: Props) {
-  // Para birimi formatlayıcı
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('tr-TR', {
-      style: 'currency',
-      currency: 'TRY',
-      minimumFractionDigits: 2,
-    }).format(value);
-  };
-
   // Yüzde formatlayıcı
   const formatPercent = (value: number) => {
     return new Intl.NumberFormat('tr-TR', {
@@ -38,9 +30,9 @@ export default function PortfolioWidget({ payload }: Props) {
       <div className="bg-slate-50 p-4 border-b border-slate-200 flex flex-col gap-1">
         <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Mevcut Portföy Durumu</h4>
         <div className="flex items-end justify-between">
-          <span className="text-2xl font-bold text-slate-900">{formatCurrency(payload.total_value)}</span>
+          <span className="text-2xl font-bold text-slate-900">{formatMoney(payload.total_value, payload.base_currency ?? BASE_CURRENCY)}</span>
           <div className={`flex flex-col items-end text-sm font-medium ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
-            <span>{isProfit ? '+' : ''}{formatCurrency(payload.total_profit_loss)}</span>
+            <span>{isProfit ? '+' : ''}{formatMoney(payload.total_profit_loss, payload.base_currency ?? BASE_CURRENCY)}</span>
           </div>
         </div>
       </div>
@@ -71,11 +63,11 @@ export default function PortfolioWidget({ payload }: Props) {
                   <tr key={pos.symbol} className="hover:bg-white/5 transition-colors text-[13px]">
                     <td className="px-3 py-2 font-semibold text-slate-900">{pos.symbol}</td>
                     <td className="px-3 py-2 text-right text-slate-600">{pos.quantity}</td>
-                    <td className="px-3 py-2 text-right text-slate-600">{formatCurrency(pos.avg_cost)}</td>
-                    <td className="px-3 py-2 text-right font-medium text-white">{formatCurrency(pos.last_price)}</td>
+                    <td className="px-3 py-2 text-right text-slate-600">{formatMoney(pos.avg_cost, pos.instrument_currency)}</td>
+                    <td className="px-3 py-2 text-right font-medium text-white">{formatMoney(pos.last_price, pos.instrument_currency)}</td>
                     <td className={`px-3 py-2 text-right font-semibold ${isPosProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
                       <div className="flex flex-col">
-                        <span>{isPosProfit ? '+' : ''}{formatCurrency(pos.unrealized_pnl)}</span>
+                        <span>{isPosProfit ? '+' : ''}{formatMoney(pos.unrealized_pnl, payload.base_currency ?? BASE_CURRENCY)}</span>
                         <span className="text-[10px] opacity-80 font-medium">{formatPercent(pos.unrealized_pnl_pct)}</span>
                       </div>
                     </td>

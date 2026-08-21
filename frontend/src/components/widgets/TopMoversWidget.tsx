@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
 import type { TopMoverItem } from '../../api/client'
+import { formatMoney } from '../../lib/money'
+import { useLiveRows } from '../../hooks/useLiveRows'
 
 type Tab = 'gainers' | 'losers'
 
@@ -8,6 +10,12 @@ export default function TopMoversWidget() {
   const [data, setData] = useState<Record<string, TopMoverItem[]>>({})
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<Tab>('gainers')
+
+  // Live, so this list cannot drift from the ticker strip. Called before the
+  // loading guard below: a hook that runs only on the branch where the data
+  // has arrived changes the hook count between renders, and React tears down
+  // the whole tree rather than just this widget.
+  const currentItems = useLiveRows(data[activeTab] || [])
 
   useEffect(() => {
     async function loadData() {
@@ -30,8 +38,6 @@ export default function TopMoversWidget() {
       </div>
     )
   }
-
-  const currentItems = data[activeTab] || []
 
   return (
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
@@ -60,7 +66,7 @@ export default function TopMoversWidget() {
               <div className="font-semibold text-white text-sm">{item.symbol}</div>
               <div className="text-right">
                 <div className="tabular-nums text-sm font-medium text-slate-300">
-                  {item.price.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(item.price, item.currency)}
                 </div>
                 <div className={`tabular-nums text-xs font-semibold ${item.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
                   {item.changePercent > 0 ? '+' : ''}{item.changePercent}%

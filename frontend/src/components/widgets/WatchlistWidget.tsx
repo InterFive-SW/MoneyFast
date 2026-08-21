@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
 import type { WatchlistItem } from '../../api/client'
 import { useLiveRows } from '../../hooks/useLiveRows'
+import { formatMoney } from '../../lib/money'
 
 type Tab = 'bist' | 'us' | 'crypto'
 
@@ -72,7 +73,7 @@ export default function WatchlistWidget() {
               <div className="font-semibold text-white text-sm">{item.symbol}</div>
               <div className="text-right">
                 <div className="tabular-nums text-sm font-medium text-slate-300">
-                  {item.price.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(item.price, item.currency)}
                 </div>
                 <div className={`tabular-nums text-xs font-semibold ${item.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
                   {item.changePercent > 0 ? '+' : ''}{item.changePercent}%

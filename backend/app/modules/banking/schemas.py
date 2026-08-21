@@ -55,3 +55,54 @@ class StatementOut(BaseModel):
     balance: float
     currency_code: str
     movements: List[MovementOut] = Field(default_factory=list)
+
+
+class SpendingCategoryOut(BaseModel):
+    category: str
+    amount: float
+
+
+class SpendingSummaryOut(BaseModel):
+    """What went out, by category, over a window."""
+
+    period: str
+    currency_code: str = "TRY"
+    total_expense: float = 0.0
+    #: Change against the previous window of the same length. None when there
+    #: is no earlier window to compare against — a first month has no trend,
+    #: and rendering 0% would claim it was flat.
+    change_percent: Optional[float] = None
+    categories: List[SpendingCategoryOut] = Field(default_factory=list)
+
+
+class BalancePointOut(BaseModel):
+    at: datetime
+    balance: float
+
+
+class BalanceHistoryOut(BaseModel):
+    currency_code: str = "TRY"
+    total: float = 0.0
+    change_amount: float = 0.0
+    change_percent: Optional[float] = None
+    points: List[BalancePointOut] = Field(default_factory=list)
+
+
+class SavingsGoalOut(BaseModel):
+    id: str
+    name: str
+    target_amount: float
+    current_amount: float
+    currency_code: str = "TRY"
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    deadline: Optional[str] = None
+
+
+class SavingsGoalIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    target_amount: float = Field(..., gt=0)
+    current_amount: float = Field(default=0, ge=0)
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    deadline: Optional[str] = None

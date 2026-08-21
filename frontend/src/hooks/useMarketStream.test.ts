@@ -199,13 +199,47 @@ describe('the polling fallback', () => {
     return hook
   }
 
-  it('normalises the ticker strip into the same shape subscribers already read', async () => {
-    const rows = [{ symbol: 'THYAO', price: 301, change: 1, changePercent: 0.3 }]
-    const hook = await failIntoPolling(
-      vi.fn().mockResolvedValue({ ok: true, json: async () => rows }),
-    )
+  it('polls the whole universe, not the four-symbol ticker strip', async () => {
+    // Polling /tickers narrowed the snapshot from ~95 instruments to 4, so
+    // after three SSE failures every live table froze while the strip moved.
+    const body = {
+      instruments: [
+        { symbol: 'THYAO', price: 301, change: 1, change_percent: 0.3, currency: 'TRY' },
+        { symbol: 'AAPL', price: 314.88, change: 6.8, change_percent: 2.2, currency: 'USD' },
+        { symbol: 'USDTRY', price: 47.9479, change: 0, change_percent: 0, currency: 'TRY' },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => body })
+    const hook = await failIntoPolling(fetchMock)
     await waitFor(() => expect(hook.result.current.quotes.THYAO?.price).toBe(301))
+    expect(hook.result.current.quotes.AAPL?.currency).toBe('USD')
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/market/instruments')
     expect(hook.result.current.transport).toBe('polling')
+  })
+
+  it('normalises a polled row that omits its change fields', async () => {
+    // /instruments leaves change and change_percent null for an instrument
+    // with no previous close; null must survive as null, not become 0, which
+    // would render as "unchanged today".
+    const body = {
+      instruments: [{ symbol: 'IPEKE', price: 12.5, currency: 'TRY' }],
+    }
+    const hook = await failIntoPolling(
+      vi.fn().mockResolvedValue({ ok: true, json: async () => body }),
+    )
+    await waitFor(() => expect(hook.result.current.quotes.IPEKE?.price).toBe(12.5))
+    expect(hook.result.current.quotes.IPEKE.change).toBeNull()
+    expect(hook.result.current.quotes.IPEKE.changePercent).toBeNull()
+  })
+
+  it('recovers the FX rates while polling, so conversions keep working', async () => {
+    const body = {
+      instruments: [{ symbol: 'USDTRY', price: 47.9479, change: 0, change_percent: 0, currency: 'TRY' }],
+    }
+    const hook = await failIntoPolling(
+      vi.fn().mockResolvedValue({ ok: true, json: async () => body }),
+    )
+    await waitFor(() => expect(hook.result.current.rates.USD).toBeCloseTo(47.9479))
   })
 
   it('keeps the last snapshot when a poll fails', async () => {
@@ -274,5 +308,49 @@ describe('polling is started once', () => {
     const callsAfter = (fetch as ReturnType<typeof vi.fn>).mock.calls.length
     // One interval, so one poll per cycle — not two.
     expect(callsAfter - callsBefore).toBeLessThanOrEqual(2)
+  })
+})
+
+describe('conversion rates', () => {
+  beforeEach(() => {
+    instances.length = 0
+    vi.stubGlobal('EventSource', FakeEventSource)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ instruments: [] }) }))
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reads the lira rates out of the frame itself', async () => {
+    // Derived rather than sent alongside: USDTRY and EURTRY are instruments
+    // like any other, so a separate fx field could drift from the quotes.
+    const { useMarketStream } = await loadHook()
+    const { result } = renderHook(() => useMarketStream())
+    act(() => instances[0].emit('quotes', {
+      ...FRAME,
+      quotes: {
+        USDTRY: { price: 47.9479, change: 0, changePercent: 0 },
+        EURTRY: { price: 56.0921, change: 0, changePercent: 0 },
+      },
+    }))
+    expect(result.current.rates.USD).toBeCloseTo(47.9479)
+    expect(result.current.rates.EUR).toBeCloseTo(56.0921)
+  })
+
+  it('reports no rate when the FX instrument is absent', async () => {
+    // Callers must be able to tell "unknown" from a number, so they can show
+    // the native price rather than an invented lira one.
+    const { useMarketStream } = await loadHook()
+    const { result } = renderHook(() => useMarketStream())
+    act(() => instances[0].emit('quotes', FRAME))
+    expect(result.current.rates.USD).toBeUndefined()
+  })
+
+  it('carries each quote’s own currency', async () => {
+    const { useMarketStream } = await loadHook()
+    const { result } = renderHook(() => useMarketStream())
+    act(() => instances[0].emit('quotes', {
+      ...FRAME,
+      quotes: { AAPL: { price: 314.88, change: 1, changePercent: 0.3, currency: 'USD' } },
+    }))
+    expect(result.current.quotes.AAPL.currency).toBe('USD')
   })
 })

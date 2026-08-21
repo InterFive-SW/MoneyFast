@@ -159,6 +159,10 @@ def _portfolio_widget(data: dict[str, Any]) -> tuple[Optional[dict[str, Any]], O
             "positions": [
                 {
                     "symbol": p.get("symbol", ""),
+                    # avg_cost and last_price are in the INSTRUMENT's currency
+                    # while market_value and the P&L are already converted to
+                    # base_currency. Both were being rendered as ₺.
+                    "instrument_currency": p.get("instrument_currency") or "TRY",
                     "quantity": p.get("quantity", 0.0),
                     "avg_cost": p.get("avg_cost", 0.0),
                     "last_price": p.get("last_price", 0.0),

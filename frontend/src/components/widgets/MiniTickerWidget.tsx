@@ -1,4 +1,5 @@
 import { useQuote } from '../../hooks/useMarketStream'
+import { formatMoney } from '../../lib/money'
 
 /**
  * Tek satırlık canlı kur/endeks kutucuğu.
@@ -16,9 +17,7 @@ export default function MiniTickerWidget({ symbol, label }: { symbol: string; la
       <span className="text-[11px] uppercase tracking-wider font-medium text-slate-400 mb-1">{label ?? symbol}</span>
       <div className="flex items-baseline gap-2">
         <span className="text-lg font-bold text-white tabular-nums">
-          {quote
-            ? quote.price.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-            : '—'}
+          {quote ? formatMoney(quote.price, quote.currency) : '—'}
         </span>
         {changePercent != null && (
           <span className={`text-[11px] font-semibold tabular-nums ${changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>

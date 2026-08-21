@@ -1,8 +1,10 @@
+import json
 import logging
 from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -96,6 +98,83 @@ async def chat_with_orchestrator(
         },
     )
     return answer
+
+
+@router.post("/chat/stream")
+async def chat_stream(
+    request: ChatRequest,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Sohbetin akış (SSE) sürümü. Kimlik çözümü `/chat` ile birebir aynı.
+
+    Yanıt tek parça değil: graf düğümleri ilerledikçe `stage` olayları,
+    sonunda tek bir `done` olayı gönderilir. Model çıktısı token token
+    akmaz — uygunluk kapısı fail-closed çalışıyor ve engellediği bir taslak
+    kullanıcıya ulaşmamalı; ekrana yazılmış bir metni geri almak bu güvenceyi
+    anlamsız kılardı.
+
+    Tur, tıpkı `/chat`'te olduğu gibi bitiminde kaydedilir; akış sürümünde
+    kayıt `done` olayı üretildikten sonra yapılır.
+    """
+    history = service.load_history(db, user_id, request.thread_id) or [
+        turn.model_dump() for turn in request.conversation_history
+    ]
+    payload = {
+        "user_message": request.user_message,
+        "user_id": user_id,
+        "thread_id": request.thread_id,
+        "conversation_history": history,
+    }
+
+    async def relay():
+        try:
+            async with httpx.AsyncClient(timeout=CHAT_TIMEOUT_SECONDS) as client:
+                async with client.stream(
+                    "POST", f"{settings.AI_ORCHESTRATOR_URL}/chat/stream", json=payload
+                ) as upstream:
+                    upstream.raise_for_status()
+                    answer: Optional[dict] = None
+                    async for line in upstream.aiter_lines():
+                        # Olayı olduğu gibi geçiriyoruz; `done` gövdesini
+                        # ayrıca yakalıyoruz çünkü tur kaydı burada yapılıyor.
+                        if line.startswith("data: "):
+                            try:
+                                body = json.loads(line[6:])
+                            except json.JSONDecodeError:
+                                body = None
+                            if isinstance(body, dict) and "final_output" in body:
+                                answer = body
+                        yield f"{line}\n"
+                    if answer is not None:
+                        conversation_id = service.record_turn(
+                            db,
+                            user_id=user_id,
+                            thread_id=request.thread_id,
+                            user_message=request.user_message,
+                            assistant_message=answer.get("final_output") or "",
+                            meta={
+                                "primary_intent": answer.get("primary_intent"),
+                                "target_agent": answer.get("target_agent"),
+                                "compliance_verdict": answer.get("compliance_verdict"),
+                            },
+                        )
+                        tail = json.dumps(
+                            {"conversation_id": conversation_id}, ensure_ascii=False
+                        )
+                        yield f"event: saved\ndata: {tail}\n\n"
+        except (httpx.HTTPError, httpx.StreamError) as exc:
+            # Akış zaten 200 döndü; hata ancak gövdenin içinde bildirilebilir.
+            # İstemci bunu görünce tamponlu `/chat` uç noktasına düşer.
+            log.warning("streaming chat failed: %s", exc)
+            body = json.dumps({"error": str(exc)}, ensure_ascii=False)
+            yield f"event: error\ndata: {body}\n\n"
+
+    return StreamingResponse(
+        relay(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/health")

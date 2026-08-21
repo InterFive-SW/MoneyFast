@@ -18,11 +18,12 @@ import hashlib
 import logging
 import secrets
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .models import AccountTransaction, BankAccount, BankTransaction
+from .models import AccountTransaction, BankAccount, BankTransaction, SavingsGoal
 
 log = logging.getLogger("moneyfast.banking")
 
@@ -241,3 +242,113 @@ def transfer(
         "source_balance_after": float(source.balance),
         "destination_account": destination.account_number,
     }
+
+
+# ---------------------------------------------------------------------------
+# Reporting — derived from the ledger, never stored as a separate total
+# ---------------------------------------------------------------------------
+
+def spending_by_category(
+    db: Session, user_id: str, since: datetime
+) -> list[dict[str, Any]]:
+    """Outgoing money grouped by what it was for.
+
+    DEBIT legs only: a transfer between your own accounts appears as both a
+    debit and a credit, and counting the debit as spending would make moving
+    your own money look like an expense.
+    """
+    account_ids = [account.id for account in accounts_for(db, user_id)]
+    if not account_ids:
+        return []
+
+    rows = db.execute(
+        select(
+            BankTransaction.category,
+            func.sum(AccountTransaction.amount),
+        )
+        .join(BankTransaction, BankTransaction.id == AccountTransaction.transaction_id)
+        .where(
+            AccountTransaction.account_id.in_(account_ids),
+            AccountTransaction.direction == "DEBIT",
+            AccountTransaction.created_at >= since,
+            BankTransaction.category.isnot(None),
+        )
+        .group_by(BankTransaction.category)
+        .order_by(func.sum(AccountTransaction.amount).desc())
+    ).all()
+
+    return [
+        {"category": category, "amount": round(float(total), 2)}
+        for category, total in rows
+    ]
+
+
+def income_total(db: Session, user_id: str, since: datetime) -> float:
+    """Money that arrived from OUTSIDE the user's own accounts.
+
+    The mirror of `spending_by_category`, and it has the same trap in reverse:
+    moving your own money between two of your accounts writes a CREDIT leg,
+    and counting that as income would let anyone raise their apparent salary
+    by shuffling funds back and forth.
+
+    So a credit only counts when the same transaction has no debit leg on any
+    account this user owns. Salary arrives from an employer, which by
+    definition has no account here.
+    """
+    account_ids = [account.id for account in accounts_for(db, user_id)]
+    if not account_ids:
+        return 0.0
+
+    internal = (
+        select(AccountTransaction.transaction_id)
+        .where(
+            AccountTransaction.account_id.in_(account_ids),
+            AccountTransaction.direction == "DEBIT",
+        )
+        .scalar_subquery()
+    )
+
+    total = db.execute(
+        select(func.sum(AccountTransaction.amount)).where(
+            AccountTransaction.account_id.in_(account_ids),
+            AccountTransaction.direction == "CREDIT",
+            AccountTransaction.created_at >= since,
+            AccountTransaction.transaction_id.notin_(internal),
+        )
+    ).scalar()
+
+    return round(float(total or 0.0), 2)
+
+
+def balance_history(
+    db: Session, user_id: str, limit: int = 30
+) -> list[dict[str, Any]]:
+    """The running balance after each movement.
+
+    Read from `balance_after`, which the ledger already records, rather than
+    replayed from the movements — the whole reason that column exists.
+    """
+    account_ids = [account.id for account in accounts_for(db, user_id)]
+    if not account_ids:
+        return []
+
+    rows = db.execute(
+        select(AccountTransaction.created_at, AccountTransaction.balance_after)
+        .where(AccountTransaction.account_id.in_(account_ids))
+        .order_by(AccountTransaction.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    return [
+        {"at": created_at, "balance": round(float(balance), 2)}
+        for created_at, balance in reversed(rows)
+    ]
+
+
+def goals_for(db: Session, user_id: str) -> list[SavingsGoal]:
+    return (
+        db.query(SavingsGoal)
+        .filter(SavingsGoal.user_id == user_id)
+        .order_by(SavingsGoal.created_at)
+        .all()
+    )

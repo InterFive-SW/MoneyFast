@@ -45,20 +45,63 @@ DEFAULT_AGENTS: list[str] = [
 #:
 #: Matched on a normalised, casefolded string, so patterns are lowercase and
 #: dotless-i safe (see _normalise).
-_DISTRESS_PATTERNS = (
+#:
+#: SELF-HARM IS SEPARATE FROM FINANCIAL DISTRESS. They were one list, and the
+#: single downstream instruction that list fed was written for the financial
+#: case -- so "ölmek istiyorum" was answered with a lecture on how borrowed
+#: money raises risk. Two categories, two responses.
+_SELF_HARM_PATTERNS = (
+    # Direct statements of intent.
     r"intihar",
     r"kendime zarar",
-    r"yasamak istemiyorum",
-    r"olmek istiyorum",
+    r"kendimi oldur",
+    r"kendimi as[aiy]",
     r"canima kiy",
+    r"canimi al",
     r"hayatima son",
-    r"her seyimi kaybettim",
-    r"batt[iı]m.*(borc|kredi|icra)",
-    r"borcumu odeyemiyorum.*(icra|haciz)",
+    r"yasamak istemiyorum",
+    r"artik yasamak istem",
+    # Broader than "olmek istiyorum": also catches "ölmek istedim",
+    # "ölmek istiyom". Matching the negation too is intentional -- an
+    # over-cautious reply is the cheap error here.
+    r"olmek ist",
+    r"olsem (daha )?iyi",
+    # Means. Jumping needs a place or a height, so "bu adımı atlayacağım"
+    # (skip this step) does not trip it.
+    r"(kopru|balkon|cati|pencere|teras|yukari)\w*\s*\w*\s*(atla|atli|atliy)",
+    r"(atla|atli|atliy)\w*\s+\w*\s*(kopru|balkon|cati|pencere|teras)",
+    r"\d+\s*(metre|kat)\w*\s*\w*\s*(atla|dus)",
+    # A lethality question following a means: "100 metreden atlasam yaşar
+    # mıyım". Someone checking whether a method works is at acute risk.
+    r"(atla|dus|ilac|bilek|kesers)\w*.{0,40}(yasar m|olur muyum|olurum|olur mu)",
     r"kill myself",
     r"end my life",
     r"suicid",
     r"self.?harm",
+    r"want to die",
+    r"jump off",
+)
+
+#: Severe financial hardship. Real distress, but the response is budgeting and
+#: debt triage -- not crisis lines.
+_FINANCIAL_DISTRESS_PATTERNS = (
+    r"her seyimi kaybettim",
+    r"batt[iı]m.*(borc|kredi|icra)",
+    r"borcumu odeyemiyorum.*(icra|haciz)",
+)
+
+#: Being threatened by someone else. Neither a suicide risk nor a budgeting
+#: problem: "tetikçi tutmuşlar, öldürecekler beni" was answered with advice
+#: about emergency funds.
+_COERCION_PATTERNS = (
+    # Spelling of the future suffix varies in the wild ("öldürecekler",
+    # "öldürücekler"), so the vowel is not pinned down.
+    r"oldur\w*\s+beni",
+    r"beni\s+oldur\w*",
+    r"tetikci",
+    r"tehdit ed[iy]",
+    r"sant[ai]j",
+    r"zorla imzala",
 )
 
 #: Attempts to make the assistant treat retrieved or user text as instructions.
@@ -108,8 +151,18 @@ def detect_safety_flags(user_message: str) -> list[str]:
     """
     normalised = _normalise(user_message or "")
     flags: list[str] = []
-    if _match_any(normalised, _DISTRESS_PATTERNS):
+    # DISTRESS_SIGNAL still fires for every category: it is what routes the
+    # turn to the handoff node, and nothing downstream may lose that. The
+    # specific flag rides alongside so the handoff can pick its response.
+    if _match_any(normalised, _SELF_HARM_PATTERNS):
         flags.append("DISTRESS_SIGNAL")
+        flags.append("SELF_HARM_RISK")
+    elif _match_any(normalised, _COERCION_PATTERNS):
+        flags.append("DISTRESS_SIGNAL")
+        flags.append("COERCION_RISK")
+    elif _match_any(normalised, _FINANCIAL_DISTRESS_PATTERNS):
+        flags.append("DISTRESS_SIGNAL")
+        flags.append("FINANCIAL_DISTRESS")
     if _match_any(normalised, _INJECTION_PATTERNS):
         flags.append("PROMPT_INJECTION_SUSPECTED")
     if _match_any(normalised, _BYPASS_PATTERNS):
@@ -121,7 +174,7 @@ def classify_and_route_intent(
     user_message: str,
     conversation_summary: Optional[str] = None,
     available_agents: Optional[list[str]] = None,
-    locale: str = "tr-TR",
+    locale: Optional[str] = "tr-TR",
     user_context_flags: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """
@@ -234,6 +287,7 @@ def classify_and_route_intent(
         - Do NOT skip this tool for messages that appear simple. Unrouted turns bypass
           the compliance gate by construction.
     """
+    locale = locale or "tr-TR"
     # Deterministic pass only. Topic classification happens in the
     # orchestrator, which has the model; see this module's docstring.
     agents = available_agents or DEFAULT_AGENTS

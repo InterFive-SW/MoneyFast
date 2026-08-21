@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
 import type { Position } from '../../api/client'
 import { useLiveRows } from '../../hooks/useLiveRows'
+import { baseEquivalent, formatMoney } from '../../lib/money'
+import { useMarketStream } from '../../hooks/useMarketStream'
 
 /**
  * Pozisyonlar Tablosu Bileşeni (Fintables tarzı)
@@ -13,6 +15,7 @@ import { useLiveRows } from '../../hooks/useLiveRows'
  * dondurmak satırı kendi içinde tutarsız bırakırdı.
  */
 export default function PositionsWidget() {
+  const { rates } = useMarketStream()
   const [fetched, setFetched] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -68,7 +71,7 @@ export default function PositionsWidget() {
               <th className="py-2 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Fiyat</th>
               <th className="py-2 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Adet</th>
               <th className="py-2 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Ort. Maliyet</th>
-              <th className="py-2 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Pozisyon (₺)</th>
+              <th className="py-2 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Pozisyon</th>
               <th className="py-2 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Günlük Getiri</th>
               <th className="py-2 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Toplam Getiri</th>
             </tr>
@@ -78,21 +81,26 @@ export default function PositionsWidget() {
               <tr key={pos.symbol} className="hover:bg-white/5 transition-colors group">
                 <td className="py-3 font-semibold text-white text-sm">{pos.symbol}</td>
                 <td className="py-3 text-right tabular-nums text-sm font-medium text-slate-300">
-                  {pos.price.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(pos.price, pos.currency)}
                 </td>
                 <td className="py-3 text-right tabular-nums text-sm text-slate-400">{pos.quantity}</td>
                 <td className="py-3 text-right tabular-nums text-sm text-slate-400">
-                  {pos.avgCost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(pos.avgCost, pos.currency)}
                 </td>
                 <td className="py-3 text-right tabular-nums text-sm font-semibold text-white">
-                  {pos.totalValue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(pos.totalValue, pos.currency)}
+                  {baseEquivalent(pos.totalValue, pos.currency, rates) && (
+                    <span className="block text-[10px] font-normal text-slate-500">
+                      {baseEquivalent(pos.totalValue, pos.currency, rates)}
+                    </span>
+                  )}
                 </td>
                 <td className={`py-3 text-right tabular-nums text-sm font-semibold ${pos.dailyReturn < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                  {pos.dailyReturn > 0 ? '+' : ''}{pos.dailyReturn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} (
+                  {pos.dailyReturn > 0 ? '+' : ''}{formatMoney(pos.dailyReturn, pos.currency)} (
                   {pos.dailyReturnPercent > 0 ? '+' : ''}{pos.dailyReturnPercent}%)
                 </td>
                 <td className={`py-3 text-right tabular-nums text-sm font-semibold ${pos.totalReturn < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                  {pos.totalReturn > 0 ? '+' : ''}{pos.totalReturn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} (
+                  {pos.totalReturn > 0 ? '+' : ''}{formatMoney(pos.totalReturn, pos.currency)} (
                   {pos.totalReturnPercent > 0 ? '+' : ''}{pos.totalReturnPercent}%)
                 </td>
               </tr>

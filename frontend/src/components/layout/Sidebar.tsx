@@ -196,6 +196,7 @@ export default function Sidebar() {
   /** Oturumu sonlandırır: token silinir, giriş sayfasına yönlendirilir */
   function handleLogout() {
     localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
     navigate('/login')
   }
 

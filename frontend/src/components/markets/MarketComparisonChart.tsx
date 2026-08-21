@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { MarketInstrument } from '../../data/mockData'
-import { buildComparisonChartData } from '../../data/comparisonSeries'
+import { useComparisonSeries } from '../../hooks/useComparisonSeries'
 import { signedPercent, seriesName } from '../../lib/chartFormat'
 
 interface Props {
@@ -28,7 +28,10 @@ export default function MarketComparisonChart({ instruments }: Props) {
     })
   }
 
-  const chartData = useMemo(() => buildComparisonChartData(selected, SERIES_DAYS), [selected])
+  // Real closes, rebased to percent so instruments at different price
+  // levels share one axis. The generator this replaces had a positive
+  // bias, so every line trended up whatever the instrument had done.
+  const { data: chartData } = useComparisonSeries(selected, SERIES_DAYS)
 
   return (
     <div className="flex flex-col bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5">

@@ -21,6 +21,7 @@ from typing import Any, Callable, Optional
 
 from sqlalchemy.orm import Session
 
+from app.modules.investment.ai_service import _convert
 from app.modules.risk import returns as risk_returns
 
 log = logging.getLogger("moneyfast.analytics")
@@ -69,6 +70,8 @@ def build(
     proposals: list[Any],
     as_of: Optional[datetime] = None,
     delay_minutes: int = 0,
+    rates: Optional[dict[str, float]] = None,
+    base_currency: str = "TRY",
 ) -> dict[str, Any]:
     """Assemble the report. Pure: every input is supplied by the router."""
     warnings: list[str] = []
@@ -83,15 +86,44 @@ def build(
             + ", ".join(missing)
         )
 
-    invested = sum(row["quantity"] * row["price"] for row in priced)
-    cost = sum(row["quantity"] * row["avg_cost"] for row in priced)
+    # Values in the ACCOUNT's currency, converted per holding.
+    #
+    # These sums used to add USD straight to TRY, so a portfolio holding AAPL,
+    # MSFT and NVDA counted them at roughly 1/48th of their worth: this page
+    # reported ₺404.467 while /portfolio/summary reported ₺1.087.834 for the
+    # same holdings. A holding whose rate is missing is excluded and named
+    # rather than converted at an invented rate.
+    rates = rates or {"TRY": 1.0}
+    valued, unconvertible = [], []
+    for row in priced:
+        try:
+            market_value = _convert(
+                row["quantity"] * row["price"], row.get("currency") or base_currency,
+                base_currency, rates,
+            )
+            cost_basis = _convert(
+                row["quantity"] * row["avg_cost"], row.get("currency") or base_currency,
+                base_currency, rates,
+            )
+        except KeyError:
+            unconvertible.append(row["symbol"])
+            continue
+        valued.append((row, market_value, cost_basis))
+
+    if unconvertible:
+        warnings.append(
+            "Kuru alınamadığı için değerlemeye dahil edilmeyen pozisyonlar: "
+            + ", ".join(sorted(unconvertible))
+        )
+
+    invested = sum(market_value for _, market_value, _ in valued)
+    cost = sum(cost_basis for _, _, cost_basis in valued)
     total = invested + cash
 
     allocation = [
         {"label": "Nakit (TRY)", "value": round(cash, 2), "percentage": _percent(cash, total)}
     ]
-    for row in sorted(priced, key=lambda r: r["quantity"] * r["price"], reverse=True):
-        value = row["quantity"] * row["price"]
+    for row, value, _ in sorted(valued, key=lambda entry: entry[1], reverse=True):
         allocation.append(
             {
                 "label": row["symbol"],
@@ -101,13 +133,13 @@ def build(
         )
 
     sectors: dict[str, float] = {}
-    for row in priced:
+    for row, value, _ in valued:
         # "Bilinmiyor" rather than a guess: assigning a sector by inference
         # would make the breakdown look more certain than it is.
         label = sector_map.get(row["symbol"]) or "Bilinmiyor"
-        sectors[label] = sectors.get(label, 0.0) + row["quantity"] * row["price"]
+        sectors[label] = sectors.get(label, 0.0) + value
 
-    trend, excluded = _trend(priced, closes_for)
+    trend, excluded = _trend([row for row, _, _ in valued], closes_for)
     if excluded:
         warnings.append(
             "Fiyat geçmişi olmayan enstrümanlar trend hesabının dışında: "
@@ -144,6 +176,7 @@ def build(
     _normalise(allocation)
 
     return {
+        "base_currency": base_currency,
         "as_of": as_of,
         "is_delayed": True,
         "delay_minutes": delay_minutes,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
 import type { Order } from '../../api/client'
+import { formatMoney } from '../../lib/money'
 
 /**
  * Emir Geçmişi Bileşeni
@@ -77,10 +78,10 @@ export default function OrderHistoryWidget() {
                 <td className={`py-3 font-semibold text-[13px] ${getTypeColor(order.type)}`}>{order.type}</td>
                 <td className="py-3 text-right tabular-nums text-sm text-slate-400">{order.quantity}</td>
                 <td className="py-3 text-right tabular-nums text-sm font-medium text-slate-300">
-                  {order.price.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(order.price, order.currency)}
                 </td>
                 <td className="py-3 text-right tabular-nums text-sm font-semibold text-white">
-                  {order.total.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(order.total, order.currency)}
                 </td>
                 <td className="py-3 text-right tabular-nums text-[12px] text-slate-400">
                   {new Date(order.date).toLocaleString('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}

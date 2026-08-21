@@ -1,15 +1,18 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries, HistogramSeries } from 'lightweight-charts'
 import {
-  getSeries,
-  presetRange,
+  presetRangeFor,
+  sliceSeries,
   dateInputToSeconds,
   secondsToDateInput,
   RANGE_PRESETS,
-  SERIES_START,
-  SERIES_END,
 } from '../../data/portfolioSeries'
 import type { RangePreset } from '../../data/portfolioSeries'
+import { apiClient } from '../../api/client'
+import type { Candle } from '../../data/portfolioSeries'
+
+/** The index the performance chart tracks until per-account snapshots exist. */
+const BENCHMARK_SYMBOL = 'XU100'
 
 type Mode = RangePreset | 'custom'
 
@@ -21,6 +24,29 @@ type Mode = RangePreset | 'custom'
  */
 export default function PortfolioPerformanceChart() {
   const [mode, setMode] = useState<Mode>('Yıl')
+  // Real daily bars. This chart drew a seeded random walk from
+  // data/portfolioSeries.ts — its own header said an API call would replace
+  // the generator, and /api/market/candles now serves genuine ones.
+  const [series, setSeries] = useState<Candle[]>([])
+
+  useEffect(() => {
+    apiClient
+      .getCandles(BENCHMARK_SYMBOL, 400)
+      .then((response) =>
+        setSeries(
+          (response.candles ?? []).map((bar) => ({
+            time: Math.floor(new Date(bar.timestamp).getTime() / 1000),
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+            value: bar.volume ?? 0,
+            color: bar.close >= bar.open ? '#10b981' : '#ef4444',
+          })),
+        ),
+      )
+      .catch((error) => console.error('Failed to load performance series', error))
+  }, [])
   const [pickerOpen, setPickerOpen] = useState(false)
   const [fromInput, setFromInput] = useState('')
   const [toInput, setToInput] = useState('')
@@ -34,12 +60,12 @@ export default function PortfolioPerformanceChart() {
 
   const activeRange = useMemo(() => {
     if (mode === 'custom') return customRange
-    return presetRange(mode)
+    return presetRangeFor(series, mode)
   }, [mode, customRange])
 
   const data = useMemo(() => {
     if (!activeRange) return []
-    return getSeries(activeRange.from, activeRange.to)
+    return sliceSeries(series, activeRange.from, activeRange.to)
   }, [activeRange])
 
   // Chart kurulumu (yalnızca mount'ta)
@@ -145,15 +171,17 @@ export default function PortfolioPerformanceChart() {
       setRangeError('Bitiş tarihi başlangıç tarihinden sonra olmalıdır.')
       return
     }
-    if (from > SERIES_END || to < SERIES_START) {
+    const seriesStart = series.length ? series[0].time : 0
+    const seriesEnd = series.length ? series[series.length - 1].time : 0
+    if (from > seriesEnd || to < seriesStart) {
       setRangeError('Seçilen aralık veri kapsamının dışında.')
       return
     }
 
-    const clampedFrom = Math.max(from, SERIES_START)
-    const clampedTo = Math.min(to, SERIES_END)
+    const clampedFrom = Math.max(from, seriesStart)
+    const clampedTo = Math.min(to, seriesEnd)
 
-    if (getSeries(clampedFrom, clampedTo).length === 0) {
+    if (sliceSeries(series, clampedFrom, clampedTo).length === 0) {
       setRangeError('Seçilen aralıkta veri bulunmuyor.')
       return
     }
@@ -173,8 +201,10 @@ export default function PortfolioPerformanceChart() {
     setPickerOpen(false)
   }
 
-  const minDate = secondsToDateInput(SERIES_START)
-  const maxDate = secondsToDateInput(SERIES_END)
+  // Bounded by the data we actually loaded, so the picker cannot offer a day
+  // with no bars behind it.
+  const minDate = secondsToDateInput(series.length ? series[0].time : 0)
+  const maxDate = secondsToDateInput(series.length ? series[series.length - 1].time : 0)
 
   const rangeLabel =
     mode === 'custom' && customRange

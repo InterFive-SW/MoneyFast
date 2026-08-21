@@ -5,6 +5,7 @@ kullanıcının kendi eylemiyle hareket eder, ajan kendi başına transfer
 başlatamaz.
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,7 +17,17 @@ from app.core.deps import get_current_user_id
 
 from . import service
 from .models import AccountTransaction, BankTransaction
-from .schemas import BankAccountOut, StatementOut, TransferOut, TransferRequest
+from .models import SavingsGoal
+from .schemas import (
+    BalanceHistoryOut,
+    BankAccountOut,
+    SavingsGoalIn,
+    SavingsGoalOut,
+    SpendingSummaryOut,
+    StatementOut,
+    TransferOut,
+    TransferRequest,
+)
 
 router = APIRouter(tags=["banking"])
 
@@ -115,6 +126,93 @@ async def statement(
             for leg, transaction in rows
         ],
     }
+
+
+@router.get("/spending", response_model=SpendingSummaryOut, summary="Aylık harcama özeti")
+async def spending_summary(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    Kategorilere göre harcama — yalnızca DEBIT bacaklarından.
+
+    Kendi hesapları arasındaki transfer hem borç hem alacak bacağı üretir;
+    borç bacağını harcama saymak, kendi parasını taşımayı gider gibi
+    gösterirdi. Kategorisi olmayan hareketler toplama girmez.
+    """
+    now = datetime.now(timezone.utc)
+    window = timedelta(days=days)
+    current = service.spending_by_category(db, user_id, since=now - window)
+    previous = service.spending_by_category(db, user_id, since=now - 2 * window)
+
+    total = sum(row["amount"] for row in current)
+    # `previous` covers both windows, so the earlier one is the difference.
+    earlier = sum(row["amount"] for row in previous) - total
+    change = round((total - earlier) / earlier * 100, 2) if earlier else None
+
+    return {
+        "period": f"Son {days} gün",
+        "currency_code": "TRY",
+        "total_expense": round(total, 2),
+        "change_percent": change,
+        "categories": current,
+    }
+
+
+@router.get("/balance-history", response_model=BalanceHistoryOut, summary="Bakiye geçmişi")
+async def balance_history(
+    limit: int = Query(default=30, ge=2, le=200),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    Her hareketten sonraki bakiye — `balance_after` sütunundan okunuyor.
+
+    Hareketleri yeniden oynatarak hesaplamak yerine saklanan değeri okumak,
+    o sütunun var olma sebebi.
+    """
+    points = service.balance_history(db, user_id, limit=limit)
+    accounts = service.accounts_for(db, user_id)
+    total = sum(float(account.balance) for account in accounts)
+
+    first = points[0]["balance"] if points else None
+    change_amount = round(total - first, 2) if first is not None else 0.0
+    # Only meaningful against a positive starting balance. Dividing by zero or
+    # by a negative opening balance produces a percentage that reads backwards.
+    change_percent = (
+        round(change_amount / first * 100, 2) if first and first > 0 else None
+    )
+
+    return {
+        "currency_code": accounts[0].currency_code if accounts else "TRY",
+        "total": round(total, 2),
+        "change_amount": change_amount,
+        "change_percent": change_percent,
+        "points": points,
+    }
+
+
+@router.get("/savings-goals", response_model=List[SavingsGoalOut], summary="Birikim hedefleri")
+async def list_savings_goals(
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Kullanıcının koyduğu hedefler. Gözlem değil, niyet."""
+    return service.goals_for(db, user_id)
+
+
+@router.post("/savings-goals", response_model=SavingsGoalOut, summary="Birikim hedefi ekle")
+async def create_savings_goal(
+    request: SavingsGoalIn,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    goal = SavingsGoal(user_id=user_id, **request.model_dump())
+    db.add(goal)
+    db.commit()
+    db.refresh(goal)
+    return goal
 
 
 @router.get("/health", summary="Banking modülü sağlık durumu")

@@ -337,6 +337,75 @@ class TestDistressDetection:
         """"Zarar ettim" is a normal thing to say about a portfolio."""
         assert orchestrator_tools.detect_safety_flags("bu ay biraz zarar ettim") == []
 
+    # ------------------------------------------------------------------
+    # Regression: turns taken verbatim from the production chat log.
+    #
+    # Every message below was typed by a real user. Three of them raised no
+    # flag at all and were answered with budgeting advice, and the categories
+    # were undifferentiated, so even a flagged self-harm turn got a lecture
+    # about how borrowed money raises risk. Both halves are asserted here:
+    # that the flag fires, and WHICH category it is.
+    # ------------------------------------------------------------------
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "kendimi öldürücem",                        # missed entirely
+            "ne borcu kardeş atlicam köprüden",         # missed entirely
+            "100 metreden asfalta atlasam yaşar mıyım",  # missed entirely
+            "ölmek istiyorum",                          # flagged, wrong reply
+            "aga ben intihar ediyorum ozaman",
+            "kendimi asacağım",
+        ],
+    )
+    def test_self_harm_turns_from_the_log(self, message):
+        flags = orchestrator_tools.detect_safety_flags(message)
+        assert "DISTRESS_SIGNAL" in flags
+        assert "SELF_HARM_RISK" in flags
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "acil para kazanmam lazım tetikçi tutmuşlar",
+            "bana hisse öner para kazanmam lazım öldürücekler beni",
+            "tehdit ediliyorum",
+        ],
+    )
+    def test_threats_from_others_are_their_own_category(self, message):
+        """Answered with emergency-fund advice in the log. It is neither a
+        suicide risk nor a budgeting problem."""
+        flags = orchestrator_tools.detect_safety_flags(message)
+        assert "DISTRESS_SIGNAL" in flags
+        assert "COERCION_RISK" in flags
+
+    def test_financial_hardship_stays_financial(self):
+        flags = orchestrator_tools.detect_safety_flags(
+            "battım, borç ve icra altındayım"
+        )
+        assert "FINANCIAL_DISTRESS" in flags
+        assert "SELF_HARM_RISK" not in flags
+
+    def test_self_harm_outranks_financial_hardship(self):
+        """A turn carrying both is answered as the more serious one."""
+        flags = orchestrator_tools.detect_safety_flags(
+            "her şeyimi kaybettim, intihar etmek istiyorum"
+        )
+        assert "SELF_HARM_RISK" in flags
+        assert "FINANCIAL_DISTRESS" not in flags
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "bu adımı atlayacağım",
+            "bir sonraki adımı atla",
+            "ben çok borca girdim napıcam",
+            "kaç param var baksana",
+        ],
+    )
+    def test_benign_turns_do_not_trip_the_new_patterns(self, message):
+        """"Atla" is an ordinary verb. Widening the jumping patterns must not
+        flag someone asking to skip a step."""
+        assert orchestrator_tools.detect_safety_flags(message) == []
+
     def test_handoff_absent_from_roster_does_not_crash(self):
         """Edge case: distress detected but HUMAN_HANDOFF not offered. Falls
         back rather than raising, and keeps the flag so the caller still

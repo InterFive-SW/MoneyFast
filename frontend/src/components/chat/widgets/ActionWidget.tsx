@@ -103,9 +103,12 @@ export default function ActionWidget({ payload }: ActionWidgetProps) {
         )}
       </div>
 
-      {/* Elegant Toast Bildirimi (Cosmos.so ilhamlı) */}
+      {/* Bildirim akışın içinde durur.
+          `absolute -bottom-14` ile kartın 56px altına konumlandırılıyordu ve
+          orası tam olarak MessageBubble'ın yasal dipnotunun bulunduğu yer:
+          bildirim göründüğünde zorunlu bildirimin üstünü örtüyordu. */}
       {toastMessage && (
-        <div className={`absolute -bottom-14 left-0 right-0 mx-auto w-[90%] text-center px-4 py-2 rounded-lg text-xs font-medium shadow-md transition-all animate-fade-in-up border ${
+        <div className={`mt-2 w-full text-center px-4 py-2 rounded-lg text-xs font-medium shadow-md transition-all animate-fade-in-up border ${
           toastMessage.type === 'success'
             ? 'bg-emerald-500 border-emerald-600 text-white shadow-emerald-500/20'
             : 'bg-rose-500 border-rose-600 text-white shadow-rose-500/20'

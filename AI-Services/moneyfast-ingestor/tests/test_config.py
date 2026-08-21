@@ -51,7 +51,7 @@ class TestNumericSettings:
     def test_defaults(self):
         assert config.request_timeout() == 20.0
         assert config.per_host_delay() == 2.0
-        assert config.quote_interval_seconds() == 10
+        assert config.quote_interval_seconds() == 30
         assert config.history_days() == 400
 
     def test_garbage_falls_back_instead_of_crashing_the_service(self, monkeypatch):
@@ -59,7 +59,7 @@ class TestNumericSettings:
         monkeypatch.setenv("INGESTOR_TIMEOUT_SECONDS", "soon")
         monkeypatch.setenv("INGESTOR_QUOTE_INTERVAL_SECONDS", "often")
         assert config.request_timeout() == 20.0
-        assert config.quote_interval_seconds() == 10
+        assert config.quote_interval_seconds() == 30
 
     def test_valid_overrides_are_honoured(self, monkeypatch):
         monkeypatch.setenv("INGESTOR_HOST_DELAY_SECONDS", "5.5")
@@ -94,10 +94,12 @@ class TestEmptyEnvironmentOverrides:
 
 
 class TestQuoteInterval:
-    def test_ten_seconds_by_default(self):
-        """Achievable because the universe is fetched in ONE batched request:
-        measured 3.3-5.4s for ~95 symbols."""
-        assert config.quote_interval_seconds() == 10
+    def test_thirty_seconds_by_default(self):
+        """Raised from 10s when the universe doubled to ~190 symbols across
+        two markets. A clean cycle is a few seconds, but one chunk that has to
+        time out pushes it past ten, and every overrun was logged as a skipped
+        run. A budget the cycle can meet beats a number that looks live."""
+        assert config.quote_interval_seconds() == 30
 
     def test_is_overridable(self, monkeypatch):
         monkeypatch.setenv("INGESTOR_QUOTE_INTERVAL_SECONDS", "30")

@@ -66,6 +66,24 @@ async def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)
 
 
 @router.post(
+    "/refresh",
+    response_model=schemas.TokenResponse,
+    summary="Yenileme token'ı ile yeni bir access token al",
+)
+async def refresh(payload: schemas.RefreshRequest, db: Session = Depends(get_db)):
+    """
+    Süresi dolmuş bir access token'ı, uzun ömürlü yenileme token'ıyla tazeler.
+
+    Bu uç nokta olmadan oturum 30 dakikada sessizce düşüyordu: kullanıcı
+    çıkışa yönlendirilmiyor, anonim çağırana dönüşüyordu. Sohbet çalışmaya
+    devam ettiği için fark edilmiyordu, ama hazırladığı işlem önerileri
+    `user_id="anonymous"` ile kaydediliyor ve onay adımında kalıcı olarak
+    404 alıyordu.
+    """
+    return service.refresh_access_token(payload.refresh_token, db)
+
+
+@router.post(
     "/forgot-password",
     status_code=status.HTTP_200_OK,
     summary="Şifre sıfırlama bağlantısı iste"

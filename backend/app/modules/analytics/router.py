@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_optional_user_id
-from app.modules.investment import market_service
+from app.modules.investment import ai_service, market_service
 from app.modules.investment.models import TransactionProposal
 
 from . import service
@@ -69,6 +69,10 @@ async def portfolio_analysis(
         proposals=proposals,
         as_of=as_of,
         delay_minutes=delay_minutes,
+        # Same helper the portfolio summary uses, so the two pages cannot
+        # disagree about what a dollar is worth.
+        rates=ai_service.fx_rates(quotes),
+        base_currency=(account.currency_code if account else "TRY") or "TRY",
     )
 
 

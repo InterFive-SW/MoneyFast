@@ -1,3 +1,10 @@
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import type { InvestmentBalance } from '../../data/mockData'
+
+interface Props {
+  data: InvestmentBalance
+}
 import { useEffect, useState } from 'react'
 import { apiClient, type InvestmentBalance } from '../../api/client'
 
@@ -8,6 +15,8 @@ import { apiClient, type InvestmentBalance } from '../../api/client'
  * besleniyordu — oysa `/api/investment/portfolio/summary` tam olarak bu şekli
  * canlı fiyatlardan hesaplayıp döndürüyordu ve hiçbir yerden çağrılmıyordu.
  */
+export default function InvestmentBalanceWidget({ data }: Props) {
+  const navigate = useNavigate()
 export default function InvestmentBalanceWidget() {
   const [currency, setCurrency] = useState<'TRY' | 'USD'>('TRY')
   const [data, setData] = useState<InvestmentBalance | null>(null)
@@ -38,7 +47,12 @@ export default function InvestmentBalanceWidget() {
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       {/* Üst Kısım: Başlık ve Para Birimi Geçişi */}
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Yatırım Hesabım</h3>
+        <h3 
+          className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 cursor-pointer hover:text-brandBlue transition-colors"
+          onClick={() => navigate('/portfolio')}
+        >
+          Yatırım Hesabım <span className="text-[9px] opacity-70 ml-1">↗</span>
+        </h3>
         <div className="flex bg-white/5/10/50 p-1 rounded-lg">
           <button
             onClick={() => setCurrency('TRY')}

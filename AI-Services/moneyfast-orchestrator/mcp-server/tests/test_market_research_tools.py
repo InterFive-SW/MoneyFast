@@ -1,7 +1,7 @@
 """Unit tests for market_research_tools.
 
 Contract under test: Interface Definitions v2.1, rag_semantic_market_search,
-now backed by POST /market-research/search.
+now backed by POST /search on the rag service.
 
 The failure that matters is a fabricated citation, so provenance is required
 rather than defaulted, and the empty-corpus path is asserted explicitly: the
@@ -28,7 +28,7 @@ class TestRequest:
     async def test_posts_to_the_search_endpoint(self, fake_backend):
         await market_research_tools.rag_semantic_market_search("THY")
         assert fake_backend.last.method == "POST"
-        assert "/market-research/search" in str(fake_backend.last.url)
+        assert str(fake_backend.last.url) == "http://rag:8100/search"
 
     async def test_default_body(self, fake_backend):
         await market_research_tools.rag_semantic_market_search("THY")
@@ -334,3 +334,26 @@ class TestRegistration:
         assert inspect.iscoroutinefunction(
             market_research_tools.rag_semantic_market_search
         )
+
+
+class TestExplicitNulls:
+    """Same failure mode as get_market_data: a model that names every
+    parameter and nulls the ones it has no opinion about must not be told the
+    tool is unavailable."""
+
+    @pytest.mark.asyncio
+    async def test_null_arguments_fall_back_to_the_documented_defaults(self, fake_backend):
+        await market_research_tools.rag_semantic_market_search(
+            query="THY", top_k=None, min_similarity=None, rerank=None
+        )
+        body = fake_backend.body()
+        assert body["top_k"] == market_research_tools.DEFAULT_TOP_K
+        assert body["min_similarity"] == market_research_tools.DEFAULT_MIN_SIMILARITY
+        assert body["rerank"] is True
+
+    @pytest.mark.asyncio
+    async def test_an_explicit_false_rerank_is_not_treated_as_absent(self, fake_backend):
+        """`False` and `None` are different instructions; `or` would conflate
+        them and silently rerank when asked not to."""
+        await market_research_tools.rag_semantic_market_search(query="THY", rerank=False)
+        assert fake_backend.body()["rerank"] is False

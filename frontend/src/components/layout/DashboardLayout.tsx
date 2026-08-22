@@ -8,7 +8,8 @@
  */
 
 import React, { useState } from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
+import ErrorBoundary from '../ErrorBoundary'
 import Sidebar from './Sidebar'
 import Header  from './Header'
 import { ChatProvider } from '../../context/ChatContext'
@@ -147,7 +148,11 @@ export default function DashboardLayout() {
           <Header pageTitle={pageTitle} />
 
           <main className="flex-1 overflow-y-auto" id="main-content">
-            <Outlet />
+            {/* Sayfa çökerse sidebar ve header ayakta kalsın; kullanıcı
+                boş beyaz ekranda kalmak yerine başka bir sayfaya geçebilsin. */}
+            <ErrorBoundary label="Sayfa">
+              <Outlet />
+            </ErrorBoundary>
           </main>
         </div>
 

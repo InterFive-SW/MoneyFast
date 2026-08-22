@@ -63,6 +63,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Deterministic configuration regardless of the developer's shell."""
     for name in (
         "BACKEND_API_BASE_URL",
+        "RAG_API_BASE_URL",
         "BACKEND_TIMEOUT_SECONDS",
         "BACKEND_CONNECT_TIMEOUT",
         "BACKEND_MAX_RETRIES",
@@ -92,11 +93,13 @@ def no_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 # --------------------------------------------------------------------------
 #: Path fragment -> route key. Keeps tests readable: backend.set("portfolio", ...)
 ROUTES = {
-    "/portfolio/": "portfolio",
-    "/market-research/search": "search",
+    "/investment/portfolio/": "portfolio",
+    "/investment/transactions/stage": "stage",
     "/risk/calculate": "risk",
+    "/market/instruments": "instruments",
     "/compliance/validate": "compliance",
-    "/transactions/stage": "stage",
+    # Served by the rag service on its own base URL, matched on path alone.
+    "/search": "search",
 }
 
 
@@ -364,7 +367,12 @@ def portfolio_top_level_keys() -> frozenset[str]:
 def position_keys() -> frozenset[str]:
     return frozenset(
         {
-            "symbol", "isin", "name", "asset_class", "exchange", "quantity",
+            # v2.6 adds `sector` and `market`. Both additive. The risk engine
+            # buckets exposure by sector and reported every portfolio as 100%
+            # UNCLASSIFIED, not because sectors were unknown but because the
+            # positions handed to it never carried the field.
+            "symbol", "isin", "name", "asset_class", "sector", "market",
+            "exchange", "quantity",
             "avg_cost", "instrument_currency", "last_price", "market_value",
             "cost_basis", "unrealized_pnl", "unrealized_pnl_pct", "weight",
             "available_quantity", "opened_at",
@@ -415,6 +423,10 @@ def routing_top_level_keys() -> frozenset[str]:
             "is_compound", "sub_requests", "entities", "required_tools",
             "needs_clarification", "clarifying_question", "routing_rationale",
             "safety_flags",
+            # Added when routing moved to the orchestrator: tells the caller
+            # whether it may substitute its own decision. False means safety
+            # decided, and safety is not delegable.
+            "is_overridable",
         }
     )
 

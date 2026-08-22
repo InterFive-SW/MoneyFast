@@ -1,5 +1,5 @@
 // src/pages/Chat.tsx
-import React, { useRef, useEffect, useLayoutEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import MessageBubble from '../components/chat/MessageBubble';
 import ChatInput from '../components/chat/ChatInput';
 import SuggestedPrompts from '../components/chat/SuggestedPrompts';
@@ -16,7 +16,7 @@ import { useChat } from '../context/ChatContext';
  */
 export default function Chat() {
   const { 
-    sessions, activeSessionId, messages, isTyping, currentThought, activeContext, 
+    sessions, activeSessionId, messages, isTyping, currentThought, justAnsweredId, activeContext, dismissContext,
     handleSendMessage, createNewSession, loadSession, deleteSession 
   } = useChat();
   
@@ -40,8 +40,11 @@ export default function Chat() {
 
   const hasMessages = messages.length > 0;
 
+  // h-full, not calc(100vh-80px): the header is h-16 (64px), not 80, and
+  // <main> already scrolls. The 16px mismatch put a second scrollbar in the
+  // middle of the page and pushed the composer below the fold.
   return (
-    <div className="flex flex-col md:flex-row h-[calc(100vh-80px)] bg-slate-900/30 relative overflow-hidden rounded-xl border border-white/10 shadow-sm">
+    <div className="flex min-h-0 flex-col md:flex-row h-full bg-slate-900/30 relative overflow-hidden rounded-xl border border-white/10 shadow-sm">
       
       {/* Sol Sidebar - Sohbet Geçmişi */}
       <div className="hidden md:flex w-64 border-r border-white/10 bg-slate-900/50 flex-col">
@@ -96,7 +99,7 @@ export default function Chat() {
       <div className={`flex-1 flex flex-col relative h-full w-full ${hasMessages ? 'md:w-auto' : ''}`}>
         
         {/* Scroll Edilebilir Mesaj Alanı veya Boş Durum (Empty State) */}
-        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-4 md:px-8 pt-6 pb-[140px] scroll-smooth">
+        <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto px-4 md:px-8 pt-6 pb-4 scroll-smooth">
           <div className="max-w-3xl mx-auto w-full min-h-full flex flex-col justify-end">
             
             {!hasMessages ? (
@@ -123,7 +126,11 @@ export default function Chat() {
             ) : (
               <div className="flex flex-col w-full justify-start mt-4 min-h-full">
                 {messages.map((msg) => (
-                  <MessageBubble key={msg.id} message={msg} />
+                  <MessageBubble
+                    key={msg.id}
+                    message={msg}
+                    animate={msg.id === justAnsweredId}
+                  />
                 ))}
                 {isTyping && <TypingIndicator thought={currentThought} />}
                 <div ref={messagesEndRef} className="h-4 w-full" />
@@ -133,8 +140,11 @@ export default function Chat() {
           </div>
         </div>
 
-        {/* Sabit Mesaj Girdi Alanı */}
-        <div className="absolute bottom-0 w-full bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pt-10 pb-4 px-4 md:px-8">
+        {/* Girdi alanı akışın içinde: absolute konumlandırılıp kaydırma
+            alanına pb-[140px] ile yer açılıyordu. 140 bir tahmindi ve çok
+            satırlı bir mesaj yazıldığında kutu büyüyüp son mesajın üstünü
+            kapatıyordu. Kardeş öğe olunca boşluk kendiliğinden doğru. */}
+        <div className="shrink-0 w-full bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pt-4 pb-4 px-4 md:px-8">
           <div className="max-w-3xl mx-auto w-full flex flex-col items-center">
             <ChatInput onSendMessage={handleSendMessage} disabled={isTyping} />
           </div>
@@ -144,7 +154,7 @@ export default function Chat() {
       {/* Akıllı Bağlam Paneli (Sadece mesaj varsa ve Desktop'ta görünür) */}
       {hasMessages && activeContext && (
         <div className="hidden lg:block w-80 xl:w-96 h-full border-l border-white/10 bg-slate-900/50">
-          <ContextPanel contextTopic={activeContext} />
+          <ContextPanel symbol={activeContext} onClose={dismissContext} />
         </div>
       )}
       

@@ -27,7 +27,7 @@ def test_default_algorithm_expiry_and_orchestrator_url_are_applied():
     )
     assert s.ALGORITHM == "HS256"
     assert s.ACCESS_TOKEN_EXPIRE_MINUTES == 30
-    assert s.AI_ORCHESTRATOR_URL == "http://orchestrator-agent:8080"
+    assert s.AI_ORCHESTRATOR_URL == "http://agents:8080"
 
 
 def test_explicit_values_override_defaults():

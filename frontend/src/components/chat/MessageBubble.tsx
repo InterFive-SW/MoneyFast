@@ -1,12 +1,15 @@
 // src/components/chat/MessageBubble.tsx
-import React from 'react';
 import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload, PortfolioWidgetPayload } from '../../types/chat';
 import ChartWidget from './widgets/ChartWidget';
 import ActionWidget from './widgets/ActionWidget';
 import PortfolioWidget from './widgets/PortfolioWidget';
+import Markdown from './Markdown';
+import { useTypewriter } from '../../hooks/useTypewriter';
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  /** Metni yazılıyormuş gibi ortaya çıkarır. Sadece son yanıt için. */
+  animate?: boolean;
 }
 
 /**
@@ -15,8 +18,11 @@ interface MessageBubbleProps {
  * Kullanıcı ve yapay zeka mesajlarının arayüzdeki temsilidir.
  * Mesaj tipine göre farklı stiller uygulanır ve widget varsa render edilir.
  */
-export default function MessageBubble({ message }: MessageBubbleProps) {
+export default function MessageBubble({ message, animate = false }: MessageBubbleProps) {
   const isUser = message.sender === 'user';
+  // Yalnızca son asistan mesajı yazılır. Geçmiş mesajlar her render'da
+  // yeniden yazılsaydı, sohbet her açılışta baştan canlanırdı.
+  const shownText = useTypewriter(message.text, animate && !isUser);
   
   // Saati formatla (HH:mm)
   const timeString = message.timestamp.toLocaleTimeString('tr-TR', {
@@ -43,7 +49,15 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
               : 'bg-slate-800/80 backdrop-blur-md border border-white/10 text-white shadow-xl rounded-2xl rounded-bl-sm'
           }`}
         >
-          <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{message.text}</p>
+          {/* Kullanıcının kendi metni yazdığı gibi durur; markdown olarak
+              yorumlamak yazdıklarını değiştirmek olurdu. Asistan ise
+              markdown üretiyor ve ham basıldığında ekranda yıldızlar ve boru
+              işaretleri görünüyordu. */}
+          {isUser ? (
+            <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{message.text}</p>
+          ) : (
+            <Markdown text={shownText} />
+          )}
           
           {/* Widget Render Alanı */}
           {message.widget && message.widget.type === 'chart' && (
@@ -54,6 +68,22 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
           )}
           {message.widget && message.widget.type === 'portfolio' && (
             <PortfolioWidget payload={message.widget.payload as PortfolioWidgetPayload} />
+          )}
+
+          {/*
+            Yasal bildirimler — kelimesi kelimesine, ama gövde metninin
+            parçası değil. Her cevabın sonuna yapıştırılan kalıp metin,
+            okuyucuyu bildirimi gerçekten önemli olduğu yerde de atlamaya
+            alıştırıyordu. Burada görünür ama cevabı boğmuyor.
+          */}
+          {!isUser && message.disclosures && message.disclosures.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-white/10 flex flex-col gap-1">
+              {message.disclosures.map((notice) => (
+                <p key={notice} className="text-[10px] leading-snug text-slate-400">
+                  {notice}
+                </p>
+              ))}
+            </div>
           )}
 
           <span 

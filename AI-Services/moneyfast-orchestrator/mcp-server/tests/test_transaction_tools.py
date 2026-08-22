@@ -1,7 +1,7 @@
 """Unit tests for transaction_tools.
 
 Contract under test: Interface Definitions v2.1, prepare_transaction_proposal,
-now backed by POST /transactions/stage.
+now backed by POST /investment/transactions/stage.
 
 Two invariants dominate this file because both are ways a user could end up
 believing money moved:
@@ -40,6 +40,20 @@ async def stage(stage_args, **overrides):
 # Client-side validation, before any request
 # ==========================================================================
 class TestPreflightValidation:
+    @pytest.mark.parametrize("user_id", ["anonymous", "", None])
+    async def test_an_unidentified_caller_cannot_stage(
+        self, fake_backend, stage_args, user_id
+    ):
+        """"anonymous" is the sentinel the orchestrator substitutes when the
+        backend resolved no user from the bearer token -- an expired session.
+        Staging anyway produced a proposal owned by nobody: priced against the
+        shared demo account and rejected forever by the confirm endpoint, so
+        the user got a complete buy/sell card whose only button always failed.
+        """
+        with pytest.raises(InvalidInputError, match="not authenticated"):
+            await stage(stage_args, user_id=user_id)
+        assert fake_backend.attempts == 0
+
     async def test_quantity_and_notional_are_mutually_exclusive(
         self, fake_backend, stage_args
     ):
@@ -102,7 +116,7 @@ class TestRequest:
     async def test_posts_to_the_staging_endpoint(self, fake_backend, stage_args):
         await stage(stage_args)
         assert fake_backend.last.method == "POST"
-        assert "/transactions/stage" in str(fake_backend.last.url)
+        assert "/investment/transactions/stage" in str(fake_backend.last.url)
 
     async def test_idempotency_key_travels_in_the_header_and_the_body(
         self, fake_backend, stage_args

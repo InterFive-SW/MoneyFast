@@ -6,31 +6,17 @@
  * görüntüleyen birincil dashboard widget'ıdır.
  */
 
-import type { BalanceData } from '../../data/mockData'
-
-interface TotalBalanceWidgetProps {
-  data: BalanceData
-}
+import { useEffect, useState } from 'react'
+import { apiClient, type BalanceHistory } from '../../api/client'
+import { formatMoney } from '../../lib/money' 
 
 // ─── Biçimlendirme Yardımcıları ───────────────────────────────────────────────
 
-/**
- * Sayısal değeri Türk Lirası para birimi formatında biçimlendirir.
- * `tr-TR` yerel ayarı kullanılarak binlik ayraç ve ondalık virgül uygulanır.
- */
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('tr-TR', {
-    style: 'currency',
-    currency: 'TRY',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount)
-}
 
 // ─── Sparkline Alt Bileşeni ───────────────────────────────────────────────────
 
 interface SparklineChartProps {
-  /** 0.0–1.0 aralığında normalize edilmiş veri noktaları dizisi */
+  /** Ham değerler (ör. bakiye geçmişi); ölçekleme burada yapılır */
   points: number[]
   /** Olumlu değişim için emerald, olumsuz için red renk paleti */
   isPositive: boolean
@@ -46,9 +32,21 @@ function SparklineChart({ points, isPositive }: SparklineChartProps) {
   const H = 48
   const PAD = 4
 
+  // Yeni bir hesapta bakiye geçmişi boştur; tek nokta da bir çizgi çizmez.
+  // Bunu çizmeye çalışmak `coords[0]` üzerinden patlıyordu ve React bir
+  // widget yerine tüm ağacı söküyordu.
+  if (points.length < 2) return null
+
+  // Değerler ham bakiye (ör. 132.785,38) olarak gelir; kendi aralığına göre
+  // 0–1'e ölçeklenir. Aksi hâlde y koordinatı görünür alanın çok dışına düşer.
+  const min = Math.min(...points)
+  const max = Math.max(...points)
+  const span = max - min
+  const scaled = points.map((v) => (span === 0 ? 0.5 : (v - min) / span))
+
   // Her noktanın piksel koordinatını hesapla
-  const coords = points.map((v, i) => ({
-    x: PAD + (i / (points.length - 1)) * (W - PAD * 2),
+  const coords = scaled.map((v, i) => ({
+    x: PAD + (i / (scaled.length - 1)) * (W - PAD * 2),
     y: H - PAD - v * (H - PAD * 2),
   }))
 
@@ -107,8 +105,31 @@ function SparklineChart({ points, isPositive }: SparklineChartProps) {
  *  2. Toplam bakiye rakamı ve değişim göstergesi (orta)
  *  3. Geçmiş performans sparkline grafiği (alt)
  */
-export default function TotalBalanceWidget({ data }: TotalBalanceWidgetProps) {
-  const isPositive = data.changePercent >= 0
+export default function TotalBalanceWidget() {
+  // Real balances and their history, from the banking ledger. This widget was
+  // fed a ₺145.000 literal with a five-point invented sparkline.
+  const [data, setData] = useState<BalanceHistory | null>(null)
+
+  useEffect(() => {
+    apiClient
+      .getBalanceHistory()
+      .then(setData)
+      .catch((error) => console.error('Failed to load balance history', error))
+  }, [])
+
+  if (!data) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+      </div>
+    )
+  }
+
+  const changePercent = data.change_percent ?? 0
+  const isPositive = changePercent >= 0
+  // The real running balance after each movement — `balance_after` is stored
+  // on every ledger leg precisely so this does not have to be replayed.
+  const sparklinePoints = (data.points ?? []).map((point) => point.balance)
 
   const changeBadgeClass = isPositive
     ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
@@ -118,7 +139,7 @@ export default function TotalBalanceWidget({ data }: TotalBalanceWidgetProps) {
     <div className="flex h-full flex-col justify-between">
       {/* ── Üst Satır: Başlık ve Durum Rozeti ────────────────────────── */}
       <div className="flex items-start justify-between mb-2">
-        <h2 className="text-[11px] uppercase tracking-wider font-medium text-slate-400">{data.period} Toplam Varlık</h2>
+        <h2 className="text-[11px] uppercase tracking-wider font-medium text-slate-400">Toplam Varlık</h2>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold text-emerald-700 tracking-wide">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
           CANLI
@@ -129,22 +150,22 @@ export default function TotalBalanceWidget({ data }: TotalBalanceWidgetProps) {
       <div className="flex-1 flex flex-col justify-center">
         <div className="flex items-baseline gap-3">
           <p className="text-[2.2rem] font-bold leading-none tracking-tight text-white tabular-nums">
-            {formatCurrency(data.total)}
+            {formatMoney(data.total, data.currency_code)}
           </p>
         </div>
         <div className="mt-2 flex items-center gap-2">
           <span className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${changeBadgeClass}`}>
-            {isPositive ? '▲' : '▼'} {Math.abs(data.changePercent).toFixed(2)}%
+            {isPositive ? '▲' : '▼'} {Math.abs(changePercent).toFixed(2)}%
           </span>
           <span className="text-[11px] text-slate-400 font-medium tracking-wide tabular-nums">
-            {isPositive ? '+' : ''}{formatCurrency(data.changeAmount)}
+            {isPositive ? '+' : ''}{formatMoney(data.change_amount, data.currency_code)}
           </span>
         </div>
       </div>
 
       {/* ── Alt: Sparkline Grafiği ────────────────────────────────────── */}
       <div className="mt-2 h-10 w-full overflow-hidden">
-        <SparklineChart points={data.sparklinePoints} isPositive={isPositive} />
+        <SparklineChart points={sparklinePoints} isPositive={isPositive} />
       </div>
     </div>
   )

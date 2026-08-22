@@ -35,11 +35,11 @@ DEFAULT_BLOCK_REASON_TR = (
 async def validate_compliance_rules(
     draft_response: str,
     user_query: str,
-    jurisdiction: str = "TR",
+    jurisdiction: Optional[str] = "TR",
     tools_used: Optional[list[str]] = None,
     contains_personal_data: bool = False,
     contains_transaction_proposal: bool = False,
-    strictness: str = "STANDARD",
+    strictness: Optional[str] = "STANDARD",
 ) -> dict[str, Any]:
     """
     Screens a drafted assistant response against the configured regulatory rule set for
@@ -145,6 +145,8 @@ async def validate_compliance_rules(
         - This tool validates LANGUAGE, not ACCURACY. "PASS" is not confirmation that
           the underlying figures or claims are correct.
     """
+    strictness = strictness or "STANDARD"
+    jurisdiction = jurisdiction or "TR"
     # POST /compliance/validate.
     #
     # This function never returns a verdict it did not receive. There is no

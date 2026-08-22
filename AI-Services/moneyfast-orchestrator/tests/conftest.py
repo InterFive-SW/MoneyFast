@@ -153,6 +153,48 @@ def fake_mcp(mocker):
 # Payload fixtures mirroring the v2.1 tool contracts
 # --------------------------------------------------------------------------
 @pytest.fixture()
+def safety_payload() -> dict[str, Any]:
+    """What the MCP pre-filter returns for a message with no safety signal.
+
+    It forms no topic opinion since routing moved to the orchestrator, so
+    tests that care about the ROUTE stage it through the LLM double instead
+    (see the `route_as` fixture).
+    """
+    return {
+        "primary_intent": "UNCLASSIFIED",
+        "confidence": 0.0,
+        "target_agent": "EDUCATION_AGENT",
+        "secondary_intents": [],
+        "is_compound": False,
+        "sub_requests": [],
+        "entities": {},
+        "required_tools": [],
+        "needs_clarification": False,
+        "clarifying_question": None,
+        "routing_rationale": "Safety pre-filter only.",
+        "safety_flags": [],
+        "is_overridable": True,
+    }
+
+
+@pytest.fixture()
+def route_as(fake_mcp, patched_llm, safety_payload):
+    """Stage a full routing decision: clean pre-filter + a model reply.
+
+    Routing now takes two passes with different trust levels, so a test that
+    wants "this turn routes to X" has to satisfy both. Bundling it here keeps
+    that mechanism out of every individual test.
+    """
+    import json
+
+    def _stage(routing: dict[str, Any], safety: dict[str, Any] | None = None) -> None:
+        fake_mcp.responses["classify_and_route_intent"] = safety or safety_payload
+        patched_llm.set_responses([json.dumps(routing)])
+
+    return _stage
+
+
+@pytest.fixture()
 def routing_payload() -> dict[str, Any]:
     return {
         "primary_intent": "PORTFOLIO_INQUIRY",

@@ -12,20 +12,41 @@ işlemleri, yatırım/portföy yönetimi, RAG tabanlı piyasa/haber okuma ve ris
 değerlendirmesi sunuyor. Süre: 4 hafta. Gerçek müşteri verisi kullanılmıyor — tüm veri
 dummy/sentetik (TC kimlik no dahil, gerçekçi ama açıkça sahte formatta).
 
-## Mimari: backend+frontend birlikte, AI/RAG ayrı servis (2 Dockerfile)
+## Mimari: 7 container
 
-Güncelleme: Başlangıçta 3 ayrı servis (backend, frontend, ai-service) planlanmıştı;
+Başlangıçta 3 ayrı servis (backend, frontend, ai-service) planlanmıştı;
 PO ile yapılan değerlendirme sonrası **frontend backend'e birleştirildi** —
 aralarında gerçek bir izolasyon ihtiyacı yoktu (frontend statik dosya, CPU/bellek
 yükü yaratmıyor), birleştirme CORS'u ve bir deploy adımını ortadan kaldırdı.
-**ai-service ayrı kaldı** — bunun gerekçesi hâlâ geçerli: RAG/embedding
-kütüphaneleri farklı bağımlılık profiline sahip ve performans izolasyonu
-gerektiriyor (chatbot yavaşlarsa/çökerse bankacılık işlemleri etkilenmemeli —
-bkz. gereksinim FOG-04/FOG-05). Frontend çökerse zaten kullanıcı hiçbir şeye
-erişemez, bu yüzden onu izole etmenin gerçek bir koruma değeri yoktu.
+AI tarafı ise üç servise ayrıldı; gerekçe hâlâ aynı: RAG/embedding kütüphaneleri
+farklı bağımlılık profiline sahip ve performans izolasyonu gerektiriyor
+(chatbot yavaşlarsa/çökerse bankacılık işlemleri etkilenmemeli — bkz. gereksinim
+FOG-04/FOG-05).
 
-backend modülleri (auth, banking, investment, notification, analytics) network
-sınırı olmadan, aynı process içinde, doğrudan Python import'uyla birbirini çağırır.
+| Servis | Rol |
+|---|---|
+| `backend` | FastAPI monolit + derlenmiş frontend (tek dış giriş noktası) |
+| `base-db` | PostgreSQL 16 — uygulama verisi |
+| `vector-db` | pgvector — yalnızca `rag.documents` / `rag.chunks` |
+| `rag` | Retrieval servisi. Vektör DB kredensiyelini tutan **tek** bileşen; embedding'i yerel çalıştırır |
+| `mcp` | MCP tool sunucusu (SSE). Ajanların çağırdığı yedi tool |
+| `agents` | LangGraph orchestrator. Yönlendirme + uzman ajanlar; Groq'a çıkar |
+| `ingestor` | Fiyat (yfinance) ve haber (RSS) toplayıcı. DB kredensiyeli **taşımaz**, her şeyi HTTP ile iter |
+
+Ağ topolojisi ve hangi servisin hangi URL'i kullandığı: `docs/DOCKER_NETWORKING.md`.
+
+backend modülleri (auth, banking, investment, notification, analytics, market,
+risk, compliance) network sınırı olmadan, aynı process içinde, doğrudan Python
+import'uyla birbirini çağırır.
+
+`banking` artık gerçek: `banking.accounts` + `banking.transactions` +
+`banking.account_transactions` (migration 0008). Transfer, çift taraflı kayıt
+olarak yazılıyor — bir `transactions` satırı ve iki `account_transactions`
+bacağı (DEBIT/CREDIT), her biri `balance_before`/`balance_after` ile. Bakiyeleri
+saklamak, bir hesabın belirli bir andaki durumunu tüm geçmişi yeniden
+oynatmadan söyleyebilmeyi sağlıyor. Üçü **tek** transaction'da commit ediliyor:
+borcu yazıp alacağı yazamamak, bir hesaptan çıkıp hiçbir yere varmamış para
+demek.
 
 ```
 moneyfast/
@@ -33,25 +54,237 @@ moneyfast/
 │   └── app/
 │       ├── main.py     ← modül router'larını otomatik keşfedip toplar + StaticFiles serve
 │       ├── core/        (config, DB bağlantısı, JWT middleware)
-│       ├── modules/      auth/, banking/, investment/, notification/, analytics/
+│       ├── modules/      auth/, banking/, investment/, notification/, analytics/,
+│       │                 market/, risk/, compliance/, ai_orchestrator/
 │       └── shared/      (SADECE domain'siz ortak kod — enum, exception, pagination.
 │                         DB modeli KOYMA, bkz. "shared/ kuralı" aşağıda)
-├── frontend/            ← React kaynak kodu (geliştirme sırasında ayrı, build sonrası backend'e kopyalanır)
-├── ai-service/         ← ayrı servis: chatbot, RAG, MCP, ajanlar
-├── infra/docker-compose.yml   ← backend (frontend dahil) + ai-service + postgres + redis
+├── frontend/            ← React kaynak kodu (build sonrası backend image'ına kopyalanır)
+├── AI-Services/
+│   ├── moneyfast-orchestrator/          ← `agents` servisi (LangGraph + Groq)
+│   │   └── mcp-server/                  ← `mcp` servisi (MCP tool sunucusu)
+│   ├── moneyfast-rag/                   ← `rag` servisi (fastembed + vector-db)
+│   └── moneyfast-ingestor/              ← `ingestor` servisi (yfinance + RSS)
+├── infra/docker-compose.yml   ← 7 servisin tamamı, tek kaynak
 └── docs/
 ```
+
+### AI uç noktaları backend'de nerede
+
+`mcp` içindeki tool'lar backend'e gerçek uç noktalar üzerinden gider. Bunların
+gövde/yanıt şemaları **"MCP Tools Interface Definitions v2.2"ye karşı dondurulmuş**
+— eksik bir alan default'lanmaz, tool katmanı `ContractViolationError` fırlatır.
+Bu uç noktaları değiştirirken `AI-Services/.../mcp-server/*_tools.py` içindeki
+`_normalize()` fonksiyonlarına bakılmalı.
+
+| Tool | Uç nokta |
+|---|---|
+| `get_portfolio_positions` | `GET /api/investment/portfolio/{user_id}/positions` |
+| `prepare_transaction_proposal` | `POST /api/investment/transactions/stage` |
+| `calculate_portfolio_risk_metrics` | `POST /api/risk/calculate` |
+| `validate_compliance_rules` | `POST /api/compliance/validate` |
+| `rag_semantic_market_search` | `POST /search` — **backend'de değil, `rag` servisinde** |
+| `get_market_data` | `GET /api/market/instruments` — v2.2 ile eklendi |
+
+v2.3 ile `get_portfolio_positions` yanıtına `totals.cash_balance` ve
+`totals.total_value` eklendi. Öncesinde sözleşmede nakit yoktu, dolayısıyla
+"bakiyem ne kadar" sorusuna ajan ya pozisyonların piyasa değerini bakiye gibi
+söylüyor ya da "bu veri sette yok" diyordu. `null` = bilinmiyor; sıfır olarak
+raporlanmaz.
+
+`sort_by` yalnızca beş değer alır: `symbol`, `change_percent` (en çok
+yükselenler), `change_percent_asc` (en çok düşenler), `market_cap`, `pe_ratio`.
+Bu liste hem `prompts.py`'deki uzman ajan sözleşmesinde hem de
+`market_data_tools.ALLOWED_SORTS`'ta yazılı; ikisi ayrışırsa ajan geçersiz bir
+değer üretir ve kullanıcı "veriye ulaşamadım" cevabı alır. Modelin sık yazdığı
+eşanlamlılar (`gainers`, `change_percent_desc`) `_SORT_SYNONYMS` ile kanonik
+hâle çevrilir; tanınmayan değer sessizce yok sayılmaz, hata verir.
+
+Sohbet akışının kendisi `POST /api/ai_orchestrator/chat`. `user_id` gövdeden
+DEĞİL, bearer token'dan çözülür (`app/core/deps.py`); MCP sözleşmesi bu değerin
+yalnızca doğrulanmış oturumdan gelmesini şart koşuyor. İşlem onayı yalnızca
+`POST /api/investment/transactions/{proposal_id}/confirm` üzerinden, kullanıcının
+kendi eylemiyle verilir — sohbette "evet" demek onay sayılmaz.
+
+`POST /api/ai_orchestrator/chat/stream` aynı turu SSE ile yürütür: graf
+düğümleri ilerledikçe `stage` olayları, sonunda tek bir `done`. **Model
+çıktısı token token akmaz.** Graf fail-closed: uygunluk kapısının engellediği
+bir taslak kullanıcıya ulaşmamalı, ekrana yazılmış metin ise geri alınamaz.
+Bu yüzden yalnızca ilerleme akar; onaylanmış metin istemcide daktilo
+efektiyle gösterilir (`useTypewriter`). Akış kurulamazsa istemci tamponlu
+`/chat` uç noktasına düşer.
+
+### Oturum ömrü
+
+Access token 30 dakika yaşar ve `get_optional_user_id` süresi dolmuş bir
+token'ı **anonim** sayar — okuma uçları için doğru, para hareketi için değil.
+Bu ikisi bir süre karışmıştı: oturum sessizce anonime düşüyor, sohbet
+çalışmaya devam ediyor, ama hazırladığı öneriler `user_id="anonymous"` ile
+kaydediliyordu. Bu öneriler DEMO hesabına karşı fiyatlanıyor ve onay adımının
+sahiplik denetimini hiçbir zaman geçemiyordu: kullanıcı, her basışta 404
+dönen bir "Onayla" düğmesi görüyordu.
+
+İki taraflı çözüldü: `POST /api/auth/refresh` (uzun ömürlü yenileme token'ı,
+`typ` claim'i ile access token'dan ayrılır; biri diğerinin yerine
+kullanılamaz) oturumu sessizce tazeler, ve `transactions/stage` sahibi
+belirsiz bir öneriyi **401 ile reddeder**. `market_service.account` artık
+`allow_demo_fallback=False` alabiliyor — demo portföyünü okumak zararsız,
+ona karşı işlem fiyatlamak değil.
+
+### İki piyasa
+
+Evren 88 BIST + 3 ABD hissesiydi; o üçü yalnızca demo portföyü onları tuttuğu
+için vardı. Migration 0010 ile **Nasdaq-100** eklendi (96 sembol; ANSS ve EA
+sağlayıcıda fiyat döndürmediği için listeden çıkarıldı — fiyatlanamayan bir
+adı tohumlamak, olmayan bir enstrümanı varmış gibi göstermek olurdu). Üyelik
+listesi 0006'daki BIST listesi gibi elle yazılı ve tarihli: endeks üyeliği
+lisanslı bir üründür ve altından sessizce değişen bir tohum, diff'te
+okunabilenden kötüdür.
+
+Ekranlarda BIST / ABD / Tümü süzgeci var; sohbette `get_market_data`'nın
+`market` filtresi kullanılıyor (aksi hâlde "en çok yükselen ABD hisseleri"
+listesinin başında bir Türk hissesi çıkıyordu). Alım-satım yolu ortak: ABD
+emri USD cinsinden fiyatlanır, öneride saklanan kurla TRY'ye çevrilir ve
+bakiye kontrolü hesabın para biriminde yapılır.
+
+**Bir pozisyon satırında iki para birimi vardır.** `last_price` ve `avg_cost`
+enstrümanın kendi para biriminde; `market_value`, `cost_basis` ve
+`unrealized_pnl` ise zaten `base_currency`'ye çevrilmiş. Bunu söyleyen bir
+kural yoktu ve 481 dolarlık bir MSFT pozisyonu "23.068,69 USD" olarak
+yazıldı — TL değeri, yanlış birimle, yaklaşık kırk kat abartılmış.
+
+### Sütunlar hangi araçtan geldiyse ona uyar
+
+Tek bir varsayılan sütun seti vardı ve bu bir TARAMA setiydi:
+`| Hisse | Sektör | Fiyat (TL) | 1.000 TL ile lot | Günlük ciro | F/K |`.
+"portföyümü göstersene" sorusuna portföy verisiyle bu sütunlar dolduruldu;
+portföy aracı bu alanların hiçbirini döndürmediği için tablonun tamamı
+"veri yok" oldu. Veri eksik değildi — sektör 94 enstrümanın 90'ında, F/K
+64'ünde vardı.
+
+`Günlük ciro` ise yapısal olarak boştu: hacim her `market_quotes` satırında
+DOLU saklanıyor ama hiçbir uç nokta dışarı vermiyordu. Artık veriliyor.
+
+`veri yok`, o satırda eksik olan bir değeri işaretler; aracın hiç döndürmediği
+bir alan için kullanılmaz, o sütun hiç yazılmaz.
+
+### Kriz ve güvenlik sinyalleri
+
+`detect_safety_flags` üç ayrı kategori üretir: `SELF_HARM_RISK`,
+`COERCION_RISK`, `FINANCIAL_DISTRESS` (üçü de `DISTRESS_SIGNAL` ile birlikte,
+yönlendirme onu okuyor). Tek bir listeydiler ve besledikleri tek yönerge
+finansal sıkıntı için yazılmıştı; sonuç, "ölmek istiyorum" diyen birine
+borçla yatırımın riski anlatmaktı.
+
+Kriz kaynakları **modelden istenmez**, `crisis_notices` olarak koda gömülüdür
+ve `_keep_crisis` ile uygunluk kapısının HER dalında — BLOCK dahil —
+`disclosures`'a eklenir. Modelin unutabildiği bir kaynak bloğu güvenlik
+denetimi değildir; ölçüldüğünde yaklaşık yarı yarıya çıkıyordu. Numaralar
+sabit: model bir kez "ALO 182" (MHRS randevu hattı) önermişti.
+
+Ürün bir uzmana yönlendirme yapamıyor, bu yüzden **teklif de etmez**. Eskiden
+"sizi bir uzmana yönlendirebilirim" deyip, kullanıcı kabul edince
+"yönlendirme yapamıyorum" diyordu.
+
+Frontend'in kullandığı `/api/investment/positions`, `/api/investment/watchlist`
+gibi uç noktalar bunlardan ayrı ve camelCase şemalarını koruyor; ikisi farklı
+tüketicilere hizmet ediyor ve farklı sebeplerle değişiyor. Emir verme yolu ise
+ortak: panel de sohbet de `transactions/stage` → `transactions/{id}/confirm`
+kullanıyor (eski `/orders/propose` ve `/orders/confirm` taslakları kaldırıldı,
+bkz. CONTRACT_WORKFLOW.md).
+
+### Canlı fiyat akışı
+
+**Tek fiyat kuralı:** her fiyat `investment.market_quotes`'tan gelir ve arayüzde
+paylaşılan SSE akışıyla tazelenir. Bir ekranın veriyi bir kez çekip bırakması,
+yanındaki şeridin oynadığı bir tabloda donmuş fiyat demekti; hisse detay sayfası
+ise `mockData.ts`'ten okuduğu için tıklanan satırla asla aynı fiyatı
+göstermiyordu. `market_candles` ayrı bir seri (gecelik iş) — grafikler onu
+okur, anlık fiyat asla oradan gelmez.
+
+`ingestor` 30 saniyede bir, ~190 enstrümanı 40'lık parçalara bölerek çekiyor
+ve backend'e HTTP ile yazıyor. Tek parça ve 10 saniyeydi; evren iki borsaya
+çıkınca yetmedi. `yf.download` sembol başına hatayı YUTUYOR ve yine bir frame
+döndürüyor, dolayısıyla zaman aşımları istisna olarak değil yalnızca geçen
+süre olarak görünüyordu: ölçülen bir turda 61 saniye, 10 saniyelik bütçeye
+karşı, ve arada her koşu "skipped" olarak loglanıyordu. Üç değişiklik:
+istek başına gerçek bir timeout, parçalama, ve kısa dönen bir partiyi
+(`MISSING_TOLERANCE`) yavaşlama sinyali sayıp mevcut backoff merdivenini
+besleme.
+
+**Piyasa saatleri artık borsa başına.** `open_markets()` o an işlem gören
+piyasalar kümesini döner (BIST 10-18, NASDAQ/NYSE 16-23, FX/COMEX 7/24) ve
+yalnızca onların enstrümanları çekilir. Tek bir BIST kapısı vardı; ABD
+hisseleri eklenince bu, saat 18:00'den sonra ABD fiyatlarının hiç
+tazelenmemesi demekti — yani ABD seansının neredeyse tamamı. Tanımadığı bir
+borsadaki enstrüman düşürülmez, çekilir: eksik bir `MARKET_HOURS` girdisi,
+hiç fiyatlanmayan bir enstrümandan çok daha kolay fark edilir. Frontend `GET /api/market/stream` (SSE) üzerinden
+dinliyor; `frontend/src/hooks/useMarketStream.ts` tüm uygulama için **tek**
+`EventSource` tutuyor, akış kurulamazsa 10 saniyelik yoklamaya düşüyor.
+Fiyata bağlı kolonları (pozisyon değeri, günlük/toplam getiri) yeniden hesaplama
+işi `useLiveRows` içinde; yalnızca fiyatı tazeleyip yanındaki değeri dondurmak
+satırı kendi içinde tutarsız bırakırdı.
 
 ## Teknoloji stack'i
 
 - Backend: Python + FastAPI + PostgreSQL (SQLAlchemy + Alembic)
-- AI servis: Python, RAG (Chroma), MCP, LLM sağlayıcı — karar için MIMARI_KARARLAR.md'ye bakın
+- AI servisleri: Python. RAG **pgvector** üzerinde (Chroma değil — karar ve
+  gerekçe için MIMARI_KARARLAR.md). Embedding yerel çalışıyor (fastembed/ONNX,
+  `paraphrase-multilingual-MiniLM-L12-v2`, 384 boyut, API anahtarı yok).
+  LLM çıkışı yalnızca `agents` servisinde ve yalnızca Groq'a.
 - Auth: ASP.NET Core Identity + JWT önerisi .NET dönemine aitti; Python'a dönüşle
   **FastAPI + python-jose (JWT) + passlib (parola hash)** kullanılıyor — Identity'nin
   Python karşılığı budur.
 - Frontend: React + Vite + TypeScript + TailwindCSS
 - Servisler arası tek network sınırı: backend ↔ ai-service (HTTP). Sözleşme yönetimi
   için bkz. `CONTRACT_WORKFLOW.md`.
+
+### Nakit, takas ve hesaplar
+
+Her kullanıcının kendi `investment.investment_accounts` satırı var (migration
+0007). Onaylanan bir işlem `investment/service.py` içindeki `settle()` ile
+uygulanır: nakit `payload["estimate"]["net_amount"]` kadar azalır/artar,
+pozisyon **ağırlıklı ortalama maliyetle** güncellenir ve bunların hepsi
+önerinin durum değişikliğiyle **aynı transaction** içinde commit edilir. Ayrı
+commit'lemek, para hareket edip önerinin "beklemede" kalabildiği bir aralık
+bırakırdı.
+
+Alım, hem hazırlama (`ai_service.stage_transaction`) hem de onay anında bakiyeye
+karşı kontrol edilir. İki kez, çünkü aynı bakiyeye karşı iki öneri hazırlanıp
+sonra ikisi de onaylanabilir.
+
+### Para birimi kuralı
+
+**Bir fiyat, para birimi olmadan taşınmaz.** Enstrümanın para birimi
+(`investment_products.currency_code`) `Position`, `WatchlistItem`,
+`TopMoverItem`, `DividendItem`, `HeatmapItem`, `Order`, `MarketTicker` ve
+`CandleSeriesOut` yanıtlarının hepsinde yer alıyor. Bir dönem düşürülüyordu ve
+arayüzün tahmin etmekten başka seçeneği yoktu: AAPL'in 314,88 USD'lik fiyatı
+gösterge panelinde "₺314,88" olarak görünüyordu.
+
+**Farklı para birimleri toplanmadan önce çevrilir.** `ai_service.holding_value`
+tek uygulama; `/portfolio/summary`, `/asset-allocation`, `/sector-allocation`,
+`/heatmap` ve `analytics/service.build` hepsi onu kullanıyor. Çevirmeden
+toplamak, Analiz sayfasının portföyü 404.467 TL, özet kartının aynı portföyü
+1.087.834 TL göstermesine yol açıyordu. Kuru olmayan pozisyon toplama
+katılmaz ve adı uyarıda geçer — 1.0 varsaymaz.
+
+Arayüzde tek biçimlendirici var: `frontend/src/lib/money.ts`. Yedi ayrı
+TRY'ye sabitlenmiş `formatCurrency` kopyasının yerini aldı. Yabancı bir fiyat
+`314,88 $ · ≈₺15.097,83` biçiminde, kendi para birimi ve yaklaşık TL karşılığı
+ile gösteriliyor.
+
+**Para birimi hiçbir yerde varsayılmaz.** Enstrümanın para birimi ile hesabın
+para birimi ayrı şeyler: AAPL USD, hesap TRY. `net_amount` enstrümanın para
+biriminde hesaplanır; bakiye kontrolü ve takas, `ai_service._convert` ile
+hesabın para birimine çevirdikten sonra yapılır. Kur, önerinin üzerinde
+`estimate.fx` olarak saklanır ve takasta yeniden çekilmez — kullanıcı o kurla
+hesaplanmış bir maliyeti onayladı. Kur yoksa işlem **reddedilir**; 1.0
+varsaymak 15.098 TL'lik bir alımı 315 TL'ye yaptırıyor, 226.468 TL'lik bir
+satışı 4.723 TL'ye ödüyordu.
+
+`source_account_id` sorulmaz: kullanıcının kendi hesabı backend'de çözülür.
+Sorulduğu dönemde hiç doğrulanmıyordu ve gelen "1" değeri kabul edilip hiçbir
+yerde kullanılmıyordu.
 
 ## shared/ kuralı — DB modeli asla buraya girmez
 
@@ -86,6 +319,12 @@ sınıfı import etmiyoruz — böylece modüller arası gizli bağımlılık a�
 - API key / secret asla kod içine hardcode edilmez. `.env` + `.env.example` + `.gitignore`.
 - Format/lint: Python'da `ruff` + `black`, frontend'de `eslint` + `prettier` — pre-commit
   hook olarak bağlı, farklı ajanların farklı stilde kod üretmesini önler.
+- **Testler: altı paketin altısı da %100 kapsama zorunlu** (backend, rag,
+  orchestrator, mcp, ingestor, frontend). Her paket çalıştığında `junit.xml`
+  (test sonuçları) ve `coverage.xml` (kapsama) üretir; frontend'de karşılığı
+  `coverage/cobertura-coverage.xml`. Eşikler `pytest.ini`/`vitest.config.ts`
+  içinde — Makefile'daki `coverage` hedefi değil, çünkü `make test` ve
+  Dockerfile'lar düz `pytest` çalıştırıyor.
 - Küçük, tek amaçlı PR'lar. Bir PR bir özellik/endpoint.
 - Test verisi üretirken gerçekçi ama açıkça sahte veri kullan (örn. "TEST-" prefix'li
   müşteri ID'leri, gerçek olmayan TC formatları).

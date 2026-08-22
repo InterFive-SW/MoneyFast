@@ -44,6 +44,12 @@ htmlcov/
 .coverage.*
 .cache
 nosetests.xml
+# Test-results XML. coverage.xml and htmlcov/ are already covered above;
+# junit output is written by every suite's addopts and must not be committed.
+junit.xml
+test-results.xml
+# Vitest coverage output (the Python suites' htmlcov/ is covered above).
+frontend/coverage/
 coverage.xml
 *.cover
 *.py.cover

@@ -1,5 +1,5 @@
 // src/components/chat/ChatPopup.tsx
-import React, { useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChat } from '../../context/ChatContext';
 import MessageBubble from './MessageBubble';

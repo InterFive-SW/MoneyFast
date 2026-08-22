@@ -31,6 +31,7 @@ def flat(text: str) -> str:
 
 SPECIALIST_KEYS = {
     "PORTFOLIO_AGENT",
+    "MARKET_DATA_AGENT",
     "MARKET_RESEARCH_AGENT",
     "RISK_STRATEGY_AGENT",
     "TRANSACTION_AGENT",
@@ -171,15 +172,45 @@ def test_hard_rules_survive_in_the_operative_subset(rule):
     assert rule in flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
 
 
-def test_default_table_columns_are_specified():
-    assert "1.000 TL ile lot" in prompts.ORCHESTRATOR_SYSTEM_PROMPT
-    assert "| Hisse | Sektör |" in prompts.ORCHESTRATOR_SYSTEM_PROMPT
+def test_column_sets_are_specified_per_tool():
+    """One default set was applied to every table, so a portfolio answer got
+    screening columns -- sector, P/E, turnover -- that the portfolio tool does
+    not return, and every cell rendered as "veri yok"."""
+    text = prompts.ORCHESTRATOR_SYSTEM_PROMPT
+    assert "COLUMNS FOLLOW THE TOOL THAT PRODUCED THE ROWS" in text
+    assert "| Hisse | Sektör | Fiyat | Günlük ciro | F/K | Piyasa |" in text
+    assert "| Hisse | Adet | Maliyet | Son Fiyat | Değer (TL) | K/Z |" in text
+
+
+def test_price_headers_never_assert_a_currency():
+    """"Fiyat (TL)" is a claim about every row and is false the moment a USD
+    instrument appears -- which is how AAPL rendered as a blank cell."""
+    text = prompts.ORCHESTRATOR_SYSTEM_PROMPT
+    assert "NEVER put a currency in a price column header" in text
+    assert "| Fiyat (TL) |" not in text
+
+
+def test_the_two_currencies_in_a_position_row_are_distinguished():
+    """`last_price` is in the instrument's currency; `market_value` is already
+    converted to the base currency. Nothing said so, and a 481-dollar MSFT
+    position was rendered as "23.068,69 USD" -- the lira value with the wrong
+    unit, overstating it roughly fortyfold."""
+    text = prompts.ORCHESTRATOR_SYSTEM_PROMPT
+    assert "A POSITION ROW HOLDS TWO CURRENCIES" in text
+    assert "base_currency" in text
+    assert "instrument_currency" in text
+
+
+def test_the_agent_is_told_to_filter_by_market():
+    """Without it "en çok yükselen ABD hisseleri" comes back topped by a
+    Turkish stock."""
+    assert "filters.market" in prompts.SPECIALIST_PROMPTS["MARKET_DATA_AGENT"]
 
 
 # --------------------------------------------------------------------------
 # Specialist prompts
 # --------------------------------------------------------------------------
-def test_all_five_specialists_are_defined():
+def test_all_six_specialists_are_defined():
     assert set(prompts.SPECIALIST_PROMPTS) == SPECIALIST_KEYS
 
 

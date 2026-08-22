@@ -161,9 +161,9 @@ class TestParseJSON:
 class TestRouterNode:
     @pytest.mark.asyncio
     async def test_happy_path_populates_routing_state(
-        self, fake_mcp, base_state, routing_payload
+        self, route_as, base_state, routing_payload
     ):
-        fake_mcp.responses["classify_and_route_intent"] = routing_payload
+        route_as(routing_payload)
         out = await orchestrator.router_node(base_state)
         assert out["primary_intent"] == "PORTFOLIO_INQUIRY"
         assert out["target_agent"] == "PORTFOLIO_AGENT"
@@ -173,8 +173,10 @@ class TestRouterNode:
         assert out["errors"] == []
 
     @pytest.mark.asyncio
-    async def test_passes_conversation_summary_and_locale(self, fake_mcp, routing_payload):
-        fake_mcp.responses["classify_and_route_intent"] = routing_payload
+    async def test_passes_conversation_summary_and_locale(
+        self, route_as, fake_mcp, routing_payload
+    ):
+        route_as(routing_payload)
         state = {
             "user_message": "onu sat",
             "conversation_history": [{"role": "user", "content": "THYAO aldım"}],
@@ -188,88 +190,188 @@ class TestRouterNode:
         assert args["user_context_flags"] == {"has_linked_account": True}
 
     @pytest.mark.asyncio
-    async def test_locale_falls_back_to_the_default(self, fake_mcp, routing_payload):
-        fake_mcp.responses["classify_and_route_intent"] = routing_payload
+    async def test_locale_falls_back_to_the_default(self, route_as, fake_mcp, routing_payload):
+        route_as(routing_payload)
         await orchestrator.router_node({"user_message": "x", "user_id": "u_1"})
         assert fake_mcp.calls[0][1]["locale"] == orchestrator.DEFAULT_LOCALE
 
     @pytest.mark.asyncio
-    async def test_anonymous_user_is_flagged_as_unlinked(self, fake_mcp, routing_payload):
-        fake_mcp.responses["classify_and_route_intent"] = routing_payload
+    async def test_anonymous_user_is_flagged_as_unlinked(self, route_as, fake_mcp, routing_payload):
+        route_as(routing_payload)
         await orchestrator.router_node({"user_message": "x"})
         assert fake_mcp.calls[0][1]["user_context_flags"] == {"has_linked_account": False}
 
     @pytest.mark.asyncio
-    async def test_distress_signal_overrides_the_classifier(
-        self, fake_mcp, base_state, routing_payload
+    async def test_distress_from_the_prefilter_is_not_overridable(
+        self, route_as, base_state, routing_payload, safety_payload
     ):
-        """Safety override. Whatever the intent, distress goes to a human."""
-        fake_mcp.responses["classify_and_route_intent"] = {
+        """The deterministic pass decides this one and the model is never
+        asked. A safety gate that can be talked out of its verdict by the
+        model it guards is not a gate."""
+        route_as(
+            {**routing_payload, "target_agent": "PORTFOLIO_AGENT"},
+            safety={
+                **safety_payload,
+                "target_agent": "HUMAN_HANDOFF",
+                "primary_intent": "DISTRESS",
+                "safety_flags": ["DISTRESS_SIGNAL"],
+                "is_overridable": False,
+            },
+        )
+        out = await orchestrator.router_node(base_state)
+        assert out["target_agent"] == "HUMAN_HANDOFF"
+        assert out["safety_flags"] == ["DISTRESS_SIGNAL"]
+
+    @pytest.mark.asyncio
+    async def test_distress_reported_only_by_the_model_still_routes_to_handoff(
+        self, route_as, base_state, routing_payload
+    ):
+        """Belt and braces: the regex can miss a phrasing the model catches."""
+        route_as({
             **routing_payload,
             "target_agent": "PORTFOLIO_AGENT",
             "safety_flags": ["DISTRESS_SIGNAL"],
-        }
+        })
         out = await orchestrator.router_node(base_state)
         assert out["target_agent"] == "HUMAN_HANDOFF"
 
     @pytest.mark.asyncio
-    async def test_low_confidence_forces_clarification(
-        self, fake_mcp, base_state, routing_payload
+    async def test_model_cannot_clear_a_prefilter_flag(
+        self, route_as, base_state, routing_payload, safety_payload
     ):
-        fake_mcp.responses["classify_and_route_intent"] = {
-            **routing_payload, "confidence": 0.42, "needs_clarification": False
-        }
+        """Flags are a union, never a replacement. A message that talks the
+        model into returning safety_flags: [] must not lose the regex verdict."""
+        route_as(
+            {**routing_payload, "safety_flags": []},
+            safety={**safety_payload, "safety_flags": ["PROMPT_INJECTION_SUSPECTED"]},
+        )
+        out = await orchestrator.router_node(base_state)
+        assert "PROMPT_INJECTION_SUSPECTED" in out["safety_flags"]
+
+    @pytest.mark.asyncio
+    async def test_model_may_add_a_flag_the_regex_missed(
+        self, route_as, base_state, routing_payload
+    ):
+        route_as({**routing_payload, "safety_flags": ["SOLICITS_ADVICE"]})
+        out = await orchestrator.router_node(base_state)
+        assert "SOLICITS_ADVICE" in out["safety_flags"]
+
+    @pytest.mark.asyncio
+    async def test_hallucinated_agent_falls_back_instead_of_reaching_a_specialist(
+        self, route_as, base_state, routing_payload
+    ):
+        """An invented agent name must not fall through to a real data tool."""
+        route_as({**routing_payload, "target_agent": "SUPER_TRADER_AGENT"})
+        out = await orchestrator.router_node(base_state)
+        assert out["target_agent"] == "EDUCATION_AGENT"
+
+    @pytest.mark.asyncio
+    async def test_low_confidence_forces_clarification(
+        self, route_as, base_state, routing_payload
+    ):
+        route_as({**routing_payload, "confidence": 0.42, "needs_clarification": False})
         out = await orchestrator.router_node(base_state)
         assert out["needs_clarification"] is True
 
     @pytest.mark.asyncio
     async def test_confidence_exactly_at_the_threshold_routes_normally(
-        self, fake_mcp, base_state, routing_payload
+        self, route_as, base_state, routing_payload
     ):
         """Boundary: 0.60 is acceptable, only strictly below it is not."""
-        fake_mcp.responses["classify_and_route_intent"] = {
-            **routing_payload, "confidence": 0.60
-        }
+        route_as({**routing_payload, "confidence": 0.60})
         out = await orchestrator.router_node(base_state)
         assert out["needs_clarification"] is False
 
     @pytest.mark.asyncio
     async def test_missing_confidence_is_treated_as_zero(
-        self, fake_mcp, base_state, routing_payload
+        self, route_as, base_state, routing_payload
     ):
         """Edge case: a malformed classifier reply must not route confidently."""
         payload = {**routing_payload}
         del payload["confidence"]
-        fake_mcp.responses["classify_and_route_intent"] = payload
+        route_as(payload)
         out = await orchestrator.router_node(base_state)
         assert out["needs_clarification"] is True
 
     @pytest.mark.asyncio
     async def test_missing_target_agent_falls_back_to_education(
-        self, fake_mcp, base_state, routing_payload
+        self, route_as, base_state, routing_payload
     ):
         payload = {**routing_payload}
         del payload["target_agent"]
         del payload["primary_intent"]
-        fake_mcp.responses["classify_and_route_intent"] = payload
+        route_as(payload)
         out = await orchestrator.router_node(base_state)
         assert out["target_agent"] == "EDUCATION_AGENT"
         assert out["primary_intent"] == "OUT_OF_SCOPE"
 
     @pytest.mark.asyncio
-    async def test_mcp_unavailable_degrades_without_crashing(self, fake_mcp, base_state):
-        """The turn must still produce a reply, and it must not claim data."""
+    async def test_prefilter_outage_is_recorded_but_not_fatal(
+        self, fake_mcp, patched_llm, base_state, routing_payload
+    ):
+        """Losing the deterministic pre-filter degrades safety detection to
+        whatever the model notices; it does not drop the turn. The failure is
+        recorded so it is visible in the turn record rather than silent."""
+        import json
+
         fake_mcp.responses["classify_and_route_intent"] = MCPUnavailable("no route to host")
+        patched_llm.set_responses([json.dumps(routing_payload)])
         out = await orchestrator.router_node(base_state)
-        assert out["target_agent"] == "EDUCATION_AGENT"
-        assert out["specialist_output"]["status"] == "ERROR"
-        assert "router" in out["errors"][0]
+        assert out["target_agent"] == "PORTFOLIO_AGENT"
+        assert any("safety_prefilter" in e for e in out["errors"])
 
     @pytest.mark.asyncio
-    async def test_tool_error_is_handled_like_unavailable(self, fake_mcp, base_state):
-        fake_mcp.responses["classify_and_route_intent"] = MCPToolError("classifier blew up")
+    async def test_tool_error_is_handled_like_unavailable(
+        self, fake_mcp, patched_llm, base_state, routing_payload
+    ):
+        import json
+
+        fake_mcp.responses["classify_and_route_intent"] = MCPToolError("prefilter blew up")
+        patched_llm.set_responses([json.dumps(routing_payload)])
         out = await orchestrator.router_node(base_state)
-        assert out["specialist_output"]["status"] == "ERROR"
+        assert any("safety_prefilter" in e for e in out["errors"])
+
+    @pytest.mark.asyncio
+    async def test_llm_outage_does_not_route_at_a_data_agent(
+        self, route_as, patched_llm, base_state, routing_payload
+    ):
+        """Groq 429 or a dropped connection. A rate limit must not become a
+        portfolio lookup for whoever happens to be asking."""
+        route_as(routing_payload)
+
+        async def _boom(_messages):
+            raise RuntimeError("groq 429 rate limited")
+
+        patched_llm.ainvoke = _boom
+        out = await orchestrator.router_node(base_state)
+        assert out["target_agent"] == "EDUCATION_AGENT"
+        assert out["primary_intent"] == "OUT_OF_SCOPE"
+        assert any("router" in e for e in out["errors"])
+
+    @pytest.mark.asyncio
+    async def test_a_flag_raised_by_both_passes_is_not_duplicated(
+        self, route_as, base_state, routing_payload, safety_payload
+    ):
+        """Both layers can spot the same injection attempt. The turn record
+        should say so once."""
+        route_as(
+            {**routing_payload, "safety_flags": ["PROMPT_INJECTION_SUSPECTED"]},
+            safety={**safety_payload, "safety_flags": ["PROMPT_INJECTION_SUSPECTED"]},
+        )
+        out = await orchestrator.router_node(base_state)
+        assert out["safety_flags"] == ["PROMPT_INJECTION_SUSPECTED"]
+
+    @pytest.mark.asyncio
+    async def test_both_passes_failing_lands_on_education_not_a_data_agent(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Worst case: MCP down and the model returns prose. The turn must not
+        be routed at a tool that reads someone's holdings."""
+        fake_mcp.responses["classify_and_route_intent"] = MCPUnavailable("down")
+        patched_llm.set_response("Bir hata oluştu.")
+        out = await orchestrator.router_node(base_state)
+        assert out["target_agent"] == "EDUCATION_AGENT"
+        assert out["primary_intent"] == "OUT_OF_SCOPE"
 
 
 # ==========================================================================
@@ -360,7 +462,7 @@ class TestMarketResearchNode:
         args = fake_mcp.calls[0][1]
         assert args["query"] == base_state["user_message"]
         assert args["top_k"] == 8
-        assert args["min_similarity"] == 0.62
+        assert args["min_similarity"] == 0.35
 
     @pytest.mark.asyncio
     async def test_only_the_last_six_turns_are_sent_as_context(
@@ -599,6 +701,82 @@ class TestHandoffNode:
     async def test_missing_safety_flags_defaults_to_empty(self, fake_mcp, base_state):
         out = await orchestrator.handoff_node(base_state)
         assert out["specialist_output"]["safety_flags"] == []
+
+    @pytest.mark.asyncio
+    async def test_self_harm_gets_crisis_resources_and_no_money_talk(
+        self, fake_mcp, base_state
+    ):
+        """The log's worst turn: "ölmek istiyorum" was answered with a lecture
+        on how borrowed money raises risk, because one instruction served both
+        categories."""
+        out = await orchestrator.handoff_node(
+            {**base_state, "safety_flags": ["DISTRESS_SIGNAL", "SELF_HARM_RISK"]}
+        )
+        assert out["crisis_notices"] == [orchestrator.CRISIS_RESOURCES_TR]
+        instruction = out["specialist_output"]["instruction"]
+        assert out["specialist_output"]["handoff_category"] == "SELF_HARM_RISK"
+        assert "not a financial turn" in instruction
+        for banned in ("budgeting", "portfolios", "debt"):
+            assert banned in instruction  # named only to be forbidden
+        assert "Do NOT offer to connect" in instruction
+
+    @pytest.mark.asyncio
+    async def test_coercion_points_at_law_enforcement_not_a_budget(
+        self, fake_mcp, base_state
+    ):
+        out = await orchestrator.handoff_node(
+            {**base_state, "safety_flags": ["DISTRESS_SIGNAL", "COERCION_RISK"]}
+        )
+        assert out["crisis_notices"] == [orchestrator.COERCION_RESOURCES_TR]
+        assert "155" in orchestrator.COERCION_RESOURCES_TR
+        assert out["specialist_output"]["handoff_category"] == "COERCION_RISK"
+
+    @pytest.mark.asyncio
+    async def test_financial_distress_keeps_the_budgeting_answer(
+        self, fake_mcp, base_state
+    ):
+        """Unchanged behaviour for the case the original instruction was
+        actually written for -- and no crisis line, which would be noise."""
+        out = await orchestrator.handoff_node(
+            {**base_state, "safety_flags": ["DISTRESS_SIGNAL", "FINANCIAL_DISTRESS"]}
+        )
+        assert out["crisis_notices"] == []
+        assert "Do not screen" in out["specialist_output"]["instruction"]
+
+    def test_crisis_resources_name_real_lines(self):
+        """A hallucinated helpline is worse than none: the model once offered
+        ALO 182, the health-appointment line."""
+        assert "112" in orchestrator.CRISIS_RESOURCES_TR
+        assert "183" in orchestrator.CRISIS_RESOURCES_TR
+        assert "182" not in orchestrator.CRISIS_RESOURCES_TR
+
+
+class TestKeepCrisis:
+    """Crisis resources must leave the compliance gate on every branch."""
+
+    def test_notices_are_appended_to_disclosures(self):
+        out = orchestrator._keep_crisis(
+            {"crisis_notices": ["ACIL"]}, {"disclosures": ["yasal"]}
+        )
+        assert out["disclosures"] == ["yasal", "ACIL"]
+
+    def test_block_branch_still_carries_them(self):
+        """The worst moment to hand someone a dead end is a blocked crisis
+        turn, which previously ended at a generic failure string."""
+        out = orchestrator._keep_crisis(
+            {"crisis_notices": ["ACIL"]}, {"final_output": "engellendi"}
+        )
+        assert out["disclosures"] == ["ACIL"]
+
+    def test_not_duplicated_when_already_present(self):
+        out = orchestrator._keep_crisis(
+            {"crisis_notices": ["ACIL"]}, {"disclosures": ["ACIL"]}
+        )
+        assert out["disclosures"] == ["ACIL"]
+
+    def test_ordinary_turn_is_untouched(self):
+        payload = {"disclosures": ["yasal"]}
+        assert orchestrator._keep_crisis({}, payload) is payload
 
 
 # ==========================================================================
@@ -1143,17 +1321,120 @@ class TestGraph:
         assert any("no checkpointer" in r.getMessage() for r in caplog.records)
 
 
-class TestRunTurn:
+class TestRunTurnStreaming:
+    """Progress streams; the answer does not.
+
+    The graph is fail-closed -- a draft the compliance gate blocks must never
+    be shown -- so synthesis tokens cannot be emitted as they are produced.
+    The stages are real node transitions, which is the point: the captions
+    they replace were a fixed 800ms client-side loop that announced "Risk
+    modeli güncelleniyor..." even for "what is the capital of Turkey".
+    """
+
     @pytest.mark.asyncio
-    async def test_portfolio_turn_end_to_end(
-        self, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
+    async def test_stages_name_the_nodes_actually_entered(
+        self, route_as, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
     ):
-        """Full traversal: router, specialist, synthesis, gate."""
         fake_mcp.responses.update({
-            "classify_and_route_intent": routing_payload,
             "get_portfolio_positions": positions_payload,
             "validate_compliance_rules": pass_verdict,
         })
+        route_as(routing_payload)
+        patched_llm.set_responses(["{}", "Portföyünüzde 500 lot THYAO var."])
+
+        events = [
+            item
+            async for item in orchestrator.run_turn_streaming(
+                "portföyüm ne durumda?", user_id="u_123"
+            )
+        ]
+
+        stages = [value for kind, value in events if kind == "stage"]
+        assert orchestrator.STAGE_LABELS_TR["portfolio"] in stages
+        # The risk node never ran, so its caption must not appear.
+        assert orchestrator.STAGE_LABELS_TR["risk"] not in stages
+
+    @pytest.mark.asyncio
+    async def test_the_last_event_carries_the_finished_state(
+        self, route_as, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
+    ):
+        fake_mcp.responses.update({
+            "get_portfolio_positions": positions_payload,
+            "validate_compliance_rules": pass_verdict,
+        })
+        route_as(routing_payload)
+        patched_llm.set_responses(["{}", "Portföyünüzde 500 lot THYAO var."])
+
+        events = [
+            item
+            async for item in orchestrator.run_turn_streaming("portföyüm?", user_id="u_1")
+        ]
+
+        kind, final = events[-1]
+        assert kind == "state"
+        assert "THYAO" in final["final_output"]
+        assert final["compliance_verdict"] == "PASS"
+        # Seeded from the initial state: `updates` mode yields only the keys a
+        # node returned, so this would be missing if the accumulator started
+        # empty -- and widgets.build() reads it.
+        assert final["user_message"] == "portföyüm?"
+
+    @pytest.mark.asyncio
+    async def test_a_node_yielding_no_patch_is_survived(self, mocker):
+        """LangGraph yields a dict per node today. A None would otherwise
+        crash the turn at the accumulator rather than degrade."""
+
+        class _FakeGraph:
+            async def astream(self, *_args, **_kwargs):
+                yield {"router": None}
+                yield {"synthesis": {"final_output": "Merhaba"}}
+
+        mocker.patch.object(orchestrator, "get_graph", return_value=_FakeGraph())
+
+        events = [item async for item in orchestrator.run_turn_streaming("selam")]
+
+        assert ("stage", orchestrator.STAGE_LABELS_TR["router"]) in events
+        assert events[-1][1]["final_output"] == "Merhaba"
+
+    @pytest.mark.asyncio
+    async def test_streaming_and_buffered_runs_agree(
+        self, route_as, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
+    ):
+        """Two entry points, one graph. If they diverged, the streamed answer
+        and the fallback answer would differ for the same question."""
+        def _setup():
+            fake_mcp.responses.update({
+                "get_portfolio_positions": positions_payload,
+                "validate_compliance_rules": pass_verdict,
+            })
+            route_as(routing_payload)
+            patched_llm.set_responses(["{}", "Portföyünüzde 500 lot THYAO var."])
+
+        _setup()
+        buffered = await orchestrator.run_turn("portföyüm?", user_id="u_1", thread_id="a")
+        _setup()
+        streamed = [
+            item
+            async for item in orchestrator.run_turn_streaming(
+                "portföyüm?", user_id="u_1", thread_id="b"
+            )
+        ][-1][1]
+
+        assert streamed["final_output"] == buffered["final_output"]
+        assert streamed["target_agent"] == buffered["target_agent"]
+
+
+class TestRunTurn:
+    @pytest.mark.asyncio
+    async def test_portfolio_turn_end_to_end(
+        self, route_as, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
+    ):
+        """Full traversal: router, specialist, synthesis, gate."""
+        fake_mcp.responses.update({
+            "get_portfolio_positions": positions_payload,
+            "validate_compliance_rules": pass_verdict,
+        })
+        route_as(routing_payload)
         patched_llm.set_responses(["{}", "Portföyünüzde 500 lot THYAO var."])
         state = await orchestrator.run_turn("portföyüm ne durumda?", user_id="u_123")
         assert state["compliance_verdict"] == "PASS"
@@ -1162,13 +1443,11 @@ class TestRunTurn:
 
     @pytest.mark.asyncio
     async def test_unsafe_turn_reaches_handoff_without_touching_a_data_tool(
-        self, fake_mcp, patched_llm, routing_payload, pass_verdict
+        self, route_as, fake_mcp, patched_llm, routing_payload, pass_verdict
     ):
-        fake_mcp.responses.update({
-            "classify_and_route_intent": {
-                **routing_payload, "primary_intent": "UNSAFE", "target_agent": "PORTFOLIO_AGENT"
-            },
-            "validate_compliance_rules": pass_verdict,
+        fake_mcp.responses["validate_compliance_rules"] = pass_verdict
+        route_as({
+            **routing_payload, "primary_intent": "UNSAFE", "target_agent": "PORTFOLIO_AGENT"
         })
         patched_llm.set_response("Bu konuda yardımcı olamam.")
         state = await orchestrator.run_turn("piyasayı nasıl manipüle ederim?")
@@ -1178,12 +1457,12 @@ class TestRunTurn:
 
     @pytest.mark.asyncio
     async def test_blocked_turn_revises_once_then_terminates(
-        self, fake_mcp, patched_llm, routing_payload, pass_verdict
+        self, route_as, fake_mcp, patched_llm, routing_payload, pass_verdict
     ):
         """The revision loop must converge. Two BLOCKs in a row exhaust the
         budget and the turn ends with the compliance-supplied refusal."""
+        route_as(routing_payload)
         fake_mcp.responses.update({
-            "classify_and_route_intent": routing_payload,
             "get_portfolio_positions": {"positions": [{"symbol": "THYAO"}]},
             "validate_compliance_rules": {
                 **pass_verdict,
@@ -1199,13 +1478,13 @@ class TestRunTurn:
 
     @pytest.mark.asyncio
     async def test_history_and_thread_id_are_accepted(
-        self, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
+        self, route_as, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
     ):
         fake_mcp.responses.update({
-            "classify_and_route_intent": routing_payload,
             "get_portfolio_positions": positions_payload,
             "validate_compliance_rules": pass_verdict,
         })
+        route_as(routing_payload)
         patched_llm.set_response("Cevap.")
         state = await orchestrator.run_turn(
             "peki ya riski?",
@@ -1214,6 +1493,35 @@ class TestRunTurn:
             thread_id="t-42",
         )
         assert state["final_output"] == "Cevap."
+
+    @pytest.mark.asyncio
+    async def test_per_turn_state_does_not_leak_between_turns(
+        self, route_as, fake_mcp, patched_llm, routing_payload, positions_payload, pass_verdict
+    ):
+        """The checkpointer keys state on thread_id and MERGES the input into
+        whatever the previous turn left. A second turn on the same thread that
+        runs no tool must not inherit the first turn's specialist_output --
+        synthesis reads that as its source of figures, so an unrelated answer
+        could quote an earlier question's holdings."""
+        import json
+
+        fake_mcp.responses.update({
+            "get_portfolio_positions": positions_payload,
+            "validate_compliance_rules": pass_verdict,
+        })
+        route_as(routing_payload)
+        patched_llm.set_responses(["{}", "Portföyünüzde THYAO var."])
+        first = await orchestrator.run_turn("portföyüm?", user_id="u_1", thread_id="shared")
+        assert first["specialist_output"]["status"] == "OK"
+
+        # Second turn: routed to an agent that runs no tool.
+        route_as({**routing_payload, "target_agent": "EDUCATION_AGENT",
+                  "primary_intent": "FINANCIAL_EDUCATION"})
+        patched_llm.set_responses(["F/K oranı şudur."])
+        second = await orchestrator.run_turn("F/K nedir?", user_id="u_1", thread_id="shared")
+
+        assert not second.get("specialist_output"), "stale tool payload leaked into a new turn"
+        assert second["target_agent"] == "EDUCATION_AGENT"
 
     @pytest.mark.asyncio
     async def test_router_outage_still_produces_a_reply(
@@ -1339,8 +1647,9 @@ def test_state_schema_exposes_every_contract_field():
 
 def test_agent_roster_matches_the_routing_contract():
     assert orchestrator.AGENTS == [
-        "PORTFOLIO_AGENT", "MARKET_RESEARCH_AGENT", "RISK_STRATEGY_AGENT",
-        "TRANSACTION_AGENT", "EDUCATION_AGENT", "SMALLTALK_AGENT", "HUMAN_HANDOFF",
+        "PORTFOLIO_AGENT", "MARKET_DATA_AGENT", "MARKET_RESEARCH_AGENT",
+        "RISK_STRATEGY_AGENT", "TRANSACTION_AGENT", "EDUCATION_AGENT",
+        "SMALLTALK_AGENT", "HUMAN_HANDOFF",
     ]
 
 
@@ -1348,3 +1657,481 @@ def test_configuration_defaults():
     assert orchestrator.JURISDICTION == "TR"
     assert orchestrator.DEFAULT_LOCALE == "tr-TR"
     assert orchestrator.MAX_COMPLIANCE_REVISIONS >= 1
+
+
+class TestSimilarityThresholdCalibration:
+    """The threshold belongs to the embedding model, not to the product.
+
+    The tool contract documents 0.62, calibrated for E5. This corpus uses
+    paraphrase-multilingual-MiniLM, whose cosine scores run lower — measured
+    against the live corpus, a clearly relevant article scores 0.43-0.72. The
+    contract default silently discarded good hits and the assistant reported
+    "no sources found" for news it was holding.
+    """
+
+    @pytest.mark.asyncio
+    async def test_caller_overrides_whatever_the_model_proposed(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["rag_semantic_market_search"] = {"results": [{"chunk_id": "c1"}]}
+        patched_llm.set_response('{"arguments": {"min_similarity": 0.9}}')
+        await orchestrator.market_research_node(base_state)
+        _, args = fake_mcp.calls[0]
+        assert args["min_similarity"] == 0.35
+
+    @pytest.mark.asyncio
+    async def test_threshold_is_tunable_without_a_rebuild(
+        self, fake_mcp, patched_llm, base_state, monkeypatch
+    ):
+        """Retrieval evaluation should be able to move this without a code
+        change; VECTOR_DB_ARCHITECTURE.md requires it be chosen by measurement."""
+        monkeypatch.setenv("RAG_MIN_SIMILARITY", "0.5")
+        fake_mcp.responses["rag_semantic_market_search"] = {"results": [{"chunk_id": "c1"}]}
+        patched_llm.set_response("{}")
+        await orchestrator.market_research_node(base_state)
+        assert fake_mcp.calls[0][1]["min_similarity"] == 0.5
+
+
+class TestMarketDataNode:
+    """Added in v2.2. This is the node that answers "THYAO kaç lira?" — the
+    question the six-tool system structurally could not reach."""
+
+    @pytest.mark.asyncio
+    async def test_named_symbols_are_passed_through(self, fake_mcp, patched_llm, base_state):
+        fake_mcp.responses["get_market_data"] = {"instruments": [{"symbol": "THYAO"}]}
+        patched_llm.set_response('{"arguments": {"symbols": ["THYAO"]}}')
+        out = await orchestrator.market_data_node(base_state)
+        assert fake_mcp.calls[0][1]["symbols"] == ["THYAO"]
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_filters_reach_the_tool(self, fake_mcp, patched_llm, base_state):
+        fake_mcp.responses["get_market_data"] = {"instruments": []}
+        patched_llm.set_response('{"arguments": {"filters": {"max_pe": 10}}}')
+        await orchestrator.market_data_node(base_state)
+        assert fake_mcp.calls[0][1]["filters"] == {"max_pe": 10}
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_router_entities_rather_than_screening_everything(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """A plan with neither symbols nor filters would otherwise screen the
+        whole universe and hand the model fifty rows to summarise."""
+        fake_mcp.responses["get_market_data"] = {"instruments": []}
+        patched_llm.set_response("{}")
+        state = {**base_state, "entities": {"tickers": ["ASELS"]}}
+        await orchestrator.market_data_node(state)
+        assert fake_mcp.calls[0][1]["symbols"] == ["ASELS"]
+
+    @pytest.mark.asyncio
+    async def test_empty_result_is_reported_as_empty_not_as_an_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """No instrument matching a screen is a complete answer."""
+        fake_mcp.responses["get_market_data"] = {"instruments": []}
+        patched_llm.set_response('{"arguments": {"filters": {"max_pe": 1}}}')
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_tool_failure_does_not_become_a_remembered_price(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """A stale price presented as current is indistinguishable from a
+        wrong one."""
+        fake_mcp.responses["get_market_data"] = MCPUnavailable("market data down")
+        patched_llm.set_response("{}")
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "ERROR"
+        assert out["specialist_output"]["data"] is None
+
+    @pytest.mark.asyncio
+    async def test_price_questions_route_here(self, route_as, base_state, routing_payload):
+        route_as({**routing_payload, "target_agent": "MARKET_DATA_AGENT",
+                  "primary_intent": "MARKET_DATA"})
+        out = await orchestrator.router_node(base_state)
+        assert out["target_agent"] == "MARKET_DATA_AGENT"
+        assert orchestrator.route_after_router(out) == "market_data"
+
+
+class TestArgumentRepair:
+    """One correction attempt when the tool rejects an argument the caller can fix.
+
+    This is the failure the user actually hit: asking for "BIST 100'de en çok
+    kazandıranlar" produced "Verilere ulaşamadım", and typing "tekrar dene"
+    worked — because the retry re-rolled the planner onto a legal enum value.
+    The fix makes that correction happen inside one turn, using the tool's own
+    error, which names the permitted values.
+    """
+
+    def _failing_then_ok(self, fake_mcp, error, payload):
+        """First call raises, second succeeds."""
+        outcomes = [error, payload]
+
+        async def _call(name, arguments):
+            fake_mcp.calls.append((name, arguments))
+            outcome = outcomes.pop(0) if outcomes else payload
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        fake_mcp.call = _call
+
+    @pytest.mark.asyncio
+    async def test_a_rejected_sort_is_corrected_within_the_same_turn(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        self._failing_then_ok(
+            fake_mcp,
+            MCPToolError("get_market_data: unrecognised sort_by 'gainers'; allowed: change_percent, symbol."),
+            {"instruments": [{"symbol": "THYAO"}]},
+        )
+        patched_llm.set_responses([
+            '{"arguments": {"filters": {"market": "BIST"}, "sort_by": "gainers"}}',
+            '{"arguments": {"filters": {"market": "BIST"}, "sort_by": "change_percent"}}',
+        ])
+        out = await orchestrator.market_data_node(base_state)
+
+        assert out["specialist_output"]["status"] == "OK", "the user should not see a failure"
+        assert len(fake_mcp.calls) == 2
+        assert fake_mcp.calls[1][1]["sort_by"] == "change_percent"
+
+    @pytest.mark.asyncio
+    async def test_the_repair_prompt_carries_the_tool_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """The model is corrected with the authoritative list, not asked to
+        guess a second time."""
+        self._failing_then_ok(
+            fake_mcp,
+            MCPToolError("unrecognised sort_by 'losers'; allowed: change_percent_asc."),
+            {"instruments": []},
+        )
+        patched_llm.set_responses([
+            '{"arguments": {"sort_by": "losers"}}',
+            '{"arguments": {"sort_by": "change_percent_asc"}}',
+        ])
+        await orchestrator.market_data_node(base_state)
+        repair_call = patched_llm.calls[-1]
+        assert "change_percent_asc" in str(repair_call)
+        assert "losers" in str(repair_call)
+
+    @pytest.mark.asyncio
+    async def test_only_one_retry_is_attempted(self, fake_mcp, patched_llm, base_state):
+        """A model that keeps producing bad arguments must not loop."""
+        error = MCPToolError("get_market_data: unrecognised sort_by 'nope'; allowed: symbol.")
+        fake_mcp.responses["get_market_data"] = error
+        patched_llm.set_responses([
+            '{"arguments": {"sort_by": "nope"}}',
+            '{"arguments": {"sort_by": "still_nope"}}',
+        ])
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "ERROR"
+        assert len(fake_mcp.calls) == 2, "one original call plus exactly one retry"
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_backend_is_not_retried(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Rewriting arguments cannot fix a service that is down; retrying only
+        doubles the wait before the user is told."""
+        fake_mcp.responses["get_market_data"] = MCPUnavailable("connection refused")
+        patched_llm.set_response('{"arguments": {"symbols": ["THYAO"]}}')
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "ERROR"
+        assert len(fake_mcp.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_an_unchanged_repair_is_not_re_sent(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """If the model returns the same arguments, calling again would fail
+        identically — so it is reported rather than repeated."""
+        fake_mcp.responses["get_market_data"] = MCPToolError("unrecognised sort_by 'x'; allowed: symbol.")
+        patched_llm.set_responses([
+            '{"arguments": {"sort_by": "x"}}',
+            '{"arguments": {"sort_by": "x"}}',
+        ])
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "ERROR"
+        assert len(fake_mcp.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_repair_that_returns_nothing_reports_the_original_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["get_market_data"] = MCPToolError("unrecognised sort_by 'x'; allowed: symbol.")
+        patched_llm.set_responses([
+            '{"arguments": {"sort_by": "x"}}',
+            "not json at all",
+        ])
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "ERROR"
+
+
+class TestDisclosurePlacement:
+    """Required notices travel as data, not as three sentences appended to
+    every answer. The words are unchanged and still mandatory; only where they
+    are rendered moves."""
+
+    def _verdict(self, texts, remediated=None):
+        return {
+            "verdict": "REVISE",
+            "required_disclosures": [{"text": t, "placement": "APPEND"} for t in texts],
+            "remediated_response": remediated,
+        }
+
+    def test_disclosure_texts_are_extracted_verbatim(self):
+        verdict = self._verdict(["Bu içerik yatırım danışmanlığı değildir.", "Veriler gecikmelidir."])
+        assert orchestrator._disclosure_texts(verdict) == [
+            "Bu içerik yatırım danışmanlığı değildir.",
+            "Veriler gecikmelidir.",
+        ]
+
+    def test_a_duplicate_notice_is_listed_once(self):
+        verdict = self._verdict(["Aynı metin.", "Aynı metin."])
+        assert orchestrator._disclosure_texts(verdict) == ["Aynı metin."]
+
+    def test_no_disclosures_yields_an_empty_list(self):
+        assert orchestrator._disclosure_texts({"verdict": "PASS"}) == []
+
+    def test_the_inlined_copy_is_stripped_from_the_prose(self):
+        """The compliance layer returns the notice already appended. Leaving
+        that copy in place would show it twice — once inline, once as the
+        footnote."""
+        notice = "Bu içerik yatırım danışmanlığı değildir."
+        verdict = self._verdict([notice])
+        cleaned = orchestrator._without_disclosures(f"THYAO 301,25 TL.\n\n{notice}", verdict)
+        assert cleaned == "THYAO 301,25 TL."
+
+    def test_stripping_collapses_the_blank_lines_it_leaves(self):
+        notice = "Uyarı."
+        verdict = self._verdict([notice])
+        cleaned = orchestrator._without_disclosures(f"Cevap.\n\n{notice}\n\n{notice}", verdict)
+        assert cleaned == "Cevap."
+
+    def test_an_answer_without_the_notice_is_unchanged(self):
+        verdict = self._verdict(["Uyarı."])
+        assert orchestrator._without_disclosures("Cevap.", verdict) == "Cevap."
+
+
+class TestTransferStaging:
+    """Transfers are staged like trades and confirmed by the user.
+
+    They used to be refused outright; before that, they were routed through
+    the SECURITIES path — costed with brokerage commission and BSMV, and
+    rendered as a "Satım" with a blank ticker. Now they settle against the
+    banking ledger.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["TRANSFER", "EFT", "HAVALE"])
+    async def test_a_transfer_is_staged_for_confirmation(
+        self, fake_mcp, patched_llm, base_state, kind
+    ):
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "%s",'
+            ' "notional_amount": {"amount": 200, "currency": "TRY"},'
+            ' "destination_account_id": "1000000000002"}}' % kind
+        )
+        state = {**base_state, "user_message": "1000000000002 hesabına 200 lira gönder"}
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+        assert fake_mcp.calls[0][1]["transaction_type"] == kind
+
+    @pytest.mark.asyncio
+    async def test_a_transfer_still_requires_confirmation(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """The agent prepares; the user confirms. Same discipline as a trade —
+        conversational assent is never confirmation."""
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": False,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "TRANSFER",'
+            ' "notional_amount": {"amount": 200, "currency": "TRY"},'
+            ' "destination_account_id": "1000000000002"}}'
+        )
+        state = {**base_state, "user_message": "200 lira gönder"}
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "ERROR"
+
+
+class TestCurrentTurnAmount:
+    """The 250/200 bug: the planner sees the last six turns verbatim, and with
+    no precedence rule it staged an amount from the PREVIOUS message while the
+    user had just named a different one."""
+
+    def _state(self, base_state, message, history):
+        return {
+            **base_state,
+            "user_message": message,
+            "conversation_history": [{"role": "user", "content": h} for h in history],
+        }
+
+    @pytest.mark.asyncio
+    async def test_an_amount_only_in_the_history_is_refused(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 250,'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        state = self._state(base_state, "200 adet al", ["250 adet alacaktım"])
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "NEEDS_INPUT"
+        assert not fake_mcp.calls, "a figure the user did not just say must not be staged"
+
+    @pytest.mark.asyncio
+    async def test_the_amount_from_the_current_turn_is_staged(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 200,'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        state = self._state(base_state, "200 adet al", ["250 adet alacaktım"])
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+        assert fake_mcp.calls[0][1]["quantity"] == 200
+
+    @pytest.mark.asyncio
+    async def test_a_thousands_separator_still_matches(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """The user writes "10.000", the planner emits 10000."""
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY",'
+            ' "notional_amount": {"amount": 10000, "currency": "TRY"},'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        state = self._state(base_state, "10.000 TL'lik al", ["5.000 TL demiştim"])
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_an_inferred_amount_in_neither_place_is_left_alone(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """"hepsini sat" has no number anywhere. That is a different question
+        and the tool validates it; blocking here would break the phrasing."""
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "SELL", "quantity": 120,'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        state = self._state(base_state, "THYAO'nun hepsini sat", ["portföyümü göster"])
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+
+
+class TestDirectionGuard:
+    """"10 tane aselsan satsana" was staged as a BUY and settled.
+
+    The inversion is worse than it looks: a SELL mislabelled as BUY skips the
+    backend's sell-side inventory check and lands in the cash check instead, so
+    it surfaces as a successful purchase rather than an error.
+    """
+
+    @pytest.mark.parametrize(
+        "message,expected",
+        [
+            ("10 tane aselsan satsana", "SELL"),
+            ("ASELS satmak istiyorum", "SELL"),
+            ("hepsini bozdur", "SELL"),
+            ("pozisyonu nakde çevir", "SELL"),
+            # "altın" starts with the buy stem "al" — a prefix match would read
+            # every gold price question as a purchase order.
+            ("altın fiyatı ne kadar", None),
+            ("altın alsana", "BUY"),
+            ("10 tane aselsan al", "BUY"),
+            ("10 tane aselsan satın al", "BUY"),
+            ("100 lotluk THYAO alsana", "BUY"),
+            ("THYAO almak istiyorum", "BUY"),
+            ("portföyümü göster", None),
+        ],
+    )
+    def test_the_users_verb_decides_the_direction(self, message, expected):
+        assert orchestrator._stated_direction(message) == expected
+
+    def test_satin_al_is_a_buy_despite_containing_sat(self):
+        """The single most dangerous collision: every purchase phrased this way
+        would otherwise read as a sale."""
+        assert orchestrator._stated_direction("ASELS satın alıcam") == "BUY"
+        assert orchestrator._stated_direction("ASELS satin alicam") == "BUY"
+
+    @pytest.mark.parametrize("message", ["ASELS SATSANA", "ASELS Satsana"])
+    def test_case_and_turkish_i_do_not_change_the_reading(self, message):
+        assert orchestrator._stated_direction(message) == "SELL"
+
+    @pytest.mark.asyncio
+    async def test_a_buy_emitted_for_a_sell_request_is_refused(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 10,'
+            ' "instrument": {"symbol": "ASELS"}, "source_account_id": "1"}}'
+        )
+        state = {**base_state, "user_message": "10 tane aselsan satsana"}
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "NEEDS_INPUT"
+        assert "transaction_type" in out["specialist_output"]["missing_fields"]
+        assert not fake_mcp.calls, "nothing may be staged in the wrong direction"
+
+    @pytest.mark.asyncio
+    async def test_a_matching_sell_is_staged(self, fake_mcp, patched_llm, base_state):
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "SELL", "quantity": 10,'
+            ' "instrument": {"symbol": "ASELS"}, "source_account_id": "1"}}'
+        )
+        state = {**base_state, "user_message": "10 tane aselsan satsana"}
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+        assert fake_mcp.calls[0][1]["transaction_type"] == "SELL"
+
+    @pytest.mark.asyncio
+    async def test_an_unstated_direction_is_left_to_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Inferring a direction from history is the failure being prevented,
+        so silence here must not be turned into a guess either."""
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 10,'
+            ' "instrument": {"symbol": "ASELS"}, "source_account_id": "1"}}'
+        )
+        state = {**base_state, "user_message": "ASELS 10 adet"}
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_transaction_type_is_not_second_guessed(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "PROP-1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "SUBSCRIBE", "quantity": 1,'
+            ' "instrument": {"symbol": "ASELS"}, "source_account_id": "1"}}'
+        )
+        state = {**base_state, "user_message": "ASELS satsana"}
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"

@@ -3,6 +3,7 @@ import { MOCK_FUNDS } from '../../data/mockData'
 import FundsTable from '../../components/markets/FundsTable'
 import FundFilterPanel, { EMPTY_FUND_FILTERS, applyFundFilters, type FundFilters } from '../../components/markets/FundFilterPanel'
 import FundComparisonChart from '../../components/markets/FundComparisonChart'
+import SampleDataBadge from '../../components/markets/SampleDataBadge'
 
 export default function FundsScreen() {
   const [filters, setFilters] = useState<FundFilters>(EMPTY_FUND_FILTERS)
@@ -14,6 +15,7 @@ export default function FundsScreen() {
 
   return (
     <div>
+      <SampleDataBadge reason="Fon verisi (TEFAS) için okunabilir bir kaynak yok; yfinance Türk yatırım fonlarını kapsamıyor." />
       <FundFilterPanel filters={filters} onChange={setFilters} founders={founders} umbrellas={umbrellas} />
 
       <div className="mb-6">

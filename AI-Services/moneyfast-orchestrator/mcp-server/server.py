@@ -6,9 +6,16 @@ Each module exposes a `register(mcp)` function; the tool callables stay at
 module level so they can be imported and unit-tested without a running
 server.
 
-Contracts are frozen against "MCP Tools Interface Definitions v2.1".
-Every tool in this build returns deterministic mock data. No network,
-database, or broker call is made anywhere in this package.
+Contracts follow "MCP Tools Interface Definitions v2.2": the six v2.1 tools
+are unchanged, and get_market_data is added because v2.1 had no way to reach
+the price of an instrument the user does not own.
+
+Six of the seven tools call a real HTTP service: get_portfolio_positions,
+prepare_transaction_proposal, calculate_portfolio_risk_metrics and
+validate_compliance_rules reach the backend, and rag_semantic_market_search
+reaches the rag service. Only classify_and_route_intent is computed locally,
+because routing needs no state. Nothing here falls back to canned data when a
+service is unreachable; every failure raises.
 
 Run:
     pip install "mcp[cli]"
@@ -22,7 +29,9 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 
+import backend_client
 import compliance_tools
+import market_data_tools
 import market_research_tools
 import orchestrator_tools
 import portfolio_tools
@@ -33,15 +42,19 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 log = logging.getLogger("moneyfast.mcp")
 
 SERVER_NAME = "moneyfast"
-CONTRACT_VERSION = "v2.1"
+CONTRACT_VERSION = "v2.2"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Six tools across six domains.
+MoneyFast tool server. Seven tools across seven domains.
 
 Routing: call classify_and_route_intent first on every user turn.
-Data:    get_portfolio_positions, rag_semantic_market_search and
-         calculate_portfolio_risk_metrics return as_of, source and
-         is_delayed at the top level. Propagate them.
+Data:    get_portfolio_positions, get_market_data,
+         rag_semantic_market_search and calculate_portfolio_risk_metrics
+         return as_of, source and is_delayed at the top level. Propagate
+         them.
+Prices:  get_market_data is the ONLY source for the price or valuation of an
+         instrument the user does not hold. A null fundamental means the
+         provider does not publish it; report "veri yok", never 0.
 Empty:   an empty list is a valid, complete answer. Never substitute
          remembered or illustrative data for it.
 Gate:    validate_compliance_rules runs on every user-facing draft that
@@ -56,6 +69,7 @@ mcp = FastMCP(SERVER_NAME, instructions=SERVER_INSTRUCTIONS, host="0.0.0.0", por
 DOMAIN_MODULES = (
     ("orchestrator", orchestrator_tools),
     ("portfolio", portfolio_tools),
+    ("market_data", market_data_tools),
     ("market_research", market_research_tools),
     ("risk_strategy", risk_strategy_tools),
     ("compliance", compliance_tools),
@@ -68,7 +82,12 @@ def build_server() -> FastMCP:
     for domain, module in DOMAIN_MODULES:
         module.register(mcp)
         log.info("registered domain: %s (%s)", domain, module.__name__)
-    log.info("moneyfast mcp ready, contract %s, MOCK DATA ONLY", CONTRACT_VERSION)
+    log.info(
+        "moneyfast mcp ready, contract %s, backend=%s rag=%s",
+        CONTRACT_VERSION,
+        backend_client.base_url(),
+        backend_client.rag_base_url(),
+    )
     return mcp
 
 

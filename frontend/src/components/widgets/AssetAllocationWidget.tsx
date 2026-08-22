@@ -6,15 +6,8 @@ import { useEffect, useState } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { apiClient } from '../../api/client'
 import type { AssetAllocationItem } from '../../api/client'
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('tr-TR', {
-    style: 'currency',
-    currency: 'TRY',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
+import { toNumber, seriesName } from '../../lib/chartFormat'
+import { BASE_CURRENCY, formatMoney } from '../../lib/money'
 
 export default function AssetAllocationWidget() {
   const [items, setItems] = useState<AssetAllocationItem[]>([])
@@ -68,7 +61,7 @@ export default function AssetAllocationWidget() {
                 ))}
               </Pie>
               <Tooltip 
-                formatter={(value: number, name: string, props: any) => [`%${value} - ${formatCurrency(props.payload.amount)}`, name]}
+                formatter={(value, name, item: any) => [`%${toNumber(value) ?? 0} - ${formatMoney(item?.payload?.amount ?? 0, BASE_CURRENCY)}`, seriesName(name)]}
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)', backgroundColor: 'rgba(255, 255, 255, 0.9)', backdropFilter: 'blur(8px)' }}
                 itemStyle={{ fontSize: '12px', fontWeight: 600, color: '#334155' }}
               />
@@ -78,7 +71,7 @@ export default function AssetAllocationWidget() {
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
             <span className="text-[10px] uppercase font-semibold tracking-wider text-slate-400">Toplam</span>
             <span className="text-sm font-bold text-white">
-              {formatCurrency(items.reduce((acc, curr) => acc + curr.amount, 0))}
+              {formatMoney(items.reduce((acc, curr) => acc + curr.amount, 0), BASE_CURRENCY)}
             </span>
           </div>
         </div>
@@ -101,7 +94,7 @@ export default function AssetAllocationWidget() {
                   <span className="text-[12px] font-semibold text-white">{item.assetClass}</span>
                 </td>
                 <td className="py-2 text-right">
-                  <span className="text-[12px] font-semibold tabular-nums text-white">{formatCurrency(item.amount)}</span>
+                  <span className="text-[12px] font-semibold tabular-nums text-white">{formatMoney(item.amount, BASE_CURRENCY)}</span>
                 </td>
                 <td className="py-2 text-right">
                   <span className="text-[12px] font-bold tabular-nums text-slate-400">{item.percentage}%</span>

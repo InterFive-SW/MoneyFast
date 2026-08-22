@@ -69,7 +69,11 @@ def test_chat_happy_path_forwards_orchestrator_response(client, mocker):
     response = client.post("/api/ai_orchestrator/chat", json=CHAT_PAYLOAD)
 
     assert response.status_code == 200
-    assert response.json() == orchestrator_body
+    # The response model gained widget/context_topic/conversation_id, so a
+    # whole-body equality check would now assert the absence of features
+    # rather than the forwarding behaviour under test.
+    assert response.json() | orchestrator_body == response.json()
+    assert response.json()["widget"] is None
 
 
 def test_chat_returns_503_when_orchestrator_connection_refused(client, mocker):
@@ -81,12 +85,16 @@ def test_chat_returns_503_when_orchestrator_connection_refused(client, mocker):
     assert "unreachable" in response.json()["detail"]
 
 
-def test_chat_returns_503_when_orchestrator_times_out(client, mocker):
+def test_chat_returns_504_when_orchestrator_times_out(client, mocker):
+    """A timeout is not an outage. 503 sent the user looking for a service
+    that is up and simply slow -- usually a Groq 429 whose retry-after
+    exceeded our budget."""
     _install_async_client(mocker, post_exception=httpx.TimeoutException("timed out"))
 
     response = client.post("/api/ai_orchestrator/chat", json=CHAT_PAYLOAD)
 
-    assert response.status_code == 503
+    assert response.status_code == 504
+    assert "yoğunluk" in response.json()["detail"]
 
 
 def test_chat_returns_502_when_orchestrator_returns_error_status(client, mocker):
@@ -132,3 +140,137 @@ def test_orchestrator_health_returns_503_on_timeout(client, mocker):
     response = client.get("/api/ai_orchestrator/health")
 
     assert response.status_code == 503
+
+
+# --------------------------------------------------------------------------
+# POST /chat/stream
+#
+# The streaming variant exists so the client can show what the graph is
+# ACTUALLY doing. The captions it replaces were a hardcoded 800ms loop that
+# announced "Risk modeli güncelleniyor..." for any question at all.
+#
+# The answer itself is not streamed token by token: the compliance gate is
+# fail-closed, and text already painted on screen cannot be un-shown.
+# --------------------------------------------------------------------------
+def _install_stream(mocker, lines, raise_error=None):
+    """Mock `async with client.stream(...) as upstream:` yielding `lines`."""
+    upstream = MagicMock()
+    upstream.raise_for_status.side_effect = raise_error
+
+    async def _aiter_lines():
+        for line in lines:
+            yield line
+
+    upstream.aiter_lines = _aiter_lines
+
+    stream_ctx = MagicMock()
+    stream_ctx.__aenter__ = AsyncMock(return_value=upstream)
+    stream_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    client_instance = MagicMock()
+    client_instance.__aenter__ = AsyncMock(return_value=client_instance)
+    client_instance.__aexit__ = AsyncMock(return_value=False)
+    client_instance.stream = MagicMock(return_value=stream_ctx)
+
+    mocker.patch("httpx.AsyncClient", return_value=client_instance)
+    return client_instance
+
+
+DONE_LINE = 'data: {"final_output": "Merhaba", "primary_intent": "SMALLTALK"}'
+
+
+def test_stream_relays_stage_events_and_the_answer(client, mocker):
+    _install_stream(
+        mocker,
+        ['event: stage', 'data: {"stage": "Yanıt yazılıyor..."}', '', 'event: done', DONE_LINE, ''],
+    )
+    response = client.post(
+        "/api/ai_orchestrator/chat/stream",
+        json={"user_message": "selam", "thread_id": "t1", "conversation_history": []},
+    )
+    assert response.status_code == 200
+    assert "Yanıt yazılıyor" in response.text
+    assert "Merhaba" in response.text
+
+
+def test_stream_records_the_turn_once_the_answer_arrives(client, mocker):
+    """The buffered endpoint persists the turn; the streaming one must too, or
+    a streamed conversation would vanish from history."""
+    from app.modules.ai_orchestrator import service
+
+    recorded = mocker.patch.object(service, "record_turn", return_value="conv-1")
+    mocker.patch.object(service, "load_history", return_value=[])
+    _install_stream(mocker, ['event: done', DONE_LINE, ''])
+
+    response = client.post(
+        "/api/ai_orchestrator/chat/stream",
+        json={"user_message": "selam", "thread_id": "t1", "conversation_history": []},
+    )
+
+    assert recorded.call_count == 1
+    assert recorded.call_args.kwargs["assistant_message"] == "Merhaba"
+    assert "conv-1" in response.text
+
+
+def test_stream_reports_an_upstream_failure_in_band(client, mocker):
+    """The response is already 200 by the time the graph fails, so the error
+    cannot be an HTTP status. The client falls back to the buffered path."""
+    _install_stream(mocker, [], raise_error=httpx.ConnectError("refused"))
+    response = client.post(
+        "/api/ai_orchestrator/chat/stream",
+        json={"user_message": "selam", "thread_id": "t1", "conversation_history": []},
+    )
+    assert response.status_code == 200
+    assert "event: error" in response.text
+
+
+def test_stream_ignores_a_malformed_frame(client, mocker):
+    from app.modules.ai_orchestrator import service
+
+    recorded = mocker.patch.object(service, "record_turn", return_value="conv-2")
+    mocker.patch.object(service, "load_history", return_value=[])
+    _install_stream(mocker, ['data: not-json', '', 'event: done', DONE_LINE, ''])
+
+    response = client.post(
+        "/api/ai_orchestrator/chat/stream",
+        json={"user_message": "selam", "thread_id": "t1", "conversation_history": []},
+    )
+
+    assert response.status_code == 200
+    assert recorded.call_count == 1
+
+
+def test_stream_without_an_answer_records_nothing(client, mocker):
+    """A turn that died mid-graph must not be persisted as an empty reply."""
+    from app.modules.ai_orchestrator import service
+
+    recorded = mocker.patch.object(service, "record_turn", return_value="conv-3")
+    mocker.patch.object(service, "load_history", return_value=[])
+    _install_stream(mocker, ['event: stage', 'data: {"stage": "..."}', ''])
+
+    client.post(
+        "/api/ai_orchestrator/chat/stream",
+        json={"user_message": "selam", "thread_id": "t1", "conversation_history": []},
+    )
+
+    assert recorded.call_count == 0
+
+
+def test_stream_falls_back_to_the_client_history_when_nothing_is_stored(client, mocker):
+    from app.modules.ai_orchestrator import service
+
+    mocker.patch.object(service, "record_turn", return_value="conv-4")
+    mocker.patch.object(service, "load_history", return_value=[])
+    instance = _install_stream(mocker, ['event: done', DONE_LINE, ''])
+
+    client.post(
+        "/api/ai_orchestrator/chat/stream",
+        json={
+            "user_message": "peki ya o?",
+            "thread_id": "t1",
+            "conversation_history": [{"role": "user", "content": "THYAO"}],
+        },
+    )
+
+    sent = instance.stream.call_args.kwargs["json"]
+    assert sent["conversation_history"] == [{"role": "user", "content": "THYAO"}]

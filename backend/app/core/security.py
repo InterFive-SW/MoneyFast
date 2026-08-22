@@ -46,6 +46,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
+#: Token kind, carried as the `typ` claim.
+#:
+#: The two kinds are NOT interchangeable and the claim is what keeps them
+#: apart. A refresh token lives for days; if it were accepted wherever an
+#: access token is, a single leaked long-lived token would be as good as a
+#: password. `get_current_user` rejects anything that is not ACCESS, and
+#: `/auth/refresh` rejects anything that is not REFRESH.
+ACCESS_TOKEN_TYPE = "access"
+REFRESH_TOKEN_TYPE = "refresh"
+
+
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """
     Süre sonu (expiration) talebi içeren bir JSON Web Token (JWT) oluşturur.
@@ -62,10 +73,24 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    to_encode.update({"exp": expire})
-    
+    to_encode.update({"exp": expire, "typ": ACCESS_TOKEN_TYPE})
+
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
+
+
+def create_refresh_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    """Uzun ömürlü yenileme token'ı üretir.
+
+    Yalnızca `/auth/refresh` tarafından kabul edilir; kaynak uç noktalarında
+    kullanılamaz.
+    """
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    )
+    to_encode.update({"exp": expire, "typ": REFRESH_TOKEN_TYPE})
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def decode_access_token(token: str) -> dict:

@@ -21,7 +21,7 @@ RUN apt-get update \
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-COPY orchestrator.py prompts.py mcp_client.py api.py ./
+COPY orchestrator.py prompts.py mcp_client.py api.py widgets.py ./
 
 # ---------------------------------------------------------------------------
 # Stage 2: test. Fails the build on any test failure or a coverage drop.

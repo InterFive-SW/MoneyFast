@@ -1,7 +1,7 @@
-import type { RiskRecommendation } from '../../data/mockRiskData'
+import type { RiskSuggestion } from '../../api/client'
 
 interface RiskRecommendationsWidgetProps {
-  recommendations: RiskRecommendation[]
+  recommendations: RiskSuggestion[]
 }
 
 const IconArrowRight = () => (

@@ -2,18 +2,9 @@
  * RecentTransactionsWidget — Son İşlemler Tablosu Bileşeni
  */
 
-import type { TransactionData } from '../../data/mockData'
-
-interface RecentTransactionsWidgetProps {
-  transactions: TransactionData[]
-}
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('tr-TR', {
-    style: 'currency',
-    currency: 'TRY',
-  }).format(amount)
-}
+import { useEffect, useState } from 'react'
+import { apiClient, type Movement } from '../../api/client'
+import { formatMoney } from '../../lib/money'
 
 function formatDate(isoString: string): string {
   const date = new Date(isoString)
@@ -25,9 +16,28 @@ function formatDate(isoString: string): string {
   }).format(date)
 }
 
-export default function RecentTransactionsWidget({
-  transactions,
-}: RecentTransactionsWidgetProps) {
+export default function RecentTransactionsWidget() {
+  // Real movements from the banking ledger. This widget was mounted with
+  // `transactions={[]}` — permanently empty, so it could never show anything.
+  const [movements, setMovements] = useState<Movement[]>([])
+  const [currency, setCurrency] = useState('TRY')
+
+  useEffect(() => {
+    // Two steps: the account, then its statement. A user has one deposit
+    // account, so there is nothing to choose between.
+    apiClient
+      .getBankAccounts()
+      .then((accounts) => {
+        const account = accounts[0]
+        if (!account) return
+        setCurrency(account.currency_code)
+        return apiClient
+          .getStatement(account.account_number, 8)
+          .then((statement) => setMovements(statement.movements ?? []))
+      })
+      .catch((error) => console.error('Failed to load recent transactions', error))
+  }, [])
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between mb-4">
@@ -46,24 +56,25 @@ export default function RecentTransactionsWidget({
             </tr>
           </thead>
           <tbody>
-            {transactions.map((tx) => {
-              const isPositive = tx.amount >= 0
-              const amountColorClass = isPositive ? 'text-emerald-600' : 'text-white'
-              
-              // We don't have icon/title in TransactionData right now, it has description, category.
-              // So we will just use description and category text.
-              
+            {movements.map((tx) => {
+              // The ledger records direction rather than a signed amount, so
+              // an incoming transfer is a CREDIT rather than a positive number.
+              const isPositive = tx.direction === 'CREDIT'
+              const amountColorClass = isPositive ? 'text-emerald-500' : 'text-white'
+
               return (
-                <tr key={tx.id} className="border-b border-slate-50 hover:bg-white/5 transition-colors group">
+                <tr key={tx.reference_number} className="border-b border-white/5 hover:bg-white/5 transition-colors group">
                   <td className="py-2.5 flex items-center gap-3">
                     <div className="flex flex-col">
-                      <span className="text-[12px] font-semibold text-white line-clamp-1">{tx.description}</span>
-                      <span className="text-[10px] text-slate-400 font-medium tabular-nums uppercase tracking-wider">{formatDate(tx.date)}</span>
+                      <span className="text-[12px] font-semibold text-white line-clamp-1">
+                        {tx.description || tx.counterparty_iban || tx.reference_number}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-medium tabular-nums uppercase tracking-wider">{formatDate(tx.created_at)}</span>
                     </div>
                   </td>
                   <td className="py-2.5 text-right align-middle">
                     <span className={`text-[12px] font-bold tabular-nums ${amountColorClass}`}>
-                      {isPositive ? '+' : ''}{formatCurrency(tx.amount)}
+                      {isPositive ? '+' : '−'}{formatMoney(tx.amount, currency)}
                     </span>
                   </td>
                 </tr>

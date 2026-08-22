@@ -37,6 +37,7 @@ import FundDetail           from './pages/markets/FundDetail'
 import IndicesScreen        from './pages/markets/IndicesScreen'
 import SectorsScreen        from './pages/markets/SectorsScreen'
 import AnalysesScreen       from './pages/markets/AnalysesScreen'
+import Analytics from './pages/Analytics'
 
 export default function App() {
   return (
@@ -75,6 +76,8 @@ export default function App() {
                 <Route path="new-account" element={<NewAccountWizard />} />
                 <Route path="new-card" element={<NewCardWizard />} />
               </Route>
+              <Route path="analytics"  element={<Analytics />}  />
+              <Route path="banking"    element={<Banking />}    />
               <Route path="investment" element={<Investment />}>
                 <Route index                element={<Navigate to="hisseler" replace />} />
                 <Route path="hisseler"       element={<StocksScreen />}  />

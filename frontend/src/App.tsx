@@ -21,7 +21,6 @@ import Chat                 from './pages/Chat'
 import Portfolio            from './pages/Portfolio'
 import Banking              from './pages/Banking'
 import BankingDashboard     from './components/banking/BankingDashboard'
-import BankingMenu          from './components/banking/BankingMenu'
 import AccountsView         from './components/banking/AccountsView'
 import AccountTransactionsView from './components/banking/AccountTransactionsView'
 import MoneyTransferWizard  from './components/banking/MoneyTransferWizard'
@@ -77,7 +76,6 @@ export default function App() {
                 <Route path="new-card" element={<NewCardWizard />} />
               </Route>
               <Route path="analytics"  element={<Analytics />}  />
-              <Route path="banking"    element={<Banking />}    />
               <Route path="investment" element={<Investment />}>
                 <Route index                element={<Navigate to="hisseler" replace />} />
                 <Route path="hisseler"       element={<StocksScreen />}  />

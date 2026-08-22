@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { MarketInstrument } from '../../data/mockData'
 import { COLUMN_SETS, formatMetricValue, type ColumnSetKey } from '../../data/columnSets'
+import { useWatchlist } from '../../hooks/useWatchlist'
 
 type MarketTab = 'BIST' | 'ABD' | 'Kripto'
 type SortKey = 'symbol' | 'price' | 'changePercent' | 'volume'
@@ -57,7 +58,9 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
   const [query, setQuery] = useState('')
   const [sortKey, setSortKey] = useState<SortKey>('symbol')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
-  const [favorites, setFavorites] = useState<Set<string>>(new Set())
+  // Backed by the real watchlist now. This was local state: the star lit up,
+  // saved nothing, and reset on navigation.
+  const { symbols: favorites, toggle: toggleFavorite } = useWatchlist()
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   const activeColumnSet = COLUMN_SETS.find((set) => set.key === columnSet) ?? COLUMN_SETS[0]
@@ -73,15 +76,6 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
-
-  function toggleFavorite(symbol: string) {
-    setFavorites((prev) => {
-      const next = new Set(prev)
-      if (next.has(symbol)) next.delete(symbol)
-      else next.add(symbol)
-      return next
-    })
-  }
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -205,7 +199,8 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
                 <td className="py-3">
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleFavorite(item.symbol) }}
-                    aria-label={favorites.has(item.symbol) ? `${item.symbol} favorilerden çıkar` : `${item.symbol} favorilere ekle`}
+                    aria-label={favorites.has(item.symbol) ? `${item.symbol} izlemeden çıkar` : `${item.symbol} izleme listesine ekle`}
+                    title={favorites.has(item.symbol) ? 'İzleme listesinden çıkar' : 'İzleme listesine ekle'}
                     className={`transition-colors ${favorites.has(item.symbol) ? 'text-amber-400' : 'text-slate-300 hover:text-amber-300'}`}
                   >
                     <svg className="h-4 w-4" viewBox="0 0 24 24" fill={favorites.has(item.symbol) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

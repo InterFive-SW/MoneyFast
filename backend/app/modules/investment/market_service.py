@@ -22,6 +22,7 @@ from .models import (
     MarketCandle,
     MarketQuote,
     PortfolioPosition,
+    WatchlistItem,
 )
 
 log = logging.getLogger("moneyfast.market_data")
@@ -742,3 +743,57 @@ def recent_orders(db: Session, limit: int = 20) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Watchlist
+#
+# What the endpoint returned before was the first eight priced stocks per
+# market, alphabetically: the same list for every user, reflecting nobody's
+# choice and unchangeable from the interface.
+# ---------------------------------------------------------------------------
+def watchlist_symbols(db: Session, user_id: str) -> list[str]:
+    """The instruments this user follows, oldest pick first."""
+    rows = db.execute(
+        select(InvestmentProduct.symbol)
+        .join(WatchlistItem, WatchlistItem.product_id == InvestmentProduct.id)
+        .where(WatchlistItem.user_id == user_id)
+        .order_by(WatchlistItem.created_at)
+    ).all()
+    return [row[0] for row in rows]
+
+
+def watchlist_add(db: Session, user_id: str, symbol: str) -> Optional[InvestmentProduct]:
+    """Follow an instrument. Idempotent: starring twice is not an error.
+
+    Returns None when the symbol resolves to nothing, so the caller can answer
+    404 rather than storing a row pointing at an instrument that does not
+    exist.
+    """
+    product = resolve_symbol(db, symbol)
+    if product is None:
+        return None
+
+    existing = (
+        db.query(WatchlistItem)
+        .filter(WatchlistItem.user_id == user_id, WatchlistItem.product_id == product.id)
+        .first()
+    )
+    if existing is None:
+        db.add(WatchlistItem(user_id=user_id, product_id=product.id))
+        db.commit()
+    return product
+
+
+def watchlist_remove(db: Session, user_id: str, symbol: str) -> bool:
+    """Unfollow. False when it was not on the list, so the caller can 404."""
+    product = resolve_symbol(db, symbol)
+    if product is None:
+        return False
+    deleted = (
+        db.query(WatchlistItem)
+        .filter(WatchlistItem.user_id == user_id, WatchlistItem.product_id == product.id)
+        .delete()
+    )
+    db.commit()
+    return bool(deleted)

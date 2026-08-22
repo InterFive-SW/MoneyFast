@@ -1,4 +1,3 @@
-import React from 'react'
 import { useParams, useNavigate, useOutletContext, Navigate } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
 

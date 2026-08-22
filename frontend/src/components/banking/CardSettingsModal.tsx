@@ -1,11 +1,11 @@
-import React, { useState } from 'react'
-import { CreditCard } from '../../data/mockBankingData'
+import { useState } from 'react'
+import { CreditCard, type CreditCardUpdate } from '../../data/mockBankingData'
 
 interface CardSettingsModalProps {
   isOpen: boolean
   onClose: () => void
   card: CreditCard | null
-  updateCard: (cardId: string, updates: Partial<CreditCard>) => void
+  updateCard: (cardId: string, updates: CreditCardUpdate) => void
 }
 
 type DialogType = 'none' | 'pin' | 'limit' | 'emergency' | 'physical' | 'renewal' | 'success'

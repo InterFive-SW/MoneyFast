@@ -599,15 +599,47 @@ export interface paths {
         };
         /**
          * Get Watchlist
-         * @description İzleme listesi — canlı fiyatlarla, piyasaya göre gruplanmış.
+         * @description Kullanıcının kendi izleme listesi — canlı fiyatlarla, piyasaya göre
+         *     gruplanmış.
          *
-         *     Değişim yüzdesi bilinmeyen enstrümanlar listelenmez: sıfır değişim
-         *     "fiyat kımıldamadı" iddiasıdır ve "bilmiyorum" ile aynı şey değildir.
+         *     Önceden bu uç nokta alfabetik olarak ilk sekiz hisseyi döndürüyordu:
+         *     herkese aynı liste, kimsenin seçimini yansıtmayan ve arayüzden
+         *     değiştirilemeyen bir "izleme listesi". Artık `watchlist_items`'tan
+         *     okunuyor ve boşsa BOŞ döner — kullanıcının seçmediği bir hisseyi onun
+         *     listesiymiş gibi göstermek, listenin anlamını ortadan kaldırır.
+         *
+         *     Gruplar: `bist`, `global` ve hepsini içeren `all`. Değişim yüzdesi
+         *     bilinmeyen enstrümanlar da listelenir; kullanıcı onu bilerek ekledi ve
+         *     listeden sessizce düşmesi, eklemenin işe yaramadığı izlenimi verir.
          */
         get: operations["get_watchlist_api_investment_watchlist_get"];
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/investment/watchlist/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add To Watchlist
+         * @description İzleme listesine ekler. Aynı hisseyi iki kez eklemek hata değildir.
+         */
+        post: operations["add_to_watchlist_api_investment_watchlist__symbol__post"];
+        /**
+         * Remove From Watchlist
+         * @description İzleme listesinden çıkarır.
+         */
+        delete: operations["remove_from_watchlist_api_investment_watchlist__symbol__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3255,6 +3287,72 @@ export interface operations {
                     "application/json": {
                         [key: string]: components["schemas"]["WatchlistItem"][];
                     };
+                };
+            };
+        };
+    };
+    add_to_watchlist_api_investment_watchlist__symbol__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_from_watchlist_api_investment_watchlist__symbol__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

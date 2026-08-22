@@ -1,11 +1,12 @@
-import React, { useState } from 'react'
+import React from 'react'
+import { useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
 import CardSettingsModal from './CardSettingsModal'
 
 export default function CardsView() {
   const navigate = useNavigate()
-  const { data, updateCard, handleCardCreate } = useOutletContext<BankingContextType>()
+  const { data, updateCard } = useOutletContext<BankingContextType>()
   const cards = data.creditCards
 
   const [selectedCardId, setSelectedCardId] = useState<string>(cards[0]?.id || '')

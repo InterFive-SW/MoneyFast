@@ -1,7 +1,7 @@
-import React, { useState } from 'react'
+import React from 'react'
+import { useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
-import type { BankAccount } from '../../data/mockBankingData'
 
 /**
  * AccountsView Bileşeni
@@ -35,7 +35,6 @@ export default function AccountsView() {
   const selectedAccount = accounts.find(a => a.id === selectedAccountId)
 
   // Toplam varlık hesaplaması (sadece gösterim amaçlı, mock data'dan da gelebilirdi)
-  const totalBalance = accounts.reduce((sum, acc) => sum + acc.balance, 0)
 
   return (
     <div className="w-full max-w-7xl mx-auto flex flex-col gap-6 animate-fade-in-up">

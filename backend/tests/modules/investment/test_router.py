@@ -176,19 +176,129 @@ class TestChart:
 
 
 class TestWatchlist:
-    def test_groups_by_market(self, dash):
-        body = dash.get("/api/investment/watchlist").json()
+    """The watchlist is the user's own picks.
+
+    It used to be the first eight priced stocks per market in alphabetical
+    order: the same list for everybody, reflecting nobody's choice, and
+    unchangeable from the interface. These pin that it now comes from
+    `watchlist_items` and belongs to the caller.
+    """
+
+    URL = "/api/investment/watchlist"
+
+    @pytest.fixture()
+    def signed_in(self, dash):
+        from app.core.deps import get_current_user_id
+        from app.main import app
+
+        app.dependency_overrides[get_current_user_id] = lambda: "user-1"
+        try:
+            yield dash
+        finally:
+            app.dependency_overrides.pop(get_current_user_id, None)
+
+    def test_requires_a_session(self, dash):
+        """Without one it would have to guess whose list to return."""
+        assert dash.get(self.URL).status_code == 401
+
+    def test_an_empty_list_is_empty(self, signed_in, mocker):
+        """No fallback. Showing instruments the user never picked would make
+        the list mean nothing."""
+        from app.modules.investment import market_service
+
+        mocker.patch.object(market_service, "watchlist_symbols", return_value=[])
+        body = signed_in.get(self.URL).json()
+        assert body == {"bist": [], "global": [], "all": []}
+
+    @pytest.mark.parametrize(
+        "quotes",
+        [{"THYAO": quote(304.0, 1.0, 3.0), "AAPL": quote(215.3, 0.6, 1.3)}],
+    )
+    def test_groups_by_market_and_keeps_everything_in_all(self, signed_in, mocker):
+        from app.modules.investment import market_service
+
+        mocker.patch.object(market_service, "watchlist_symbols", return_value=["THYAO", "AAPL"])
+        body = signed_in.get(self.URL).json()
         assert [r["symbol"] for r in body["bist"]] == ["THYAO"]
+        assert [r["symbol"] for r in body["global"]] == ["AAPL"]
+        assert [r["symbol"] for r in body["all"]] == ["THYAO", "AAPL"]
+
+    @pytest.mark.parametrize(
+        "quotes",
+        [{"THYAO": quote(304.0, 1.0, 3.0), "AAPL": quote(215.3, 0.6, 1.3)}],
+    )
+    def test_the_users_own_order_is_preserved(self, signed_in, mocker):
+        """Sorting alphabetically would take the list out of the order the
+        person built it in."""
+        from app.modules.investment import market_service
+
+        mocker.patch.object(market_service, "watchlist_symbols", return_value=["AAPL", "THYAO"])
+        body = signed_in.get(self.URL).json()
+        assert [r["symbol"] for r in body["all"]] == ["AAPL", "THYAO"]
 
     @pytest.mark.parametrize("quotes", [{"THYAO": quote(304.0, None, None)}])
-    def test_unknown_change_is_omitted_not_shown_as_flat(self, dash):
-        body = dash.get("/api/investment/watchlist").json()
-        assert body["bist"] == []
+    def test_a_followed_instrument_with_no_change_is_still_listed(self, signed_in, mocker):
+        """The old endpoint dropped these. Here the user deliberately added it,
+        and having it vanish reads as the add not having worked."""
+        from app.modules.investment import market_service
 
-    def test_indices_are_not_listed_as_stocks(self, dash):
-        body = dash.get("/api/investment/watchlist").json()
-        symbols = [r["symbol"] for group in body.values() for r in group]
-        assert "XU100" not in symbols
+        mocker.patch.object(market_service, "watchlist_symbols", return_value=["THYAO"])
+        body = signed_in.get(self.URL).json()
+        assert [r["symbol"] for r in body["bist"]] == ["THYAO"]
+        assert body["bist"][0]["changePercent"] == 0.0
+
+    def test_a_symbol_with_no_quote_is_skipped(self, signed_in, mocker):
+        from app.modules.investment import market_service
+
+        mocker.patch.object(market_service, "watchlist_symbols", return_value=["THYAO", "GHOST"])
+        body = signed_in.get(self.URL).json()
+        assert [r["symbol"] for r in body["all"]] == ["THYAO"]
+
+
+class TestWatchlistMutations:
+    @pytest.fixture()
+    def signed_in(self, dash):
+        from app.core.deps import get_current_user_id
+        from app.main import app
+
+        app.dependency_overrides[get_current_user_id] = lambda: "user-1"
+        try:
+            yield dash
+        finally:
+            app.dependency_overrides.pop(get_current_user_id, None)
+
+    def test_add_returns_the_canonical_symbol(self, signed_in, mocker):
+        from app.modules.investment import market_service
+
+        mocker.patch.object(
+            market_service, "watchlist_add",
+            return_value=SimpleNamespace(symbol="THYAO"),
+        )
+        body = signed_in.post("/api/investment/watchlist/thyao").json()
+        assert body == {"symbol": "THYAO", "status": "added"}
+
+    def test_adding_an_unknown_symbol_is_a_404(self, signed_in, mocker):
+        from app.modules.investment import market_service
+
+        mocker.patch.object(market_service, "watchlist_add", return_value=None)
+        assert signed_in.post("/api/investment/watchlist/NOPE").status_code == 404
+
+    def test_remove(self, signed_in, mocker):
+        from app.modules.investment import market_service
+
+        mocker.patch.object(market_service, "watchlist_remove", return_value=True)
+        body = signed_in.delete("/api/investment/watchlist/THYAO").json()
+        assert body == {"symbol": "THYAO", "status": "removed"}
+
+    def test_removing_something_not_on_the_list_is_a_404(self, signed_in, mocker):
+        from app.modules.investment import market_service
+
+        mocker.patch.object(market_service, "watchlist_remove", return_value=False)
+        assert signed_in.delete("/api/investment/watchlist/THYAO").status_code == 404
+
+    def test_mutations_require_a_session(self, dash):
+        assert dash.post("/api/investment/watchlist/THYAO").status_code == 401
+        assert dash.delete("/api/investment/watchlist/THYAO").status_code == 401
 
 
 class TestAllocations:

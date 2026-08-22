@@ -1,7 +1,6 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
-import type { BankAccount } from '../../data/mockBankingData'
 
 const DUMMY_RECIPIENTS = [
   { id: '1', name: 'Yağmur Nur Özkan', bank: 'T.GARANTİ BANKASI A.Ş.', iban: 'TR72 0006 2001 0450 0006 6677 03', isFrequent: true },
@@ -59,7 +58,7 @@ export default function MoneyTransferWizard() {
       ? (DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.iban || '')
       : receiverIban
       
-    handleTransfer(numAmount, senderAccountId, receiverName || receiverIban, description)
+    handleTransfer(numAmount, senderAccountId, receiverName || finalIban, description)
     setStep(5)
   }
 

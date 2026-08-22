@@ -1,11 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import type { InvestmentBalance } from '../../data/mockData'
-
-interface Props {
-  data: InvestmentBalance
-}
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { apiClient, type InvestmentBalance } from '../../api/client'
 
 /**
@@ -14,10 +8,12 @@ import { apiClient, type InvestmentBalance } from '../../api/client'
  * Kendi verisini çeker. Bir süre `MOCK_INVESTMENT_BALANCE` sabitiyle
  * besleniyordu — oysa `/api/investment/portfolio/summary` tam olarak bu şekli
  * canlı fiyatlardan hesaplayıp döndürüyordu ve hiçbir yerden çağrılmıyordu.
+ *
+ * Başlığa tıklayınca portföye gider; bu davranış bankacılık dalından geldi ve
+ * korundu.
  */
-export default function InvestmentBalanceWidget({ data }: Props) {
-  const navigate = useNavigate()
 export default function InvestmentBalanceWidget() {
+  const navigate = useNavigate()
   const [currency, setCurrency] = useState<'TRY' | 'USD'>('TRY')
   const [data, setData] = useState<InvestmentBalance | null>(null)
 

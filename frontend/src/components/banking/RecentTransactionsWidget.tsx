@@ -1,4 +1,3 @@
-import React from 'react'
 import type { BankTransaction } from '../../data/mockBankingData'
 
 interface Props {

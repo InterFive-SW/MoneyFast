@@ -302,6 +302,30 @@ describe('the banking endpoints', () => {
 // staging transaction proposals owned by "anonymous" that could never be
 // confirmed.
 // ==========================================================================
+describe('watchlist', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('adds by symbol', () => {
+    const fetchMock = mockFetch({ status: 'added' })
+    apiClient.addToWatchlist('THYAO')
+    expect(calledUrl(fetchMock)).toContain('/investment/watchlist/THYAO')
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST')
+  })
+
+  it('removes by symbol with DELETE', () => {
+    const fetchMock = mockFetch({ status: 'removed' })
+    apiClient.removeFromWatchlist('THYAO')
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('DELETE')
+  })
+
+  it('encodes the symbol into the path', () => {
+    const fetchMock = mockFetch({})
+    apiClient.addToWatchlist('BRK B')
+    expect(calledUrl(fetchMock)).toContain('BRK%20B')
+  })
+})
+
 describe('getRiskProfile', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => vi.unstubAllGlobals())

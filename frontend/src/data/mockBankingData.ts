@@ -18,13 +18,19 @@ export interface CreditCard {
   dueDate: string
   color: string
   isDigital?: boolean
-  settings?: {
-    onlineShopping: boolean
-    contactless: boolean
-    isFrozen: boolean
-  }
+  settings?: CardSettings
   linkedAccountId?: string
 }
+
+export interface CardSettings {
+  onlineShopping: boolean
+  contactless: boolean
+  isFrozen: boolean
+}
+
+/** What `updateCard` accepts: any field, and settings one flag at a time. */
+export type CreditCardUpdate =
+  Partial<Omit<CreditCard, 'settings'>> & { settings?: Partial<CardSettings> }
 
 export interface SavedContact {
   id: string

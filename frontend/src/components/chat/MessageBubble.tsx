@@ -45,7 +45,12 @@ export default function MessageBubble({ message, animate = false }: MessageBubbl
         <div 
           className={`flex flex-col px-4 py-3 ${
             isUser 
-              ? 'bg-brandBlue text-white shadow-md rounded-2xl rounded-br-sm' 
+              // Kendi seçim rengi. Uygulama genelinde seçim `bg-brandBlue`
+              // (bkz. DashboardLayout) ve bu balonun ZEMİNİ de brandBlue —
+              // yani kullanıcının kendi mesajı seçilebiliyordu ama vurgusu
+              // zeminle aynı renk olduğu için hiçbir şey olmuyormuş gibi
+              // görünüyordu.
+              ? 'bg-brandBlue text-white shadow-md rounded-2xl rounded-br-sm selection:bg-white selection:text-brandBlue' 
               : 'bg-slate-800/80 backdrop-blur-md border border-white/10 text-white shadow-xl rounded-2xl rounded-bl-sm'
           }`}
         >

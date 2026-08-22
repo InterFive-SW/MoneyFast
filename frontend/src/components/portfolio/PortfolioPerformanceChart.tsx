@@ -58,15 +58,20 @@ export default function PortfolioPerformanceChart() {
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
 
+  // `series` belongs in both dependency lists: it starts empty and is filled
+  // by the fetch above. Without it neither memo recomputed when the bars
+  // arrived, so the chart sat on "Seçilen aralıkta veri bulunmuyor" until the
+  // user changed range -- which changed `mode` and recomputed them by
+  // accident.
   const activeRange = useMemo(() => {
     if (mode === 'custom') return customRange
     return presetRangeFor(series, mode)
-  }, [mode, customRange])
+  }, [mode, customRange, series])
 
   const data = useMemo(() => {
     if (!activeRange) return []
     return sliceSeries(series, activeRange.from, activeRange.to)
-  }, [activeRange])
+  }, [activeRange, series])
 
   // Chart kurulumu (yalnızca mount'ta)
   useEffect(() => {

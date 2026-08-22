@@ -53,11 +53,20 @@ def _chunks(items: list[str], size: int) -> Iterator[list[str]]:
 def fetch_quotes(products: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
     """Latest price per product, in batched requests.
 
-    Measured on the ~95-symbol universe: a `period="2d", interval="1d"` batch
-    takes 3.3-5.4s, while the same batch with minute bars takes 6.8-11.4s.
-    Two daily bars is exactly what is needed — during an open session the last
-    row is today's partially formed bar whose close tracks the current price,
-    and the row before it is yesterday's close.
+    Measured on the ~95-symbol universe: a daily-bar batch takes 3.3-5.4s,
+    while the same batch with minute bars takes 6.8-11.4s. During an open
+    session the last row is today's partially formed bar whose close tracks
+    the current price, and the row before it is the previous close.
+
+    The window is FIVE days, not two, because two is not reliably two bars.
+    `period` is a calendar span, and how many trading days fall inside it
+    varies by venue: measured on a Saturday, US symbols returned two bars
+    while every `.IS` symbol returned one. With a single bar there is no
+    previous close, so `change_percent` stayed null -- and the watchlist, the
+    heatmap and the top-movers list all drop rows whose change is unknown.
+    The observable result was 87 of 88 BIST stocks silently vanishing from
+    those screens every weekend. Only the last two bars are ever read, so a
+    wider window costs nothing but a slightly larger response.
 
     The per-symbol alternative (`Ticker(s).fast_info` in a loop) would be one
     HTTP request per symbol per cycle, which is how you get rate limited and
@@ -81,7 +90,7 @@ def fetch_quotes(products: Iterable[dict[str, str]]) -> list[dict[str, Any]]:
         try:
             part = yf.download(
                 " ".join(chunk),
-                period="2d",
+                period="5d",
                 interval="1d",
                 progress=False,
                 threads=True,

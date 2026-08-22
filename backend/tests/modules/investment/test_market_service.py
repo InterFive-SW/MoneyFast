@@ -498,3 +498,59 @@ class TestNameBackfill:
             self._db(row), [{"symbol": "ASELS", "name": "   "}]
         )
         assert row.name == "ASELS"
+
+
+class TestWatchlistStore:
+    """Following an instrument, and the two ways it can go wrong.
+
+    An unresolvable symbol must not create a row: a watchlist entry pointing
+    at nothing renders as a blank line the user cannot remove.
+    """
+
+    def _db(self, product=None, existing=None):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = existing
+        db.query.return_value.filter.return_value.delete.return_value = 1 if existing else 0
+        return db
+
+    def test_symbols_come_back_in_the_order_they_were_added(self):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = [("THYAO",), ("AAPL",)]
+        assert market_service.watchlist_symbols(db, "user-1") == ["THYAO", "AAPL"]
+
+    def test_adding_resolves_the_symbol_first(self, mocker):
+        db = self._db()
+        resolved = product()
+        mocker.patch.object(market_service, "resolve_symbol", return_value=resolved)
+        assert market_service.watchlist_add(db, "user-1", "thyao") is resolved
+        db.add.assert_called_once()
+        db.commit.assert_called_once()
+
+    def test_adding_an_unresolvable_symbol_stores_nothing(self, mocker):
+        db = self._db()
+        mocker.patch.object(market_service, "resolve_symbol", return_value=None)
+        assert market_service.watchlist_add(db, "user-1", "NOPE") is None
+        db.add.assert_not_called()
+
+    def test_adding_twice_is_a_no_op(self, mocker):
+        """Starring an instrument you already follow is not an error."""
+        db = self._db(existing=SimpleNamespace(id="w1"))
+        resolved = product()
+        mocker.patch.object(market_service, "resolve_symbol", return_value=resolved)
+        assert market_service.watchlist_add(db, "user-1", "THYAO") is resolved
+        db.add.assert_not_called()
+
+    def test_removing_reports_whether_anything_went(self, mocker):
+        db = self._db(existing=SimpleNamespace(id="w1"))
+        mocker.patch.object(market_service, "resolve_symbol", return_value=product())
+        assert market_service.watchlist_remove(db, "user-1", "THYAO") is True
+
+    def test_removing_something_not_followed_reports_false(self, mocker):
+        db = self._db()
+        mocker.patch.object(market_service, "resolve_symbol", return_value=product())
+        assert market_service.watchlist_remove(db, "user-1", "THYAO") is False
+
+    def test_removing_an_unresolvable_symbol_reports_false(self, mocker):
+        db = self._db()
+        mocker.patch.object(market_service, "resolve_symbol", return_value=None)
+        assert market_service.watchlist_remove(db, "user-1", "NOPE") is False

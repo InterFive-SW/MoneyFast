@@ -129,17 +129,17 @@ class ApiClient {
         }
     }
 
-    private async request<T>(endpoint: string): Promise<T> {
+    private async request<T>(endpoint: string, method: 'GET' | 'DELETE' = 'GET'): Promise<T> {
         try {
             const response = await this.authedFetch(`${this.baseUrl}${endpoint}`, {
-                method: 'GET',
+                method,
             });
             if (!response.ok) {
                 throw new Error(`API Hatası: ${response.status} ${response.statusText}`);
             }
             return await response.json();
         } catch (error) {
-            console.error(`[API Ağ Hatası] GET ${endpoint} isteği başarısız oldu (Olası CORS veya Sunucu Hatası):`, error);
+            console.error(`[API Ağ Hatası] ${method} ${endpoint} isteği başarısız oldu (Olası CORS veya Sunucu Hatası):`, error);
             throw error;
         }
     }
@@ -163,6 +163,18 @@ class ApiClient {
 
     getAssetAllocation() {
         return this.request<AssetAllocationItem[]>('/investment/asset-allocation');
+    }
+
+    /** Follow an instrument. Idempotent — starring twice is not an error. */
+    addToWatchlist(symbol: string) {
+        return this.post<Record<string, string>>(
+            `/investment/watchlist/${encodeURIComponent(symbol)}`, {});
+    }
+
+    /** Unfollow. */
+    removeFromWatchlist(symbol: string) {
+        return this.request<Record<string, string>>(
+            `/investment/watchlist/${encodeURIComponent(symbol)}`, 'DELETE');
     }
 
     getWatchlist() {

@@ -1,4 +1,3 @@
-import React from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
 import AccountHeroWidget from './AccountHeroWidget'

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
 
@@ -317,7 +317,7 @@ export default function NewCardWizard() {
                       >
                         <div>
                           <h4 className="text-lg font-bold text-white">{acc.name}</h4>
-                          <p className="text-slate-400 font-mono text-sm mt-1">{acc.iban}</p>
+                          <p className="text-slate-400 font-mono text-sm mt-1">{acc.accountNumber}</p>
                         </div>
                         <div className="text-right">
                           <span className="text-xl font-bold text-white">

@@ -17,7 +17,6 @@ import { useMarketStream } from '../../hooks/useMarketStream'
  */
 export default function PositionsWidget() {
   const navigate = useNavigate()
-  const [positions, setPositions] = useState<Position[]>([])
   const { rates } = useMarketStream()
   const [fetched, setFetched] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)

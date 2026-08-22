@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 
 from app.core.database import get_db
-from app.core.deps import get_optional_user_id
+from app.core.deps import get_current_user_id, get_optional_user_id
 from . import ai_service, market_service, service
 from .models import TransactionProposal
 from .ai_schemas import (
@@ -18,9 +18,6 @@ from .schemas import (
 )
 
 router = APIRouter(tags=["investment"])
-
-#: Rows per watchlist group. The dashboard shows a short list, not a screener.
-WATCHLIST_LIMIT = 8
 
 @router.get("/portfolio/summary", response_model=InvestmentBalance)
 async def get_portfolio_summary(
@@ -227,34 +224,74 @@ async def get_asset_allocation(
 
 
 @router.get("/watchlist", response_model=Dict[str, List[WatchlistItem]])
-async def get_watchlist(db: Session = Depends(get_db)):
+async def get_watchlist(
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
     """
-    İzleme listesi — canlı fiyatlarla, piyasaya göre gruplanmış.
+    Kullanıcının kendi izleme listesi — canlı fiyatlarla, piyasaya göre
+    gruplanmış.
 
-    Değişim yüzdesi bilinmeyen enstrümanlar listelenmez: sıfır değişim
-    "fiyat kımıldamadı" iddiasıdır ve "bilmiyorum" ile aynı şey değildir.
+    Önceden bu uç nokta alfabetik olarak ilk sekiz hisseyi döndürüyordu:
+    herkese aynı liste, kimsenin seçimini yansıtmayan ve arayüzden
+    değiştirilemeyen bir "izleme listesi". Artık `watchlist_items`'tan
+    okunuyor ve boşsa BOŞ döner — kullanıcının seçmediği bir hisseyi onun
+    listesiymiş gibi göstermek, listenin anlamını ortadan kaldırır.
+
+    Gruplar: `bist`, `global` ve hepsini içeren `all`. Değişim yüzdesi
+    bilinmeyen enstrümanlar da listelenir; kullanıcı onu bilerek ekledi ve
+    listeden sessizce düşmesi, eklemenin işe yaramadığı izlenimi verir.
     """
+    symbols = market_service.watchlist_symbols(db, user_id)
+    if not symbols:
+        return {"bist": [], "global": [], "all": []}
+
     products = {p.symbol: p for p in market_service.list_products(db, only_priced=False)}
-    quotes = market_service.latest_quotes(db)
+    quotes = market_service.latest_quotes(db, symbols)
 
-    groups: Dict[str, List[dict]] = {"bist": [], "global": []}
-    for symbol, quote in sorted(quotes.items()):
+    groups: Dict[str, List[dict]] = {"bist": [], "global": [], "all": []}
+    # Kullanıcının ekleme sırası korunur; alfabetik sıralamak, kişinin
+    # listesini kendi kurduğu düzenden çıkarır.
+    for symbol in symbols:
         product = products.get(symbol)
-        if product is None or product.product_type != "stock":
+        quote = quotes.get(symbol)
+        if product is None or quote is None:
             continue
-        if quote.get("change_percent") is None:
-            continue
-        bucket = "bist" if product.market == "BIST" else "global"
-        groups[bucket].append(
-            {
-                "symbol": symbol,
-                "currency": quote.get("currency") or "TRY",
-                "price": round(quote["price"], 4),
-                "change": round(quote.get("change_amount") or 0.0, 4),
-                "changePercent": round(quote["change_percent"], 2),
-            }
-        )
-    return {key: rows[:WATCHLIST_LIMIT] for key, rows in groups.items()}
+        row = {
+            "symbol": symbol,
+            "currency": quote.get("currency") or "TRY",
+            "price": round(quote["price"], 4),
+            "change": round(quote.get("change_amount") or 0.0, 4),
+            "changePercent": round(quote.get("change_percent") or 0.0, 2),
+        }
+        groups["bist" if product.market == "BIST" else "global"].append(row)
+        groups["all"].append(row)
+    return groups
+
+
+@router.post("/watchlist/{symbol}", response_model=Dict[str, str])
+async def add_to_watchlist(
+    symbol: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """İzleme listesine ekler. Aynı hisseyi iki kez eklemek hata değildir."""
+    product = market_service.watchlist_add(db, user_id, symbol)
+    if product is None:
+        raise HTTPException(status_code=404, detail=f"Bilinmeyen sembol: {symbol}")
+    return {"symbol": product.symbol, "status": "added"}
+
+
+@router.delete("/watchlist/{symbol}", response_model=Dict[str, str])
+async def remove_from_watchlist(
+    symbol: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """İzleme listesinden çıkarır."""
+    if not market_service.watchlist_remove(db, user_id, symbol):
+        raise HTTPException(status_code=404, detail=f"İzleme listesinde yok: {symbol}")
+    return {"symbol": symbol.upper(), "status": "removed"}
 
 
 @router.get("/top-movers", response_model=Dict[str, List[TopMoverItem]])

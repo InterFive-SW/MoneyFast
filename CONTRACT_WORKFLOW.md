@@ -89,6 +89,7 @@ dondurulmuş. Sürüm geçmişi:
 |---|---|
 | v2.1 | Altı tool: `get_portfolio_positions`, `rag_semantic_market_search`, `calculate_portfolio_risk_metrics`, `prepare_transaction_proposal`, `validate_compliance_rules`, `route_user_request` |
 | **v2.2** | **`get_market_data` eklendi.** Mevcut altı tool'un şeması değişmedi. |
+| **v2.7** | `GET /investment/watchlist` artık **kimlik doğrulaması ister** ve kullanıcının kendi listesini döndürür; grup anahtarlarına `all` eklendi. Yeni: `POST`/`DELETE /investment/watchlist/{symbol}`. Kırıcı: uç nokta eskiden token'sız çalışıyor ve evrenin bir dilimini döndürüyordu. |
 | **v2.6** | `get_market_data` → enstrüman başına `volume`. `get_portfolio_positions` → pozisyon başına `sector` ve `market`. Üçü de eklemeli. Varsayılanı olan string parametreler (`valuation_mode`, `base_currency`, `order_type`, `time_in_force`, `lookback`, `jurisdiction`, `strictness`, `locale`, `rebalance_assumption`) artık `null` kabul edip varsayılana düşer. |
 | **v2.5** | `prepare_transaction_proposal` artık kimliği belirsiz bir çağıranı (`user_id` yok / boş / `"anonymous"`) **reddeder** — backend `/transactions/stage` 401 döner. Kırıcı değil: geçerli bir `user_id` ile davranış aynı. Eklemeli: `POST /api/auth/refresh`, `POST /api/ai_orchestrator/chat/stream` (SSE). |
 | **v2.4** | Frontend yanıtlarına `currency` eklendi (Position, WatchlistItem, TopMoverItem, DividendItem, HeatmapItem, Order, MarketTicker, CandleSeriesOut). `PortfolioAnalysis` → `base_currency`. Portföy widget'ında pozisyon başına `instrument_currency`. Hepsi eklemeli. |

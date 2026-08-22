@@ -131,7 +131,10 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
     }
   }, [])
 
-  // Filtre değiştiğinde veriyi güncelle
+  // Filtre DEĞİŞTİĞİNDE ya da veri GELDİĞİNDE. `series` boş başlıyor ve
+  // fetch ile doluyor; bağımlılıkta yalnızca `filter` olduğu için ilk veri
+  // hiç çizilmiyordu — grafik, kullanıcı aralığı değiştirene kadar boş
+  // kalıyordu.
   useEffect(() => {
     if (!candlestickSeriesRef.current || !volumeSeriesRef.current || !chartRef.current) return
 
@@ -164,7 +167,7 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
     } catch (err) {
       console.error("Chart data error:", err)
     }
-  }, [filter])
+  }, [filter, series])
 
   if (w <= 2 || h <= 1) {
     const latestData = points.slice(-1)[0];

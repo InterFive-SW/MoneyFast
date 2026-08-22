@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import type { BankAccount } from '../../data/mockBankingData'
 
 interface Props {
@@ -12,7 +12,6 @@ interface Props {
 
 export default function AccountHeroWidget({ 
   accounts, 
-  totalAssets, 
   onNavigateToAccounts, 
   onOpenTransfer, 
   onOpenBillPayment, 

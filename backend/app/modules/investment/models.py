@@ -239,3 +239,34 @@ class PortfolioPosition(Base):
     average_buy_price: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class WatchlistItem(Base):
+    """An instrument the user chose to follow.
+
+    Replaces a "watchlist" that was not one: the endpoint used to return the
+    first eight priced stocks per market in alphabetical order, so it showed
+    the same list to everyone and reflected nobody's choice.
+
+    `user_id` is a plain column rather than a foreign key into `auth.users`.
+    Modules do not import each other's ORM classes (see the shared/ rule in
+    CLAUDE.md); the database-level relationship still holds because both live
+    in the same Postgres instance.
+    """
+
+    __tablename__ = "watchlist_items"
+    __table_args__ = (
+        # One row per user per instrument. Starring twice is idempotent
+        # rather than an error, and the constraint is what makes it so.
+        UniqueConstraint("user_id", "product_id", name="uq_watchlist_user_product"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey(f"{SCHEMA}.investment_products.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )

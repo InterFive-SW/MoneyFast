@@ -167,6 +167,24 @@ DOLU saklanıyor ama hiçbir uç nokta dışarı vermiyordu. Artık veriliyor.
 `veri yok`, o satırda eksik olan bir değeri işaretler; aracın hiç döndürmediği
 bir alan için kullanılmaz, o sütun hiç yazılmaz.
 
+### İzleme listesi
+
+`GET /api/investment/watchlist` evrenin ilk sekiz hissesini alfabetik
+döndürüyordu: herkese aynı liste, kimsenin seçimini yansıtmayan ve arayüzden
+değiştirilemeyen bir "izleme listesi". Artık `investment.watchlist_items`
+(migration 0011) üzerinden **kullanıcıya ait**; Piyasalar ekranındaki yıldız
+onu yazıyor, Gösterge Paneli ve Portföy sayfası aynı `WatchlistWidget`'ı
+kullandığı için üç yüzey asla farklı bir liste gösteremez.
+
+Boşsa boş görünür ve Piyasalar'a yönlendirir. Kullanıcının seçmediği hisseleri
+onun listesiymiş gibi göstermek, listenin ne olduğunu anlamsızlaştırır.
+Sekmeler `bist` / `global` / `all`; eskiden API'de olmayan `us` ve `crypto`
+anahtarlarını okuduğu için ABD ve Kripto sekmeleri her zaman boştu ve sistemde
+hiç kripto enstrümanı yok.
+
+Kotanın (`WATCHLIST_LIMIT = 8`) yeri yok: elle kurulmuş bir liste kullanıcının
+yaptığı kadardır, kırpmak onun bilerek eklediği enstrümanı gizler.
+
 ### Kriz ve güvenlik sinyalleri
 
 `detect_safety_flags` üç ayrı kategori üretir: `SELF_HARM_RISK`,
@@ -210,6 +228,14 @@ karşı, ve arada her koşu "skipped" olarak loglanıyordu. Üç değişiklik:
 istek başına gerçek bir timeout, parçalama, ve kısa dönen bir partiyi
 (`MISSING_TOLERANCE`) yavaşlama sinyali sayıp mevcut backoff merdivenini
 besleme.
+
+Fiyat penceresi **beş gün**, iki değil. `period` takvim aralığıdır ve içine
+kaç işlem günü düştüğü borsaya göre değişir: bir cumartesi ölçüldüğünde ABD
+sembolleri iki bar, her `.IS` sembolü tek bar döndürdü. Tek barla önceki
+kapanış yoktur, `change_percent` null kalır — ve izleme listesi, ısı haritası
+ve hareketliler listesi değişimi bilinmeyen satırları düşürür. Gözlenen sonuç,
+88 BIST hissesinin 87'sinin her hafta sonu bu ekranlardan sessizce
+kaybolmasıydı. Yalnızca son iki bar okunur, geniş pencere bedava.
 
 **Piyasa saatleri artık borsa başına.** `open_markets()` o an işlem gören
 piyasalar kümesini döner (BIST 10-18, NASDAQ/NYSE 16-23, FX/COMEX 7/24) ve

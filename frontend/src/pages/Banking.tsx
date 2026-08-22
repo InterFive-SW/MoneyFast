@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import { MOCK_BANKING_DATA } from '../data/mockBankingData'
-import type { BankingData, BankAccount, BankTransaction } from '../data/mockBankingData'
+import type {
+  BankingData, BankAccount, BankTransaction, CardSettings, CreditCardUpdate,
+} from '../data/mockBankingData'
 
 // Modals
 import BillPaymentModal from '../components/banking/BillPaymentModal'
@@ -13,7 +15,7 @@ export interface BankingContextType {
   handleAccountCreate: (currency: string, type: 'checking' | 'savings' | 'foreign_currency', accountName: string, iban: string) => void;
   handleAccountClose: (accountId: string) => void;
   handleCardCreate: (type: 'credit' | 'debit', brand: 'mastercard' | 'visa', limit: number, isDigital: boolean, customName: string, linkedAccountId?: string) => void;
-  updateCard: (cardId: string, updates: Partial<CreditCard>) => void;
+  updateCard: (cardId: string, updates: CreditCardUpdate) => void;
   handleTransfer: (amount: number, fromAccountId: string, toIban: string, description: string) => void;
   handleBillPay: (billId: string) => void;
   openCloseAccountModal: (accountId: string) => void;
@@ -93,7 +95,16 @@ export default function Banking() {
     setData({ ...data, creditCards: [...data.creditCards, newCard] })
   }
 
-  const updateCard = (cardId: string, updates: Partial<CreditCard>) => {
+  // A card created before settings existed has none, so the merge needs a
+  // floor -- otherwise toggling one flag yields an object missing the other
+  // two, which is not a valid CardSettings.
+  const DEFAULT_CARD_SETTINGS: CardSettings = {
+    onlineShopping: true,
+    contactless: true,
+    isFrozen: false,
+  }
+
+  const updateCard = (cardId: string, updates: CreditCardUpdate) => {
     if (!data) return
     
     // Deep merge for settings
@@ -103,8 +114,9 @@ export default function Banking() {
           ...c,
           ...updates,
           settings: {
+            ...DEFAULT_CARD_SETTINGS,
             ...c.settings,
-            ...(updates.settings || {})
+            ...(updates.settings ?? {}),
           }
         }
       }
@@ -114,7 +126,7 @@ export default function Banking() {
     setData({ ...data, creditCards: updatedCards })
   }
 
-  const handleTransfer = (amount: number, fromAccountId: string, toIban: string, description: string) => {
+  const handleTransfer = (amount: number, fromAccountId: string, toIban: string, _description: string) => {
     if (!data) return
     
     const updatedAccounts = data.accounts.map(acc => {

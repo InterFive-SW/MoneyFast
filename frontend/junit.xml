@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="36" failures="0" errors="0" time="3.4053579">
+    <testsuite name="src/components/widgets/__tests__/widgets.render.test.tsx" timestamp="2026-08-22T12:00:55.394Z" hostname="BurakCan" tests="36" failures="0" errors="0" skipped="0" time="3.4053579">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; AssetAllocationWidget" time="0.25197456">
+            <system-err>
+⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; DividendCalendarWidget" time="0.093915673">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; InvestmentBalanceWidget" time="0.09216267">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; MarketTickerWidget" time="0.099560276">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; MiniTickerWidget" time="0.090487856">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; NewsWidget" time="0.092664569">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; OrderHistoryWidget" time="0.100759404">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; PortfolioChartWidget" time="0.161439571">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; PositionsWidget" time="0.096481259">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; ProfitLossHeatmapWidget" time="0.093972142">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; QuickActionsWidget" time="0.091678564">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; RecentTransactionsWidget" time="0.090211886">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SavingsGoalWidget" time="0.090495646">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SectorAllocationWidget" time="0.092026124">
+            <system-err>
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SpendingOverviewWidget" time="0.089952703">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; TopMoversWidget" time="0.088822009">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; TotalBalanceWidget" time="0.090438775">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; WatchlistWidget" time="0.092153009">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; AssetAllocationWidget" time="0.08401848">
+            <system-err>
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; DividendCalendarWidget" time="0.082353525">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; InvestmentBalanceWidget" time="0.083123926">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; MarketTickerWidget" time="0.083479425">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; MiniTickerWidget" time="0.083981923">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; NewsWidget" time="0.08247836">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; OrderHistoryWidget" time="0.083169937">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; PortfolioChartWidget" time="0.089313714">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; PositionsWidget" time="0.08286605">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; ProfitLossHeatmapWidget" time="0.084264205">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; QuickActionsWidget" time="0.083857074">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; RecentTransactionsWidget" time="0.082013941">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SavingsGoalWidget" time="0.08380852">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SectorAllocationWidget" time="0.082193769">
+            <system-err>
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SpendingOverviewWidget" time="0.082378479">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; TopMoversWidget" time="0.083607749">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; TotalBalanceWidget" time="0.083130734">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; WatchlistWidget" time="0.083384172">
+        </testcase>
+    </testsuite>
+</testsuites>

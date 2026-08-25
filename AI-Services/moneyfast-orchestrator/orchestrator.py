@@ -36,6 +36,7 @@ from typing import Any, Literal, Optional, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
+import agent_trace
 from mcp_client import MCPToolError, MCPUnavailable, get_mcp_client
 from prompts import (
     ORCHESTRATOR_SYSTEM_PROMPT,
@@ -685,17 +686,34 @@ def route_after_compliance(state: MoneyFastState) -> Literal["synthesis", "__end
 # ---------------------------------------------------------------------------
 # Graph
 # ---------------------------------------------------------------------------
+def _traced(name: str, fn):
+    """Record one node's input, output and duration.
+
+    Wrapped here rather than inside each node: registration is the one place
+    that already names every stage, so both `run_turn` and
+    `run_turn_streaming` are covered without either knowing tracing exists.
+    """
+    async def wrapper(state: MoneyFastState) -> dict[str, Any]:
+        with agent_trace.span("node", name, input=dict(state)) as sp:
+            out = await fn(state)
+            sp.set(output=out)
+            return out
+
+    wrapper.__name__ = getattr(fn, "__name__", name)
+    return wrapper
+
+
 def build_graph():
     g = StateGraph(MoneyFastState)
-    g.add_node("router", router_node)
-    g.add_node("portfolio", portfolio_node)
-    g.add_node("market_data", market_data_node)
-    g.add_node("market_research", market_research_node)
-    g.add_node("risk", risk_node)
-    g.add_node("transaction", transaction_node)
-    g.add_node("handoff", handoff_node)
-    g.add_node("synthesis", synthesis_node)
-    g.add_node("compliance", compliance_gate_node)
+    g.add_node("router", _traced("router", router_node))
+    g.add_node("portfolio", _traced("portfolio", portfolio_node))
+    g.add_node("market_data", _traced("market_data", market_data_node))
+    g.add_node("market_research", _traced("market_research", market_research_node))
+    g.add_node("risk", _traced("risk", risk_node))
+    g.add_node("transaction", _traced("transaction", transaction_node))
+    g.add_node("handoff", _traced("handoff", handoff_node))
+    g.add_node("synthesis", _traced("synthesis", synthesis_node))
+    g.add_node("compliance", _traced("compliance", compliance_gate_node))
 
     g.add_edge(START, "router")
     g.add_conditional_edges(
@@ -788,6 +806,7 @@ async def run_turn(
     conversation_history: Optional[list[dict[str, str]]] = None,
     thread_id: str = "default",
 ) -> dict[str, Any]:
+    agent_trace.new_turn(thread_id)
     state = _initial_state(user_message, user_id, conversation_history)
     return await get_graph().ainvoke(state, config=_graph_config(thread_id))
 
@@ -831,6 +850,7 @@ async def run_turn_streaming(
     the first block. The client gets real progress while the turn runs and
     types out the APPROVED text afterwards.
     """
+    agent_trace.new_turn(thread_id)
     state = _initial_state(user_message, user_id, conversation_history)
     # Seeded from the initial state, not empty: `updates` mode yields only the
     # keys a node returned, so `user_message` and friends would be missing

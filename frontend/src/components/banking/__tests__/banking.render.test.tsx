@@ -1,23 +1,55 @@
 /**
- * The banking demo page.
+ * The banking page.
  *
  * It arrived through a merge whose conflict resolution kept BOTH sides of
  * several files, so the app would not even build. These mount the page the
  * way the router does — nested routes under an <Outlet/> fed by context — so
- * a repeat of that cannot reach a demo unnoticed.
+ * a repeat of that cannot reach a screen unnoticed.
  *
- * The page is deliberately mock-only: it reads MOCK_BANKING_DATA and calls no
- * endpoint. Wiring it to the real banking API is a later, separate job.
+ * Accounts and movements now come from the banking API; cards, bills, loans
+ * and saved contacts are still mock, because the backend has no endpoint for
+ * them yet. The API is stubbed here rather than the global fetch: what these
+ * assert is that the page asks for the right things and renders what comes
+ * back, not how the client serialises a request.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, waitFor, screen } from '@testing-library/react'
+import { render, waitFor, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
 import Banking from '../../../pages/Banking'
 import BankingDashboard from '../BankingDashboard'
 import AccountsView from '../AccountsView'
+import AccountTransactionsView from '../AccountTransactionsView'
 import CardsView from '../CardsView'
 import MoneyTransferWizard from '../MoneyTransferWizard'
+import { apiClient } from '../../../api/client'
+
+const ACCOUNT = {
+  id: 'acc-real-1',
+  account_number: '1212962058976',
+  iban: 'TR0000012129620589760000000',
+  account_type: 'vadesiz',
+  currency_code: 'TRY',
+  balance: 48497.5,
+  status: 'active',
+}
+
+const STATEMENT = {
+  account_number: ACCOUNT.account_number,
+  balance: ACCOUNT.balance,
+  currency_code: 'TRY',
+  movements: [
+    {
+      reference_number: 'TRF-81F9CCC63EBC',
+      direction: 'DEBIT',
+      amount: 1502.5,
+      balance_after: 48497.5,
+      counterparty_iban: 'TR0000011152396151350000000',
+      description: 'TEST-transfer',
+      created_at: new Date().toISOString(),
+    },
+  ],
+}
 
 let consoleError: ReturnType<typeof vi.spyOn>
 
@@ -26,12 +58,16 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class {
     observe() {} unobserve() {} disconnect() {}
   } as never)
-  // Any call at all would be wiring we have not done yet.
-  vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('banking must not call the network'))))
+
+  vi.spyOn(apiClient, 'getBankAccounts').mockResolvedValue([ACCOUNT] as never)
+  vi.spyOn(apiClient, 'getStatement').mockResolvedValue(STATEMENT as never)
+  vi.spyOn(apiClient, 'createTransfer').mockResolvedValue({} as never)
 })
+
 afterEach(() => {
   consoleError.mockRestore()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 async function mountAt(path: string) {
@@ -41,13 +77,13 @@ async function mountAt(path: string) {
         <Route path="/banking" element={<Banking />}>
           <Route index element={<BankingDashboard />} />
           <Route path="accounts" element={<AccountsView />} />
+          <Route path="accounts/:accountId" element={<AccountTransactionsView />} />
           <Route path="cards" element={<CardsView />} />
           <Route path="transfer" element={<MoneyTransferWizard />} />
         </Route>
       </Routes>
     </MemoryRouter>,
   )
-  // The page fakes an 800ms load before revealing its mock data.
   await waitFor(() => expect(screen.queryByText(/yükleniyor/i)).toBeNull(), { timeout: 3000 })
   const crash = consoleError.mock.calls.find((c: unknown[]) =>
     String(c[0]).includes('The above error occurred'))
@@ -55,7 +91,7 @@ async function mountAt(path: string) {
   return view
 }
 
-describe('banking demo', () => {
+describe('banking', () => {
   it('renders the dashboard', async () => {
     const { container } = await mountAt('/banking')
     expect(container.textContent?.length).toBeGreaterThan(0)
@@ -76,8 +112,88 @@ describe('banking demo', () => {
     expect(container.textContent?.length).toBeGreaterThan(0)
   })
 
-  it('never touches the network', async () => {
+  it('reads accounts and their movements from the API', async () => {
     await mountAt('/banking')
-    expect(fetch).not.toHaveBeenCalled()
+    expect(apiClient.getBankAccounts).toHaveBeenCalled()
+    // The statement is fetched per account, keyed by account NUMBER — the
+    // route parameter is the id, so passing the wrong one 404s.
+    expect(apiClient.getStatement).toHaveBeenCalledWith(ACCOUNT.account_number, 50)
+  })
+
+  it('shows the balance the API reported, not the mock one', async () => {
+    const { container } = await mountAt('/banking')
+    // 48.497,50 from the stub; the old mock hard-coded 12.500,50.
+    expect(container.textContent).toContain('48.497,50')
+    expect(container.textContent).not.toContain('12.500,50')
+  })
+
+  it('groups the IBAN for display', async () => {
+    const { container } = await mountAt('/banking')
+    expect(container.textContent).toContain('TR00 0001 2129 6205 8976 0000 000')
+  })
+
+  it('lists only the selected account movements', async () => {
+    const { container } = await mountAt(`/banking/accounts/${ACCOUNT.id}`)
+    expect(container.textContent).toContain('TEST-transfer')
+  })
+
+  /**
+   * Opening and closing an account have no backend endpoint. The wizard used
+   * to add a row to component state and report success, so the account was
+   * gone on the next refresh. Both entry points say "not ready" until the
+   * endpoints exist -- if someone re-wires them, this fails.
+   */
+  it('does not pretend to open or close accounts', async () => {
+    await mountAt('/banking/accounts')
+
+    fireEvent.click(screen.getByText('Yeni Hesap Aç'))
+    expect(await screen.findByText(/geliştirme aşamasındadır/i)).toBeTruthy()
+    fireEvent.click(screen.getByText('Anladım'))
+
+    fireEvent.click(screen.getByText('Hesap Kapama'))
+    expect(await screen.findByText(/geliştirme aşamasındadır/i)).toBeTruthy()
+  })
+
+  /** Walks recipient -> sender -> amount -> details and stops on step 4. */
+  async function fillTransferWizard(amount: string) {
+    fireEvent.click(screen.getByText(/Yeni Bir Alıcı/i))
+    fireEvent.change(screen.getByPlaceholderText('TR...'), {
+      target: { value: 'TR0000011152396151350000000' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('Alıcı Adı Soyadı'), {
+      target: { value: 'Test Alici' },
+    })
+    fireEvent.click(screen.getByText('DEVAM'))       // 1 -> 2 (recipient)
+    fireEvent.click(screen.getByText('DEVAM'))       // 2 -> 3 (sender defaults to first account)
+    fireEvent.change(screen.getByPlaceholderText('0,00'), { target: { value: amount } })
+    fireEvent.click(screen.getByText('DEVAM'))       // 3 -> 4 (amount)
+    await screen.findByText('ONAYLA')
+  }
+
+  it('sends the IBAN as the destination, not the recipient name', async () => {
+    await mountAt('/banking/transfer')
+    await fillTransferWizard('100')
+    fireEvent.click(screen.getByText('ONAYLA'))
+
+    await waitFor(() => expect(apiClient.createTransfer).toHaveBeenCalled())
+    const [request] = vi.mocked(apiClient.createTransfer).mock.calls[0]
+    expect(request.destination).toBe('TR0000011152396151350000000')
+    expect(request.amount).toBe(100)
+  })
+
+  it('surfaces a rejected transfer instead of reporting success', async () => {
+    const reason =
+      'Bakiye yetersiz: transfer ücretle birlikte 99.999,00 TRY tutuyor, hesabınızda 48.497,50 TRY var.'
+    vi.mocked(apiClient.createTransfer).mockRejectedValue(new Error(reason))
+
+    await mountAt('/banking/transfer')
+    await fillTransferWizard('100')
+    fireEvent.click(screen.getByText('ONAYLA'))
+
+    // The backend's reason reaches the user, and the success screen does not
+    // appear -- the bug this guards against showed "işleminiz alınmıştır"
+    // whatever the server said.
+    expect(await screen.findByRole('alert')).toHaveTextContent(reason)
+    expect(screen.queryByText(/Başarıyla Alınmıştır/i)).toBeNull()
   })
 })

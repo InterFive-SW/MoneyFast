@@ -36,13 +36,35 @@ export default function MoneyTransferWizard() {
   // Step 4: Details State
   const [description, setDescription] = useState<string>('')
   const [transferType, setTransferType] = useState<string>('Bireysel Ödeme')
-  const transferFee = 8.37 // Mock
   const date = new Date().toLocaleDateString('tr-TR')
+
+  // Step 4 -> 5: Gönderim durumu
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   // Computed
   const senderAccount = accounts.find(a => a.id === senderAccountId)
   const numAmount = parseFloat(amount) || 0
-  
+
+  /**
+   * Alıcının IBAN'ı — kayıtlı alıcı seçildiyse ondan, yoksa elle girilenden.
+   * Backend boşluklu IBAN'ı da çözüyor.
+   */
+  const destinationIban = receiverTab === 'saved'
+    ? (DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.iban || '')
+    : receiverIban
+
+  /**
+   * Transfer ücreti, backend'deki kuralın aynısı: kendi hesapları arasında
+   * ücret yok, dışarıya 2,50 TL. Burada yeniden hesaplanıyor çünkü tutarı
+   * onaylamadan önce göstermek gerekiyor ve ücreti öğrenmenin tek yolu
+   * transferi yapmak olamaz. Kural değişirse iki yer birlikte güncellenmeli.
+   */
+  const isOwnAccountTransfer = accounts.some(
+    a => a.accountNumber.replace(/\s+/g, '') === destinationIban.replace(/\s+/g, ''),
+  )
+  const transferFee = isOwnAccountTransfer ? 0 : 2.5
+
   const handleNext = () => {
     if (step < 4) setStep((prev) => (prev + 1) as 1 | 2 | 3 | 4)
   }
@@ -52,19 +74,38 @@ export default function MoneyTransferWizard() {
     else navigate('/banking')
   }
 
-  const handleConfirm = () => {
-    if (!senderAccountId) return
-    const finalIban = receiverTab === 'saved' 
-      ? (DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.iban || '')
-      : receiverIban
-      
-    handleTransfer(numAmount, senderAccountId, receiverName || finalIban, description)
-    setStep(5)
+  /**
+   * Transferi gönderir ve ancak backend kabul ederse başarı adımına geçer.
+   *
+   * Önceden `handleTransfer` çağrılıp anında 5. adım gösteriliyordu; bakiye
+   * yetmediğinde bile kullanıcı "işleminiz alınmıştır" görüyordu. Artık
+   * bekleniyor ve reddedilirse gerekçe 4. adımda gösteriliyor.
+   */
+  const handleConfirm = async () => {
+    if (!senderAccountId || submitting) return
+
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      // Alıcının adı değil IBAN'ı gönderilir; backend hesabı numara ya da
+      // IBAN ile çözüyor, adla değil.
+      await handleTransfer(numAmount, senderAccountId, destinationIban, description)
+      setStep(5)
+    } catch (error: unknown) {
+      setSubmitError(
+        error instanceof Error ? error.message : 'Transfer gerçekleştirilemedi.',
+      )
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const isStep1Valid = receiverTab === 'saved' ? !!selectedRecipientId : (receiverIban.length > 10 && receiverName.length > 2)
   const isStep2Valid = !!senderAccountId
-  const isStep3Valid = parseFloat(amount) > 0 && parseFloat(amount) <= (senderAccount?.balance || 0)
+  // Ücret de bakiyeden çıkacağı için eşiğe dahil; backend aynı kontrolü
+  // yapıyor ve yalnız tutarı karşılaştırmak, ücretle birlikte aşan bir
+  // transferi son adımda reddettirirdi.
+  const isStep3Valid = numAmount > 0 && numAmount + transferFee <= (senderAccount?.balance || 0)
 
   return (
     <div className="w-full max-w-6xl mx-auto flex flex-col gap-6 animate-fade-in-up">
@@ -426,11 +467,21 @@ export default function MoneyTransferWizard() {
 
             </div>
 
-            <button 
+            {submitError && (
+              <div
+                role="alert"
+                className="mt-6 p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-sm font-medium"
+              >
+                {submitError}
+              </div>
+            )}
+
+            <button
               onClick={handleConfirm}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-colors shadow-lg shadow-blue-600/20 mt-6 text-lg tracking-wide"
+              disabled={submitting}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/40 disabled:cursor-not-allowed text-white font-bold py-4 rounded-xl transition-colors shadow-lg shadow-blue-600/20 mt-6 text-lg tracking-wide"
             >
-              ONAYLA
+              {submitting ? 'GÖNDERİLİYOR...' : 'ONAYLA'}
             </button>
           </div>
         )}

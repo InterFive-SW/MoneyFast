@@ -34,6 +34,8 @@ export type Movement = NonNullable<Statement['movements']>[0];
 export type SpendingSummary = GetResponseType<paths['/api/banking/spending']>;
 export type BalanceHistory = GetResponseType<paths['/api/banking/balance-history']>;
 export type SavingsGoalItem = GetResponseType<paths['/api/banking/savings-goals']>[0];
+export type TransferRequest = components['schemas']['TransferRequest'];
+export type TransferOut = components['schemas']['TransferOut'];
 export type MarketInstrument = NonNullable<
     GetResponseType<paths['/api/market/instruments']>['instruments']
 >[0];
@@ -300,6 +302,21 @@ class ApiClient {
         return this.request<SavingsGoalItem[]>('/banking/savings-goals');
     }
 
+    /**
+     * Para transferi.
+     *
+     * `destination` hesap numarası ya da IBAN olabilir; backend ikisini de
+     * çözer (boşluklu yazılmış IBAN dahil). `source` verilmezse kullanıcının
+     * kendi mevduat hesabı kullanılır.
+     *
+     * Uygulanamayan bir transfer (yetersiz bakiye, kapalı hesap, aynı hesap)
+     * 422 döner ve gerekçe Türkçe olarak `detail` alanında gelir; `post`
+     * bunu Error.message'a taşıdığı için çağıran doğrudan gösterebilir.
+     */
+    createTransfer(request: TransferRequest) {
+        return this.post<TransferOut>('/banking/transfers', request);
+    }
+
     /** Portföy analizi — dağılım, trend, performans ve işlem geçmişi tek çağrıda. */
     getPortfolioAnalysis() {
         return this.request<PortfolioAnalysis>('/analytics/portfolio');
@@ -411,13 +428,48 @@ class ApiClient {
                 body: data ? JSON.stringify(data) : undefined,
             });
             if (!response.ok) {
-                throw new Error(`API Hatası: ${response.status} ${response.statusText}`);
+                throw new Error(await describeError(response));
             }
             return await response.json();
         } catch (error) {
             console.error(`[API Ağ Hatası] POST ${fullUrl} isteği başarısız oldu:`, error);
             throw error;
         }
+    }
+}
+
+/**
+ * Bir hata yanıtını kullanıcıya gösterilebilir tek satıra çevirir.
+ *
+ * Backend reddettiği bir işlemin gerekçesini `detail` alanında Türkçe olarak
+ * döndürüyor ("Bakiye yetersiz: transfer ücretle birlikte ... tutuyor").
+ * Yalnızca durum kodunu göstermek bu gerekçeyi çöpe atıyor ve kullanıcıya
+ * neyi düzeltmesi gerektiğini söylemeyen bir "422" bırakıyordu.
+ *
+ * FastAPI iki farklı `detail` üretir: HTTPException'da düz metin, gövde
+ * doğrulaması başarısız olduğunda ise nesne dizisi. İkisi de ele alınıyor;
+ * gövde okunamazsa eski davranışa düşülüyor.
+ */
+async function describeError(response: Response): Promise<string> {
+    const fallback = `API Hatası: ${response.status} ${response.statusText}`;
+    try {
+        const body = await response.json();
+        const detail = body?.detail;
+        if (typeof detail === 'string' && detail.trim()) {
+            return detail;
+        }
+        if (Array.isArray(detail)) {
+            const messages = detail
+                .map((item) => item?.msg)
+                .filter((msg): msg is string => typeof msg === 'string' && !!msg.trim());
+            if (messages.length) {
+                return messages.join(' • ');
+            }
+        }
+        return fallback;
+    } catch {
+        // Gövde yok ya da JSON değil (ağ katmanından gelen 502 gibi).
+        return fallback;
     }
 }
 

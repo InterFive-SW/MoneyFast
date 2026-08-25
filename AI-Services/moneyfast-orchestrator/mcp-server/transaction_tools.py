@@ -31,17 +31,21 @@ STATUSES = frozenset(
 async def prepare_transaction_proposal(
     user_id: str,
     transaction_type: str,
-    source_account_id: str,
     idempotency_key: str,
+    # Optional, and ordered after the required arguments for that reason. The
+    # backend resolves the caller's own account. It used to be required, so the
+    # planner asked the user to recite an account id, then accepted "1" and
+    # never validated it. A null here means "mine".
+    source_account_id: Optional[str] = None,
     instrument: Optional[dict[str, Any]] = None,
     quantity: Optional[float] = None,
     notional_amount: Optional[dict[str, Any]] = None,
     destination_account_id: Optional[str] = None,
     beneficiary: Optional[dict[str, Any]] = None,
-    order_type: str = "MARKET",
+    order_type: Optional[str] = "MARKET",
     limit_price: Optional[float] = None,
     stop_price: Optional[float] = None,
-    time_in_force: str = "DAY",
+    time_in_force: Optional[str] = "DAY",
     assumptions: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """
@@ -80,7 +84,8 @@ async def prepare_transaction_proposal(
         transaction_type (str): REQUIRED. One of:
             "BUY", "SELL", "TRANSFER_INTERNAL", "TRANSFER_EXTERNAL",
             "FX_CONVERSION", "FUND_SUBSCRIPTION", "FUND_REDEMPTION".
-        source_account_id (str): REQUIRED. Debited cash or custody account.
+        source_account_id (str | None): The account to debit. Omit it and the
+            backend uses the caller's own — do NOT ask the user for it.
         instrument (dict | None): REQUIRED for BUY, SELL, FUND_SUBSCRIPTION,
             FUND_REDEMPTION. Must resolve to exactly one tradable instrument:
             symbol (str), exchange (str, MIC code), isin (str | None). If the user
@@ -207,6 +212,21 @@ async def prepare_transaction_proposal(
           validate_compliance_rules with contains_transaction_proposal=True before
           emission.
     """
+    time_in_force = time_in_force or "DAY"
+    order_type = order_type or "MARKET"
+    # An unidentified caller cannot stage a trade. "anonymous" is the sentinel
+    # the orchestrator substitutes when the backend resolved no user from the
+    # bearer token -- an expired session, in practice. Staging anyway produced
+    # a proposal owned by nobody: priced against the shared demo account, and
+    # rejected forever by the confirm endpoint's ownership check. The user saw
+    # a complete buy/sell card whose only button was guaranteed to fail.
+    if user_id in (None, "", "anonymous"):
+        raise InvalidInputError(
+            f"{TOOL}: the session is not authenticated, so no transaction can "
+            f"be prepared. Tell the user their session has expired and they "
+            f"need to sign in again. Do not present a proposal."
+        )
+
     # Client-side validation first. These are contradictions no backend should
     # have to reject, and catching them here keeps a malformed order off the
     # staging path entirely.
@@ -221,13 +241,13 @@ async def prepare_transaction_proposal(
     if not idempotency_key:
         raise InvalidInputError(f"{TOOL}: idempotency_key is required.")
 
-    # POST /transactions/stage. The key travels in the header as well as the
+    # POST /investment/transactions/stage. The key travels in the header as well as the
     # body: the header is what a gateway or proxy deduplicates on, and a retry
     # that creates a second proposal is the failure this endpoint most needs to
     # avoid.
     payload = await backend_client.request(
         "POST",
-        "/transactions/stage",
+        "/investment/transactions/stage",
         tool=TOOL,
         headers={"Idempotency-Key": idempotency_key},
         json_body={

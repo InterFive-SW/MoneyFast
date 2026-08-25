@@ -1,120 +1,847 @@
-from fastapi import APIRouter
-from typing import List, Dict
+from datetime import datetime, timezone
 
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from sqlalchemy.orm import Session
+from typing import List, Dict, Optional
+
+from app.core.database import get_db
+from app.core.deps import get_current_user_id, get_optional_user_id
+from . import ai_service, market_service, service
+from .models import TransactionProposal
+from .ai_schemas import (
+    PortfolioPositionsOut, StageTransactionRequest, StageTransactionOut,
+)
 from .schemas import (
     InvestmentBalance, Position, Order, CandlestickDataPoint, AssetAllocationItem,
     WatchlistItem, TopMoverItem, DividendItem, SectorAllocationItem, HeatmapItem,
     OrderProposeRequest, OrderConfirmRequest
 )
-from .mock_data import (
-    MOCK_INVESTMENT_BALANCE, MOCK_POSITIONS, MOCK_ORDERS, MOCK_CHART_DATA, MOCK_ASSET_ALLOCATION,
-    MOCK_WATCHLIST, MOCK_TOP_MOVERS, MOCK_DIVIDENDS, MOCK_SECTOR_ALLOCATION, MOCK_HEATMAP
-)
 
 router = APIRouter(tags=["investment"])
 
 @router.get("/portfolio/summary", response_model=InvestmentBalance)
-async def get_portfolio_summary():
+async def get_portfolio_summary(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """
-    Kullanıcının yatırım hesabının toplam bakiyesini ve kırılımlarını (Nakit, BIST, ABD vb.) döner.
+    Yatırım hesabının toplam bakiyesi ve kırılımı (nakit, BIST, ABD).
+
+    Canlı fiyatlardan hesaplanır; saklanan bir toplam yok. Saklansaydı, fiyat
+    her değiştiğinde pozisyonların toplamıyla uyuşmazdı.
     """
-    return MOCK_INVESTMENT_BALANCE
+    rows = market_service.holdings(db, user_id=user_id)
+    quotes = market_service.latest_quotes(db)
+    rates = ai_service.fx_rates(quotes)
+    account = market_service.account(db, user_id=user_id)
+    cash = float(account.cash_balance) if account else 0.0
+
+    # Split by the holding's own currency, not by whether its market is BIST.
+    # The old test was right only while every foreign holding happened to be
+    # American; a EUR instrument was converted at the dollar rate.
+    bist = sum(
+        value for value in (
+            ai_service.holding_value(r, rates) for r in rows
+            if (r.get("currency") or "TRY") == "TRY"
+        ) if value is not None
+    )
+    foreign_try = sum(
+        value for value in (
+            ai_service.holding_value(r, rates) for r in rows
+            if (r.get("currency") or "TRY") != "TRY"
+        ) if value is not None
+    )
+    usd_rate = rates.get("USD")
+
+    total_try = cash + bist + foreign_try
+    return {
+        "totalTRY": round(total_try, 2),
+        # Reported as 0 rather than an invented figure when the rate is not in
+        # yet; the TRY total is still correct on its own terms.
+        "totalUSD": round(total_try / usd_rate, 2) if usd_rate else 0.0,
+        "breakdown": {
+            "cashTRY": round(cash, 2),
+            "stocksBIST": round(bist, 2),
+            "stocksUS": round(foreign_try, 2),
+        },
+    }
 
 @router.get("/portfolio/chart", response_model=Dict[str, List[CandlestickDataPoint]])
-async def get_portfolio_chart():
+async def get_portfolio_chart(
+    symbol: str = Query(default="XU100"),
+    db: Session = Depends(get_db),
+):
     """
-    Portföy performans grafiği için farklı zaman dilimlerine göre (Gün, Hafta, Ay vb.)
-    mum (candlestick) ve hacim (volume) verilerini döner.
+    Mum (candlestick) grafiği verisi — gerçek `investment.market_candles`
+    satırlarından, farklı zaman dilimleri için.
+
+    Varsayılan sembol XU100: portföyün kendi zaman serisi ancak günlük
+    anlık görüntüler biriktikçe oluşur, endeks ise ilk günden itibaren gerçek.
     """
-    return MOCK_CHART_DATA
+    product = market_service.resolve_symbol(db, symbol)
+    if product is None:
+        raise HTTPException(status_code=404, detail=f"Bilinmeyen sembol: {symbol}")
+
+    series = market_service.candle_series(db, product.symbol, limit=400)
+    # Windows the dashboard offers. Bars, not calendar days: a 5-day window on
+    # a market that was shut for three of them should still draw five bars.
+    windows = {"gun": 1, "hafta": 5, "ay": 22, "yil": 252, "tum": len(series)}
+    return {
+        key: [
+            {
+                "time": int(bar["timestamp"].timestamp()),
+                "open": bar["open"], "high": bar["high"],
+                "low": bar["low"], "close": bar["close"],
+                "value": bar.get("volume") or 0,
+                "color": "#22c55e" if bar["close"] >= bar["open"] else "#ef4444",
+            }
+            for bar in series[-count:]
+        ]
+        for key, count in windows.items()
+        if count > 0
+    }
 
 @router.get("/positions", response_model=List[Position])
-async def get_positions():
+async def get_positions(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """
-    Kullanıcının sahip olduğu açık yatırım pozisyonlarını döner.
+    Açık yatırım pozisyonları.
+
+    Miktar ve ortalama maliyet veritabanında; fiyat ve türetilen her değer
+    canlı. Sohbet botunun okuduğu `market_service.holdings()` fonksiyonunun
+    aynısı, dolayısıyla iki yüzeyin farklı rakam göstermesi mümkün değil.
     """
-    return MOCK_POSITIONS
+    return [_as_frontend_position(row) for row in market_service.holdings(db, user_id=user_id)]
+
+
+def _as_frontend_position(row: dict) -> dict:
+    """Project a holding onto the camelCase shape the dashboard expects.
+
+    Every figure is recomputed from the live price. An unpriced instrument
+    reports zeros with a zero price, which reads as "no quote" rather than as
+    a holding that lost its value.
+    """
+    price = row.get("price") or 0.0
+    quantity = row["quantity"]
+    avg_cost = row["avg_cost"]
+    previous = row.get("previous_close")
+    daily = (price - previous) * quantity if (previous and price) else 0.0
+    return {
+        "symbol": row["symbol"],
+        # Carried through. `holdings()` had it all along; dropping it here is
+        # why the dashboard rendered a dollar price under a "Pozisyon (₺)"
+        # heading.
+        "currency": row.get("currency") or "TRY",
+        "price": round(price, 4),
+        "quantity": quantity,
+        "avgCost": round(avg_cost, 4),
+        "totalValue": round(price * quantity, 2),
+        "dailyReturn": round(daily, 2),
+        "dailyReturnPercent": round(row.get("change_percent") or 0.0, 2),
+        "totalReturn": round((price - avg_cost) * quantity, 2),
+        "totalReturnPercent": round((price - avg_cost) / avg_cost * 100, 2) if avg_cost else 0.0,
+    }
+
 
 @router.get("/orders", response_model=List[Order])
-async def get_orders():
+async def get_orders(db: Session = Depends(get_db)):
     """
-    Kullanıcının geçmiş ve bekleyen alım/satım emirlerini döner.
+    Geçmiş ve bekleyen emirler.
+
+    Kaynak `investment.transaction_proposals`: sohbette gerçekten hazırlanmış
+    ve onaylanmış öneriler. Uydurma emir listesi göstermiyoruz — kullanıcının
+    vermediği bir emri geçmişinde görmesi, gerçekten verilmiş sanmasına yol
+    açar.
     """
-    return MOCK_ORDERS
+    return market_service.recent_orders(db)
+
 
 @router.get("/asset-allocation", response_model=List[AssetAllocationItem])
-async def get_asset_allocation():
-    """
-    Portföyün varlık sınıflarına (Hisse, Altın, Döviz vb.) göre dağılımını döner.
-    """
-    return MOCK_ASSET_ALLOCATION
+async def get_asset_allocation(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """Varlık sınıflarına göre dağılım: nakit, BIST hisseleri, yabancı hisseler."""
+    rows = market_service.holdings(db, user_id=user_id)
+    quotes = market_service.latest_quotes(db)
+    rates = ai_service.fx_rates(quotes)
+    account = market_service.account(db, user_id=user_id)
+
+    # Bucketed by the instrument's MARKET, not by its currency. Currency was a
+    # workable proxy while the only foreign instrument was American, but gold
+    # is quoted in dollars and is not a foreign share -- it was being counted
+    # as one. Values are still converted through `holding_value`, which skips
+    # a holding whose rate is unknown rather than assuming 1.0.
+    #: Venue to bucket. Anything unlisted falls to "Diğer" rather than being
+    #: dropped: a holding that disappears from an allocation chart is far
+    #: harder to notice than one in a catch-all slice.
+    by_market = {
+        "BIST": "BIST Hisse",
+        "NASDAQ": "ABD Hisse",
+        "NYSE": "ABD Hisse",
+        "COMEX": "Emtia / Döviz",
+        "FX": "Emtia / Döviz",
+    }
+
+    buckets = {
+        "Nakit (TRY)": float(account.cash_balance) if account else 0.0,
+        "BIST Hisse": 0.0,
+        "ABD Hisse": 0.0,
+        "Emtia / Döviz": 0.0,
+        "Diğer": 0.0,
+    }
+    for row in rows:
+        value = ai_service.holding_value(row, rates)
+        if value is None:
+            continue
+        buckets[by_market.get(row.get("market") or "", "Diğer")] += value
+    grand = sum(buckets.values())
+    palette = {
+        "Nakit (TRY)": "#64748b",
+        "BIST Hisse": "#0ea5e9",
+        "ABD Hisse": "#22c55e",
+        "Emtia / Döviz": "#f59e0b",
+        "Diğer": "#a855f7",
+    }
+    # An empty bucket is noise on a pie chart; cash is kept even at zero
+    # because "no cash" is itself worth seeing.
+    buckets = {
+        name: amount
+        for name, amount in buckets.items()
+        if amount or name == "Nakit (TRY)"
+    }
+    return [
+        {
+            "assetClass": name,
+            "percentage": round(amount / grand * 100, 2) if grand else 0.0,
+            "amount": round(amount, 2),
+            "color": palette[name],
+        }
+        for name, amount in buckets.items()
+    ]
+
 
 @router.get("/watchlist", response_model=Dict[str, List[WatchlistItem]])
-async def get_watchlist():
+async def get_watchlist(
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
     """
-    İzleme listesindeki varlıkları döner.
+    Kullanıcının kendi izleme listesi — canlı fiyatlarla, piyasaya göre
+    gruplanmış.
+
+    Önceden bu uç nokta alfabetik olarak ilk sekiz hisseyi döndürüyordu:
+    herkese aynı liste, kimsenin seçimini yansıtmayan ve arayüzden
+    değiştirilemeyen bir "izleme listesi". Artık `watchlist_items`'tan
+    okunuyor ve boşsa BOŞ döner — kullanıcının seçmediği bir hisseyi onun
+    listesiymiş gibi göstermek, listenin anlamını ortadan kaldırır.
+
+    Gruplar: `bist`, `global` ve hepsini içeren `all`. Değişim yüzdesi
+    bilinmeyen enstrümanlar da listelenir; kullanıcı onu bilerek ekledi ve
+    listeden sessizce düşmesi, eklemenin işe yaramadığı izlenimi verir.
     """
-    return MOCK_WATCHLIST
+    symbols = market_service.watchlist_symbols(db, user_id)
+    if not symbols:
+        return {"bist": [], "global": [], "all": []}
+
+    products = {p.symbol: p for p in market_service.list_products(db, only_priced=False)}
+    quotes = market_service.latest_quotes(db, symbols)
+
+    groups: Dict[str, List[dict]] = {"bist": [], "global": [], "all": []}
+    # Kullanıcının ekleme sırası korunur; alfabetik sıralamak, kişinin
+    # listesini kendi kurduğu düzenden çıkarır.
+    for symbol in symbols:
+        product = products.get(symbol)
+        quote = quotes.get(symbol)
+        if product is None or quote is None:
+            continue
+        row = {
+            "symbol": symbol,
+            "currency": quote.get("currency") or "TRY",
+            "price": round(quote["price"], 4),
+            "change": round(quote.get("change_amount") or 0.0, 4),
+            "changePercent": round(quote.get("change_percent") or 0.0, 2),
+        }
+        groups["bist" if product.market == "BIST" else "global"].append(row)
+        groups["all"].append(row)
+    return groups
+
+
+@router.post("/watchlist/{symbol}", response_model=Dict[str, str])
+async def add_to_watchlist(
+    symbol: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """İzleme listesine ekler. Aynı hisseyi iki kez eklemek hata değildir."""
+    product = market_service.watchlist_add(db, user_id, symbol)
+    if product is None:
+        raise HTTPException(status_code=404, detail=f"Bilinmeyen sembol: {symbol}")
+    return {"symbol": product.symbol, "status": "added"}
+
+
+@router.delete("/watchlist/{symbol}", response_model=Dict[str, str])
+async def remove_from_watchlist(
+    symbol: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """İzleme listesinden çıkarır."""
+    if not market_service.watchlist_remove(db, user_id, symbol):
+        raise HTTPException(status_code=404, detail=f"İzleme listesinde yok: {symbol}")
+    return {"symbol": symbol.upper(), "status": "removed"}
+
 
 @router.get("/top-movers", response_model=Dict[str, List[TopMoverItem]])
-async def get_top_movers():
+async def get_top_movers(db: Session = Depends(get_db), limit: int = Query(default=5, ge=1, le=20)):
     """
-    Günün en çok kazandıran ve kaybettiren hisselerini döner.
+    Günün en çok kazandıran ve kaybettiren hisseleri — "yükselenler/düşenler".
+
+    Yalnızca hisse ürünleri değerlendirilir; endeks ve döviz satırları bir
+    "hisse" listesinde yer almamalı. Değişim yüzdesi bilinmeyen enstrümanlar
+    listelenmez.
     """
-    return MOCK_TOP_MOVERS
+    products = {p.symbol: p for p in market_service.list_products(db, only_priced=False)}
+    quotes = market_service.latest_quotes(db)
+
+    rows = [
+        {
+            "symbol": symbol,
+            "currency": quote.get("currency") or "TRY",
+            "price": quote["price"],
+            "changePercent": round(float(quote["change_percent"]), 2),
+        }
+        for symbol, quote in quotes.items()
+        if quote.get("change_percent") is not None
+        and getattr(products.get(symbol), "product_type", None) == "stock"
+    ]
+    ranked = sorted(rows, key=lambda row: row["changePercent"], reverse=True)
+    return {
+        "gainers": [row for row in ranked if row["changePercent"] > 0][:limit],
+        "losers": [row for row in reversed(ranked) if row["changePercent"] < 0][:limit],
+    }
+
 
 @router.get("/dividends", response_model=List[DividendItem])
-async def get_dividends():
+async def get_dividends(db: Session = Depends(get_db)):
     """
-    Yaklaşan temettü tarihlerini ve detaylarını döner.
+    Temettü verimi — sağlayıcıdan gelen `dividend_yield` üzerinden.
+
+    Ex-date ve ödeme tarihi bu sağlayıcıda yok; uydurulmuş tarih göstermek
+    yerine boş bırakılıyor. Yanlış bir temettü tarihi, kullanıcının o tarihe
+    göre işlem yapmasına sebep olabilir.
     """
-    return MOCK_DIVIDENDS
+    return market_service.dividend_rows(db)
+
 
 @router.get("/sector-allocation", response_model=List[SectorAllocationItem])
-async def get_sector_allocation():
+async def get_sector_allocation(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
     """
-    Hisse senedi portföyünün sektörel dağılımını döner.
+    Portföyün sektörel dağılımı — `instrument_fundamentals` satırlarından.
+
+    Sektörü bilinmeyen pozisyonlar "Bilinmiyor" altında toplanır; tahmin
+    yürüterek sektör atamak, dağılımı olduğundan daha kesin gösterirdi.
     """
-    return MOCK_SECTOR_ALLOCATION
+    rows = market_service.holdings(db, user_id=user_id)
+    sectors = market_service.sector_by_symbol(db)
+    rates = ai_service.fx_rates(market_service.latest_quotes(db))
+
+    totals: Dict[str, float] = {}
+    for row in rows:
+        # Converted before summing. Adding a USD position straight into a TRY
+        # total made every percentage on this chart wrong whenever the user
+        # held a foreign name.
+        value = ai_service.holding_value(row, rates)
+        if value is None:
+            continue
+        sector = sectors.get(row["symbol"]) or "Bilinmiyor"
+        totals[sector] = totals.get(sector, 0.0) + value
+
+    grand = sum(totals.values())
+    palette = ["#0ea5e9", "#22c55e", "#f59e0b", "#a855f7", "#ef4444", "#14b8a6", "#64748b"]
+    return [
+        {
+            "sector": sector,
+            "percentage": round(value / grand * 100, 2) if grand else 0.0,
+            "color": palette[index % len(palette)],
+        }
+        for index, (sector, value) in enumerate(
+            sorted(totals.items(), key=lambda item: item[1], reverse=True)
+        )
+    ]
+
 
 @router.get("/heatmap", response_model=List[HeatmapItem])
-async def get_heatmap():
-    """
-    Isı haritası (heatmap) için gerekli olan verileri döner.
-    """
-    return MOCK_HEATMAP
+async def get_heatmap(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """Isı haritası: portföy ağırlığı ve günlük değişim."""
+    sectors = market_service.sector_by_symbol(db)
+    rates = ai_service.fx_rates(market_service.latest_quotes(db))
 
-@router.post("/orders/propose", response_model=Dict[str, str])
-async def propose_order(request: OrderProposeRequest):
+    # Weights are shares of one total, so every value must be in one currency.
+    valued = []
+    for row in market_service.holdings(db, user_id=user_id):
+        value = ai_service.holding_value(row, rates)
+        if value is not None:
+            valued.append((row, value))
+
+    grand = sum(value for _, value in valued)
+    return [
+        {
+            "symbol": row["symbol"],
+            "currency": row.get("currency") or "TRY",
+            "weight": round(value / grand * 100, 2) if grand else 0.0,
+            "changePercent": round(row.get("change_percent") or 0.0, 2),
+            "sector": sectors.get(row["symbol"]) or "Bilinmiyor",
+        }
+        for row, value in valued
+    ]
+
+
+# ---------------------------------------------------------------------------
+# AI-facing endpoints
+#
+# Consumed by the MCP tool server, not by the frontend. Their payload shapes
+# are frozen against "MCP Tools Interface Definitions v2.1": the tool layer
+# raises ContractViolationError on a missing key rather than defaulting it, so
+# these responses must be complete rather than convenient. The frontend
+# endpoints above are unaffected and keep their camelCase rendering shapes.
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/portfolio/{user_id}/positions",
+    response_model=PortfolioPositionsOut,
+    summary="Portföy pozisyonları (MCP v2.1 sözleşmesi)",
+)
+async def get_portfolio_positions_for_ai(
+    user_id: str,
+    db: Session = Depends(get_db),
+    account_ids: Optional[List[str]] = Query(default=None),
+    asset_classes: Optional[List[str]] = Query(default=None),
+    include_closed: bool = Query(default=False),
+    base_currency: str = Query(default="TRY"),
+    valuation_mode: str = Query(default="LAST_CLOSE"),
+):
     """
-    AI servisi tarafından iletilen işlem önerisini alır ve geçici (mock) bir işlem numarası ile öneri statüsünü döner.
-    
-    Parametreler:
-        request (OrderProposeRequest): Varlık türü, işlem türü ve miktarını içeren veri modeli.
-        
-    Dönüş:
-        Dict[str, str]: İşlem numarası ve 'proposed' statüsünü içeren yanıt.
+    Kullanıcının pozisyonlarını, AI ajanlarının beklediği sözleşme biçiminde döner.
+
+    Frontend'in kullandığı `/positions` ile aynı veri kaynağını
+    kullanır; iki uç noktanın kullanıcının neye sahip olduğu konusunda
+    çelişmesi bu sayede mümkün değildir.
     """
+    currency = base_currency.upper()
+    if currency not in ai_service.SUPPORTED_BASE_CURRENCIES:
+        # Deterministic client error: the MCP layer maps 400 to
+        # InvalidInputError, which tells the agent to correct and retry rather
+        # than to treat the portfolio as unavailable.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Desteklenmeyen base_currency: {base_currency}. "
+                f"Desteklenenler: {', '.join(sorted(ai_service.SUPPORTED_BASE_CURRENCIES))}"
+            ),
+        )
+
+    # One source of prices for the chatbot and the dashboard. Reading them
+    # here rather than inside ai_service keeps that module free of database
+    # concerns and unit-testable without a session.
+    quotes = market_service.latest_quotes(db)
+    owner = market_service.account(db, user_id=user_id)
+    payload, _ = ai_service.build_portfolio(
+        user_id=user_id,
+        holdings=market_service.holdings(db, user_id=user_id),
+        # Cash, so the assistant can answer "bakiyem ne kadar" instead of
+        # quoting the portfolio's market value as if it were a balance.
+        cash_balance=float(owner.cash_balance) if owner is not None else None,
+        account_ids=account_ids,
+        asset_classes=asset_classes,
+        include_closed=include_closed,
+        base_currency=currency,
+        valuation_mode=valuation_mode,
+        quotes=quotes,
+        freshness=market_service.freshness(quotes),
+    )
+    return payload
+
+
+@router.post(
+    "/transactions/stage",
+    response_model=StageTransactionOut,
+    summary="İşlem önerisi hazırla (MCP v2.1 sözleşmesi)",
+)
+async def stage_transaction(
+    request: StageTransactionRequest,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+    authenticated_user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    Bir işlemi doğrular, maliyetlendirir ve **yalnızca öneri olarak** bekletir.
+
+    Bu uç nokta hiçbir emir iletmez. `confirmation_required` her zaman True
+    döner ve onay, frontend'deki ayrı onay yüzeyinde kullanıcı tarafından
+    verilir; `/orders/confirm` o ayrı yoldur.
+
+    `Idempotency-Key` başlığı ile gövdedeki `idempotency_key` çelişirse istek
+    reddedilir: bir proxy başlığa göre, backend gövdeye göre tekilleştirirse
+    aynı niyet için iki ayrı öneri oluşabilir.
+    """
+    if idempotency_key and idempotency_key != request.idempotency_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key başlığı ile gövdedeki idempotency_key uyuşmuyor.",
+        )
+
+    # Kim adına öneri hazırlandığı, token varsa token'dan belirlenir. Gövdedeki
+    # user_id'ye güvenmek, herhangi birinin bir başkasının adına öneri
+    # oluşturup o kişinin emir listesinde görünmesine izin verirdi.
+    #
+    # Token yoksa gövdedeki değer korunur: `mcp` bu uç noktayı kullanıcı
+    # JWT'siyle değil, servis kimliğiyle çağırır ve kimin adına çalıştığını
+    # gövdede bildirir.
+    if authenticated_user_id and request.user_id != authenticated_user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Bir başkası adına işlem önerisi hazırlanamaz.",
+        )
+
+    # Resolve what the user actually typed before validating. "THYAO",
+    # "thyao", "THYAO.IS" and "Türk Hava Yolları" all name the same
+    # instrument; refusing the ones that are not the canonical spelling is
+    # what turned an ordinary buy order into REJECTED_VALIDATION.
+    body = request.model_dump()
+    raw_symbol = (body.get("instrument") or {}).get("symbol")
+    product = market_service.resolve_symbol(db, raw_symbol) if raw_symbol else None
+
+    # Whose portfolio and cash this proposal is measured against. The
+    # authenticated identity wins; `mcp` calls with a service identity and
+    # names the user in the body.
+    owner_id = authenticated_user_id or request.user_id
+
+    # A proposal needs a real owner, and "anonymous" is not one.
+    #
+    # The chat degrades an expired token to an anonymous session so general
+    # questions keep working (core/deps.py). That is right for READING and
+    # wrong here: the orchestrator then names the user as "anonymous", the
+    # account lookup below falls through to the shared DEMO account, and the
+    # proposal is priced against a portfolio that is not the caller's. It is
+    # then stored with user_id="anonymous", which the confirm endpoint's
+    # ownership check can never match -- so the user is shown an Onayla button
+    # that is guaranteed to 404. Refuse at the point the bad row would be
+    # created.
+    if owner_id in (None, "", "anonymous"):
+        raise HTTPException(
+            status_code=401,
+            detail="Oturum doğrulanamadı. İşlem hazırlamak için tekrar giriş yapın.",
+        )
+
+    # No demo fallback here: `account()` returns the shared demo account for a
+    # caller it cannot place, which is fine for reading and wrong for pricing
+    # a trade.
+    owner = market_service.account(db, user_id=owner_id, allow_demo_fallback=False)
+
+    # The caller's own account, when they did not name one. `source_account_id`
+    # was previously stored without ever being validated, so the chat asked for
+    # an id, accepted "1", and used it for nothing. A user has one account of
+    # each kind; making them recite its number is friction with no purpose.
+    body["source_account_id"] = _resolve_source_account(
+        db, body.get("source_account_id"), owner, owner_id, body.get("transaction_type")
+    )
+
+    # Rates for the funds check and for the fx block recorded on the proposal.
+    # Same helper the portfolio view uses, so the two cannot disagree about
+    # what a dollar is worth.
+    rates = ai_service.fx_rates(market_service.latest_quotes(db))
+
+    reference_price = None
+    held_quantity = None
+    currency = "TRY"
+    if product is not None:
+        currency = product.currency_code
+        quote = market_service.latest_quotes(db, [product.symbol]).get(product.symbol)
+        reference_price = quote["price"] if quote else None
+        held_quantity = next(
+            (
+                h["quantity"]
+                for h in market_service.holdings(db, user_id=owner_id)
+                if h["symbol"] == product.symbol
+            ),
+            0.0,
+        )
+
+    proposal = ai_service.stage_transaction(
+        body,
+        reference_price=reference_price,
+        held_quantity=held_quantity,
+        resolved_symbol=product.symbol if product else None,
+        currency=currency,
+        available_cash=float(owner.cash_balance) if owner is not None else None,
+        cash_currency=(owner.currency_code if owner is not None else "TRY") or "TRY",
+        rates=rates,
+    )
+
+    # Persisted so the confirm step can be verified. Without a record,
+    # "does this proposal exist and has it expired" is unanswerable and any
+    # proposal_id a client invented would be honoured.
+    #
+    # Only confirmable proposals are stored: a rejected or incomplete one is
+    # a message to the user, not something that can later be acted on.
+    if proposal["status"] == "PENDING_USER_CONFIRMATION":
+        _persist_proposal(
+            db, request, proposal,
+            owner_id=authenticated_user_id,
+            # The RESOLVED account, not what the caller typed. Persisting the
+            # raw value stored "1" and confirm then could not find it.
+            source_account_id=body.get("source_account_id"),
+        )
+
+    return proposal
+
+
+def _persist_proposal(
+    db: Session,
+    request: StageTransactionRequest,
+    proposal: dict,
+    owner_id: Optional[str] = None,
+    source_account_id: Optional[str] = None,
+) -> None:
+    """`owner_id` doğrulanmış kimlik; yoksa gövdedeki değere düşer.
+
+    Servis kimliğiyle gelen `mcp` çağrılarında token olmaz ve kimin adına
+    çalışıldığı gövdede bildirilir; tarayıcıdan gelen çağrıda ise gövdeye
+    değil token'a güvenilir.
+    """
+    summary = proposal.get("summary") or {}
+    existing = db.get(TransactionProposal, proposal["proposal_id"])
+    if existing is not None:
+        # Same idempotency key, same row. A retry must not create a second
+        # pending proposal for one intent, and must not resurrect a
+        # confirmed one.
+        return
+
+    db.add(
+        TransactionProposal(
+            id=proposal["proposal_id"],
+            user_id=owner_id or request.user_id,
+            idempotency_key=request.idempotency_key,
+            status=proposal["status"],
+            transaction_type=summary.get("transaction_type") or request.transaction_type,
+            symbol=summary.get("symbol"),
+            quantity=summary.get("quantity"),
+            source_account_id=source_account_id or request.source_account_id,
+            destination_account_id=request.destination_account_id,
+            order_type=summary.get("order_type") or request.order_type,
+            payload=proposal,
+            expires_at=datetime.fromisoformat(proposal["expires_at"].replace("Z", "+00:00")),
+            audit_id=proposal["audit_id"],
+        )
+    )
+    db.commit()
+
+
+@router.post(
+    "/transactions/{proposal_id}/confirm",
+    response_model=Dict[str, str],
+    summary="Kullanıcının onayladığı işlem önerisini kesinleştir",
+)
+async def confirm_transaction_proposal(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    Sohbetteki onay düğmesinin çağırdığı uç nokta.
+
+    Onay **yalnızca burada**, kullanıcının kendi eylemiyle verilir. Ajan
+    hiçbir koşulda onay veremez; sohbet içindeki "evet", "onaylıyorum" gibi
+    ifadeler onay sayılmaz. Bu ayrım MCP sözleşmesinin en sert kuralı ve bu
+    uç nokta onun karşılığı.
+
+    Önerinin gerçekten var olduğu, süresinin dolmadığı ve onu isteyen
+    kullanıcıya ait olduğu doğrulanır; aksi halde reddedilir.
+    """
+    proposal = db.get(TransactionProposal, proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Böyle bir işlem önerisi bulunamadı.")
+
+    # Ownership check before anything else: a 403 that leaked "this exists but
+    # is not yours" would already be more than the caller should learn, so an
+    # unowned proposal is indistinguishable from a missing one.
+    if proposal.user_id and proposal.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Böyle bir işlem önerisi bulunamadı.")
+
+    if proposal.cancelled_at is not None:
+        raise HTTPException(status_code=409, detail="Bu öneri iptal edilmiş.")
+
+    if proposal.confirmed_at is not None:
+        # Idempotent: pressing confirm twice reports the same outcome rather
+        # than raising, because the user cannot tell whether the first press
+        # registered.
+        return {
+            "proposal_id": proposal.id,
+            "status": "confirmed",
+            "message": f"İşlem zaten onaylanmıştı (Öneri No: {proposal.id}).",
+        }
+
+    now = datetime.now(timezone.utc)
+    expires_at = proposal.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < now:
+        raise HTTPException(
+            status_code=410,
+            detail="Bu önerinin süresi doldu. Lütfen işlemi yeniden hazırlatın.",
+        )
+
+    # A transfer settles against the BANKING ledger, not the investment
+    # account. Routing it through securities settlement is what produced a
+    # "Satım" with a blank ticker.
+    if (proposal.transaction_type or "").upper() in ai_service.TRANSFER_TYPES:
+        return _confirm_transfer(db, proposal, user_id, now)
+
+    # Settle before flipping the status, in ONE transaction. Marking a trade
+    # confirmed and then failing to move the money would leave the order list
+    # saying "Gerçekleşti" over an unchanged portfolio — the inconsistency this
+    # whole path exists to remove.
+    owner = market_service.account(db, user_id=proposal.user_id or user_id)
+    if owner is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Bu işlemi uygulayacak bir yatırım hesabı bulunamadı.",
+        )
+
+    try:
+        applied = service.settle(db, proposal, owner)
+    except service.SettlementError as exc:
+        db.rollback()
+        # 409, not 400: the request was well-formed and was valid when staged;
+        # the account state changed underneath it.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    proposal.confirmed_at = now
+    proposal.status = "CONFIRMED"
+    db.commit()
+
     return {
-        "order_id": "TEST-ORDER-123",
-        "status": "proposed"
+        "proposal_id": proposal.id,
+        "status": "confirmed",
+        "message": (
+            f"İşlem onaylandı (Öneri No: {proposal.id}). "
+            f"Kalan bakiye: {applied['cash_after']:,.2f} TL."
+        ),
     }
 
-@router.post("/orders/confirm", response_model=Dict[str, str])
-async def confirm_order(request: OrderConfirmRequest):
+
+def _resolve_source_account(
+    db: Session,
+    requested: Optional[str],
+    owner,
+    owner_id: Optional[str],
+    transaction_type: Optional[str],
+) -> Optional[str]:
+    """The account this transaction draws on.
+
+    A transfer draws on the deposit account; a trade on the investment one.
+    An id the caller supplied is honoured only if it is genuinely theirs —
+    otherwise it is replaced rather than trusted, because it was never checked
+    before and "1" was accepted as a real account.
     """
-    Frontend tarafında kullanıcı tarafından onaylanan işlemi kesinleştirir ve onay statüsünü döner.
-    
-    Parametreler:
-        request (OrderConfirmRequest): Kullanıcı tarafından onaylanan sipariş numarasını ve işlem türünü içeren veri modeli.
-        
-    Dönüş:
-        Dict[str, str]: İşlem onay mesajı ve 'confirmed' statüsünü içeren yanıt.
+    from app.modules.banking import service as banking_service
+
+    is_transfer = (transaction_type or "").upper() in ai_service.TRANSFER_TYPES
+
+    if is_transfer:
+        if requested:
+            named = banking_service.find_account(db, requested)
+            if named is not None and named.user_id == owner_id:
+                return named.account_number
+        if owner_id:
+            return banking_service.ensure_account(db, owner_id).account_number
+        return requested
+
+    if requested and owner is not None and requested == owner.account_number:
+        return requested
+    return owner.account_number if owner is not None else requested
+
+
+def _confirm_transfer(db: Session, proposal, user_id, now) -> Dict[str, str]:
+    """Apply a confirmed transfer through the banking ledger.
+
+    `banking.service.transfer` commits its own transaction (both legs plus the
+    transaction row), so the proposal's status is written immediately after and
+    committed separately. The ordering matters: a transfer that moved money but
+    left the proposal pending can be re-read from the ledger by its reference
+    number, whereas the reverse — a proposal marked confirmed with no ledger
+    entry — leaves nothing to reconcile against.
     """
+    from app.modules.banking import service as banking_service
+
+    amount = ((proposal.payload or {}).get("estimate") or {}).get("net_amount")
+    if amount is None:
+        raise HTTPException(
+            status_code=409, detail="Bu transferin tutar bilgisi eksik."
+        )
+
+    try:
+        result = banking_service.transfer(
+            db,
+            user_id=proposal.user_id or user_id,
+            source_reference=proposal.source_account_id or "",
+            destination_reference=proposal.destination_account_id or "",
+            amount=float(amount),
+        )
+    except banking_service.TransferError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    proposal.confirmed_at = now
+    proposal.status = "CONFIRMED"
+    db.commit()
+
     return {
-        "message": f"Sipariş başarıyla onaylandı (Sipariş No: {request.order_id})",
-        "status": "confirmed"
+        "proposal_id": proposal.id,
+        "status": "confirmed",
+        "message": (
+            f"Transfer tamamlandı (Dekont No: {result['reference_number']}). "
+            f"Kalan bakiye: {result['source_balance_after']:,.2f} "
+            f"{result['currency']}."
+        ),
     }
+
+
+@router.get(
+    "/products",
+    response_model=List[Dict[str, Optional[str]]],
+    summary="Sembol haritası (servisler arası)",
+)
+async def list_products(db: Session = Depends(get_db)):
+    """
+    `ingestor` servisinin hangi sembolleri çekeceğini öğrendiği uç nokta.
+
+    Haritayı ingestor'ın kendi konfigürasyonuna gömmek yerine buradan
+    sormasının sebebi: yeni bir enstrüman eklemek bir veritabanı satırı olsun,
+    ingestor'ın yeniden deploy edilmesi gerekmesin.
+
+    `data_symbol`'ü olmayan ürünler döndürülmez; o alan boşsa "bu enstrümanı
+    fiyatlama" demektir.
+    """
+    return [
+        {
+            "symbol": product.symbol,
+            "data_symbol": product.data_symbol,
+            "currency_code": product.currency_code,
+            "market": product.market,
+        }
+        for product in market_service.list_products(db, only_priced=True)
+    ]
 
 
 @router.get(

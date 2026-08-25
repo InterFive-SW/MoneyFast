@@ -23,7 +23,8 @@ for ``validate_compliance_rules``, where the canned answer is PASS. Every
 failure raises.
 
 Environment:
-    BACKEND_API_BASE_URL      default http://backend:3000/api/v1
+    BACKEND_API_BASE_URL      default http://backend:8000/api
+    RAG_API_BASE_URL          default http://rag:8100
     BACKEND_TIMEOUT_SECONDS   default 10.0
     BACKEND_CONNECT_TIMEOUT   default 5.0
     BACKEND_MAX_RETRIES       default 1 (retries, so 2 attempts total)
@@ -41,7 +42,15 @@ import httpx
 
 log = logging.getLogger("moneyfast.backend")
 
-DEFAULT_BASE_URL = "http://backend:3000/api/v1"
+#: The backend serves its routers under /api/<module> and listens on 8000
+#: inside the container. The host-side port mapping is irrelevant here; see
+#: docs/DOCKER_NETWORKING.md.
+DEFAULT_BASE_URL = "http://backend:8000/api"
+
+#: Semantic search lives in the rag service, which owns the vector database
+#: and the embedding model. It is a second base URL rather than a path under
+#: the backend because there is no proxy in between: mcp calls rag directly.
+DEFAULT_RAG_BASE_URL = "http://rag:8100"
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_CONNECT_TIMEOUT = 5.0
 DEFAULT_MAX_RETRIES = 1
@@ -100,6 +109,12 @@ class ContractViolationError(BackendError):
 # ---------------------------------------------------------------------------
 def base_url() -> str:
     return os.getenv("BACKEND_API_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+
+
+def rag_base_url() -> str:
+    """Base URL of the rag service, for tools that retrieve rather than read
+    application state."""
+    return os.getenv("RAG_API_BASE_URL", DEFAULT_RAG_BASE_URL).rstrip("/")
 
 
 def _float_env(name: str, default: float) -> float:
@@ -201,6 +216,7 @@ async def request(
     path: str,
     *,
     tool: str,
+    base: Optional[str] = None,
     params: Optional[Mapping[str, Any]] = None,
     json_body: Optional[Mapping[str, Any]] = None,
     headers: Optional[Mapping[str, str]] = None,
@@ -209,8 +225,13 @@ async def request(
 
     Args:
         method: HTTP verb, e.g. "GET" or "POST".
-        path: Path relative to BACKEND_API_BASE_URL, e.g. "/portfolio/u_1".
+        path: Path relative to the base URL, e.g. "/investment/positions".
         tool: Name of the calling tool, used in log lines and error messages.
+        base: Override the base URL for this call. Used by the market research
+            tool, which talks to the rag service rather than the backend.
+            Everything else about the call - timeout, retry budget, error
+            mapping - is identical, which is the point of routing it through
+            here instead of hand-rolling a second client.
         params: Query string parameters. None values are dropped.
         json_body: Request body. None values are dropped.
         headers: Extra headers merged over the defaults.
@@ -228,7 +249,7 @@ async def request(
     No other exception type escapes: an unexpected error is wrapped as
     UpstreamUnavailableError so a tool call can never crash the MCP server.
     """
-    url = f"{base_url()}{path}"
+    url = f"{(base.rstrip('/') if base else base_url())}{path}"
     attempts = max_retries() + 1
     last: Optional[BackendError] = None
 

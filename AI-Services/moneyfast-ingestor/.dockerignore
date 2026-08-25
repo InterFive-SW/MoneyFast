@@ -1,0 +1,15 @@
+# tests/ is NOT excluded: the Dockerfile's `test` stage copies it, and
+# ignoring it here would make that copy silently produce nothing.
+.env
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+coverage.xml
+.coverage

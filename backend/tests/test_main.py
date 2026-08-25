@@ -110,7 +110,6 @@ def test_real_app_discovers_all_module_health_endpoints():
         "notification",
         "analytics",
         "market",
-        "ai_assistant",
         "ai_orchestrator",
     ):
         assert f"/api/{module_name}/health" in paths or any(

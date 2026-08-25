@@ -1,17 +1,10 @@
 import type { Position } from '../../api/client'
+import { BASE_CURRENCY, convert, formatMoney } from '../../lib/money'
+import { useMarketStream } from '../../hooks/useMarketStream'
 
 interface PortfolioSummaryBarProps {
   positions: Position[]
   loading: boolean
-}
-
-function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('tr-TR', {
-    style: 'currency',
-    currency: 'TRY',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount)
 }
 
 function formatPercent(percent: number): string {
@@ -19,6 +12,8 @@ function formatPercent(percent: number): string {
 }
 
 export default function PortfolioSummaryBar({ positions, loading }: PortfolioSummaryBarProps) {
+  const { rates } = useMarketStream()
+
   if (loading) {
     return (
       <div className="flex h-28 items-center justify-center bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl">
@@ -27,9 +22,14 @@ export default function PortfolioSummaryBar({ positions, loading }: PortfolioSum
     )
   }
 
-  const totalValue = positions.reduce((acc, pos) => acc + pos.totalValue, 0)
-  const dailyPL = positions.reduce((acc, pos) => acc + pos.dailyReturn, 0)
-  const totalPL = positions.reduce((acc, pos) => acc + pos.totalReturn, 0)
+  // Converted before summing. Adding a dollar position's value straight into
+  // a lira total counted it at roughly 1/48th, then labelled the result ₺.
+  // A position we cannot convert is left out rather than counted wrong.
+  const inBase = (amount: number, currency: string) =>
+    convert(amount, currency || BASE_CURRENCY, BASE_CURRENCY, rates) ?? 0
+  const totalValue = positions.reduce((acc, pos) => acc + inBase(pos.totalValue, pos.currency), 0)
+  const dailyPL = positions.reduce((acc, pos) => acc + inBase(pos.dailyReturn, pos.currency), 0)
+  const totalPL = positions.reduce((acc, pos) => acc + inBase(pos.totalReturn, pos.currency), 0)
   const dailyBase = totalValue - dailyPL
   const totalBase = totalValue - totalPL
   const dailyPLPercent = dailyBase !== 0 ? (dailyPL / dailyBase) * 100 : 0
@@ -38,19 +38,19 @@ export default function PortfolioSummaryBar({ positions, loading }: PortfolioSum
   const stats = [
     {
       label: 'Toplam Portföy Değeri',
-      value: formatCurrency(totalValue),
+      value: formatMoney(totalValue, BASE_CURRENCY),
       sub: null as string | null,
       tone: 'neutral' as const,
     },
     {
       label: 'Günlük Kâr / Zarar',
-      value: formatCurrency(dailyPL),
+      value: formatMoney(dailyPL, BASE_CURRENCY),
       sub: formatPercent(dailyPLPercent),
       tone: dailyPL < 0 ? ('negative' as const) : ('positive' as const),
     },
     {
       label: 'Toplam Kâr / Zarar',
-      value: formatCurrency(totalPL),
+      value: formatMoney(totalPL, BASE_CURRENCY),
       sub: formatPercent(totalPLPercent),
       tone: totalPL < 0 ? ('negative' as const) : ('positive' as const),
     },

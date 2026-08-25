@@ -1,16 +1,36 @@
-import { useState } from 'react'
-import type { InvestmentBalance } from '../../data/mockData'
-
-interface Props {
-  data: InvestmentBalance
-}
+import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { apiClient, type InvestmentBalance } from '../../api/client'
 
 /**
  * Yatırım Hesabım (Investment Balance) Bileşeni
- * Toplam bakiyeyi TL ve Dolar cinsinden gösterir ve alt varlık dağılımını özetler.
+ *
+ * Kendi verisini çeker. Bir süre `MOCK_INVESTMENT_BALANCE` sabitiyle
+ * besleniyordu — oysa `/api/investment/portfolio/summary` tam olarak bu şekli
+ * canlı fiyatlardan hesaplayıp döndürüyordu ve hiçbir yerden çağrılmıyordu.
+ *
+ * Başlığa tıklayınca portföye gider; bu davranış bankacılık dalından geldi ve
+ * korundu.
  */
-export default function InvestmentBalanceWidget({ data }: Props) {
+export default function InvestmentBalanceWidget() {
+  const navigate = useNavigate()
   const [currency, setCurrency] = useState<'TRY' | 'USD'>('TRY')
+  const [data, setData] = useState<InvestmentBalance | null>(null)
+
+  useEffect(() => {
+    apiClient
+      .getPortfolioSummary()
+      .then(setData)
+      .catch((error) => console.error('Failed to load investment balance', error))
+  }, [])
+
+  if (!data) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center bg-transparent">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+      </div>
+    )
+  }
 
   const formattedTotal =
     currency === 'TRY'
@@ -23,7 +43,12 @@ export default function InvestmentBalanceWidget({ data }: Props) {
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       {/* Üst Kısım: Başlık ve Para Birimi Geçişi */}
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Yatırım Hesabım</h3>
+        <h3 
+          className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 cursor-pointer hover:text-brandBlue transition-colors"
+          onClick={() => navigate('/portfolio')}
+        >
+          Yatırım Hesabım <span className="text-[9px] opacity-70 ml-1">↗</span>
+        </h3>
         <div className="flex bg-white/5/10/50 p-1 rounded-lg">
           <button
             onClick={() => setCurrency('TRY')}

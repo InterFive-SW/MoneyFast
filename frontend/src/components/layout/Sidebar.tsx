@@ -85,11 +85,11 @@ function IconLogout({ className }: IconProps) {
   )
 }
 
-/** Sidebar daraltma/genişletme toggle ikonu */
-function IconChevron({ className, collapsed }: IconProps & { collapsed: boolean }) {
+/** Portföy analizi — pasta grafiği çağrıştıran ikon */
+function IconAnalytics({ className }: IconProps) {
   return (
     <svg
-      className={`${className} transition-transform duration-300 ${collapsed ? 'rotate-180' : ''}`}
+      className={className}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -98,7 +98,8 @@ function IconChevron({ className, collapsed }: IconProps & { collapsed: boolean 
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <polyline points="15 18 9 12 15 6" />
+      <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
+      <path d="M22 12A10 10 0 0 0 12 2v10z" />
     </svg>
   )
 }
@@ -107,9 +108,10 @@ function IconChevron({ className, collapsed }: IconProps & { collapsed: boolean 
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard',  label: 'Genel Bakış',        icon: <IconDashboard  className="h-[18px] w-[18px] shrink-0" />, end: true },
-  { to: '/portfolio',  label: 'Portföyüm',          icon: <IconPortfolio  className="h-[18px] w-[18px] shrink-0" /> },
-  { to: '/investment', label: 'Piyasalar',          icon: <IconMarkets    className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/banking',    label: 'Banka İşlemleri',    icon: <IconBanking    className="h-[18px] w-[18px] shrink-0" /> },
+  { to: '/portfolio',  label: 'Portföyüm',          icon: <IconPortfolio  className="h-[18px] w-[18px] shrink-0" /> },
+  { to: '/analytics',  label: 'Portföy Analizi',    icon: <IconAnalytics  className="h-[18px] w-[18px] shrink-0" /> },
+  { to: '/investment', label: 'Piyasalar',          icon: <IconMarkets    className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/chat',       label: 'Yapay Zeka Asistan', icon: <IconChat       className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/risk',       label: 'Risk Analizi',       icon: <IconShield     className="h-[18px] w-[18px] shrink-0" /> },
 ]
@@ -194,6 +196,7 @@ export default function Sidebar() {
   /** Oturumu sonlandırır: token silinir, giriş sayfasına yönlendirilir */
   function handleLogout() {
     localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
     navigate('/login')
   }
 

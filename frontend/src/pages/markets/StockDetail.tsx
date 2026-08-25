@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { findInstrument, MOCK_EARNINGS_REPORTS, MOCK_DIVIDEND_ANNOUNCEMENTS, MOCK_FUNDS } from '../../data/mockData'
+import { MOCK_EARNINGS_REPORTS, MOCK_DIVIDEND_ANNOUNCEMENTS, MOCK_FUNDS } from '../../data/mockData'
+import { useInstrument } from '../../hooks/useInstrument'
+import SampleDataBadge from '../../components/markets/SampleDataBadge'
 
 type DetailTab = 'ozet' | 'finansallar' | 'oran-analizi' | 'temettu' | 'fon-pozisyonlari'
 
@@ -26,7 +28,9 @@ export default function StockDetail() {
   const { symbol = '' } = useParams()
   const [activeTab, setActiveTab] = useState<DetailTab>('ozet')
 
-  const instrument = findInstrument(symbol.toUpperCase())
+  // Live, from /api/market/instruments. Resolving against MOCK_MARKET_INSTRUMENTS
+  // meant this page showed a frozen price for the row the user just clicked.
+  const { instrument, loading } = useInstrument(symbol.toUpperCase())
 
   const earningsReport = useMemo(
     () => MOCK_EARNINGS_REPORTS.find((r) => r.symbol === symbol.toUpperCase()),
@@ -43,6 +47,14 @@ export default function StockDetail() {
       .sort((a, b) => b.holding.weight - a.holding.weight),
     [symbol]
   )
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+      </div>
+    )
+  }
 
   if (!instrument) {
     return (
@@ -122,6 +134,7 @@ export default function StockDetail() {
         {activeTab === 'finansallar' && (
           derivedRevenue && derivedNetIncome ? (
             <div className="space-y-4">
+            <SampleDataBadge reason="Bilanço ve gelir tablosu verisi için bir kaynak yok; fiyat ve temel oranlar canlıdır." />
               {earningsReport && (
                 <div className="rounded-xl bg-emerald-500/100/10 border border-emerald-500/20 p-4 text-sm text-slate-200">
                   <span className="font-semibold text-emerald-400">{earningsReport.period} bilançosu</span> — beklenti EPS {fmt(earningsReport.epsExpected, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, gerçekleşen {fmt(earningsReport.epsActual, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({earningsReport.surprise > 0 ? '+' : ''}{earningsReport.surprise}%)
@@ -163,6 +176,7 @@ export default function StockDetail() {
         {activeTab === 'temettu' && (
           dividends.length > 0 ? (
             <table className="w-full text-left border-collapse">
+            <SampleDataBadge reason="Geçmiş temettü ödemeleri için bir kaynak yok. Portföyünüzdeki temettü verimi Portföyüm ekranında gerçek veriyle sunuluyor." />
               <thead>
                 <tr className="border-b border-white/10/50">
                   <th className="py-2 text-[10px] uppercase tracking-wider font-semibold text-slate-400">Hisse Başı</th>
@@ -190,6 +204,7 @@ export default function StockDetail() {
         {activeTab === 'fon-pozisyonlari' && (
           holdingFunds.length > 0 ? (
             <div className="flex flex-col gap-2">
+            <SampleDataBadge reason="Fon portföy bilgisi (TEFAS) için okunabilir bir kaynak yok." />
               {holdingFunds.map(({ fund, holding }) => (
                 <Link
                   key={fund.code}

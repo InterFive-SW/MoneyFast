@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { findFund, findInstrument } from '../../data/mockData'
+import { toNumber, seriesName } from '../../lib/chartFormat'
+import SampleDataBadge from '../../components/markets/SampleDataBadge'
 
 type DetailTab = 'ozet' | 'portfoy' | 'getiri'
 
@@ -47,6 +49,7 @@ export default function FundDetail() {
 
   return (
     <div>
+      <SampleDataBadge reason="Fon verisi (TEFAS) için okunabilir bir kaynak yok." />
       <Link to="/investment/fonlar" className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-emerald-500 mb-4 transition-colors">
         <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
         Fonlar listesine dön
@@ -110,7 +113,7 @@ export default function FundDetail() {
                     <Pie data={holdingsWithColor} dataKey="weight" nameKey="symbol" cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} stroke="none">
                       {holdingsWithColor.map((h, i) => <Cell key={i} fill={h.color} />)}
                     </Pie>
-                    <Tooltip formatter={(value: number, name: string) => [`%${value}`, name]} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)' }} />
+                    <Tooltip formatter={(value, name) => [`%${toNumber(value) ?? 0}`, seriesName(name)]} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)' }} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>

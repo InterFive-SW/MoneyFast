@@ -1,8 +1,31 @@
 import { useState, useEffect, useRef } from 'react'
 import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries, HistogramSeries } from 'lightweight-charts'
-import { MOCK_CHART_DATA } from '../../data/mockData'
+import { apiClient } from '../../api/client'
 
-type TimeFilter = 'Gün' | 'Hafta' | 'Ay' | '3 Ay' | 'Yıl'
+type TimeFilter = 'Gün' | 'Hafta' | 'Ay' | 'Yıl' | 'Tümü'
+
+/**
+ * The backend keys its ranges without diacritics. "3 Ay" is gone because the
+ * endpoint has no such bucket — offering a filter with no data behind it just
+ * renders an empty chart.
+ */
+const RANGE_KEYS: Record<TimeFilter, string> = {
+  'Gün': 'gun',
+  'Hafta': 'hafta',
+  'Ay': 'ay',
+  'Yıl': 'yil',
+  'Tümü': 'tum',
+}
+
+interface ChartPoint {
+  time: number
+  open: number
+  high: number
+  low: number
+  close: number
+  value: number
+  color: string
+}
 
 interface Props {
   w?: number
@@ -11,6 +34,19 @@ interface Props {
 
 export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
   const [filter, setFilter] = useState<TimeFilter>('Yıl')
+  // Real bars from market_candles. This chart drew MOCK_CHART_DATA — candles
+  // generated in the browser — while /api/investment/portfolio/chart served
+  // the genuine series and was called from nowhere.
+  const [series, setSeries] = useState<Record<string, ChartPoint[]>>({})
+
+  useEffect(() => {
+    apiClient
+      .getPortfolioChart()
+      .then((response) => setSeries(response as unknown as Record<string, ChartPoint[]>))
+      .catch((error) => console.error('Failed to load portfolio chart', error))
+  }, [])
+
+  const points = series[RANGE_KEYS[filter]] ?? []
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -95,11 +131,14 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
     }
   }, [])
 
-  // Filtre değiştiğinde veriyi güncelle
+  // Filtre DEĞİŞTİĞİNDE ya da veri GELDİĞİNDE. `series` boş başlıyor ve
+  // fetch ile doluyor; bağımlılıkta yalnızca `filter` olduğu için ilk veri
+  // hiç çizilmiyordu — grafik, kullanıcı aralığı değiştirene kadar boş
+  // kalıyordu.
   useEffect(() => {
     if (!candlestickSeriesRef.current || !volumeSeriesRef.current || !chartRef.current) return
 
-    const data = MOCK_CHART_DATA[filter]
+    const data = points
 
     // Benzersiz ve sıralı veriler oluştur
     // lightweight-charts verilerin strictly ascending olmasını ister
@@ -128,11 +167,11 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
     } catch (err) {
       console.error("Chart data error:", err)
     }
-  }, [filter])
+  }, [filter, series])
 
   if (w <= 2 || h <= 1) {
-    const latestData = MOCK_CHART_DATA[filter].slice(-1)[0];
-    const prevData = MOCK_CHART_DATA[filter].slice(-2)[0];
+    const latestData = points.slice(-1)[0];
+    const prevData = points.slice(-2)[0];
     const change = latestData && prevData ? latestData.close - prevData.close : 0;
     const isPositive = change >= 0;
     
@@ -156,7 +195,7 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
         </div>
         
         <div className="flex space-x-1 bg-white/5 p-1 rounded-lg">
-          {(['Gün', 'Hafta', 'Ay', '3 Ay', 'Yıl'] as TimeFilter[]).map((f) => (
+          {(['Gün', 'Hafta', 'Ay', 'Yıl', 'Tümü'] as TimeFilter[]).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}

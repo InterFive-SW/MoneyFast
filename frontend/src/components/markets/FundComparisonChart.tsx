@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { Fund } from '../../data/mockData'
 import { buildComparisonChartData } from '../../data/comparisonSeries'
+import { signedPercent, seriesName } from '../../lib/chartFormat'
 
 interface Props {
   funds: Fund[]
@@ -67,7 +68,7 @@ export default function FundComparisonChart({ funds }: Props) {
               <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} interval={Math.floor(SERIES_DAYS / 6)} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={(v) => `${v}%`} axisLine={false} tickLine={false} width={44} />
               <Tooltip
-                formatter={(value: number, name: string) => [`${value > 0 ? '+' : ''}${value}%`, codeToName.get(name) ?? name]}
+                formatter={(value, name) => [signedPercent(value), codeToName.get(seriesName(name)) ?? seriesName(name)]}
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -8px rgba(0,0,0,0.1)', fontSize: '12px' }}
               />
               <Legend wrapperStyle={{ fontSize: '12px' }} />

@@ -21,13 +21,21 @@ export interface ActionWidgetPayload {
   message: string;
   confirmLabel: string;
   cancelLabel: string;
+  /** Kept for backwards compatibility; equals proposalId for chat proposals. */
   actionId: string;
+  /** The staged proposal this button confirms. Validated server-side. */
+  proposalId?: string;
+  /** ISO 8601. A proposal past this instant is refused with 410. */
+  expiresAt?: string;
   asset: string;
   amount: number;
   action: 'buy' | 'sell';
 }
 
 export interface PortfolioPosition {
+  /** The instrument's own currency. `last_price` and `avg_cost` are in
+   *  this; the value columns are already converted to base_currency. */
+  instrument_currency?: string;
   symbol: string;
   quantity: number;
   avg_cost: number;
@@ -40,6 +48,8 @@ export interface PortfolioPosition {
 export interface PortfolioWidgetPayload {
   total_value: number;
   total_profit_loss: number;
+  /** Currency the TOTALS are expressed in — the backend converts them. */
+  base_currency?: string;
   positions: PortfolioPosition[];
 }
 
@@ -55,6 +65,15 @@ export interface ChatMessage {
   timestamp: Date;
   thoughtProcess?: ThoughtStep[];
   widget?: ChatWidget;
+  /**
+   * Zorunlu yasal bildirimler, kelimesi kelimesine.
+   *
+   * Mesaj metnine eklenmek yerine ayrı taşınıyor ve balonun altında küçük
+   * punto dipnot olarak gösteriliyor. Metin değişmiyor — yalnızca yeri.
+   * Her yanıtın sonuna yapıştırılan üç cümlelik kalıp, okuyucuya bildirimi
+   * gerçekten gerektiği yerde de atlatıyordu.
+   */
+  disclosures?: string[];
 }
 
 /**

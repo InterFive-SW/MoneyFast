@@ -20,7 +20,11 @@ from app.modules.auth.models import User
 def _fresh_sqlite_session():
     """Her test için tamamen izole, tek kullanımlık bir in-memory SQLite DB."""
     engine = create_engine("sqlite+pysqlite:///:memory:")
-    Base.metadata.create_all(engine)
+    # Only this module's table. Base.metadata now also carries the schema
+    # qualified `investment.*` and `ai.*` tables, and SQLite has no schemas —
+    # a blanket create_all fails with "unknown database ai" on a test that has
+    # nothing to do with either.
+    Base.metadata.create_all(engine, tables=[User.__table__])
     return sessionmaker(bind=engine)()
 
 

@@ -32,9 +32,9 @@ CREATE TABLE rag.chunks (
         REFERENCES rag.documents(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
     content TEXT NOT NULL CHECK (btrim(content) <> ''),
-    embedding VECTOR(1536) NOT NULL,
-    embedding_model TEXT NOT NULL DEFAULT 'text-embedding-3-small'
-        CHECK (embedding_model = 'text-embedding-3-small'),
+    embedding VECTOR(384) NOT NULL,
+    embedding_model TEXT NOT NULL DEFAULT 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
+        CHECK (embedding_model = 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'),
     token_count INTEGER CHECK (token_count > 0),
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb
         CHECK (jsonb_typeof(metadata) = 'object'),
@@ -70,4 +70,4 @@ FOR EACH ROW
 EXECUTE FUNCTION rag.set_updated_at();
 
 COMMENT ON COLUMN rag.chunks.embedding IS
-    '1536-dimensional output from OpenAI API model text-embedding-3-small; changing the model or dimension requires a migration and re-embedding.';
+    '384-dimensional output from the local ONNX model sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2, run by the rag service through fastembed. No embedding provider API key exists anywhere in this system. Changing the model or dimension requires a schema change, a full re-embed, and a rebuild of the optional vector index.';

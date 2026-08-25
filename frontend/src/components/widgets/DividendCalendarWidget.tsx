@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
 import type { DividendItem } from '../../api/client'
+import { formatMoney } from '../../lib/money'
 
 export default function DividendCalendarWidget() {
   const [data, setData] = useState<DividendItem[]>([])
@@ -31,32 +32,44 @@ export default function DividendCalendarWidget() {
   return (
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Temettü Takvimi</h3>
-        <span className="text-xs font-medium text-slate-400">Yaklaşan Ödemeler</span>
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Temettü Verimi</h3>
+        <span className="text-xs font-medium text-slate-400">En yüksek verim</span>
       </div>
 
       <div className="flex-1 overflow-y-auto pr-2 -mr-2">
         <div className="flex flex-col gap-3">
           {data.map((item) => {
+            // The provider does not publish ex-dates, so the backend sends
+            // them empty rather than inventing one. `new Date('')` is an
+            // Invalid Date, and rendering it printed a literal NaN.
             const dateObj = new Date(item.paymentDate)
-            const day = dateObj.getDate()
-            const month = dateObj.toLocaleString('tr-TR', { month: 'short' })
+            const hasDate = item.paymentDate !== '' && !Number.isNaN(dateObj.getTime())
             
             return (
               <div key={item.symbol} className="flex items-center gap-4 p-3 bg-white/5/40 hover:bg-white/5/60 rounded-xl transition-colors border border-white/20">
                 <div className="flex flex-col items-center justify-center bg-white/5/10 rounded-lg min-w-[50px] py-1">
-                  <span className="text-xs font-semibold text-slate-400 uppercase">{month}</span>
-                  <span className="text-lg font-bold text-white">{day}</span>
+                  {hasDate ? (
+                    <>
+                      <span className="text-xs font-semibold text-slate-400 uppercase">
+                        {dateObj.toLocaleString('tr-TR', { month: 'short' })}
+                      </span>
+                      <span className="text-lg font-bold text-white">{dateObj.getDate()}</span>
+                    </>
+                  ) : (
+                    <span className="text-lg font-bold text-slate-500" title="Ödeme tarihi açıklanmadı">–</span>
+                  )}
                 </div>
                 
                 <div className="flex-1">
                   <div className="font-semibold text-white text-sm">{item.symbol}</div>
-                  <div className="text-xs text-slate-400">Ex-Date: {item.exDate}</div>
+                  <div className="text-xs text-slate-400">
+                    {item.exDate !== '' ? `Ex-Date: ${item.exDate}` : 'Ex-date açıklanmadı'}
+                  </div>
                 </div>
                 
                 <div className="text-right">
                   <div className="tabular-nums text-sm font-medium text-slate-300">
-                    {item.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₺
+                    {formatMoney(item.amount, item.currency)}
                   </div>
                   <div className="tabular-nums text-xs font-semibold text-emerald-600">
                     Verim: {item.yieldPercent}%

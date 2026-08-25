@@ -1,7 +1,0 @@
--- Compatibility notice.
---
--- HNSW is now managed by checksum-verified migrations under:
---   infra/vector-migrations/optional/
---
--- Do not execute this legacy entry point. Use run-vector-migrations.sh with
--- the optional directory after retrieval benchmarks justify HNSW.

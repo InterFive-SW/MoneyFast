@@ -1,9 +1,18 @@
 import { useMemo } from 'react'
-import type { MarketInstrument, MarketTicker } from '../../data/mockData'
+
+/**
+ * Bileşen yalnızca sembol ve günlük değişimi okur. Prop tipini tam enstrüman
+ * modeli yerine bu ikisiyle sınırlamak, aynı özeti hem canlı API satırlarıyla
+ * hem de başka bir kaynakla besleyebilmeyi sağlıyor.
+ */
+interface Movement {
+  symbol: string
+  changePercent: number
+}
 
 interface Props {
-  instruments: MarketInstrument[]
-  tickers: MarketTicker[]
+  instruments: Movement[]
+  tickers: Movement[]
 }
 
 function formatPercent(value: number): string {
@@ -11,12 +20,12 @@ function formatPercent(value: number): string {
 }
 
 /**
- * "Piyasa Nabzı" — mock veriden şablon tabanlı, tek cümlelik otomatik özet.
+ * "Piyasa Nabzı" — canlı verilerden şablon tabanlı, tek cümlelik otomatik özet.
  * LLM kullanmaz; günün genelini tek bakışta özetlemek için düz mantıkla üretilir.
  */
 export default function MarketPulseSummary({ instruments, tickers }: Props) {
   const summary = useMemo(() => {
-    const bist100 = tickers.find((t) => t.symbol === 'BIST100')
+    const bist100 = tickers.find((t) => t.symbol === 'XU100')
     const sorted = [...instruments].sort((a, b) => b.changePercent - a.changePercent)
     const topGainer = sorted[0]
     const topLoser = sorted[sorted.length - 1]

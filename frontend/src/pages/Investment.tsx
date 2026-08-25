@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
-import { MOCK_MARKET_TICKERS, MOCK_MARKET_INSTRUMENTS } from '../data/mockData'
+import { apiClient } from '../api/client'
+import type { MarketInstrument, MarketTicker } from '../api/client'
 import MarketTickerWidget from '../components/widgets/MarketTickerWidget'
 import MarketStatusBadge from '../components/markets/MarketStatusBadge'
 import MarketPulseSummary from '../components/markets/MarketPulseSummary'
@@ -11,6 +13,33 @@ import MarketsSubNav from '../components/markets/MarketsSubNav'
  * `pages/markets/*` altındaki alt rotalarda (`<Outlet />`) render edilir.
  */
 export default function Investment() {
+  // Nabız özeti tüm evrenin genişliğini ölçer (kaç enstrüman yükseldi/düştü),
+  // bu yüzden şeritteki dört başlıktan ayrı olarak enstrüman listesi çekilir.
+  const [instruments, setInstruments] = useState<MarketInstrument[]>([])
+  const [tickers, setTickers] = useState<MarketTicker[]>([])
+
+  useEffect(() => {
+    apiClient
+      .getInstruments({ limit: 200 })
+      .then((response) => setInstruments(response.instruments ?? []))
+      .catch((error) => console.error('Failed to load instruments', error))
+    apiClient
+      .getMarketTickers()
+      .then(setTickers)
+      .catch((error) => console.error('Failed to load tickers', error))
+  }, [])
+
+  const movements = instruments
+    // Fiyatı olmayan enstrüman bir hareket değil, bir boşluktur; 0 sayarak
+    // "yatay kaldı" demek sayımı bozardı.
+    .filter((row) => row.change_percent != null)
+    .map((row) => ({ symbol: row.symbol, changePercent: row.change_percent as number }))
+
+  const tickerMovements = tickers.map((row) => ({
+    symbol: row.symbol,
+    changePercent: row.changePercent ?? 0,
+  }))
+
   return (
     <div className="p-6 sm:p-8 min-h-screen">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -23,10 +52,10 @@ export default function Investment() {
         <MarketStatusBadge />
       </div>
 
-      <MarketPulseSummary instruments={MOCK_MARKET_INSTRUMENTS} tickers={MOCK_MARKET_TICKERS} />
+      <MarketPulseSummary instruments={movements} tickers={tickerMovements} />
 
       <div className="mb-6 bg-slate-900/50 backdrop-blur-xl rounded-[2rem] border border-white/10 shadow-2xl p-5">
-        <MarketTickerWidget tickers={MOCK_MARKET_TICKERS} />
+        <MarketTickerWidget />
       </div>
 
       <MarketsSubNav />

@@ -19,8 +19,32 @@ BEGIN
         RAISE EXCEPTION 'RAG role can create objects in rag schema';
     END IF;
 
-    IF has_schema_privilege(role_name, 'rag_migrations', 'USAGE') THEN
-        RAISE EXCEPTION 'RAG role can access migration ledger schema';
+    -- The `rag_migrations` ledger no longer exists: schema setup moved to
+    -- Postgres' own /docker-entrypoint-initdb.d/ mechanism, so there is no
+    -- ledger left to keep the application role out of. What still matters is
+    -- that the role cannot plant objects outside `rag`.
+    IF has_schema_privilege(role_name, 'public', 'CREATE') THEN
+        RAISE EXCEPTION 'RAG role can create objects in the public schema';
+    END IF;
+
+    -- No DIRECT grant on public either. This is what vector-db-grants.sql's
+    -- `REVOKE ALL ON SCHEMA public FROM <rag_user>` actually controls.
+    --
+    -- Note that has_schema_privilege(role, 'public', 'USAGE') is still TRUE,
+    -- and deliberately not asserted against: PostgreSQL grants USAGE on
+    -- `public` to the PUBLIC pseudo-role by default (`=U/pg_database_owner`
+    -- in nspacl), and a REVOKE naming the role cannot remove a grant made to
+    -- PUBLIC. Removing it would need
+    -- `REVOKE USAGE ON SCHEMA public FROM PUBLIC`, which affects every role in
+    -- the database, not just this one. There is nothing in `public` here, so
+    -- it is recorded rather than changed.
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_namespace
+        WHERE nspname = 'public'
+          AND array_to_string(nspacl, ',') LIKE '%' || role_name || '=%'
+    ) THEN
+        RAISE EXCEPTION 'RAG role holds a direct grant on the public schema';
     END IF;
 
     IF NOT has_database_privilege(role_name, current_database(), 'CONNECT') THEN
@@ -45,7 +69,7 @@ BEGIN
 
     IF NOT has_function_privilege(
         role_name,
-        'rag.match_chunks(vector,integer,double precision,text,text,text,text,timestamptz)',
+        'rag.match_chunks(vector,integer,double precision,text[],text[],text[],text[],timestamptz,timestamptz,text[])',
         'EXECUTE'
     ) THEN
         RAISE EXCEPTION 'RAG role cannot execute retrieval';

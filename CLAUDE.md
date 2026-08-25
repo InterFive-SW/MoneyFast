@@ -185,6 +185,40 @@ hiç kripto enstrümanı yok.
 Kotanın (`WATCHLIST_LIMIT = 8`) yeri yok: elle kurulmuş bir liste kullanıcının
 yaptığı kadardır, kırpmak onun bilerek eklediği enstrümanı gizler.
 
+### İç isimler kullanıcıya sızmaz
+
+Ölçüm: 158 asistan yanıtında `source` enum'u 7 kez, ham alan adı 1 kez, iç
+anahtarlar 9 kez kullanıcıya ulaşmıştı —
+`Veri YFINANCE_DELAYED kaynağından, 17 dk gecikmeli (as_of 2026-08-21 13:32)`
+ve `sıralama = günlük yüzde değişim (change_percent)` gibi.
+
+İki katman: `prompts.py`'deki **NAMING** kuralı modele ne yapacağını söyler,
+`sanitize.py` ise bunu doğru kılar. Prompt tavsiyedir — kriz kaynaklarında
+ölçüldüğünde yaklaşık yarı yarıya uyuluyordu, `_keep_crisis` bu yüzden var.
+Temizleyici `api._response_payload` içinde, yani `/chat` ve `/chat/stream`'in
+ortak tek çıkış noktasında çalışır ve neyi kaldırdığını **loglar**: boş log,
+prompt'un çalıştığı anlamına gelir.
+
+Tazelik tek bir biçimde yazılır:
+`Fiyatlar 15 dakika gecikmeli; 21 Ağustos 13:32 itibarıyla.` Sağlayıcı adı
+geçmez, köşeli parantez içinde ham zaman damgası olmaz.
+
+### Ajan izleme (trace)
+
+`agent_trace.py` her graf düğümünü ve her MCP tool çağrısını
+`traces/agent-trace-YYYY-MM-DD.jsonl` dosyasına satır satır yazar: `trace_id`,
+süre (ms), durum, tam girdi ve çıktı. İki bağlama noktası var — `build_graph()`
+düğümleri kaydederken sarmalar, `MCPClient.call` ise tek tool yoludur —
+dolayısıyla ne düğümlerin ne de tool'ların bundan haberi olur.
+
+`trace_id` tur başına üretilir; tool çağrısı graf durumunu göremediği için id
+bir `contextvars.ContextVar` ile taşınır. Kayıt **hiçbir koşulda turu
+düşürmez**: serileşmeyen değer `repr`'e düşer, yazılamayan dizin bir uyarıyla
+tracing'i kapatır. `AGENT_TRACE=0` ile tamamen kapanır.
+
+Dizin `traces/` gitignore'da: tam gövde kaydedildiği için içinde bakiye,
+pozisyon ve kullanıcının kendi mesajları var.
+
 ### Kriz ve güvenlik sinyalleri
 
 `detect_safety_flags` üç ayrı kategori üretir: `SELF_HARM_RISK`,

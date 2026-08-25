@@ -16,6 +16,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import agent_trace
+import sanitize
 import widgets
 from mcp_client import get_mcp_client
 from orchestrator import run_turn, run_turn_streaming
@@ -86,8 +88,12 @@ def _response_payload(state: dict[str, Any]) -> ChatResponse:
     across the boundary for the backend to interpret.
     """
     widget, context_topic = widgets.build(state)
+    # The last gate before the user sees anything. Both /chat and /chat/stream
+    # come through here, so a naming leak has exactly one place to escape.
     return ChatResponse(
-        final_output=state.get("final_output") or "",
+        final_output=sanitize.sanitized(
+            state.get("final_output") or "", agent_trace.current_trace_id()
+        ),
         primary_intent=state.get("primary_intent"),
         target_agent=state.get("target_agent"),
         compliance_verdict=state.get("compliance_verdict"),

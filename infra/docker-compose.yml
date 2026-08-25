@@ -196,6 +196,11 @@ services:
         condition: service_healthy
     expose:
       - "8080"
+    volumes:
+      # Without this the trace lives only inside the container and dies on
+      # the next rebuild. Host-side ./traces is gitignored: with full
+      # payloads it holds balances, positions and the user's own messages.
+      - ../traces:/app/traces
     networks:
       - moneyfast-net
       - ai-egress

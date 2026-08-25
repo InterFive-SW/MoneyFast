@@ -1,0 +1,636 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="242" failures="0" errors="0" time="10.623140674">
+    <testsuite name="src/api/client.test.ts" timestamp="2026-08-25T09:19:34.973Z" hostname="BurakCan" tests="65" failures="0" errors="0" skipped="0" time="0.01992052">
+        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; sends `limit`, which is the parameter the backend actually reads" time="0.001575776">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; repeats the key for each symbol, which is how FastAPI reads a list" time="0.000299244">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; passes the screening filters through" time="0.000295454">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; omits the query string entirely when nothing was asked for" time="0.000171086">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; does not send a filter that was not set" time="0.000248443">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="authentication &gt; attaches the bearer token when there is a session" time="0.000268568">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="authentication &gt; sends no Authorization header when signed out" time="0.000241503">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPositions calls /api/investment/positions" time="0.000125487">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPortfolioSummary calls /api/investment/portfolio/summary" time="0.000406129">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getOrders calls /api/investment/orders" time="0.000170315">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getWatchlist calls /api/investment/watchlist" time="0.00010917">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getTopMovers calls /api/investment/top-movers" time="0.000059884">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getDividends calls /api/investment/dividends" time="0.000047321">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getAssetAllocation calls /api/investment/asset-allocation" time="0.000106387">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getSectorAllocation calls /api/investment/sector-allocation" time="0.000148254">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getHeatmap calls /api/investment/heatmap" time="0.000132747">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPortfolioChart calls /api/investment/portfolio/chart" time="0.000077348">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getMarketTickers calls /api/market/tickers" time="0.000045948">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getMarketNews calls /api/market/news" time="0.000036468">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPortfolioAnalysis calls /api/analytics/portfolio" time="0.000036017">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getCurrentUser calls /api/auth/me" time="0.000034785">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; encodes a symbol into the candles path" time="0.00007668">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; encodes a proposal id rather than interpolating it raw" time="0.000104516">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="failures &gt; rejects on a non-ok response instead of returning an empty body" time="0.004174364">
+            <system-err>
+[API Ağ Hatası] GET /investment/positions isteği başarısız oldu (Olası CORS veya Sunucu Hatası): Error: API Hatası: 500 undefined
+    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:138:23)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:136:5
+    at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; strips a duplicate /api prefix rather than requesting /api/api/..." time="0.00030814">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; leaves a relative path alone" time="0.000130047">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; passes an absolute URL through untouched" time="0.000113469">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; sends a bearer token on a generic GET" time="0.000142282">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; omits the token on a generic GET when signed out" time="0.000125393">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; rejects a failed generic GET" time="0.000788686">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; serialises a POST body" time="0.000142141">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; sends no body when there is nothing to send" time="0.000107977">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; sends a bearer token on a generic POST" time="0.000075693">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; omits the token on a generic POST when signed out" time="0.000057693">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; rejects a failed POST rather than resolving with nothing" time="0.000146232">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the trading endpoints &gt; stages a transaction against the real staging path" time="0.000109754">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="remaining query and URL branches &gt; passes the market filter through" time="0.000091492">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="remaining query and URL branches &gt; strips a duplicate /api prefix on a POST too" time="0.000145865">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="remaining query and URL branches &gt; passes an absolute POST URL through untouched" time="0.000092347">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; getBankAccounts calls /api/banking/accounts" time="0.000080912">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; getSavingsGoals calls /api/banking/savings-goals" time="0.000042036">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; encodes the account number into the statement path" time="0.000081618">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; passes the spending window" time="0.000089789">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; defaults the spending window to a month" time="0.000049446">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; passes the balance-history limit" time="0.000047471">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; defaults the statement limit" time="0.000039045">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="watchlist &gt; adds by symbol" time="0.000110704">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="watchlist &gt; removes by symbol with DELETE" time="0.000054637">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="watchlist &gt; encodes the symbol into the path" time="0.000056311">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="getRiskProfile &gt; reads the user-scoped profile endpoint" time="0.000096579">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; refreshes once and retries the original request" time="0.00097016">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; sends the renewed token on the retry, not the stale one" time="0.000217204">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; clears the session when there is nothing to refresh with" time="0.000831903">
+            <system-err>
+[API Ağ Hatası] GET /investment/positions isteği başarısız oldu (Olası CORS veya Sunucu Hatası): Error: API Hatası: 401 undefined
+    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:138:23)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:395:5
+    at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; does not try to refresh a failed login" time="0.000722845">
+            <system-err>
+[API Ağ Hatası] POST /api/auth/login isteği başarısız oldu: Error: API Hatası: 401 undefined
+    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:414:23)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:404:5
+    at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; a dead refresh token ends the session rather than looping" time="0.000572607">
+            <system-err>
+[API Ağ Hatası] GET /investment/positions isteği başarısız oldu (Olası CORS veya Sunucu Hatası): Error: API Hatası: 401 undefined
+    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:138:23)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:421:5
+    at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; does not redirect when the user is already on the login page" time="0.000715924">
+            <system-err>
+[API Ağ Hatası] GET /investment/positions isteği başarısız oldu (Olası CORS veya Sunucu Hatası): Error: API Hatası: 401 undefined
+    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:138:23)
+    at processTicksAndRejections (node:internal/process/task_queues:103:5)
+    at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:431:5
+    at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; concurrent 401s share one refresh" time="0.00027847">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; reports each stage and then the finished answer" time="0.000607383">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; reassembles an event split across two reads" time="0.000155974">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; returns false when the stream cannot be opened, so the caller falls back" time="0.000082802">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; returns false when fetch itself throws" time="0.000128947">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; stops on an in-band error event" time="0.000149626">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; ignores a null payload" time="0.0002092">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; works with no handlers supplied" time="0.000121368">
+        </testcase>
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; ignores malformed frames rather than aborting the turn" time="0.000120925">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/chartFormat.test.ts" timestamp="2026-08-25T09:19:34.999Z" hostname="BurakCan" tests="17" failures="0" errors="0" skipped="0" time="0.003709102">
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; passes a real number through" time="0.000958922">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; parses a numeric string, because recharts sometimes hands one over" time="0.00013995">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000082736">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000077442">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000062282">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000040249">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000065696">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000067295">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000172704">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; keeps a genuine zero" time="0.000097538">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; marks a gain with a plus so the direction is readable without colour" time="0.000195387">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; leaves a loss with its own minus" time="0.0000478">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; does not sign a flat reading" time="0.00019833">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; shows a dash when there is no value, not 0%" time="0.000116609">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="seriesName &gt; passes a string through" time="0.000098751">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="seriesName &gt; stringifies a non-string label" time="0.000038001">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="seriesName &gt; renders an absent label as empty rather than &quot;undefined&quot;" time="0.00004182">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/money.test.ts" timestamp="2026-08-25T09:19:35.005Z" hostname="BurakCan" tests="32" failures="0" errors="0" skipped="0" time="0.013406878">
+        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; maps TRY to ₺" time="0.001178985">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; maps USD to $" time="0.000236792">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; maps EUR to €" time="0.0001013">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; is case-insensitive" time="0.000133339">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; falls back to the code rather than guessing a symbol" time="0.000092554">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; leads with the lira sign" time="0.007367509">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; trails other symbols after the number" time="0.000350025">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; groups thousands the Turkish way" time="0.000139141">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; always shows two decimals" time="0.000312635">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; defaults to the base currency when none is given" time="0.000248914">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; renders %p as a dash, not as zero" time="0.000169093">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; renders %p as a dash, not as zero" time="0.000038387">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; renders %p as a dash, not as zero" time="0.000022842">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; keeps a genuine zero" time="0.000072589">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; formats a negative amount" time="0.000087325">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="convert &gt; converts a foreign amount into lira" time="0.000130517">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="convert &gt; leaves the base currency untouched without needing a rate" time="0.000035857">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="convert &gt; converts between two foreign currencies through the base" time="0.000032857">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="convert &gt; returns null when the rate is missing rather than assuming 1.0" time="0.000043013">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="convert &gt; returns null for a currency it has never heard of" time="0.00002399">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; shows a foreign price with its lira equivalent" time="0.000113477">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; does not restate a lira price as itself" time="0.000058953">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; falls back to the native price when no rate is available" time="0.000048939">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; renders a missing amount as a dash" time="0.00002982">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; gives just the converted half, for a second line" time="0.000167767">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; is empty for a base-currency amount" time="0.000102155">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; is empty when the rate is unavailable" time="0.00008505">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; is empty for a missing amount" time="0.000037701">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatAmount &gt; formats without any currency marker" time="0.000139">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatAmount &gt; accepts a wider precision for prices that need it" time="0.000087429">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="missing currency defaults &gt; treats an absent currency as the base rather than crashing" time="0.000163987">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="missing currency defaults &gt; renders an empty symbol for an absent currency code" time="0.000050782">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/hooks/useComparisonSeries.test.ts" timestamp="2026-08-25T09:19:35.014Z" hostname="BurakCan" tests="11" failures="0" errors="0" skipped="0" time="0.444561621">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; rebases each series to percent change from its first close" time="0.059617921">
+        </testcase>
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; aligns two instruments on the same dates" time="0.054191975">
+        </testcase>
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; keeps a date on which only one instrument traded" time="0.05411467">
+        </testcase>
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; sorts the rows chronologically" time="0.05321391">
+        </testcase>
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; skips a series whose first close is zero rather than dividing by it" time="0.053787581">
+        </testcase>
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; requests nothing when no symbols are selected" time="0.002997555">
+        </testcase>
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; yields an empty chart when the request fails" time="0.053036549">
+        </testcase>
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; tolerates a response with no candles" time="0.053369306">
+        </testcase>
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; does not refetch when given an equal array of symbols" time="0.05356207">
+        </testcase>
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="unmounting mid-flight &gt; does not set state after the component is gone" time="0.002282827">
+        </testcase>
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="unmounting mid-flight &gt; swallows a rejection that arrives after unmount" time="0.002031206">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/hooks/useInstrument.test.tsx" timestamp="2026-08-25T09:19:35.017Z" hostname="BurakCan" tests="9" failures="0" errors="0" skipped="0" time="0.338646888">
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; fetches the named instrument" time="0.061192747">
+        </testcase>
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; keeps the price on the live stream" time="0.053126191">
+        </testcase>
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; reports nothing for a symbol the API does not know" time="0.052667398">
+        </testcase>
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; does not call the API for an empty symbol" time="0.002991981">
+        </testcase>
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; stops loading and shows nothing when the request fails" time="0.053385012">
+        </testcase>
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; tolerates a response with no instruments key" time="0.052002642">
+        </testcase>
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; refetches when the symbol changes" time="0.054855254">
+        </testcase>
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="unmounting mid-flight &gt; does not set state after the component is gone" time="0.002864137">
+        </testcase>
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="unmounting mid-flight &gt; swallows a rejection that arrives after unmount" time="0.003465353">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/hooks/useInstruments.test.tsx" timestamp="2026-08-25T09:19:35.020Z" hostname="BurakCan" tests="17" failures="0" errors="0" skipped="0" time="0.853986147">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; renames the API fields to the shape the tables read" time="0.059722287">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the NASDAQ exchange onto the ABD tab" time="0.053195456">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the NYSE exchange onto the ABD tab" time="0.052949172">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the BIST exchange onto the BIST tab" time="0.052918333">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the currency onto a display unit" time="0.053528719">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; leaves an unpublished ratio undefined rather than zero" time="0.052680193">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; labels a missing sector rather than leaving it blank" time="0.052135998">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; treats a missing change as flat so sorting does not produce NaN" time="0.052119573">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; derives the sector list from what is actually present" time="0.053165136">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; requests the limit it was given" time="0.00264826">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; stops loading and shows nothing when the request fails" time="0.052561113">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; tolerates a response with no instruments key" time="0.052905278">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; falls back to BIST for an exchange nobody mapped" time="0.052340673">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; falls back to BIST when the exchange is null" time="0.052333727">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; shows an unmapped currency code rather than an empty unit" time="0.052769343">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; defaults absent market cap and 52-week bounds to zero" time="0.051552402">
+        </testcase>
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; falls back to the symbol when the instrument has no name" time="0.052144596">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/hooks/useLiveRows.test.ts" timestamp="2026-08-25T09:19:35.025Z" hostname="BurakCan" tests="8" failures="0" errors="0" skipped="0" time="0.016365827">
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; replaces the price with the live one" time="0.00719142">
+        </testcase>
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; refreshes the change alongside the price" time="0.001305148">
+        </testcase>
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; leaves a row alone when no quote arrived for it" time="0.001454662">
+        </testcase>
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; ignores a quote whose price is not a number" time="0.000868287">
+        </testcase>
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; keeps the fetched change when the frame carries none" time="0.001256999">
+        </testcase>
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; recomputes derived columns through the derive callback" time="0.000711871">
+        </testcase>
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; passes the quote to derive so the previous close can be recovered" time="0.001168499">
+        </testcase>
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; handles an empty list" time="0.000706557">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/hooks/useMarketStream.test.ts" timestamp="2026-08-25T09:19:35.028Z" hostname="BurakCan" tests="20" failures="0" errors="0" skipped="0" time="0.122801058">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; opens exactly one connection for many subscribers" time="0.013685338">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; delivers a frame to every subscriber" time="0.003667998">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; carries the delay, so a price is never presented as live" time="0.001689">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; skips a malformed frame instead of clearing the snapshot" time="0.001626481">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; closes the connection when the last subscriber unmounts" time="0.00112683">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; keeps the connection while any subscriber remains" time="0.001800191">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; reconnects after a dropped connection" time="0.002209777">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; falls back to polling after repeated failures" time="0.021856332">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useQuote &gt; returns one instrument’s quote" time="0.00193037">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useQuote &gt; returns undefined before a frame arrives, not a zeroed placeholder" time="0.001106819">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; polls the whole universe, not the four-symbol ticker strip" time="0.020787967">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; normalises a polled row that omits its change fields" time="0.020651728">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; recovers the FX rates while polling, so conversions keep working" time="0.020613146">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; keeps the last snapshot when a poll fails" time="0.001774791">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; ignores a non-ok poll response" time="0.001117755">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; tolerates a frame with no fields rather than throwing" time="0.000932046">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="polling is started once &gt; a further error does not start a second poll timer" time="0.001332044">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="conversion rates &gt; reads the lira rates out of the frame itself" time="0.000765464">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="conversion rates &gt; reports no rate when the FX instrument is absent" time="0.000956562">
+        </testcase>
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="conversion rates &gt; carries each quote’s own currency" time="0.000916867">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/hooks/useTypewriter.test.ts" timestamp="2026-08-25T09:19:35.034Z" hostname="BurakCan" tests="7" failures="0" errors="0" skipped="0" time="0.079556902">
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; starts empty and ends with the whole text" time="0.069388454">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; reveals the text progressively rather than in one jump" time="0.00291696">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; shows everything at once when disabled" time="0.001559691">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; respects prefers-reduced-motion" time="0.001206153">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; does not animate a very long answer" time="0.001078541">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; survives a missing matchMedia" time="0.000711184">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; cancels its frame on unmount" time="0.001015027">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/hooks/useWatchlist.test.ts" timestamp="2026-08-25T09:19:35.036Z" hostname="BurakCan" tests="8" failures="0" errors="0" skipped="0" time="0.435831711">
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; loads the followed symbols" time="0.06016862">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; adds a symbol that is not followed yet" time="0.055437759">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; removes one that is" time="0.054819916">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; reverts an add that the server rejected" time="0.053281816">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; reverts a removal that the server rejected" time="0.052550944">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; leaves the stars dark when the list cannot be read" time="0.052498387">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; survives a response with no `all` group" time="0.052945349">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; refresh re-reads the server" time="0.05231528">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/components/banking/__tests__/banking.render.test.tsx" timestamp="2026-08-25T09:19:35.038Z" hostname="BurakCan" tests="5" failures="0" errors="0" skipped="0" time="4.083861311">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking demo &gt; renders the dashboard" time="0.836886171">
+            <system-err>
+⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking demo &gt; renders the accounts view" time="0.814037633">
+        </testcase>
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking demo &gt; renders the cards view" time="0.812921223">
+        </testcase>
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking demo &gt; renders the transfer wizard" time="0.809419724">
+        </testcase>
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking demo &gt; never touches the network" time="0.808680522">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/components/portfolio/__tests__/performanceChart.render.test.tsx" timestamp="2026-08-25T09:19:35.041Z" hostname="BurakCan" tests="2" failures="0" errors="0" skipped="0" time="0.14114554">
+        <testcase classname="src/components/portfolio/__tests__/performanceChart.render.test.tsx" name="PortfolioPerformanceChart &gt; draws the fetched bars without the user touching the range" time="0.01647328">
+        </testcase>
+        <testcase classname="src/components/portfolio/__tests__/performanceChart.render.test.tsx" name="PortfolioPerformanceChart &gt; says so honestly when the series really is empty" time="0.12307572">
+            <system-err>
+Warning: An update to PortfolioPerformanceChart inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() =&gt; {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you&apos;re testing the behavior the user would see in the browser. Learn more at https://reactjs.org/link/wrap-tests-with-act
+    at PortfolioPerformanceChart (/home/burakcan/InterFive/MoneyFast/frontend/src/components/portfolio/PortfolioPerformanceChart.tsx:22:60)
+
+            </system-err>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/components/risk/__tests__/risk.render.test.tsx" timestamp="2026-08-25T09:19:35.043Z" hostname="BurakCan" tests="5" failures="0" errors="0" skipped="0" time="0.470970182">
+        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; renders a scored profile" time="0.12146956">
+            <system-err>
+⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; survives a brand-new account with nothing to measure" time="0.086731372">
+            <system-err>
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; names what was left out instead of hiding it" time="0.089499168">
+            <system-err>
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; shows a failure message rather than a blank page" time="0.08434867">
+        </testcase>
+        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; reports an unknown savings rate rather than 0%" time="0.086991154">
+            <system-err>
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+    </testsuite>
+    <testsuite name="src/components/widgets/__tests__/widgets.render.test.tsx" timestamp="2026-08-25T09:19:35.046Z" hostname="BurakCan" tests="36" failures="0" errors="0" skipped="0" time="3.598376987">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; AssetAllocationWidget" time="0.41734805">
+            <system-err>
+⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
+⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
+
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; DividendCalendarWidget" time="0.092469194">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; InvestmentBalanceWidget" time="0.093059806">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; MarketTickerWidget" time="0.091722039">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; MiniTickerWidget" time="0.088835834">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; NewsWidget" time="0.09304126">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; OrderHistoryWidget" time="0.104092051">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; PortfolioChartWidget" time="0.175102633">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; PositionsWidget" time="0.096454247">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; ProfitLossHeatmapWidget" time="0.097545972">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; QuickActionsWidget" time="0.089573543">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; RecentTransactionsWidget" time="0.091210394">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SavingsGoalWidget" time="0.093191751">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SectorAllocationWidget" time="0.094255292">
+            <system-err>
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SpendingOverviewWidget" time="0.091736647">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; TopMoversWidget" time="0.089815432">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; TotalBalanceWidget" time="0.090740134">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; WatchlistWidget" time="0.091502664">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; AssetAllocationWidget" time="0.08670465">
+            <system-err>
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; DividendCalendarWidget" time="0.087023466">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; InvestmentBalanceWidget" time="0.083392166">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; MarketTickerWidget" time="0.083568658">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; MiniTickerWidget" time="0.083328048">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; NewsWidget" time="0.082502065">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; OrderHistoryWidget" time="0.082641773">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; PortfolioChartWidget" time="0.090521284">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; PositionsWidget" time="0.083978019">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; ProfitLossHeatmapWidget" time="0.083489614">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; QuickActionsWidget" time="0.084024724">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; RecentTransactionsWidget" time="0.083393143">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SavingsGoalWidget" time="0.083047895">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SectorAllocationWidget" time="0.083708838">
+            <system-err>
+The width(0) and height(0) of chart should be greater than 0,
+       please check the style of container, or the props width(100%) and height(100%),
+       or add a minWidth(0) or minHeight(undefined) or use aspect(undefined) to control the
+       height and width.
+
+            </system-err>
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SpendingOverviewWidget" time="0.083267587">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; TopMoversWidget" time="0.082425523">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; TotalBalanceWidget" time="0.083334166">
+        </testcase>
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; WatchlistWidget" time="0.083660144">
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -1,13 +1,23 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { apiClient } from '../../api/client'
 import type { TopMoverItem } from '../../api/client'
+import { formatMoney } from '../../lib/money'
+import { useLiveRows } from '../../hooks/useLiveRows'
 
 type Tab = 'gainers' | 'losers'
 
 export default function TopMoversWidget() {
+  const navigate = useNavigate()
   const [data, setData] = useState<Record<string, TopMoverItem[]>>({})
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<Tab>('gainers')
+
+  // Live, so this list cannot drift from the ticker strip. Called before the
+  // loading guard below: a hook that runs only on the branch where the data
+  // has arrived changes the hook count between renders, and React tears down
+  // the whole tree rather than just this widget.
+  const currentItems = useLiveRows(data[activeTab] || [])
 
   useEffect(() => {
     async function loadData() {
@@ -31,12 +41,15 @@ export default function TopMoversWidget() {
     )
   }
 
-  const currentItems = data[activeTab] || []
-
   return (
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Hareketliler</h3>
+        <h3 
+          className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 cursor-pointer hover:text-brandBlue transition-colors"
+          onClick={() => navigate('/investment/hisseler')}
+        >
+          Hareketliler <span className="text-[9px] opacity-70 ml-1">↗</span>
+        </h3>
         <div className="flex bg-white/5/10/80 p-1 rounded-lg backdrop-blur-sm">
           <button
             onClick={() => setActiveTab('gainers')}
@@ -60,7 +73,7 @@ export default function TopMoversWidget() {
               <div className="font-semibold text-white text-sm">{item.symbol}</div>
               <div className="text-right">
                 <div className="tabular-nums text-sm font-medium text-slate-300">
-                  {item.price.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(item.price, item.currency)}
                 </div>
                 <div className={`tabular-nums text-xs font-semibold ${item.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
                   {item.changePercent > 0 ? '+' : ''}{item.changePercent}%

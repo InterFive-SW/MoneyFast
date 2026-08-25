@@ -22,6 +22,7 @@ import server
 
 EXPECTED_TOOLS = {
     "get_portfolio_positions",
+    "get_market_data",
     "rag_semantic_market_search",
     "calculate_portfolio_risk_metrics",
     "validate_compliance_rules",
@@ -40,7 +41,7 @@ HTTP_TOOLS = EXPECTED_TOOLS - {"classify_and_route_intent"}
 class TestWiring:
     def test_server_identity_constants(self):
         assert server.SERVER_NAME == "moneyfast"
-        assert server.CONTRACT_VERSION == "v2.1"
+        assert server.CONTRACT_VERSION == "v2.2"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -51,10 +52,10 @@ class TestWiring:
         assert "Fail closed" in instructions
         assert "stages only" in instructions
 
-    def test_domain_modules_cover_all_six_domains(self):
+    def test_domain_modules_cover_all_seven_domains(self):
         domains = {name for name, _ in server.DOMAIN_MODULES}
         assert domains == {
-            "orchestrator", "portfolio", "market_research",
+            "orchestrator", "portfolio", "market_data", "market_research",
             "risk_strategy", "compliance", "transaction",
         }
 
@@ -95,7 +96,7 @@ class TestWiring:
 # ==========================================================================
 class TestDiscovery:
     @pytest.mark.asyncio
-    async def test_all_six_tools_are_discoverable(self):
+    async def test_all_seven_tools_are_discoverable(self):
         tools = await server.mcp.list_tools()
         assert {t.name for t in tools} == EXPECTED_TOOLS
 
@@ -172,12 +173,12 @@ class TestDispatch:
         result = await server.mcp.call_tool("get_portfolio_positions", {"user_id": "u_1"})
         assert isinstance(self.unwrap(result), dict)
         assert fake_backend.attempts == 1
-        assert "/portfolio/u_1" in str(fake_backend.last.url)
+        assert "/investment/portfolio/u_1/positions" in str(fake_backend.last.url)
 
     @pytest.mark.asyncio
     async def test_search_dispatch_reaches_the_backend(self, fake_backend):
         await server.mcp.call_tool("rag_semantic_market_search", {"query": "THY"})
-        assert "/market-research/search" in str(fake_backend.last.url)
+        assert "/search" in str(fake_backend.last.url)
 
     @pytest.mark.asyncio
     async def test_risk_dispatch_reaches_the_backend(self, fake_backend, sample_positions):
@@ -196,7 +197,7 @@ class TestDispatch:
     @pytest.mark.asyncio
     async def test_transaction_dispatch_reaches_the_backend(self, fake_backend, stage_args):
         await server.mcp.call_tool("prepare_transaction_proposal", stage_args)
-        assert "/transactions/stage" in str(fake_backend.last.url)
+        assert "/investment/transactions/stage" in str(fake_backend.last.url)
 
     @pytest.mark.asyncio
     async def test_routing_dispatch_makes_no_http_call(self, fake_backend):

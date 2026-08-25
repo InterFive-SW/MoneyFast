@@ -7,5 +7,6 @@ DROP INDEX IF EXISTS rag.idx_rag_chunks_embedding_hnsw;
 
 COMMIT;
 
-\echo 'HNSW was disabled. Applied migration history was preserved.'
-\echo 'Re-enabling requires a new numbered optional migration.'
+\echo 'HNSW was disabled and exact retrieval was restored.'
+\echo 'The base schema files are unchanged; re-enabling means re-applying'
+\echo 'vector-migrations/optional/0001 and 0002 against this database.'

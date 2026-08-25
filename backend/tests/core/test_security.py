@@ -9,7 +9,10 @@ import pytest
 
 from app.core.config import settings
 from app.core.security import (
+    ACCESS_TOKEN_TYPE,
+    REFRESH_TOKEN_TYPE,
     create_access_token,
+    create_refresh_token,
     decode_access_token,
     hash_password,
     verify_password,
@@ -75,3 +78,30 @@ def test_decode_access_token_returns_empty_dict_for_wrong_signature():
         {"sub": "u4"}, "a-completely-different-secret", algorithm=settings.ALGORITHM
     )
     assert decode_access_token(token) == {}
+
+
+class TestTokenKinds:
+    """Access and refresh tokens are not interchangeable.
+
+    A refresh token lives for days. If it were accepted wherever an access
+    token is, one leaked token would be as good as the password for a week.
+    """
+
+    def test_access_token_is_typed(self):
+        payload = decode_access_token(create_access_token(data={"sub": "u5"}))
+        assert payload["typ"] == ACCESS_TOKEN_TYPE
+
+    def test_refresh_token_is_typed(self):
+        payload = decode_access_token(create_refresh_token(data={"sub": "u6"}))
+        assert payload["typ"] == REFRESH_TOKEN_TYPE
+
+    def test_refresh_token_outlives_the_access_token(self):
+        access = decode_access_token(create_access_token(data={"sub": "u7"}))
+        refresh = decode_access_token(create_refresh_token(data={"sub": "u7"}))
+        assert refresh["exp"] > access["exp"]
+
+    def test_refresh_expiry_is_honoured(self):
+        expired = create_refresh_token(
+            data={"sub": "u8"}, expires_delta=timedelta(minutes=-1)
+        )
+        assert decode_access_token(expired) == {}

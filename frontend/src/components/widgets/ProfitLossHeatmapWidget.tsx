@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
 import type { HeatmapItem } from '../../api/client'
+import { useMarketStream } from '../../hooks/useMarketStream'
 
 interface Props {
   w?: number
@@ -8,7 +9,16 @@ interface Props {
 }
 
 export default function ProfitLossHeatmapWidget({ w = 4, h = 4 }: Props) {
-  const [data, setData] = useState<HeatmapItem[]>([])
+  const [fetched, setFetched] = useState<HeatmapItem[]>([])
+  const { quotes } = useMarketStream()
+
+  // Weights stay as the backend computed them (they are portfolio-relative
+  // and already currency-converted); only the daily change is refreshed, so
+  // this tile cannot show yesterday's move beside a live ticker.
+  const data = fetched.map((item) => {
+    const quote = quotes[item.symbol]
+    return quote?.changePercent == null ? item : { ...item, changePercent: quote.changePercent }
+  })
   const [loading, setLoading] = useState(true)
   const [hoveredItem, setHoveredItem] = useState<HeatmapItem | null>(null)
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 })
@@ -17,7 +27,7 @@ export default function ProfitLossHeatmapWidget({ w = 4, h = 4 }: Props) {
     async function loadData() {
       try {
         const response = await apiClient.getHeatmap()
-        setData(response)
+        setFetched(response)
       } catch (error) {
         console.error('Failed to load heatmap data', error)
       } finally {

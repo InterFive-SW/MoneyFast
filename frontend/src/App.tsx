@@ -20,6 +20,13 @@ import Dashboard            from './pages/Dashboard'
 import Chat                 from './pages/Chat'
 import Portfolio            from './pages/Portfolio'
 import Banking              from './pages/Banking'
+import BankingDashboard     from './components/banking/BankingDashboard'
+import AccountsView         from './components/banking/AccountsView'
+import AccountTransactionsView from './components/banking/AccountTransactionsView'
+import MoneyTransferWizard  from './components/banking/MoneyTransferWizard'
+import NewAccountWizard     from './components/banking/NewAccountWizard'
+import CardsView            from './components/banking/CardsView'
+import NewCardWizard        from './components/banking/NewCardWizard'
 import Investment           from './pages/Investment'
 import Risk                 from './pages/Risk'
 import StocksScreen         from './pages/markets/StocksScreen'
@@ -29,6 +36,7 @@ import FundDetail           from './pages/markets/FundDetail'
 import IndicesScreen        from './pages/markets/IndicesScreen'
 import SectorsScreen        from './pages/markets/SectorsScreen'
 import AnalysesScreen       from './pages/markets/AnalysesScreen'
+import Analytics from './pages/Analytics'
 
 export default function App() {
   return (
@@ -58,7 +66,16 @@ export default function App() {
               <Route path="dashboard"  element={<Dashboard />}  />
               <Route path="chat"       element={<Chat />}       />
               <Route path="portfolio"  element={<Portfolio />}  />
-              <Route path="banking"    element={<Banking />}    />
+              <Route path="banking" element={<Banking />}>
+                <Route index element={<BankingDashboard />} />
+                <Route path="accounts" element={<AccountsView />} />
+                <Route path="accounts/:accountId/transactions" element={<AccountTransactionsView />} />
+                <Route path="cards" element={<CardsView />} />
+                <Route path="transfer" element={<MoneyTransferWizard />} />
+                <Route path="new-account" element={<NewAccountWizard />} />
+                <Route path="new-card" element={<NewCardWizard />} />
+              </Route>
+              <Route path="analytics"  element={<Analytics />}  />
               <Route path="investment" element={<Investment />}>
                 <Route index                element={<Navigate to="hisseler" replace />} />
                 <Route path="hisseler"       element={<StocksScreen />}  />

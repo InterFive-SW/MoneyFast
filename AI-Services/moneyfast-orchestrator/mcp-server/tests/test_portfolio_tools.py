@@ -1,7 +1,7 @@
 """Unit tests for portfolio_tools.
 
 Contract under test: Interface Definitions v2.1, get_portfolio_positions,
-now backed by GET /portfolio/{user_id}.
+now backed by GET /investment/portfolio/{user_id}/positions.
 
 The dangerous failure here is not a crash, it is a plausible number. The
 normalizer sits between an unverified backend and a model that will narrate
@@ -33,7 +33,7 @@ class TestRequest:
     async def test_uses_get_on_the_user_scoped_path(self, fake_backend):
         await portfolio_tools.get_portfolio_positions("u_123")
         assert fake_backend.last.method == "GET"
-        assert "/portfolio/u_123" in str(fake_backend.last.url)
+        assert "/investment/portfolio/u_123/positions" in str(fake_backend.last.url)
 
     async def test_default_query_parameters(self, fake_backend):
         await portfolio_tools.get_portfolio_positions("u_123")
@@ -149,7 +149,10 @@ class TestHappyPath:
     async def test_totals_are_carried_through(self):
         totals = (await portfolio_tools.get_portfolio_positions("u_123"))["totals"]
         assert set(totals) == {
-            "total_market_value", "total_cost_basis", "total_unrealized_pnl", "position_count",
+            "total_market_value", "total_cost_basis", "total_unrealized_pnl",
+            "position_count",
+            # v2.3: cash, so "bakiyem ne kadar" has an answer.
+            "cash_balance", "total_value",
         }
         assert totals["position_count"] == 2
 
@@ -402,3 +405,73 @@ class TestRegistration:
         import inspect
 
         assert inspect.iscoroutinefunction(portfolio_tools.get_portfolio_positions)
+
+
+class TestCashInTotals:
+    """Contract v2.3. Before it, the portfolio tool exposed only position
+    values, so the assistant answered "how much money do I have" with the
+    market value of the holdings — or said the figure was not in its data."""
+
+    @pytest.mark.asyncio
+    async def test_cash_and_total_value_are_carried(self, fake_backend, portfolio_payload):
+        portfolio_payload["totals"]["cash_balance"] = 22142.58
+        portfolio_payload["totals"]["total_value"] = 1088042.52
+        fake_backend.json("portfolio", portfolio_payload)
+        totals = (await portfolio_tools.get_portfolio_positions("u_123"))["totals"]
+        assert totals["cash_balance"] == pytest.approx(22142.58)
+        assert totals["total_value"] == pytest.approx(1088042.52)
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_balance_stays_none_rather_than_zero(
+        self, fake_backend, portfolio_payload
+    ):
+        """A zero balance is a claim, and the wrong one: it tells the user
+        they have no money when the truth is that we could not look."""
+        portfolio_payload["totals"]["cash_balance"] = None
+        fake_backend.json("portfolio", portfolio_payload)
+        totals = (await portfolio_tools.get_portfolio_positions("u_123"))["totals"]
+        assert totals["cash_balance"] is None
+
+    @pytest.mark.asyncio
+    async def test_an_absent_balance_is_not_a_contract_violation(
+        self, fake_backend, portfolio_payload
+    ):
+        """Unlike the position totals, cash may legitimately be missing."""
+        portfolio_payload["totals"].pop("cash_balance", None)
+        fake_backend.json("portfolio", portfolio_payload)
+        totals = (await portfolio_tools.get_portfolio_positions("u_123"))["totals"]
+        assert totals["cash_balance"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_missing_position_total_is_still_a_violation(
+        self, fake_backend, portfolio_payload
+    ):
+        """The relaxation applies to cash only."""
+        from backend_client import ContractViolationError
+
+        portfolio_payload["totals"].pop("total_market_value")
+        fake_backend.json("portfolio", portfolio_payload)
+        with pytest.raises(ContractViolationError):
+            await portfolio_tools.get_portfolio_positions("u_123")
+
+
+class TestNullDefaults:
+    """A model that emits `null` for an optional parameter must not kill the call.
+
+    Observed in production: the planner sent `valuation_mode: null` for an
+    ordinary "portföyümü göstersene", the bare `str` annotation rejected it
+    before the tool ran, and the user was told
+    "portföy verilerinize ulaşamadım" — as though the backend were down.
+    A null means "no preference", which is exactly what the default is for.
+    """
+
+    async def test_null_valuation_mode_falls_back_to_the_default(self, fake_backend, portfolio_payload):
+        fake_backend.json("portfolio", portfolio_payload)
+        payload = await portfolio_tools.get_portfolio_positions("u_123", valuation_mode=None)
+        assert payload["positions"]
+        assert "valuation_mode=LAST_CLOSE" in str(fake_backend.last.url)
+
+    async def test_null_base_currency_falls_back_to_the_default(self, fake_backend, portfolio_payload):
+        fake_backend.json("portfolio", portfolio_payload)
+        await portfolio_tools.get_portfolio_positions("u_123", base_currency=None)
+        assert "base_currency=TRY" in str(fake_backend.last.url)

@@ -1,5 +1,4 @@
 // src/components/chat/widgets/ChartWidget.tsx
-import React from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { ChartWidgetPayload } from '../../../types/chat';
 

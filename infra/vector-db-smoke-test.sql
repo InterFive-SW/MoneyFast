@@ -89,8 +89,8 @@ VALUES
         '00000000-0000-0000-0000-000000000101',
         0,
         'THYAO exact match',
-        (ARRAY[1::real] || array_fill(0::real, ARRAY[1535]))::vector,
-        'text-embedding-3-small',
+        (ARRAY[1::real] || array_fill(0::real, ARRAY[383]))::vector,
+        'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
         3
     ),
     (
@@ -100,9 +100,9 @@ VALUES
         'THYAO weaker match',
         (
             ARRAY[0.8::real, 0.6::real]
-            || array_fill(0::real, ARRAY[1534])
+            || array_fill(0::real, ARRAY[382])
         )::vector,
-        'text-embedding-3-small',
+        'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
         3
     ),
     (
@@ -110,8 +110,8 @@ VALUES
         '00000000-0000-0000-0000-000000000103',
         0,
         'Inactive document match',
-        (ARRAY[1::real] || array_fill(0::real, ARRAY[1535]))::vector,
-        'text-embedding-3-small',
+        (ARRAY[1::real] || array_fill(0::real, ARRAY[383]))::vector,
+        'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
         3
     ),
     (
@@ -119,28 +119,31 @@ VALUES
         '00000000-0000-0000-0000-000000000104',
         0,
         'ASELS exact match',
-        (ARRAY[1::real] || array_fill(0::real, ARRAY[1535]))::vector,
-        'text-embedding-3-small',
+        (ARRAY[1::real] || array_fill(0::real, ARRAY[383]))::vector,
+        'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
         3
     );
 
 DO $$
 DECLARE
-    query_vector VECTOR(1536) :=
-        (ARRAY[1::real] || array_fill(0::real, ARRAY[1535]))::vector;
+    query_vector VECTOR(384) :=
+        (ARRAY[1::real] || array_fill(0::real, ARRAY[383]))::vector;
     result_count INTEGER;
     first_chunk UUID;
 BEGIN
-    SELECT count(*), min(chunk_id)
+    -- min(uuid) does not exist before PostgreSQL 18, and this stack runs 16.
+    -- Ordering the aggregate and taking the first element is equivalent here
+    -- and works on every supported version.
+    SELECT count(*), (array_agg(chunk_id ORDER BY chunk_id))[1]
     INTO result_count, first_chunk
     FROM rag.match_chunks(
         query_vector,
         5,
         NULL,
-        'THYAO',
-        'company-report',
-        'tr',
-        'annual-report',
+        ARRAY['THYAO'],
+        ARRAY['company-report'],
+        ARRAY['tr'],
+        ARRAY['annual-report'],
         '2025-06-01T00:00:00Z'
     );
 
@@ -214,8 +217,8 @@ BEGIN
             '00000000-0000-0000-0000-000000000101',
             0,
             'Duplicate chunk',
-            (ARRAY[1::real] || array_fill(0::real, ARRAY[1535]))::vector,
-            'text-embedding-3-small'
+            (ARRAY[1::real] || array_fill(0::real, ARRAY[383]))::vector,
+            'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'
         );
         RAISE EXCEPTION 'duplicate document/chunk_index was accepted';
     EXCEPTION WHEN unique_violation THEN
@@ -224,7 +227,7 @@ BEGIN
 
     BEGIN
         PERFORM * FROM rag.match_chunks(
-            (ARRAY[1::real] || array_fill(0::real, ARRAY[1535]))::vector,
+            (ARRAY[1::real] || array_fill(0::real, ARRAY[383]))::vector,
             21
         );
         RAISE EXCEPTION 'invalid top_k was accepted';
@@ -234,7 +237,7 @@ BEGIN
 
     BEGIN
         PERFORM * FROM rag.match_chunks(
-            (ARRAY[1::real] || array_fill(0::real, ARRAY[1535]))::vector,
+            (ARRAY[1::real] || array_fill(0::real, ARRAY[383]))::vector,
             5,
             1.1
         );

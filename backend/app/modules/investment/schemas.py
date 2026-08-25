@@ -21,6 +21,10 @@ class Position(BaseModel):
     dailyReturnPercent: float
     totalReturn: float
     totalReturnPercent: float
+    #: The instrument's own currency. Dropped for a long time, which is why
+    #: the frontend had to guess and guessed ₺ for a dollar-priced stock.
+    currency: str = "TRY"
+
 
 class Order(BaseModel):
     id: str
@@ -31,6 +35,10 @@ class Order(BaseModel):
     price: float
     total: float
     date: str
+    #: The instrument's own currency. Dropped for a long time, which is why
+    #: the frontend had to guess and guessed ₺ for a dollar-priced stock.
+    currency: str = "TRY"
+
 
 class CandlestickDataPoint(BaseModel):
     time: int
@@ -52,11 +60,19 @@ class WatchlistItem(BaseModel):
     price: float
     change: float
     changePercent: float
+    #: The instrument's own currency. Dropped for a long time, which is why
+    #: the frontend had to guess and guessed ₺ for a dollar-priced stock.
+    currency: str = "TRY"
+
 
 class TopMoverItem(BaseModel):
     symbol: str
     price: float
     changePercent: float
+    #: The instrument's own currency. Dropped for a long time, which is why
+    #: the frontend had to guess and guessed ₺ for a dollar-priced stock.
+    currency: str = "TRY"
+
 
 class DividendItem(BaseModel):
     symbol: str
@@ -64,6 +80,10 @@ class DividendItem(BaseModel):
     paymentDate: str
     amount: float
     yieldPercent: float
+    #: The instrument's own currency. Dropped for a long time, which is why
+    #: the frontend had to guess and guessed ₺ for a dollar-priced stock.
+    currency: str = "TRY"
+
 
 class SectorAllocationItem(BaseModel):
     sector: str
@@ -75,6 +95,10 @@ class HeatmapItem(BaseModel):
     weight: float
     changePercent: float
     sector: str
+    #: The instrument's own currency. Dropped for a long time, which is why
+    #: the frontend had to guess and guessed ₺ for a dollar-priced stock.
+    currency: str = "TRY"
+
 
 class OrderProposeRequest(BaseModel):
     """

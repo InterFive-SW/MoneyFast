@@ -1,5 +1,4 @@
 // src/components/chat/SuggestedPrompts.tsx
-import React from 'react';
 
 interface SuggestedPromptsProps {
   onSelectPrompt: (prompt: string) => void;

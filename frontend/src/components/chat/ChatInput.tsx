@@ -1,5 +1,5 @@
 // src/components/chat/ChatInput.tsx
-import React, { useState, KeyboardEvent, useRef, useEffect } from 'react';
+import { useState, KeyboardEvent, useRef, useEffect } from 'react';
 
 interface ChatInputProps {
   onSendMessage: (text: string) => void;

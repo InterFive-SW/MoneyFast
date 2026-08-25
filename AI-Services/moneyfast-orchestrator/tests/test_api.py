@@ -72,7 +72,7 @@ def test_readyz_returns_503_when_the_mcp_server_is_unreachable(api_client, mocke
     client = mocker.MagicMock()
 
     async def _list_tools():
-        raise ConnectionError("no route to host mcp-market-data")
+        raise ConnectionError("no route to host mcp")
 
     client.list_tools = _list_tools
     mocker.patch.object(api, "get_mcp_client", return_value=client)
@@ -102,14 +102,18 @@ def test_chat_returns_the_final_output(api_client, patched_run_turn):
     assert response.json()["final_output"] == "Portföyünüzde 500 lot THYAO var."
 
 
-def test_chat_exposes_only_the_four_public_fields(api_client, patched_run_turn):
+def test_chat_exposes_only_the_public_fields(api_client, patched_run_turn):
     """Internal graph state must not cross the wire. draft_response can hold
-    text the compliance gate refused to emit."""
+    text the compliance gate refused to emit, and specialist_output carries
+    raw tool payloads."""
     body = api_client.post("/chat", json={"user_message": "x"}).json()
     assert set(body) == {
-        "final_output", "primary_intent", "target_agent", "compliance_verdict"
+        "final_output", "primary_intent", "target_agent", "compliance_verdict",
+        "widget", "context_topic", "disclosures",
     }
     assert "iç taslak" not in response_text(body)
+    # The widget is a projection of the tool payload, not the payload itself.
+    assert "specialist_output" not in body
 
 
 def response_text(body: dict) -> str:
@@ -286,12 +290,88 @@ def test_wrong_method_returns_405(api_client):
 
 def test_response_model_declares_the_public_contract():
     assert set(api.ChatResponse.model_fields) == {
-        "final_output", "primary_intent", "target_agent", "compliance_verdict"
+        "final_output", "primary_intent", "target_agent", "compliance_verdict",
+        "widget", "context_topic",
+        # Added deliberately: mandatory notices travel as data so the chat can
+        # place them, rather than being concatenated into every reply.
+        "disclosures",
     }
 
 
 def test_request_model_defaults():
     request = api.ChatRequest(user_message="x")
-    assert request.user_id == "anonymous"
+    # None, not "anonymous": the backend resolves user_id from the bearer
+    # token and sends null when there is none. A placeholder string would be
+    # forwarded to a custodian lookup as though it were a real account.
+    assert request.user_id is None
     assert request.thread_id == "default"
     assert request.conversation_history == []
+
+
+# --------------------------------------------------------------------------
+# POST /chat/stream
+#
+# Progress is streamed; the ANSWER is not. The graph is fail-closed, so a
+# draft the compliance gate blocks must never reach the user -- text emitted
+# as the model produced it could not be taken back.
+# --------------------------------------------------------------------------
+@pytest.fixture()
+def patched_stream(mocker):
+    async def _stream(*_args, **_kwargs):
+        yield "stage", "Talebiniz sınıflandırılıyor..."
+        yield "stage", "Yanıt yazılıyor..."
+        yield "state", {
+            "final_output": "Merhaba",
+            "primary_intent": "SMALLTALK",
+            "target_agent": "SMALLTALK_AGENT",
+            "compliance_verdict": "PASS",
+            "draft_response": "iç taslak, sızmamalı",
+        }
+
+    return mocker.patch.object(api, "run_turn_streaming", _stream)
+
+
+def test_stream_emits_stages_then_one_answer(api_client, patched_stream):
+    response = api_client.post("/chat/stream", json={"user_message": "selam"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    body = response.text
+    assert body.count("event: stage") == 2
+    assert body.count("event: done") == 1
+    assert "Talebiniz sınıflandırılıyor" in body
+    assert "Merhaba" in body
+
+
+def test_stream_does_not_leak_internal_fields(api_client, patched_stream):
+    """Same projection as /chat: the draft and the specialist envelope stay
+    server side."""
+    body = api_client.post("/chat/stream", json={"user_message": "selam"}).text
+    assert "sızmamalı" not in body
+    assert "draft_response" not in body
+
+
+def test_stream_reports_a_graph_failure_in_band(api_client, mocker):
+    """The 200 is already sent, so the failure cannot be a status code."""
+
+    async def _boom(*_args, **_kwargs):
+        yield "stage", "Talebiniz sınıflandırılıyor..."
+        raise RuntimeError("groq exploded")
+
+    mocker.patch.object(api, "run_turn_streaming", _boom)
+
+    response = api_client.post("/chat/stream", json={"user_message": "selam"})
+    assert response.status_code == 200
+    assert "event: error" in response.text
+    assert "groq exploded" in response.text
+
+
+def test_stream_defaults_an_absent_user_to_anonymous(api_client, mocker):
+    seen = {}
+
+    async def _capture(*_args, **kwargs):
+        seen.update(kwargs)
+        yield "state", {"final_output": ""}
+
+    mocker.patch.object(api, "run_turn_streaming", _capture)
+    api_client.post("/chat/stream", json={"user_message": "selam"})
+    assert seen["user_id"] == "anonymous"

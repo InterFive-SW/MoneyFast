@@ -48,7 +48,6 @@ görünmez, ya tam geçer ya da açıkça başarısız olur.
   testi patlatır. Backend'deki tek dış HTTP çağrısı (`ai_orchestrator`
   modülünün AI servisine gidişi) bu yüzden her testte mock'lanmak zorunda.
 - **Yavaş yan etkiler hızlandırılmış:** `no_sleep` fixture'ı
-  `ai_assistant`'ın `asyncio.sleep(1.5)`'ini no-op'a çeviriyor;
   `password_hash_factory` bcrypt hash'lerini (~250ms) testler arası
   yeniden kullanıyor.
 
@@ -59,7 +58,6 @@ görünmez, ya tam geçer ya da açıkça başarısız olur.
 | `core/` (config, database, security) | Doğrudan birim testleri |
 | `auth/` | Router (HTTP sözleşmesi) + service (mock DB) + schemas (validator) + models (gerçek in-memory SQLite ile default değerler) ayrı ayrı |
 | `investment/`, `market/` | **Sözleşme testi**: mock endpoint'ler tek satırlık gövdeler olduğu için "200 dönüyor mu + yanıt şemaya uyuyor mu" testi hem %100 verir hem DB entegrasyonundan sonra da değerini korur — endpoint gövdesi mock'tan gerçek sorguya dönse bile şema aynı kaldığı sürece bu testler geçmeye devam eder |
-| `ai_assistant/` | Kural tabanlı if/elif zincirinin her dalı ve iç branch'leri (miktar çıkarma, al/sat ayrımı) |
 | `ai_orchestrator/` | `httpx` çağrısının 4 senaryosu: başarı, bağlantı reddi, zaman aşımı, orchestrator hata durumu |
 | `banking/`, `notification/`, `analytics/` | Şu an sadece health endpoint'i var (models/service boş) |
 | `main.py` | Router auto-discovery'nin 4 dalı (monkeypatch ile) + SPA fallback'in 3 dalı (`Path.exists` patch + `importlib.reload`, çünkü `backend/frontend/dist` lokalde yok) |

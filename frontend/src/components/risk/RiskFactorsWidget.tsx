@@ -1,7 +1,7 @@
-import type { RiskFactor } from '../../data/mockRiskData'
+import type { RiskFinding } from '../../api/client'
 
 interface RiskFactorsWidgetProps {
-  factors: RiskFactor[]
+  factors: RiskFinding[]
 }
 
 // Inline SVGs for positive/negative impacts

@@ -1,7 +1,7 @@
 """MCP client over SSE for container-to-container calls.
 
 The orchestrator and the MCP server are separate containers on one Docker
-network, so the host is the SERVICE NAME (mcp-market-data), never localhost.
+network, so the host is the SERVICE NAME (mcp), never localhost.
 localhost inside a container is that container.
 
 A fresh session is opened per tool call. That costs one round trip but
@@ -40,7 +40,7 @@ class MCPToolClient:
         timeout: float | None = None,
         max_retries: int | None = None,
     ) -> None:
-        self.url = url or os.getenv("MCP_SERVER_URL", "http://mcp-market-data:8000/sse")
+        self.url = url or os.getenv("MCP_SERVER_URL", "http://mcp:8000/sse")
         self.timeout = timeout if timeout is not None else float(
             os.getenv("MCP_TIMEOUT_SECONDS", "30")
         )

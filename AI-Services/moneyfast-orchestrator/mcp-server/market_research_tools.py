@@ -26,14 +26,26 @@ TOOL = "rag_semantic_market_search"
 MIN_TOP_K = 1
 MAX_TOP_K = 25
 
+#: Applied when the caller passes no preference (or an explicit null).
+DEFAULT_TOP_K = 8
+
+#: The contract's documented default, kept as-is so a direct caller gets the
+#: documented behaviour. The running system never relies on it: the
+#: orchestrator always passes RAG_MIN_SIMILARITY (0.35), calibrated for the
+#: multilingual MiniLM embedder actually in use, where relevant Turkish news
+#: hits score 0.43-0.72 and this E5-era floor would discard most of them.
+DEFAULT_MIN_SIMILARITY = 0.62
+
 
 async def rag_semantic_market_search(
     query: str,
     conversation_context: Optional[list[dict[str, str]]] = None,
-    top_k: int = 8,
+    # Optional for the same reason as get_market_data: `top_k: null` from a
+    # model means "no preference", not "invalid".
+    top_k: Optional[int] = None,
     filters: Optional[dict[str, Any]] = None,
-    min_similarity: float = 0.62,
-    rerank: bool = True,
+    min_similarity: Optional[float] = None,
+    rerank: Optional[bool] = None,
 ) -> dict[str, Any]:
     """
     Executes dense-vector semantic search with optional metadata pre-filtering over the
@@ -148,21 +160,25 @@ async def rag_semantic_market_search(
         - Any response built on this tool MUST pass validate_compliance_rules before
           emission.
     """
-    # POST /market-research/search. top_k is clamped to the documented 1..25
-    # window here rather than trusted to the backend: a negative bound would
-    # come back as an empty result set, which the orchestrator would report to
-    # the user as "no sources found".
+    # POST /search on the rag service, not the backend: the vector database
+    # and the embedding model live there, and no other component holds a
+    # vector-db credential.
+    #
+    # top_k is clamped to the documented 1..25 window here rather than trusted
+    # to the service: a negative bound would come back as an empty result set,
+    # which the orchestrator would report to the user as "no sources found".
     payload = await backend_client.request(
         "POST",
-        "/market-research/search",
+        "/search",
         tool=TOOL,
+        base=backend_client.rag_base_url(),
         json_body={
             "query": query,
             "conversation_context": conversation_context,
-            "top_k": max(MIN_TOP_K, min(MAX_TOP_K, top_k)),
+            "top_k": max(MIN_TOP_K, min(MAX_TOP_K, DEFAULT_TOP_K if top_k is None else top_k)),
             "filters": filters,
-            "min_similarity": min_similarity,
-            "rerank": rerank,
+            "min_similarity": DEFAULT_MIN_SIMILARITY if min_similarity is None else min_similarity,
+            "rerank": True if rerank is None else rerank,
         },
     )
     return _normalize(payload, query)

@@ -8,6 +8,7 @@ import {
   MOCK_ANALYST_RECOMMENDATIONS,
   MOCK_CAPITAL_INCREASES,
 } from '../../data/mockData'
+import SampleDataBadge from '../../components/markets/SampleDataBadge'
 
 type ReportKey =
   | 'bilancolar' | 'halka-arzlar' | 'geri-alimlar' | 'yeni-is-iliskileri' | 'tedbirli-hisseler'
@@ -43,6 +44,7 @@ function SymbolLink({ symbol }: { symbol: string }) {
 function ComingSoon({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
+      <SampleDataBadge reason="Bilanço, halka arz, analist tavsiyesi ve sermaye artırımı verileri için bir kaynak yok; temettü oranları ise Portföyüm ekranında gerçek veriyle sunuluyor." />
       <svg className="h-8 w-8 text-slate-300 mb-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
       </svg>

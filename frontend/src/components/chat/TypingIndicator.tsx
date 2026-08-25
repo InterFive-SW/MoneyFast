@@ -1,5 +1,4 @@
 // src/components/chat/TypingIndicator.tsx
-import React from 'react';
 
 interface TypingIndicatorProps {
   thought?: string;

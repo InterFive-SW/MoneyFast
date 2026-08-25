@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
 import type { Order } from '../../api/client'
+import { formatMoney } from '../../lib/money'
 
 /**
  * Emir Geçmişi Bileşeni
@@ -37,6 +38,15 @@ export default function OrderHistoryWidget() {
     return type === 'Alış' ? 'text-emerald-600' : 'text-rose-600'
   }
 
+  if (loading) {
+    // Boş tablo "emir yok" demektir; yüklenirken bunu göstermek yanlış olurdu.
+    return (
+      <div className="flex flex-col h-full items-center justify-center bg-transparent rounded-2xl border border-transparent shadow-sm">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full flex-col h-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4">
@@ -68,10 +78,10 @@ export default function OrderHistoryWidget() {
                 <td className={`py-3 font-semibold text-[13px] ${getTypeColor(order.type)}`}>{order.type}</td>
                 <td className="py-3 text-right tabular-nums text-sm text-slate-400">{order.quantity}</td>
                 <td className="py-3 text-right tabular-nums text-sm font-medium text-slate-300">
-                  {order.price.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(order.price, order.currency)}
                 </td>
                 <td className="py-3 text-right tabular-nums text-sm font-semibold text-white">
-                  {order.total.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatMoney(order.total, order.currency)}
                 </td>
                 <td className="py-3 text-right tabular-nums text-[12px] text-slate-400">
                   {new Date(order.date).toLocaleString('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}

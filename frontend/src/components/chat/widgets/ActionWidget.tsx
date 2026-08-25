@@ -1,5 +1,5 @@
 // src/components/chat/widgets/ActionWidget.tsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ActionWidgetPayload } from '../../../types/chat';
 import { api } from '../../../api/client';
 
@@ -27,21 +27,28 @@ export default function ActionWidget({ payload }: ActionWidgetProps) {
     setToastMessage(null);
 
     try {
-      // Backend'in bizden beklediği Pydantic şemasına tam uyumlu istek atıyoruz
-      await api.confirmOrder({
-        order_id: payload.actionId,
-        action: payload.action,
-        asset: payload.asset,
-        amount: payload.amount,
-      });
-      
+      // Confirms the REAL staged proposal by its id. This is the only place
+      // in the system where a transaction is authorised, and it is a user
+      // action by construction: the agent cannot reach this endpoint, and
+      // saying "evet" in the chat does not trigger it.
+      const result = await api.confirmProposal(payload.proposalId ?? payload.actionId);
+
       setStatus('confirmed');
-      setToastMessage({ type: 'success', message: 'İşlem başarıyla onaylandı ve sıraya alındı.' });
+      setToastMessage({ type: 'success', message: result?.message ?? 'İşlem onaylandı.' });
     } catch (error) {
       console.error("İşlem onayı sırasında hata oluştu:", error);
       setStatus('pending'); // Tekrar denemesi için pending'e çekiyoruz
-      setToastMessage({ type: 'error', message: 'İşlem onaylanırken bir hata oluştu. Lütfen tekrar deneyiniz.' });
-      
+
+      // An expired proposal is not a transient error, so retrying will not
+      // help; the user needs to ask for it to be prepared again.
+      const expired = error instanceof Error && error.message.includes('410');
+      setToastMessage({
+        type: 'error',
+        message: expired
+          ? 'Bu önerinin süresi doldu. Lütfen işlemi yeniden hazırlatın.'
+          : 'İşlem onaylanırken bir hata oluştu. Lütfen tekrar deneyiniz.',
+      });
+
       // Hata mesajını 5 saniye sonra gizle
       setTimeout(() => setToastMessage(null), 5000);
     }
@@ -96,9 +103,12 @@ export default function ActionWidget({ payload }: ActionWidgetProps) {
         )}
       </div>
 
-      {/* Elegant Toast Bildirimi (Cosmos.so ilhamlı) */}
+      {/* Bildirim akışın içinde durur.
+          `absolute -bottom-14` ile kartın 56px altına konumlandırılıyordu ve
+          orası tam olarak MessageBubble'ın yasal dipnotunun bulunduğu yer:
+          bildirim göründüğünde zorunlu bildirimin üstünü örtüyordu. */}
       {toastMessage && (
-        <div className={`absolute -bottom-14 left-0 right-0 mx-auto w-[90%] text-center px-4 py-2 rounded-lg text-xs font-medium shadow-md transition-all animate-fade-in-up border ${
+        <div className={`mt-2 w-full text-center px-4 py-2 rounded-lg text-xs font-medium shadow-md transition-all animate-fade-in-up border ${
           toastMessage.type === 'success'
             ? 'bg-emerald-500 border-emerald-600 text-white shadow-emerald-500/20'
             : 'bg-rose-500 border-rose-600 text-white shadow-rose-500/20'

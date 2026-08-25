@@ -14,8 +14,13 @@ işaretleyip ilgili yere (CLAUDE.md, CONTRACT_WORKFLOW.md) yansıtılmalı.
 | Auth | FastAPI + JWT (python-jose/passlib) | ASP.NET Identity önerisi .NET dönemine aitti, Python'a taşındı |
 | Frontend | React + Vite + TS + Tailwind — backend'e entegre (StaticFiles + SPA fallback) | Ayrı servis değil; multi-stage Dockerfile ile aynı image'da build edilip serve ediliyor |
 | Servisler arası sözleşme | OpenAPI-tabanlı otomatik üretim | Detay: CONTRACT_WORKFLOW.md — artık sadece backend↔ai-service sınırı için geçerli |
-| Veritabanı izolasyonu | Ayrı `core-db` ve `vector-db` PostgreSQL 16 instance'ları | Vector sorguları core işlem yükünden, volume'den ve resource limitlerinden izole; detay: VECTOR_DB_ARCHITECTURE.md |
-| Embedding | `text-embedding-3-small`, 1536 boyut | Model/boyut değişikliği vector migration, re-embedding ve retrieval evaluation gerektirir |
+| Veritabanı izolasyonu | Ayrı `base-db` ve `vector-db` PostgreSQL 16 instance'ları | Vector sorguları ana işlem yükünden, volume'den ve resource limitlerinden izole; detay: VECTOR_DB_ARCHITECTURE.md |
+| LLM sağlayıcı | **Groq** (`llama-3.3-70b-versatile` + `llama-3.1-8b-instant`) | Ücretsiz katman, düşük gecikme. `agents` sistemdeki tek dış çıkışı olan servis |
+| Embedding | **`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, 384 boyut**, `rag` içinde fastembed/ONNX ile yerel | Groq embedding modeli sunmuyor; barındırılan her alternatif ya ücretli ya da kotalı. Yerel çalıştırmak API anahtarını ve retrieval yolundaki ağ bağımlılığını tamamen kaldırdı. Model/boyut değişikliği şema değişikliği, re-embedding ve retrieval evaluation gerektirir |
+| Niyet yönlendirme | LLM `agents` içinde (Groq), güvenlik ön-filtresi `mcp` içinde deterministik | Bir güvenlik kapısı, koruduğu modele bağımlı olursa sağlayıcı bozulduğunda sessizce açılır. Regex denetlenebilir ve bedava |
+| Canlı veri toplama | Ayrı `ingestor` container'ı; yfinance + Türkçe RSS | İnternete çıkan tek toplayıcı hiçbir DB kredensiyeli taşımıyor, her şeyi HTTP ile itiyor. Bot korumasını aşan scraping YAPILMIYOR — bkz. moneyfast-ingestor/README |
+| Vector şema kurulumu | Postgres'in kendi `/docker-entrypoint-initdb.d/` mekanizması | Ayrı migration container'ı ve checksum defteri kaldırıldı; korpus dummy ve yeniden üretilebilir olduğu için defter bir şey korumuyordu. Bedeli: initdb yalnızca boş volume'de çalışır (VECTOR_DB_ARCHITECTURE.md'de açıkça yazılı) |
+| Container sayısı | 7: `base-db`, `vector-db`, `backend`, `rag`, `mcp`, `agents`, `ingestor` | `rag` ayrı servis: vektör DB kredensiyelini tutan tek bileşen ve ONNX bağımlılıkları bankacılık API'sinin image'ına girmemeli |
 
 ### Neden frontend backend'e birleşti, ai-service neden ayrı kaldı
 
@@ -33,9 +38,16 @@ geri alırdı.
 
 ## Açık kararlar
 
-### 1. LLM / AI sağlayıcı
-ai-service'in tüm iç mimarisini belirliyor. Kim: Şevval, Burak.
-- [ ] Karar verildi: ______________________
+### 1. LLM / AI sağlayıcı — KAPANDI
+Groq seçildi (`langchain-groq`, `orchestrator.py:get_llm`). Embedding tarafı
+Groq'ta bulunmadığı için yerel `fastembed` ile çözüldü; ikisi birbirinden
+bağımsız kararlar. Detay: VECTOR_DB_ARCHITECTURE.md → Embedding contract.
+- [x] Karar verildi: **Groq (LLM) + yerel paraphrase-multilingual-MiniLM-L12-v2 (embedding)**
+
+Not: ilk tercih `intfloat/multilingual-e5-small` idi; fastembed bu modeli
+desteklemiyor (build sırasında tespit edildi). fastembed'in tek 384 boyutlu
+çok dilli modeli MiniLM; boyut ve çalışma zamanı aynı kaldığı için şema
+değişmedi.
 
 ### 2. Piyasa/haber veri kaynağı
 Scraping mi, ücretsiz bir finans API'si mi. Kim: Şevval, Burak.

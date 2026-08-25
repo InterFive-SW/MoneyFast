@@ -35,12 +35,17 @@ export default function Login() {
 
     setLoading(true)
     try {
-      const response = await api.post<{ access_token: string }>('/api/auth/login', {
-        tc_no: tcNo,
-        password: password,
-      })
-      
+      const response = await api.post<{ access_token: string; refresh_token?: string }>(
+        '/api/auth/login',
+        { tc_no: tcNo, password: password },
+      )
+
       localStorage.setItem('access_token', response.access_token)
+      // Access token 30 dakikada dolar. Bu olmadan oturum sessizce anonime
+      // düşüyor ve sohbet onaylanamayacak işlem önerileri hazırlıyordu.
+      if (response.refresh_token) {
+        localStorage.setItem('refresh_token', response.refresh_token)
+      }
       navigate('/dashboard')
     } catch (err: any) {
       setError(err.message || 'Giriş yapılamadı. Bilgilerinizi kontrol edin.')

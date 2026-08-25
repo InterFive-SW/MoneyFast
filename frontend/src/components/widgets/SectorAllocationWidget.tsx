@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { apiClient } from '../../api/client'
 import type { SectorAllocationItem } from '../../api/client'
+import { toNumber } from '../../lib/chartFormat'
 
 export default function SectorAllocationWidget() {
   const [data, setData] = useState<SectorAllocationItem[]>([])
@@ -55,7 +56,7 @@ export default function SectorAllocationWidget() {
                 ))}
               </Pie>
               <Tooltip 
-                formatter={(value: number) => [`${value}%`, 'Oran']}
+                formatter={(value) => [`${toNumber(value) ?? 0}%`, 'Oran']}
                 contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
               />
             </PieChart>

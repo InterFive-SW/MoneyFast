@@ -27,12 +27,12 @@ TOOL = "calculate_portfolio_risk_metrics"
 
 async def calculate_portfolio_risk_metrics(
     positions: list[dict[str, Any]],
-    lookback: str = "1Y",
+    lookback: Optional[str] = "1Y",
     benchmark_symbol: Optional[str] = None,
     metrics: Optional[list[str]] = None,
     confidence_level: float = 0.95,
     risk_free_rate: Optional[float] = None,
-    rebalance_assumption: str = "BUY_AND_HOLD",
+    rebalance_assumption: Optional[str] = "BUY_AND_HOLD",
 ) -> dict[str, Any]:
     """
     Computes ex-post (historical, backward-looking) risk statistics for a set of
@@ -149,13 +149,15 @@ async def calculate_portfolio_risk_metrics(
         - Any response containing these figures MUST pass validate_compliance_rules
           before emission.
     """
+    rebalance_assumption = rebalance_assumption or "BUY_AND_HOLD"
+    lookback = lookback or "1Y"
     # Fail before the network call: an empty position set cannot produce a
     # meaningful metric, and the contract documents this as InvalidInputError
     # rather than an empty result.
     if not positions:
         raise InvalidInputError(f"{TOOL}: positions is empty.")
 
-    # POST /risk/calculate. risk_free_rate is passed through as None when unset
+    # POST /risk/calculate on the backend. risk_free_rate is passed through as None when unset
     # so the backend resolves the policy rate and reports it in assumptions;
     # backend_client drops None keys, so the field is omitted rather than null.
     payload = await backend_client.request(

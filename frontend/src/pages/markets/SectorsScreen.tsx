@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { MOCK_MARKET_INSTRUMENTS, CUSTOM_SECTOR_GROUPS, type MarketInstrument } from '../../data/mockData'
+import type { MarketInstrument } from '../../data/mockData'
+import { CUSTOM_SECTOR_GROUPS } from '../../data/sectorGroups'
+import { useInstruments } from '../../hooks/useInstruments'
 
 function fmt(value: number | undefined, suffix = ''): string {
   if (value === undefined) return '—'
@@ -46,9 +48,14 @@ export default function SectorsScreen() {
   const [expandedSector, setExpandedSector] = useState<string | null>(null)
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
 
+  // Sektör kırılımı canlı evrenden türetiliyor. `/api/investment/
+  // sector-allocation` kullanılmadı: o uç nokta PORTFÖY sektör dağılımını
+  // verir, bu ekran ise piyasa genelini gösteriyor — ikisi farklı soru.
+  const { instruments, loading } = useInstruments()
+
   const sectorStats = useMemo(() => {
     const bySector = new Map<string, MarketInstrument[]>()
-    for (const item of MOCK_MARKET_INSTRUMENTS) {
+    for (const item of instruments) {
       if (!bySector.has(item.sector)) bySector.set(item.sector, [])
       bySector.get(item.sector)!.push(item)
     }
@@ -59,19 +66,27 @@ export default function SectorsScreen() {
         avgChange: items.reduce((acc, i) => acc + i.changePercent, 0) / items.length,
       }))
       .sort((a, b) => b.avgChange - a.avgChange)
-  }, [])
+  }, [instruments])
 
   const topSectors = sectorStats.slice(0, 3)
   const bottomSectors = [...sectorStats].sort((a, b) => a.avgChange - b.avgChange).slice(0, 3)
 
   const topStocks = useMemo(
-    () => [...MOCK_MARKET_INSTRUMENTS].sort((a, b) => b.changePercent - a.changePercent).slice(0, 3),
-    []
+    () => [...instruments].sort((a, b) => b.changePercent - a.changePercent).slice(0, 3),
+    [instruments]
   )
   const bottomStocks = useMemo(
-    () => [...MOCK_MARKET_INSTRUMENTS].sort((a, b) => a.changePercent - b.changePercent).slice(0, 3),
-    []
+    () => [...instruments].sort((a, b) => a.changePercent - b.changePercent).slice(0, 3),
+    [instruments]
   )
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -148,7 +163,7 @@ export default function SectorsScreen() {
         </h3>
         <div className="flex flex-col gap-3">
           {CUSTOM_SECTOR_GROUPS.map((group) => {
-            const items = MOCK_MARKET_INSTRUMENTS.filter((i) => group.symbols.includes(i.symbol))
+            const items = instruments.filter((i) => group.symbols.includes(i.symbol))
             const isExpanded = expandedGroup === group.name
             return (
               <div key={group.name} className="bg-slate-800/70 backdrop-blur-md rounded-[2rem] p-5 border border-dashed border-emerald-200/70 shadow-sm">

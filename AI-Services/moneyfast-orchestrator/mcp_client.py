@@ -13,6 +13,8 @@ only after you have reconnect logic you trust.
 from __future__ import annotations
 
 import asyncio
+
+import agent_trace
 import json
 import logging
 import os
@@ -68,6 +70,12 @@ class MCPToolClient:
         payload: an unreachable tool must surface as an error so the graph can
         tell the user the data could not be retrieved.
         """
+        # Traced here because this is the only path to any tool: wrapping it
+        # once covers every specialist without any of them knowing.
+        with agent_trace.span("tool", name, input=arguments) as sp:
+            return await self._call_once(name, arguments, sp)
+
+    async def _call_once(self, name: str, arguments: dict[str, Any], sp) -> dict[str, Any]:
         attempt = 0
         last: Exception | None = None
         while attempt <= self.max_retries:
@@ -76,7 +84,9 @@ class MCPToolClient:
                     result = await session.call_tool(name, arguments=arguments)
                 if getattr(result, "isError", False):
                     raise MCPToolError(f"{name} reported an error: {_as_text(result)}")
-                return _payload(result)
+                payload = _payload(result)
+                sp.set(output=payload, attempts=attempt + 1)
+                return payload
             except MCPToolError:
                 raise
             except Exception as exc:  # transport, timeout, protocol

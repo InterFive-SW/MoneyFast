@@ -4,10 +4,12 @@ import { BankingContextType } from '../../pages/Banking'
 export default function AccountTransactionsView() {
   const { accountId } = useParams<{ accountId: string }>()
   const navigate = useNavigate()
-  const { data } = useOutletContext<BankingContextType>()
-  
+  const { data, transactionsByAccountId } = useOutletContext<BankingContextType>()
+
   const account = data.accounts.find(a => a.id === accountId)
-  const transactions = data.recentTransactions // we can filter if needed, but mock shows all
+  // Bu ekran tek bir hesabın dökümü; birleşik listeyi göstermek başka
+  // hesapların hareketlerini de buraya taşırdı.
+  const transactions = accountId ? transactionsByAccountId[accountId] ?? [] : []
 
   if (!account) {
     return <Navigate to="/banking/accounts" replace />

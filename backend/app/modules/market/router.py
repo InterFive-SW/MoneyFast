@@ -254,6 +254,21 @@ async def ingest_market_data(request: QuoteIngestRequest, db: Session = Depends(
     return {"quotes_written": quotes, "candles_written": candles, "news_written": 0}
 
 
+@router.get(
+    "/candles/coverage",
+    summary="Mum verisi kapsaması (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+async def candle_coverage(db: Session = Depends(get_db)):
+    """`ingestor`'ın açılışta neyi geri dolduracağını sorduğu uç nokta.
+
+    Sembol başına kaç günlük bar tutulduğunu ve en yenisinin tarihini döner.
+    Bunu sormadan geri doldurmak, her yeniden başlatmada 187 sembolün
+    tamamını sağlayıcıdan tekrar istemek demekti.
+    """
+    return market_service.candle_coverage(db)
+
+
 @router.post(
     "/news/ingest",
     response_model=IngestResult,

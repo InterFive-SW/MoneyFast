@@ -8,3 +8,8 @@ node_modules
 # Agent trace recorder output. Full payloads: balances, positions and the
 # user's own messages. Diagnostics, never committed.
 traces/
+
+# Local database dumps (make db-dump). Full copies of the live DB: credentials
+# hashes, balances, chat history. Backups and hand-offs, never commits --
+# `seeds/` is the reviewable, per-user thing that IS committed.
+dumps/

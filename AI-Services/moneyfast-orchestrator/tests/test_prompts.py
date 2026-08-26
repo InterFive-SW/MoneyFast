@@ -335,3 +335,37 @@ def test_no_prompt_is_empty_or_whitespace():
     everything = [prompts.ORCHESTRATOR_SYSTEM_PROMPT, *prompts.SPECIALIST_PROMPTS.values()]
     for text in everything:
         assert text.strip()
+
+
+# --------------------------------------------------------------------------
+# Rules added after reading real chat turns. Each one names the reply it is
+# there to prevent, because a prompt rule with no example drifts.
+# --------------------------------------------------------------------------
+def test_a_choice_question_never_gets_the_empty_screen_text():
+    """"en mantıklısı hangisini almak olur" was answered with
+    "Bu kriterlere uyan hisse bulunamadı." -- an empty-filter report, which
+    reads as a data outage rather than the refusal it should be."""
+    text = prompts.ORCHESTRATOR_SYSTEM_PROMPT
+    assert "CHOICE questions" in text
+    assert "Karar sizin." in text
+    assert "Never rank them" in text
+
+
+def test_named_advice_questions_route_where_the_numbers_are():
+    """EDUCATION_AGENT holds no tools, so the refusal arrived with nothing
+    under it and then claimed the data could not be retrieved."""
+    assert "An advice question that NAMES instruments goes to MARKET_DATA_AGENT" \
+        in prompts.ROUTER_PROMPT
+
+
+def test_comparing_two_instruments_is_a_data_question():
+    """"aselsanı THYAO ile karşılaştır" went to the document search and
+    returned nothing, while the same two answered instantly when asked for as
+    "fiyatlarını getir"."""
+    assert "COMPARING two named instruments is MARKET_DATA_AGENT" in prompts.ROUTER_PROMPT
+
+
+def test_a_single_lookup_omits_the_methodology_block():
+    """"Sıralama: fiyat yüksekten düşüğe, en fazla 10" under a one-stock price
+    describes a screen that never happened."""
+    assert "belongs to a SCREEN" in prompts.ORCHESTRATOR_SYSTEM_PROMPT

@@ -391,6 +391,42 @@ def upsert_candles(db: Session, rows: list[dict[str, Any]]) -> int:
     return result.rowcount or 0
 
 
+def candle_coverage(db: Session) -> dict[str, dict[str, Any]]:
+    """How many daily bars each instrument holds, and the newest one.
+
+    Exists so the ingestor can back-fill history on start-up without asking
+    for it blindly. Daily bars used to be a 19:15 cron and nothing else, which
+    meant a fresh clone showed empty charts until that evening -- the reason
+    the seed data carried 7.5 MB of candles that a service regenerates on its
+    own. With this the ingestor fetches only what is thin, so a first boot
+    back-fills the whole universe, a restart fetches nothing, and an
+    instrument added by a later migration is picked up the next time it runs.
+
+    Every product appears, including ones with no bars at all: "this symbol
+    has nothing" is precisely what the caller needs to be told.
+    """
+    counts = dict(
+        db.query(MarketCandle.product_id, func.count(MarketCandle.id))
+        .filter(MarketCandle.interval == "1d")
+        .group_by(MarketCandle.product_id)
+        .all()
+    )
+    latest = dict(
+        db.query(MarketCandle.product_id, func.max(MarketCandle.timestamp))
+        .filter(MarketCandle.interval == "1d")
+        .group_by(MarketCandle.product_id)
+        .all()
+    )
+    coverage: dict[str, dict[str, Any]] = {}
+    for product in db.query(InvestmentProduct).all():
+        last = latest.get(product.id)
+        coverage[product.symbol] = {
+            "bars": counts.get(product.id, 0),
+            "last": last.date().isoformat() if last else None,
+        }
+    return coverage
+
+
 def candle_closes(db: Session, symbol: str, limit: int = 260) -> list[tuple[datetime, float]]:
     """Closing prices oldest-first, for return-series calculations."""
     product = get_product(db, symbol)

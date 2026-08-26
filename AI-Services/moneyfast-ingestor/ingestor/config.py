@@ -145,6 +145,15 @@ def history_days() -> int:
     return _int("INGESTOR_HISTORY_DAYS", 400)
 
 
+#: Below this many daily bars, the start-up backfill treats an instrument as
+#: needing history. Well under `history_days()` on purpose: the point is to
+#: separate "has a usable series" from "has nothing", not to keep every symbol
+#: topped up to the same bar count. Holidays, listing dates and provider gaps
+#: all make a full 400 unreachable for some names, and a threshold near it
+#: would re-fetch those every single start.
+CANDLE_MIN_BARS = _int("INGESTOR_CANDLE_MIN_BARS", 60)
+
+
 def respect_robots() -> bool:
     """Deliberately not a documented off switch.
 

@@ -161,14 +161,54 @@ def run_fundamentals(client: httpx.Client) -> dict:
     return {"fetched": len(rows), **result}
 
 
-def run_candles(client: httpx.Client) -> dict:
+def run_candles(client: httpx.Client, symbols: set[str] | None = None) -> dict:
+    """Daily bars. `symbols` narrows the run to a subset; None means all.
+
+    The subset exists for the start-up backfill, which asks for only the
+    instruments that are short of history.
+    """
     products = sinks.fetch_products(client)
+    if symbols is not None:
+        products = [p for p in products if p.get("symbol") in symbols]
+        if not products:
+            return {"fetched": 0, "candles_written": 0}
     candles = yfinance_source.fetch_candles(products, days=config.history_days())
     result = sinks.push_market_data(client, [], candles) or {}
     log.info(
-        "candle cycle: %d bars offered, %s new", len(candles), result.get("candles_written", 0)
+        "candle cycle: %d symbols, %d bars offered, %s new",
+        len(products), len(candles), result.get("candles_written", 0),
     )
     return {"fetched": len(candles), **result}
+
+
+def backfill_candles(client: httpx.Client) -> dict:
+    """Fetch history for instruments that do not have enough of it yet.
+
+    Daily bars used to be a 19:15 cron and nothing else, so a clone started in
+    the morning showed empty charts all day. That gap is why the seed data
+    carried 7.5 MB of candles -- committed history for a series this service
+    produces on its own.
+
+    The coverage check is what makes running this on every start reasonable.
+    A first boot back-fills the whole universe; a restart an hour later finds
+    everything covered and costs one HTTP call; an instrument introduced by a
+    later migration is picked up the next time the service comes up, with no
+    one having to remember it.
+    """
+    coverage = sinks.fetch_candle_coverage(client)
+    products = sinks.fetch_products(client)
+    thin = {
+        p["symbol"] for p in products
+        if coverage.get(p["symbol"], {}).get("bars", 0) < config.CANDLE_MIN_BARS
+    }
+    if not thin:
+        log.info("candle backfill: all %d instruments covered, nothing to fetch",
+                 len(products))
+        return {"fetched": 0, "candles_written": 0}
+
+    log.info("candle backfill: %d of %d instruments below %d bars",
+             len(thin), len(products), config.CANDLE_MIN_BARS)
+    return run_candles(client, symbols=thin)
 
 
 def run_news(client: httpx.Client) -> dict:
@@ -263,10 +303,29 @@ def start_scheduler() -> None:
     )
 
     # A cold start with an empty database would otherwise show an empty
-    # dashboard until the first tick.
+    # dashboard until the first tick. Quotes and news are one batched request
+    # each, so they run inline.
     with httpx.Client() as client:
         _guard("quotes", run_quotes, client, force=True)
         _guard("news", run_news, client)
+
+    # The candle backfill is NOT inline. `fetch_candles` is per-symbol, so a
+    # cold start is ~190 sequential provider calls: 93 symbols measured at 36
+    # seconds, and that is a healthy provider. Giving it to the scheduler with
+    # a run_date of now means the service is up and pricing while the history
+    # fills in behind it.
+    scheduler.add_job(
+        _job("candle-backfill", backfill_candles),
+        "date",
+        run_date=datetime.now(ISTANBUL),
+        id="candle-backfill",
+        # The run date is fixed here, but the scheduler does not start until
+        # the inline warm start above finishes -- measured at ~80 seconds, and
+        # longer if a news feed is slow. APScheduler's default grace is one
+        # second, so without this the backfill would be dropped as a misfire
+        # and a first boot would silently keep its empty charts.
+        misfire_grace_time=None,
+    )
 
     scheduler.start()
 

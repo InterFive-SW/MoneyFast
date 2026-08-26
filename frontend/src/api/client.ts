@@ -1,4 +1,6 @@
 import type { paths, components } from './generated/schema';
+import { clearChatStorage } from '../lib/chatStorage';
+import { isTokenExpiringSoon } from '../lib/jwt';
 
 // Helper type to extract response types
 type GetResponseType<T> = T extends {
@@ -33,23 +35,6 @@ export type Statement = GetResponseType<paths['/api/banking/accounts/{account_nu
 export type Movement = NonNullable<Statement['movements']>[0];
 export type SpendingSummary = GetResponseType<paths['/api/banking/spending']>;
 export type BalanceHistory = GetResponseType<paths['/api/banking/balance-history']>;
-
-/** Kenar çubuğundaki bir satır. Mesajları taşımaz — bkz. getConversations. */
-export interface ConversationSummary {
-    thread_id: string;
-    title: string | null;
-    updated_at: string;
-    message_count: number;
-}
-
-/** Saklandığı hâliyle bir tur. `meta` yok: yönlendirme/uygunluk kaydı
- *  kullanıcıya ait bir bilgi değil. */
-export interface StoredMessage {
-    id: string;
-    role: string;
-    content: string;
-    created_at: string;
-}
 export type SavingsGoalItem = GetResponseType<paths['/api/banking/savings-goals']>[0];
 export type TransferRequest = components['schemas']['TransferRequest'];
 export type TransferOut = components['schemas']['TransferOut'];
@@ -66,6 +51,36 @@ export type TopMoverItem = GetResponseType<paths['/api/investment/top-movers']>[
 export type DividendItem = GetResponseType<paths['/api/investment/dividends']>[0];
 export type SectorAllocationItem = GetResponseType<paths['/api/investment/sector-allocation']>[0];
 export type HeatmapItem = GetResponseType<paths['/api/investment/heatmap']>[0];
+
+/** Sohbet listesi satırı. Kaynak anahtarı `thread_id`, `id` değil. */
+export interface ConversationSummary {
+    id: string;
+    thread_id: string;
+    title: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ConversationList {
+    items: ConversationSummary[];
+    total: number;
+    limit: number;
+    offset: number;
+}
+
+export interface ConversationMessage {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    created_at: string;
+    disclosures: string[];
+}
+
+export interface ConversationDetail extends ConversationSummary {
+    messages: ConversationMessage[];
+    has_more: boolean;
+    context_topic: string | null;
+}
 
 // Native fetch API client for backend
 class ApiClient {
@@ -143,9 +158,79 @@ class ApiClient {
     static onSessionExpired(): void {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
+        // Sohbet deposu da gider. Token'ları silip sohbetleri bırakmak, ortak
+        // bir tarayıcıda sıradaki kullanıcıya öncekinin konuşmalarını
+        // devretmek demekti.
+        clearChatStorage();
         if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
             window.location.assign('/login');
         }
+    }
+
+    /**
+     * Bir tur göndermeden önce oturumu tazele ve sonucu bildir.
+     *
+     * Sohbet uçları anonim çağrıyı kabul ediyor, dolayısıyla süresi dolmuş
+     * bir token 401 DEĞİL, 200-anonim üretiyor — ve `authedFetch`'in yenileme
+     * makinesi 401 görmediği için sohbet yolunda hiç çalışmıyordu. Oturumun
+     * sessizce düşmesinin sebebi buydu.
+     *
+     * Başarısızlıkta `/login`'e YÖNLENDİRMEZ: birini cümlenin ortasında
+     * oradan almak, yazdığı mesajı kaybettirir. Çağıran anonim olarak devam
+     * eder ve kullanıcıya kaydedilmediği söylenir.
+     */
+    async ensureFreshSession(): Promise<'authenticated' | 'anonymous'> {
+        const token = localStorage.getItem('access_token');
+        if (!token) return 'anonymous';
+        if (!isTokenExpiringSoon(token)) return 'authenticated';
+        return (await this.tryRefresh()) ? 'authenticated' : 'anonymous';
+    }
+
+    // ----------------------------------------------------------------------
+    // Conversations
+    //
+    // Şemalar burada elle yazılı: `src/api/generated/schema.d.ts` bu uçlar
+    // eklenmeden önce üretilmişti. Yeniden üretimi ayrı bir adım
+    // (CONTRACT_WORKFLOW.md) ve bu dosyanın çalışmasının önkoşulu değil.
+    // ----------------------------------------------------------------------
+    getConversations(params: { limit?: number; offset?: number } = {}) {
+        const query = new URLSearchParams();
+        if (params.limit !== undefined) query.set('limit', String(params.limit));
+        if (params.offset !== undefined) query.set('offset', String(params.offset));
+        const suffix = query.toString() ? `?${query}` : '';
+        return this.request<ConversationList>(`/ai_orchestrator/conversations${suffix}`);
+    }
+
+    getConversation(threadId: string, limit?: number) {
+        const suffix = limit === undefined ? '' : `?limit=${limit}`;
+        return this.request<ConversationDetail>(
+            `/ai_orchestrator/conversations/${encodeURIComponent(threadId)}${suffix}`,
+        );
+    }
+
+    renameConversation(threadId: string, title: string) {
+        return this.patch<ConversationSummary>(
+            `/ai_orchestrator/conversations/${encodeURIComponent(threadId)}`,
+            { title },
+        );
+    }
+
+    deleteConversation(threadId: string) {
+        return this.request<{ thread_id: string; status: string }>(
+            `/ai_orchestrator/conversations/${encodeURIComponent(threadId)}`,
+            'DELETE',
+        );
+    }
+
+    private async patch<T>(endpoint: string, data: unknown): Promise<T> {
+        const response = await this.authedFetch(`${this.baseUrl}${endpoint}`, {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+            throw new Error(`API Hatası: ${response.status} ${response.statusText}`);
+        }
+        return await response.json();
     }
 
     private async request<T>(endpoint: string, method: 'GET' | 'DELETE' = 'GET'): Promise<T> {
@@ -339,33 +424,6 @@ class ApiClient {
         return this.request<PortfolioAnalysis>('/analytics/portfolio');
     }
 
-    /**
-     * Kayıtlı sohbetler, en son konuşulan en üstte.
-     *
-     * Turlar ilk günden beri veritabanına yazılıyordu ama hiçbir uç nokta geri
-     * vermiyordu; sohbet geçmişi `localStorage`'dan geliyordu, yani tek bir
-     * tarayıcıda yaşıyordu. Seed verisini yükleyen bir ekip arkadaşı satırları
-     * alıyor, kenar çubuğunu boş görüyordu.
-     */
-    getConversations() {
-        return this.request<ConversationSummary[]>('/ai_orchestrator/conversations');
-    }
-
-    /** Bir sohbetin turları, eskiden yeniye. Liste uç noktası mesaj taşımaz. */
-    getConversationMessages(threadId: string) {
-        return this.request<StoredMessage[]>(
-            `/ai_orchestrator/conversations/${encodeURIComponent(threadId)}/messages`,
-        );
-    }
-
-    /** Sohbeti kalıcı olarak siler; mesajlar CASCADE ile gider. */
-    deleteConversation(threadId: string) {
-        return this.request<void>(
-            `/ai_orchestrator/conversations/${encodeURIComponent(threadId)}`,
-            'DELETE',
-        );
-    }
-
     /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */
     getCurrentUser() {
         return this.request<{ id: string; first_name: string; last_name: string }>('/auth/me');
@@ -411,6 +469,13 @@ class ApiClient {
         handlers: {
             onStage?: (label: string) => void
             onDone?: (payload: any) => void
+            /**
+             * Backend'in `done`'dan sonra eklediği `saved` olayı. Ayrı bir
+             * dal gerekiyor çünkü dispatch olay ADINA değil gövdenin ŞEKLİNE
+             * bakıyor ve bu gövde ne `stage` ne de `final_output` içeriyor —
+             * eklenmeden önce sessizce yere düşüyordu.
+             */
+            onSaved?: (payload: { conversation_id: string | null; persistence: string }) => void
         },
     ): Promise<boolean> {
         let response: Response
@@ -455,6 +520,8 @@ class ApiClient {
                 } else if (payload && 'final_output' in payload) {
                     sawDone = true
                     handlers.onDone?.(payload)
+                } else if (payload && 'persistence' in payload) {
+                    handlers.onSaved?.(payload)
                 }
             }
         }

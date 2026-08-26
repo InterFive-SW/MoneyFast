@@ -1,21 +1,26 @@
 import json
 import logging
-from typing import List, Optional
+from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_user_id, get_optional_user_id
+from app.core.deps import get_current_user_id
 from . import service
+from .deps import ChatIdentity, resolve_chat_identity
 from .schemas import (
     ChatRequest,
     ChatResponse,
+    ConversationDetailOut,
+    ConversationListOut,
     ConversationSummary,
-    StoredMessage,
+    DeletedConversationOut,
+    MessageOut,
+    RenameConversationRequest,
 )
 
 log = logging.getLogger("moneyfast.ai_orchestrator")
@@ -36,10 +41,48 @@ BUSY_MESSAGE = (
 )
 
 
+def _history_for(
+    db: Session, identity: ChatIdentity, request: ChatRequest
+) -> list[dict]:
+    """The conversation the orchestrator is allowed to see.
+
+    Stored history wins over the client's copy for a signed-in user: it is
+    what resolves "peki ya o?" to an instrument, so a client able to rewrite
+    it could steer a tool call at a different holding. An anonymous caller has
+    nothing stored and falls back to what they sent, which can only mislead
+    them about their own conversation.
+
+    Both branches go through `trim_history`. The fallback used to be passed
+    through untouched, which left the only bound on an anonymous caller's
+    payload in a different container.
+    """
+    return service.load_history(db, identity.user_id, request.thread_id) or (
+        service.trim_history([turn.model_dump() for turn in request.conversation_history])
+    )
+
+
+def _turn_meta(answer: dict) -> dict:
+    """What gets stored alongside the assistant message.
+
+    `context_topic` and `disclosures` are here so a reopened conversation can
+    render its bubbles the way they were first shown. Widgets deliberately are
+    not: a restored portfolio widget would display an earlier turn's prices,
+    and a restored action widget would offer an "Onayla" button for a proposal
+    that has since expired.
+    """
+    return {
+        "primary_intent": answer.get("primary_intent"),
+        "target_agent": answer.get("target_agent"),
+        "compliance_verdict": answer.get("compliance_verdict"),
+        "context_topic": answer.get("context_topic"),
+        "disclosures": answer.get("disclosures") or [],
+    }
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_orchestrator(
     request: ChatRequest,
-    user_id: Optional[str] = Depends(get_optional_user_id),
+    identity: ChatIdentity = Depends(resolve_chat_identity),
     db: Session = Depends(get_db),
 ) -> ChatResponse:
     """
@@ -51,18 +94,11 @@ async def chat_with_orchestrator(
     okuyabilirdi. Token yoksa `None` gider ve ajanlar bunu "okunacak portföy
     yok" olarak ele alır.
     """
-    # Stored history wins over the client's copy for a signed-in user: it is
-    # what resolves "peki ya o?" to an instrument, so a client able to rewrite
-    # it could steer a tool call at a different holding. An anonymous caller
-    # has nothing stored and falls back to what they sent, which can only
-    # mislead them about their own conversation.
-    history = service.load_history(db, user_id, request.thread_id) or [
-        turn.model_dump() for turn in request.conversation_history
-    ]
+    history = _history_for(db, identity, request)
 
     payload = {
         "user_message": request.user_message,
-        "user_id": user_id,
+        "user_id": identity.user_id,
         "thread_id": request.thread_id,
         "conversation_history": history,
     }
@@ -92,15 +128,14 @@ async def chat_with_orchestrator(
 
     answer.conversation_id = service.record_turn(
         db,
-        user_id=user_id,
+        user_id=identity.user_id,
         thread_id=request.thread_id,
         user_message=request.user_message,
         assistant_message=answer.final_output,
-        meta={
-            "primary_intent": answer.primary_intent,
-            "target_agent": answer.target_agent,
-            "compliance_verdict": answer.compliance_verdict,
-        },
+        meta=_turn_meta(answer.model_dump()),
+    )
+    answer.persistence = service.persistence_status(
+        identity.user_id, identity.token_present, answer.conversation_id
     )
     return answer
 
@@ -108,7 +143,7 @@ async def chat_with_orchestrator(
 @router.post("/chat/stream")
 async def chat_stream(
     request: ChatRequest,
-    user_id: Optional[str] = Depends(get_optional_user_id),
+    identity: ChatIdentity = Depends(resolve_chat_identity),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """Sohbetin akış (SSE) sürümü. Kimlik çözümü `/chat` ile birebir aynı.
@@ -122,12 +157,10 @@ async def chat_stream(
     Tur, tıpkı `/chat`'te olduğu gibi bitiminde kaydedilir; akış sürümünde
     kayıt `done` olayı üretildikten sonra yapılır.
     """
-    history = service.load_history(db, user_id, request.thread_id) or [
-        turn.model_dump() for turn in request.conversation_history
-    ]
+    history = _history_for(db, identity, request)
     payload = {
         "user_message": request.user_message,
-        "user_id": user_id,
+        "user_id": identity.user_id,
         "thread_id": request.thread_id,
         "conversation_history": history,
     }
@@ -154,18 +187,26 @@ async def chat_stream(
                     if answer is not None:
                         conversation_id = service.record_turn(
                             db,
-                            user_id=user_id,
+                            user_id=identity.user_id,
                             thread_id=request.thread_id,
                             user_message=request.user_message,
                             assistant_message=answer.get("final_output") or "",
-                            meta={
-                                "primary_intent": answer.get("primary_intent"),
-                                "target_agent": answer.get("target_agent"),
-                                "compliance_verdict": answer.get("compliance_verdict"),
-                            },
+                            meta=_turn_meta(answer),
                         )
+                        # `persistence` rides along with the id so the client
+                        # can tell "not saved because you were never signed
+                        # in" from "not saved because your session expired"
+                        # without decoding its own token.
                         tail = json.dumps(
-                            {"conversation_id": conversation_id}, ensure_ascii=False
+                            {
+                                "conversation_id": conversation_id,
+                                "persistence": service.persistence_status(
+                                    identity.user_id,
+                                    identity.token_present,
+                                    conversation_id,
+                                ),
+                            },
+                            ensure_ascii=False,
                         )
                         yield f"event: saved\ndata: {tail}\n\n"
         except (httpx.HTTPError, httpx.StreamError) as exc:
@@ -182,63 +223,6 @@ async def chat_stream(
     )
 
 
-@router.get("/conversations", response_model=List[ConversationSummary])
-async def list_conversations(
-    user_id: str = Depends(get_current_user_id),
-    db: Session = Depends(get_db),
-) -> List[ConversationSummary]:
-    """Kullanıcının kayıtlı sohbetleri, en son konuşulan en üstte.
-
-    Turlar ilk günden beri yazılıyordu ama hiçbir uç nokta geri vermiyordu:
-    sohbet arayüzü oturumları `localStorage`'dan geri yüklüyordu, yani geçmiş
-    veritabanında değil tek bir tarayıcıda yaşıyordu. Seed verisini yükleyen
-    bir ekip arkadaşı satırları alıyor, kenar çubuğunu boş görüyordu.
-
-    `user_id` bearer token'dan gelir — `/chat` ile aynı kural. Yol veya sorgu
-    parametresi olsaydı, thread id'si tahmin edilebilir olduğu için herkes
-    başkasının sohbetini okuyabilirdi.
-    """
-    return [ConversationSummary(**row) for row in service.list_conversations(db, user_id)]
-
-
-@router.get(
-    "/conversations/{thread_id}/messages",
-    response_model=List[StoredMessage],
-)
-async def conversation_messages(
-    thread_id: str,
-    user_id: str = Depends(get_current_user_id),
-    db: Session = Depends(get_db),
-) -> List[StoredMessage]:
-    """Bir sohbetin turları, eskiden yeniye.
-
-    Sohbet açıldığında istenir; liste uç noktası mesajları taşımaz.
-    Kullanıcıya ait olmayan bir thread 404 döner — boş bir sohbetle
-    "böyle bir sohbetin yok" farklı cevaplardır.
-    """
-    rows = service.conversation_messages(db, user_id, thread_id)
-    if rows is None:
-        raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
-    return [StoredMessage(**row) for row in rows]
-
-
-@router.delete("/conversations/{thread_id}", status_code=204)
-async def delete_conversation(
-    thread_id: str,
-    user_id: str = Depends(get_current_user_id),
-    db: Session = Depends(get_db),
-) -> None:
-    """Sohbeti kalıcı olarak siler. Mesajlar CASCADE ile birlikte gider.
-
-    Kenar çubuğundaki silme düğmesi hep vardı; liste `localStorage`'dan
-    geldiği sürece yalnızca tarayıcıdaki kopyayı unutması yetiyordu. Liste
-    artık buradan geldiğine göre, veritabanına ulaşmayan bir silme bir sonraki
-    açılışta geri gelirdi.
-    """
-    if not service.delete_conversation(db, user_id, thread_id):
-        raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
-
-
 @router.get("/health")
 async def health_check():
     try:
@@ -249,3 +233,103 @@ async def health_check():
         raise HTTPException(
             status_code=503, detail=f"AI orchestrator unreachable: {exc}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Conversations
+#
+# The counterpart to the writes above. Rows were being written since the `ai`
+# schema landed but nothing could read them back, so the session list in the
+# UI came entirely from localStorage -- which meant history died with the
+# browser profile and could be read by the next person to use the machine.
+#
+# These use `get_current_user_id`, not the optional resolver. An anonymous
+# caller has nothing stored, and answering with an empty list would make
+# "your session expired" indistinguishable from "you have no conversations".
+# ---------------------------------------------------------------------------
+@router.get("/conversations", response_model=ConversationListOut)
+def list_conversations(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ConversationListOut:
+    rows, total = service.list_conversations(db, user_id, limit, offset)
+    return ConversationListOut(
+        items=[ConversationSummary.model_validate(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/conversations/{thread_id}", response_model=ConversationDetailOut)
+def get_conversation(
+    thread_id: str,
+    limit: int = Query(200, ge=1, le=500),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ConversationDetailOut:
+    """One conversation with its transcript, oldest message first.
+
+    `limit` is a UI read and unrelated to the model's context budget: the
+    screen shows the whole conversation, the model sees `trim_history`.
+    """
+    conversation = service.get_conversation(db, user_id, thread_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
+
+    rows, has_more = service.list_messages(db, conversation.id, limit)
+    context_topic = next(
+        (
+            row.meta.get("context_topic")
+            for row in reversed(rows)
+            if row.role == "assistant" and (row.meta or {}).get("context_topic")
+        ),
+        None,
+    )
+    return ConversationDetailOut(
+        **ConversationSummary.model_validate(conversation).model_dump(),
+        messages=[
+            MessageOut(
+                id=row.id,
+                role=row.role,
+                content=row.content,
+                created_at=row.created_at,
+                disclosures=(row.meta or {}).get("disclosures") or [],
+            )
+            for row in rows
+        ],
+        has_more=has_more,
+        context_topic=context_topic,
+    )
+
+
+@router.patch("/conversations/{thread_id}", response_model=ConversationSummary)
+def rename_conversation(
+    thread_id: str,
+    payload: RenameConversationRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> ConversationSummary:
+    conversation = service.rename_conversation(db, user_id, thread_id, payload.title)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
+    return ConversationSummary.model_validate(conversation)
+
+
+@router.delete("/conversations/{thread_id}", response_model=DeletedConversationOut)
+def delete_conversation(
+    thread_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> DeletedConversationOut:
+    """Hard delete; the messages cascade.
+
+    Returns a body rather than 204 because the frontend's `request()` calls
+    `response.json()` unconditionally, so an empty response would throw in the
+    client rather than resolve.
+    """
+    if not service.delete_conversation(db, user_id, thread_id):
+        raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
+    return DeletedConversationOut(thread_id=thread_id)

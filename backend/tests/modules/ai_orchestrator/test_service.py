@@ -116,69 +116,245 @@ class TestLoadHistory:
         assert service.load_history(db, "user-1", "t-1") == []
 
 
-class TestReadingHistoryBack:
-    """The read path that was missing entirely.
+class TestTrimHistory:
+    """The context window, in one place.
 
-    Turns were written from the first day and nothing ever returned them: the
-    chat UI restored its sessions from `localStorage`, so the history lived in
-    one browser rather than in the database. A teammate who loaded the seed
-    data received 45 conversations and saw an empty sidebar.
+    It used to be decided in three: the frontend sliced 6, load_history
+    limited 6, and the orchestrator sliced 6 again. Nobody could say what the
+    model actually saw without reading all three files.
     """
 
-    def test_conversations_are_listed_newest_first(self):
-        db = MagicMock(spec=Session)
+    def test_empty_history_stays_empty(self):
+        assert service.trim_history([]) == []
+
+    def test_a_short_conversation_passes_through_unchanged(self):
+        turns = [
+            {"role": "user", "content": "merhaba"},
+            {"role": "assistant", "content": "selam"},
+        ]
+        assert service.trim_history(turns) == turns
+
+    def test_only_the_newest_messages_survive_the_message_cap(self):
+        turns = [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"tur {i}"}
+            for i in range(service.CONTEXT_MAX_MESSAGES + 10)
+        ]
+        trimmed = service.trim_history(turns)
+        assert len(trimmed) == service.CONTEXT_MAX_MESSAGES
+        assert trimmed[-1] == turns[-1]
+        assert turns[0] not in trimmed
+
+    def test_an_oversized_message_is_truncated_not_dropped(self):
+        trimmed = service.trim_history([{"role": "user", "content": "u" * 9000}])
+        assert len(trimmed) == 1
+        assert len(trimmed[0]["content"]) == service.MESSAGE_MAX_CHARS
+        assert trimmed[0]["content"].endswith("…")
+
+    def test_the_newest_message_survives_however_large_it_is(self):
+        """Returning nothing would hand the router a prompt with no question
+        in it, which is worse than handing it one long one."""
+        trimmed = service.trim_history(
+            [{"role": "user", "content": "x" * service.CONTEXT_MAX_CHARS * 3}]
+        )
+        assert len(trimmed) == 1
+
+    def test_the_character_budget_evicts_the_oldest_turns(self):
+        turns = [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "y" * 2000}
+            for i in range(6)
+        ]
+        trimmed = service.trim_history(turns)
+        total = sum(len(t["role"]) + len(t["content"]) + 2 for t in trimmed)
+        assert total <= service.CONTEXT_MAX_CHARS
+        assert len(trimmed) < len(turns)
+        assert trimmed[-1]["content"] == turns[-1]["content"]
+
+    def test_a_window_opening_on_an_answer_drops_it(self):
+        """An answer whose question was trimmed away invites the model to
+        infer what was asked."""
+        trimmed = service.trim_history(
+            [
+                {"role": "assistant", "content": "önceki cevap"},
+                {"role": "user", "content": "soru"},
+                {"role": "assistant", "content": "cevap"},
+            ]
+        )
+        assert [t["role"] for t in trimmed] == ["user", "assistant"]
+
+    def test_an_orphan_created_by_the_character_walk_is_also_dropped(self):
+        """The budget walk can strand an answer that the message cap did not:
+        dropping an old user turn leaves the reply that followed it leading."""
+        turns = [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": "z" * 2000}
+            for i in range(6)
+        ]
+        trimmed = service.trim_history(turns)
+        assert trimmed[0]["role"] == "user"
+
+    def test_consecutive_leading_answers_are_all_dropped(self):
+        """Normal alternation makes this a one-element skip; a turn whose user
+        row failed to insert leaves two assistant rows adjacent."""
+        trimmed = service.trim_history(
+            [
+                {"role": "assistant", "content": "bir"},
+                {"role": "assistant", "content": "iki"},
+                {"role": "user", "content": "soru"},
+            ]
+        )
+        assert trimmed == [{"role": "user", "content": "soru"}]
+
+    def test_a_history_of_answers_only_yields_nothing(self):
+        assert service.trim_history([{"role": "assistant", "content": "cevap"}]) == []
+
+    def test_missing_keys_default_rather_than_raise(self):
+        assert service.trim_history([{}]) == [{"role": "user", "content": ""}]
+
+
+class TestPersistenceStatus:
+    """Four outcomes, two of which the user needs different words for."""
+
+    def test_no_token_is_anonymous(self):
+        assert service.persistence_status(None, False, None) == "anonymous"
+
+    def test_a_token_that_did_not_resolve_is_an_expired_session(self):
+        """Collapsing this into "anonymous" is what made the session drop
+        silent: the user kept chatting and nothing was being stored."""
+        assert service.persistence_status(None, True, None) == "session_expired"
+
+    def test_a_stored_turn_is_saved(self):
+        assert service.persistence_status("user-1", True, "conv-1") == "saved"
+
+    def test_a_signed_in_turn_with_no_row_is_a_failure(self):
+        """record_turn swallows database errors so the answer survives. With
+        server-side history that means the model will not see this turn next
+        time, which the user is owed an explanation for."""
+        assert service.persistence_status("user-1", True, None) == "failed"
+
+
+class TestMessageOrdering:
+    def test_the_answer_is_timestamped_after_the_question(self):
+        """load_history sorts on (created_at DESC, id DESC) and `id` is a
+        random UUID, so two rows written in the same microsecond order by a
+        coin flip — which can put the answer before the question."""
+        db = make_db()
+        service.record_turn(db, "user-1", "t-1", "soru", "cevap")
+        user_msg, assistant_msg = [
+            c.args[0] for c in db.add.call_args_list if hasattr(c.args[0], "role")
+        ]
+        assert assistant_msg.created_at > user_msg.created_at
+
+
+class TestLoadHistoryWindow:
+    def test_the_query_limit_is_the_context_window(self):
+        db = make_db(existing_conversation=SimpleNamespace(id="conv-1"), messages=[])
+        service.load_history(db, "user-1", "t-1")
+        limit = db.query.return_value.filter.return_value.order_by.return_value.limit
+        limit.assert_called_once_with(service.CONTEXT_MAX_MESSAGES)
+
+    def test_stored_history_is_trimmed_like_any_other(self):
         rows = [
-            SimpleNamespace(thread_id="t-2", title="Yeni", updated_at="2026-08-26",
-                            message_count=4),
-            SimpleNamespace(thread_id="t-1", title="Eski", updated_at="2026-08-20",
-                            message_count=2),
+            SimpleNamespace(role="assistant", content="a" * 9000),
+            SimpleNamespace(role="user", content="soru"),
         ]
-        chain = db.query.return_value.outerjoin.return_value.filter.return_value
-        chain.group_by.return_value.order_by.return_value.all.return_value = rows
+        db = make_db(existing_conversation=SimpleNamespace(id="conv-1"), messages=rows)
+        trimmed = service.load_history(db, "user-1", "t-1")
+        assert len(trimmed[-1]["content"]) == service.MESSAGE_MAX_CHARS
 
-        result = service.list_conversations(db, "user-1")
 
-        assert [r["thread_id"] for r in result] == ["t-2", "t-1"]
-        assert result[0]["message_count"] == 4
+def make_listing_db(rows=None, total=0):
+    """A Session double for the list/paginate chain."""
+    db = MagicMock(spec=Session)
+    scoped = db.query.return_value.filter.return_value
+    scoped.count.return_value = total
+    scoped.order_by.return_value.limit.return_value.offset.return_value.all.return_value = (
+        rows or []
+    )
+    return db
 
-    def test_messages_come_back_oldest_first_without_meta(self):
-        """`meta` holds target_agent, primary_intent and compliance_verdict —
-        an operational record of how the turn was handled. Returning it would
-        put internal names on screen, the thing sanitize.py exists to stop."""
-        conversation = SimpleNamespace(id="c-1")
-        db = MagicMock(spec=Session)
-        db.query.return_value.filter.return_value.first.return_value = conversation
-        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
-            SimpleNamespace(id="m-1", role="user", content="merhaba",
-                            created_at="2026-08-26T10:00", meta={"target_agent": "X"}),
-        ]
 
-        rows = service.conversation_messages(db, "user-1", "t-1")
+def make_message_db(rows=None):
+    db = MagicMock(spec=Session)
+    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = (
+        rows or []
+    )
+    return db
 
-        assert rows == [{"id": "m-1", "role": "user", "content": "merhaba",
-                         "created_at": "2026-08-26T10:00"}]
-        assert "meta" not in rows[0]
 
-    def test_a_thread_that_is_not_yours_reads_as_absent(self):
-        """The user_id filter is the access check. A thread id is guessable,
-        so without it anyone could read anyone's conversation by asking."""
+class TestListConversations:
+    def test_returns_the_page_and_the_total(self):
+        rows = [SimpleNamespace(id="conv-1")]
+        db = make_listing_db(rows=rows, total=12)
+        assert service.list_conversations(db, "user-1", 20, 0) == (rows, 12)
+
+    def test_the_page_window_reaches_the_query(self):
+        db = make_listing_db()
+        service.list_conversations(db, "user-1", 5, 10)
+        ordered = db.query.return_value.filter.return_value.order_by.return_value
+        ordered.limit.assert_called_once_with(5)
+        ordered.limit.return_value.offset.assert_called_once_with(10)
+
+
+class TestGetConversation:
+    def test_returns_the_row_when_the_user_owns_it(self):
+        existing = SimpleNamespace(id="conv-1")
+        db = make_db(existing_conversation=existing)
+        assert service.get_conversation(db, "user-1", "t-1") is existing
+
+    def test_returns_none_for_a_thread_the_user_does_not_own(self):
+        """Scoped in the WHERE clause, so someone else's thread resolves to
+        nothing rather than to a row that then needs an ownership check."""
         db = make_db(existing_conversation=None)
-        assert service.conversation_messages(db, "user-1", "someone-elses") is None
+        assert service.get_conversation(db, "user-1", "t-1") is None
 
 
-class TestDeletingAConversation:
-    def test_deleting_removes_it(self):
-        """The sidebar's delete button used to forget a browser copy. Now the
-        list is served from the database, so a delete that did not reach it
-        would undo itself on the next reload."""
-        conversation = SimpleNamespace(id="c-1")
-        db = make_db(existing_conversation=conversation)
+class TestListMessages:
+    def test_returns_messages_oldest_first(self):
+        rows = [
+            SimpleNamespace(id="m2", role="assistant"),
+            SimpleNamespace(id="m1", role="user"),
+        ]
+        db = make_message_db(rows)
+        messages, has_more = service.list_messages(db, "conv-1", 10)
+        assert [m.id for m in messages] == ["m1", "m2"]
+        assert has_more is False
 
+    def test_one_extra_row_answers_has_more_without_a_second_count(self):
+        rows = [SimpleNamespace(id=f"m{i}") for i in range(3)]
+        db = make_message_db(rows)
+        messages, has_more = service.list_messages(db, "conv-1", 2)
+        assert len(messages) == 2
+        assert has_more is True
+        limit = db.query.return_value.filter.return_value.order_by.return_value.limit
+        limit.assert_called_once_with(3)
+
+
+class TestRenameConversation:
+    def test_sets_the_title_and_commits(self):
+        existing = SimpleNamespace(id="conv-1", title="eski")
+        db = make_db(existing_conversation=existing)
+        result = service.rename_conversation(db, "user-1", "t-1", "yeni başlık")
+        assert result is existing
+        assert existing.title == "yeni başlık"
+        assert db.commit.called
+
+    def test_an_unknown_thread_changes_nothing(self):
+        db = make_db(existing_conversation=None)
+        assert service.rename_conversation(db, "user-1", "t-1", "yeni") is None
+        assert db.commit.called is False
+
+
+class TestDeleteConversation:
+    def test_deletes_the_row_and_reports_success(self):
+        """Hard delete; ai.messages cascades. A soft delete would mean
+        load_history filters a status forever, and the one time someone
+        forgets, a deleted conversation returns as model context."""
+        existing = SimpleNamespace(id="conv-1")
+        db = make_db(existing_conversation=existing)
         assert service.delete_conversation(db, "user-1", "t-1") is True
-        db.delete.assert_called_once_with(conversation)
-        db.commit.assert_called_once()
+        db.delete.assert_called_once_with(existing)
+        assert db.commit.called
 
-    def test_deleting_someone_elses_conversation_is_refused(self):
+    def test_an_unknown_thread_reports_failure_without_deleting(self):
         db = make_db(existing_conversation=None)
         assert service.delete_conversation(db, "user-1", "t-1") is False
-        db.delete.assert_not_called()
+        assert db.delete.called is False

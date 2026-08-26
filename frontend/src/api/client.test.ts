@@ -109,6 +109,7 @@ describe('endpoint paths', () => {
     ['getMarketNews', '/api/market/news'],
     ['getPortfolioAnalysis', '/api/analytics/portfolio'],
     ['getCurrentUser', '/api/auth/me'],
+      ['getConversations', '/api/ai_orchestrator/conversations'],
   ])('%s calls %s', (method, path) => {
     const fetchMock = mockFetch({})
     ;(apiClient as never as Record<string, () => void>)[method]()
@@ -759,5 +760,51 @@ describe('onSessionExpired', () => {
     expect(localStorage.getItem('access_token')).toBeNull()
     expect(localStorage.getItem('refresh_token')).toBeNull()
     expect(localStorage.getItem(ANON_KEY)).toBeNull()
+  })
+})
+
+// Pre-existing coverage gaps, closed here because the repo gates at 100%.
+// `createTransfer` was only ever mocked by the banking render tests, so its
+// body never ran; `describeError` is reached only through a failing response.
+describe('transfers and error messages', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('posts a transfer to the banking endpoint', async () => {
+    const fetchMock = mockFetch({ id: 't-1' })
+    await apiClient.createTransfer({
+      source_account_id: 'a', destination_account_id: 'b', amount: 1,
+    } as never)
+    expect(calledUrl(fetchMock)).toBe('/api/banking/transfers')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+  })
+
+  it("surfaces the backend's reason instead of a bare status code", async () => {
+    // "Bakiye yetersiz: ..." tells the user what to fix; "422" does not.
+    mockFetch({ detail: 'Bakiye yetersiz: transfer ücretle birlikte 120 TL.' }, false)
+    await expect(
+      apiClient.createTransfer({} as never),
+    ).rejects.toThrow('Bakiye yetersiz: transfer ücretle birlikte 120 TL.')
+  })
+
+  it('joins FastAPI validation messages, which arrive as an array', async () => {
+    mockFetch({ detail: [{ msg: 'amount pozitif olmalı' }, { msg: 'hesap gerekli' }] }, false)
+    await expect(
+      apiClient.createTransfer({} as never),
+    ).rejects.toThrow('amount pozitif olmalı • hesap gerekli')
+  })
+
+  it('falls back to the status line when the array carries no usable text', async () => {
+    mockFetch({ detail: [{ nope: 1 }] }, false)
+    await expect(apiClient.createTransfer({} as never)).rejects.toThrow(/API Hatası/)
+  })
+
+  it('falls back when the body is not JSON at all', async () => {
+    // A 502 from the network layer has no JSON body to read.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false, status: 502, statusText: 'Bad Gateway',
+      json: () => Promise.reject(new Error('not json')),
+    }))
+    await expect(apiClient.createTransfer({} as never)).rejects.toThrow(/502/)
   })
 })

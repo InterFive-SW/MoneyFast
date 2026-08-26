@@ -76,6 +76,30 @@ def fetch_products(client: httpx.Client, force: bool = False) -> list[dict[str, 
     return _products_cache
 
 
+def fetch_candle_coverage(client: httpx.Client) -> dict[str, dict]:
+    """How many daily bars the backend already holds, per symbol.
+
+    Asked before the start-up backfill so it fetches only what is missing.
+    Never cached: it is read once per process start, and a stale answer would
+    mean either re-fetching history that is already stored or, worse, deciding
+    an empty instrument is covered.
+
+    A failure is not fatal -- an empty map reads as "nothing is covered",
+    which makes the backfill do the complete, safe thing.
+    """
+    try:
+        response = client.get(
+            f"{config.backend_url()}/market/candles/coverage",
+            headers=_headers(),
+            timeout=config.request_timeout(),
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("candle coverage unavailable, assuming none: %s", exc)
+        return {}
+
+
 def reset_products_cache() -> None:
     """For tests, and for a forced refresh after a universe change."""
     global _products_cache, _products_fetched_at

@@ -346,6 +346,10 @@ class TestScheduler:
         assert dict(added) == {
             "quotes": "interval", "news": "interval",
             "candles": "cron", "fundamentals": "cron",
+            # A one-shot, not part of the warm start: `fetch_candles` is
+            # per-symbol, so a cold-start backfill is ~190 sequential provider
+            # calls. Handing it to the scheduler keeps boot from blocking on it.
+            "candle-backfill": "date",
         }
         assert warmed == ["q", "n"]
         assert started == [True]

@@ -70,6 +70,7 @@ services:
     env_file:
       - ../backend/.env
     environment:
+      SEEDS_DIR: /app/seeds
       DATABASE_URL: ${BASE_DATABASE_URL:?Set a URL-encoded BASE_DATABASE_URL in infra/.env}
       AI_ORCHESTRATOR_URL: http://agents:8080
       # Shared secret guarding the service-to-service ingest endpoints. When
@@ -81,6 +82,10 @@ services:
     depends_on:
       base-db:
         condition: service_healthy
+    volumes:
+      # Committed, reviewable per-user seed data. Mounted so `export_seeds`
+      # writes to the repo rather than into the container filesystem.
+      - ../seeds:/app/seeds
     networks:
       # web-ingress is what makes the `ports:` mapping above actually work.
       # Docker cannot DNAT host traffic into a container attached only to

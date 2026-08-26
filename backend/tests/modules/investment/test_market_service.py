@@ -29,68 +29,224 @@ def product(symbol="THYAO", data_symbol="THYAO.IS", name="Türk Hava Yolları"):
     )
 
 
-class Resolver:
-    """A Session double whose query chain answers resolve_symbol's three steps
-    in order: exact symbol, data_symbol, then name LIKE."""
+class Universe:
+    """A Session double that hands back the instrument universe.
 
-    def __init__(self, exact=None, by_data=None, by_name=None):
-        self.results = [exact, by_data]
-        self.by_name = by_name or []
+    Resolution used to be three chained SQL queries, so the old double had to
+    script `first()` twice and then `limit().all()`. It now reads the ~190-row
+    universe once and matches in Python -- `_fold` exists because Postgres
+    folds ı/İ by collation, so a name lookup pushed into SQL can silently stop
+    matching on a differently configured database.
+    """
+
+    def __init__(self, *products):
         self.db = MagicMock(spec=Session)
-        chain = self.db.query.return_value.filter.return_value
-        chain.first.side_effect = self.results
-        chain.limit.return_value.all.return_value = self.by_name
+        self.db.query.return_value.all.return_value = list(products)
 
 
 class TestSymbolResolution:
-    """The bug that made a buy order fail."""
+    """The names people actually type.
+
+    Two measured failures drove this. "THY kaç para" answered "fiyat verisine
+    ulaşamadım" because THY is not a symbol -- THYAO is. And "turk hava
+    yollari" missed too: `_fold` normalises ı and ü, but the name lookup was a
+    raw SQL `upper(name) LIKE`, so it required the user to type the Turkish
+    characters correctly.
+    """
+
+    THY = product()
+    APPLE = product("AAPL", "AAPL", "Apple Inc.")
+
+    def _db(self, *extra):
+        return Universe(self.THY, self.APPLE, *extra).db
 
     def test_exact_symbol(self):
-        target = product()
-        assert market_service.resolve_symbol(Resolver(exact=target).db, "THYAO") is target
+        assert market_service.resolve_symbol(self._db(), "THYAO") is self.THY
 
     @pytest.mark.parametrize("typed", ["thyao", "Thyao", "THYAO"])
     def test_case_is_ignored(self, typed):
-        target = product()
-        assert market_service.resolve_symbol(Resolver(exact=target).db, typed) is target
+        assert market_service.resolve_symbol(self._db(), typed) is self.THY
 
     def test_provider_suffix_is_stripped(self):
         """People paste "THYAO.IS" out of a data provider."""
-        target = product()
-        assert market_service.resolve_symbol(Resolver(exact=target).db, "THYAO.IS") is target
+        assert market_service.resolve_symbol(self._db(), "THYAO.IS") is self.THY
 
     def test_the_historical_test_prefix_still_resolves(self):
         """Old links and saved messages carry it; refusing them would be a
         regression for anyone who bookmarked one."""
-        target = product()
-        assert market_service.resolve_symbol(Resolver(exact=target).db, "TEST-THYAO") is target
+        assert market_service.resolve_symbol(self._db(), "TEST-THYAO") is self.THY
 
     def test_fx_suffix_is_stripped(self):
-        target = product("USDTRY", "USDTRY=X", "Dolar")
-        assert market_service.resolve_symbol(Resolver(exact=target).db, "USDTRY=X") is target
+        usd = product("USDTRY", "USDTRY=X", "Dolar")
+        assert market_service.resolve_symbol(Universe(usd).db, "USDTRY=X") is usd
 
     def test_falls_back_to_the_provider_symbol(self):
-        target = product()
-        assert market_service.resolve_symbol(Resolver(by_data=target).db, "SOMETHING") is target
+        odd = product("ZZZ", "SOMETHING", "Zed")
+        assert market_service.resolve_symbol(Universe(odd).db, "SOMETHING") is odd
 
-    def test_company_name_resolves_when_unambiguous(self):
-        target = product()
-        resolver = Resolver(by_name=[target])
-        assert market_service.resolve_symbol(resolver.db, "Türk Hava Yolları") is target
+    @pytest.mark.parametrize(
+        "typed",
+        ["Türk Hava Yolları", "türk hava yolları", "TÜRK HAVA YOLLARI",
+         "turk hava yollari", "TURK HAVA YOLLARI"],
+    )
+    def test_the_company_name_resolves_with_or_without_turkish_letters(self, typed):
+        """The unaccented spellings are the ones that used to fail, and they
+        are how most people type."""
+        assert market_service.resolve_symbol(self._db(), typed) is self.THY
 
-    def test_an_ambiguous_name_is_refused_rather_than_guessed(self):
+    @pytest.mark.parametrize("typed", ["THY", "thy"])
+    def test_the_ticker_abbreviation_resolves(self, typed):
+        """THY is not a symbol -- THYAO is. The agent writes THY, the user
+        writes THY, and the answer was "fiyat verisine ulaşamadım"."""
+        assert market_service.resolve_symbol(self._db(), typed) is self.THY
+
+    def test_a_typo_lands_on_the_nearest_neighbour(self):
+        assert market_service.resolve_symbol(self._db(), "THAYO") is self.THY
+
+    def test_a_name_match_beats_a_closer_looking_symbol(self):
+        """Fuzzy scoring on symbols alone ranks "apple" -> APP (0.75) ABOVE
+        AAPL (0.67). The neighbour search runs last precisely so the name rule
+        has already settled it; reordering the two returns the wrong company."""
+        app = product("APP", "APP", "AppLovin Corporation")
+        assert market_service.resolve_symbol(self._db(app), "apple") is self.APPLE
+
+    def test_an_ambiguous_prefix_is_refused_rather_than_guessed(self):
         """Staging a transaction against the wrong instrument is far worse
         than asking which one was meant."""
-        resolver = Resolver(by_name=[product("A"), product("B")])
-        assert market_service.resolve_symbol(resolver.db, "Holding") is None
+        db = Universe(product("KOZAL", "KOZAL.IS", "Koza Altin"),
+                      product("KOZAA", "KOZAA.IS", "Koza Madencilik")).db
+        assert market_service.resolve_symbol(db, "koz") is None
 
     def test_unknown_text_resolves_to_nothing(self):
-        assert market_service.resolve_symbol(Resolver().db, "NOTATICKER") is None
+        assert market_service.resolve_symbol(self._db(), "zzzznotaticker") is None
 
     @pytest.mark.parametrize("value", ["", None, "   "])
     def test_empty_input_is_not_a_lookup(self, value):
-        db = MagicMock(spec=Session)
-        assert market_service.resolve_symbol(db, value) is None
+        """Falling through would match the entire universe on an empty
+        substring."""
+        assert market_service.resolve_symbol(self._db(), value) is None
+
+
+class TestResolutionCandidates:
+    """What to offer when it does not settle.
+
+    An ambiguous query used to log "refusing to guess" and hand the user a
+    bare "bulunamadı" -- with both matches sitting in the same payload.
+    """
+
+    KOZAL = product("KOZAL", "KOZAL.IS", "Koza Altin Isletmeleri")
+    KOZAA = product("KOZAA", "KOZAA.IS", "Koza Anadolu Metal")
+
+    def test_ambiguity_returns_every_match_to_ask_about(self):
+        db = Universe(self.KOZAL, self.KOZAA).db
+        found = market_service.resolve_candidates(db, "koz")
+        assert {p.symbol for p in found} == {"KOZAL", "KOZAA"}
+
+    def test_a_settled_query_returns_exactly_one(self):
+        db = Universe(self.KOZAL, self.KOZAA).db
+        assert [p.symbol for p in market_service.resolve_candidates(db, "KOZAL")] == ["KOZAL"]
+
+    def test_nothing_close_offers_nothing(self):
+        """A suggestion nobody typed is noise, not help."""
+        db = Universe(self.KOZAL).db
+        assert market_service.resolve_candidates(db, "zzzznotaticker") == []
+
+    def test_suggestions_are_capped(self):
+        db = Universe(*[product(f"AKS{i}", f"AKS{i}.IS", f"Aks {i} Holding")
+                        for i in range(6)]).db
+        assert len(market_service.resolve_candidates(db, "aks")) <= 3
+
+
+class TestStrictResolution:
+    """The money path never guesses.
+
+    A misread ticker on a price question is an annoyance. On a buy order it
+    spends real money on the wrong company, so `transactions/stage` takes
+    deterministic matches only.
+    """
+
+    THY = product()
+
+    def test_an_abbreviation_still_resolves_strictly(self):
+        """THY -> THYAO is a unique symbol prefix, not a guess, so an order
+        for "THY" is still perfectly ordinary."""
+        db = Universe(self.THY).db
+        assert market_service.resolve_symbol(db, "THY", strict=True) is self.THY
+
+    def test_an_unaccented_name_still_resolves_strictly(self):
+        db = Universe(self.THY).db
+        assert market_service.resolve_symbol(db, "turk hava yollari", strict=True) is self.THY
+
+    def test_a_typo_is_refused_on_the_money_path(self):
+        db = Universe(self.THY).db
+        assert market_service.resolve_symbol(db, "THAYO", strict=True) is None
+        assert market_service.resolve_symbol(db, "THAYO") is self.THY
+
+
+class TestNoMatchQuery:
+    """What the query looks like when nothing resolved.
+
+    The sentinel used to be the string "\\x00". Postgres rejects it outright --
+    "A string literal cannot contain NUL (0x00) characters" -- so a request
+    where NOTHING resolved answered 500 rather than an empty list. That is
+    exactly the case that most needs a helpful answer: "koz hissesi kaç para"
+    crashed the endpoint instead of offering KOZAL and KOZAA.
+    """
+
+    def _sql(self, db):
+        statement = db.execute.call_args[0][0]
+        return str(statement.compile(compile_kwargs={"literal_binds": True}))
+
+    def test_an_unresolvable_symbol_never_puts_a_nul_in_the_sql(self):
+        db = Universe(product()).db
+        db.execute.return_value.all.return_value = []
+        market_service.list_instruments(db, symbols=["zzzznotaticker"])
+        sql = self._sql(db)
+        assert "\x00" not in sql
+        assert "false" in sql.lower()
+
+    def test_a_resolvable_symbol_still_filters_on_it(self):
+        db = Universe(product()).db
+        db.execute.return_value.all.return_value = []
+        market_service.list_instruments(db, symbols=["THYAO"])
+        assert "THYAO" in self._sql(db)
+
+
+class TestResolutionLastResorts:
+    """The two rules that only fire when everything cheaper has missed."""
+
+    def test_initials_resolve_a_name_whose_ticker_shares_no_prefix(self):
+        """The acronym rule. "THY" reaches THYAO by symbol prefix, but a
+        company whose ticker looks nothing like its initials has only this."""
+        odd = product("XKCD1", "XKCD1.IS", "Bir İki Üç Sanayi")
+        assert market_service.resolve_symbol(Universe(odd).db, "biu") is odd
+
+    def test_a_fuzzy_tie_is_offered_rather_than_guessed(self):
+        """Two neighbours equally close, sharing no prefix and no name
+        substring, so only the neighbour search can see them. Equally close
+        means there is no winner to pick."""
+        a = product("QWERTA", "QWERTA.IS", "Alpha")
+        b = product("ZWERTY", "ZWERTY.IS", "Beta")
+        found = market_service.resolve_candidates(Universe(a, b).db, "qwerty")
+        assert {p.symbol for p in found} == {"QWERTA", "ZWERTY"}
+        assert market_service.resolve_symbol(Universe(a, b).db, "qwerty") is None
+
+
+class TestSymbolSuggestions:
+    def test_only_unsettled_queries_are_reported(self):
+        db = Universe(product(), product("KOZAL", "KOZAL.IS", "Koza Altin"),
+                      product("KOZAA", "KOZAA.IS", "Koza Metal")).db
+        out = market_service.symbol_suggestions(db, ["THYAO", "koz"])
+        assert [item["query"] for item in out] == ["koz"]
+        assert set(out[0]["candidates"]) == {"KOZAL", "KOZAA"}
+
+    def test_nothing_asked_reports_nothing(self):
+        assert market_service.symbol_suggestions(Universe(product()).db, None) == []
+
+    def test_an_unmatchable_query_is_reported_with_no_candidates(self):
+        """"Nothing close to this" is an honest answer; silence is not."""
+        out = market_service.symbol_suggestions(Universe(product()).db, ["zzzznope"])
+        assert out == [{"query": "zzzznope", "candidates": []}]
 
 
 class TestUpsertFundamentals:
@@ -416,9 +572,7 @@ class TestAliasResolution:
     """
 
     def _db(self, found=None):
-        db = MagicMock(spec=Session)
-        db.query.return_value.filter.return_value.first.return_value = found
-        return db
+        return Universe(found).db if found is not None else Universe().db
 
     @pytest.mark.parametrize(
         "typed,expected",
@@ -435,11 +589,12 @@ class TestAliasResolution:
         db = self._db(found=target)
         assert market_service.resolve_symbol(db, typed) is target
 
-    def test_the_alias_lookup_asks_for_the_right_symbol(self):
-        db = self._db(found=product("XAUUSD"))
-        market_service.resolve_symbol(db, "altın")
-        # The filter is built from the aliased symbol, not the typed word.
-        assert db.query.return_value.filter.called
+    def test_the_alias_wins_over_a_name_that_merely_contains_the_word(self):
+        """"altın" is not in XAUUSD's ticker and IS in another company's name,
+        so the alias has to be consulted before the name rule."""
+        gold = product("XAUUSD", "GC=F", "Altın (Ons/USD)")
+        decoy = product("ALTINY", "ALTINY.IS", "Altınyağ Madencilik")
+        assert market_service.resolve_symbol(Universe(gold, decoy).db, "altın") is gold
 
     def test_turkish_dotless_i_folds_the_same_either_way(self):
         """`upper()` in Postgres folds ı/İ by collation, so the answer would
@@ -457,7 +612,7 @@ class TestAliasResolution:
 
     def test_a_normal_ticker_is_unaffected(self):
         target = product("THYAO")
-        assert market_service.resolve_symbol(Resolver(exact=target).db, "THYAO") is target
+        assert market_service.resolve_symbol(Universe(target).db, "THYAO") is target
 
 
 class TestNameBackfill:

@@ -50,4 +50,13 @@ git -C "$ROOT" add "$ROOT/seeds/users" 2>/dev/null || true
 
 CHANGED=$(git -C "$ROOT" diff --cached --name-only -- seeds/users | wc -l)
 [ "$CHANGED" -gt 0 ] && echo "pre-commit: staged $CHANGED seed file(s)"
+
+# Git decides "is there anything to commit" from the index it read BEFORE
+# running this hook, so when the seeds are the ONLY thing that changed it
+# aborts with a bare "nothing to commit" even though the export just staged
+# them. Nothing here can change that -- but it can say what to do, instead of
+# leaving an exit code that looks like the hook failed.
+if [ "$CHANGED" -gt 0 ] && [ -z "$(git -C "$ROOT" diff --cached --name-only -- ':!seeds/users')" ]; then
+  echo "pre-commit: seeds were the only change; run the same git commit again to include them"
+fi
 exit 0

@@ -158,7 +158,13 @@ async def list_instruments(
     # Wrapped in an object rather than returned as a bare array: every other
     # backend endpoint returns one, and the MCP client rejects a non-object
     # body as a contract violation.
-    return {"instruments": rows}
+    # Queries that did not settle travel back with what they might have
+    # meant. Dropping them silently is how "koz" became a bare "bulunamadı"
+    # when KOZAL and KOZAA were both sitting right there.
+    return {
+        "instruments": rows,
+        "unresolved": market_service.symbol_suggestions(db, symbols),
+    }
 
 
 @router.get(

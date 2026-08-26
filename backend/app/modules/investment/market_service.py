@@ -6,12 +6,14 @@ rather than importing the model classes — the boundary rule in CLAUDE.md is
 about not sharing ORM classes across modules, not about never talking.
 """
 
+import difflib
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import false, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -96,72 +98,183 @@ def _fold(text: str) -> str:
     return text.translate(table).lower().strip()
 
 
-def resolve_symbol(db: Session, text: str) -> Optional[InvestmentProduct]:
-    """Find the instrument a human meant.
+#: Words that carry no identity. Dropped before an acronym is built, so
+#: "Türk Hava Yolları A.O." yields THY rather than THYAO's unrelated THYA.
+_NAME_STOPWORDS = frozenset({
+    "as", "ao", "ve", "anonim", "sirketi", "sti", "holding", "inc", "corp",
+    "corporation", "co", "plc", "ltd", "limited", "group", "the", "company",
+    "sanayi", "ticaret",
+})
 
-    People type "thyao", "THYAO.IS", "Türk Hava Yolları" and "TEST-THYAO"
-    (the last one only because it used to be the stored form). Requiring the
-    canonical spelling is how the assistant ended up refusing a perfectly
-    ordinary buy order for a stock it holds.
+#: A neighbour must be this close before it is returned without asking, and
+#: this far clear of the runner-up. Both conditions, because "one strong
+#: match" and "no plausible rival" are different claims and a ticker mix-up
+#: is expensive.
+_FUZZY_ACCEPT = 0.85
+_FUZZY_MARGIN = 0.08
 
-    Deliberately conservative: an ambiguous name match returns None rather
-    than a guess, because staging a transaction against the wrong instrument
-    is far worse than asking which one was meant.
+#: A slightly weaker match still settles it when nothing else is close.
+#: Measured: "THAYO" scores 0.80 against THYAO with the runner-up 0.13 behind
+#: -- one obvious winner. "koz" scores 0.75 against KOZAL and KOZAA with a
+#: margin of 0.00, and must ask. The margin is what separates them.
+_FUZZY_ACCEPT_CLEAR = 0.78
+_FUZZY_MARGIN_CLEAR = 0.12
+
+#: Below this a suggestion is noise rather than help.
+_FUZZY_SUGGEST = 0.6
+
+
+def _acronym(name: str) -> str:
+    """Initials of the words that identify a company.
+
+    "Türk Hava Yolları A.O." -> "thy", which is what people actually type and
+    what the model emits. Returns "" for single-word names: "Airbnb, Inc."
+    would otherwise yield "a" and match almost anything.
     """
-    candidate = (text or "").strip()
-    if not candidate:
-        # Whitespace is not a lookup. Falling through would query for an empty
-        # symbol and, worse, LIKE '%%' would match the entire universe.
-        return None
+    words = [w for w in re.split(r"[^0-9A-Za-zÇĞİÖŞÜçğıöşü]+", _fold(name)) if w]
+    words = [w for w in words if w not in _NAME_STOPWORDS]
+    if len(words) < 2:
+        return ""
+    return "".join(w[0] for w in words)
 
-    # Everyday names first: "altın" and "dolar" would otherwise fall through to
-    # a name substring match that depends on the database's collation.
-    aliased = _ALIASES.get(_fold(candidate))
-    if aliased is not None:
-        found = (
-            db.query(InvestmentProduct)
-            .filter(func.upper(InvestmentProduct.symbol) == aliased)
-            .first()
-        )
-        if found is not None:
-            return found
 
+def _trim_symbol(candidate: str) -> str:
+    """Strip the provider's decoration from something symbol-shaped."""
     upper = candidate.upper()
-    # ".IS" is the provider's suffix; "TEST-" is the historical prefix.
     for prefix in ("TEST-",):
         if upper.startswith(prefix):
             upper = upper[len(prefix):]
     for suffix in (".IS", "=X"):
         if upper.endswith(suffix):
             upper = upper[: -len(suffix)]
+    return upper
 
-    exact = (
-        db.query(InvestmentProduct)
-        .filter(func.upper(InvestmentProduct.symbol) == upper)
-        .first()
-    )
-    if exact is not None:
-        return exact
 
-    by_data_symbol = (
-        db.query(InvestmentProduct)
-        .filter(func.upper(InvestmentProduct.data_symbol) == candidate.upper())
-        .first()
-    )
-    if by_data_symbol is not None:
-        return by_data_symbol
+def resolve_candidates(
+    db: Session, text: str, *, strict: bool = False
+) -> list[InvestmentProduct]:
+    """Every instrument a human might have meant, best first.
 
-    # Company name, case- and accent-insensitively. Two hits means ambiguous.
-    matches = (
-        db.query(InvestmentProduct)
-        .filter(func.upper(InvestmentProduct.name).like(f"%{candidate.upper()}%"))
-        .limit(2)
-        .all()
-    )
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        log.info("ambiguous instrument reference %r, refusing to guess", candidate)
+    One element means it is settled; several mean the caller should ask;
+    none means there is nothing close enough to suggest.
+
+    The whole match runs in Python over the ~190-row universe rather than in
+    SQL. That is not a shortcut -- `_fold` exists precisely because Postgres
+    folds i/İ by collation, so a name lookup pushed into SQL can silently stop
+    matching on a differently configured database. Here the Turkish rules are
+    ours, and testable.
+
+    Order is load-bearing. Fuzzy matching on symbols alone ranks "apple" ->
+    APP (0.75) ABOVE AAPL (0.67); the neighbour search runs last so that the
+    name rule has already settled it. Cheap, exact rules first, guesses only
+    when nothing else fits.
+    """
+    candidate = (text or "").strip()
+    if not candidate:
+        # Whitespace is not a lookup. Falling through would match the entire
+        # universe on an empty substring.
+        return []
+
+    folded = _fold(candidate)
+    products = db.query(InvestmentProduct).all()
+
+    # 1. Everyday names a company name cannot yield: "altın" is not a word in
+    #    "Altın (Ons/USD)"'s ticker, and "dolar" is nowhere in USDTRY.
+    aliased = _ALIASES.get(folded)
+    if aliased is not None:
+        hit = [p for p in products if p.symbol.upper() == aliased]
+        if hit:
+            return hit[:1]
+
+    trimmed = _fold(_trim_symbol(candidate))
+
+    # 2. Exact, on either the canonical or the provider symbol.
+    exact = [p for p in products
+             if _fold(p.symbol) == trimmed or _fold(p.data_symbol or "") == folded]
+    if exact:
+        return exact[:1]
+
+    # 3. Symbol prefix. "thy" -> THYAO. Measured across the live universe:
+    #    only 5 of 185 three-letter prefixes are ambiguous, so this settles
+    #    far more often than it asks.
+    prefix = [p for p in products if _fold(p.symbol).startswith(trimmed)]
+    if len(prefix) == 1:
+        return prefix
+
+    # 4. The company's initials, for multi-word names.
+    acro = [p for p in products if _acronym(p.name or "") == folded]
+    if len(acro) == 1:
+        return acro
+
+    # 5. Name substring, folded on BOTH sides. This is what makes
+    #    "turk hava yollari" work -- the old SQL LIKE compared raw uppercase
+    #    and so required the user to type ü and ı correctly.
+    named = [p for p in products if folded in _fold(p.name or "")]
+    if len(named) == 1:
+        return named
+
+    # An ambiguous deterministic match is still a real answer: these are all
+    # genuine matches, so hand them back to be asked about rather than
+    # discarding them.
+    for group in (prefix, acro, named):
+        if len(group) > 1:
+            return group[:3]
+
+    # 6. Nearest neighbour, for typos: "aselsn", "THAYO", "garantı".
+    #    Skipped in strict mode. A misread ticker on a price question is an
+    #    annoyance; on a buy order it spends real money on the wrong company,
+    #    so the staging path takes deterministic matches only.
+    if strict:
+        return []
+
+    scored: list[tuple[float, InvestmentProduct]] = []
+    for product in products:
+        keys = [_fold(product.symbol), _fold(product.name or "")]
+        acronym = _acronym(product.name or "")
+        if acronym:
+            keys.append(acronym)
+        best = max(difflib.SequenceMatcher(None, folded, key).ratio() for key in keys)
+        if best >= _FUZZY_SUGGEST:
+            scored.append((best, product))
+
+    if not scored:
+        return []
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+
+    top = scored[0][0]
+    runner_up = scored[1][0] if len(scored) > 1 else 0.0
+    margin = top - runner_up
+    if (top >= _FUZZY_ACCEPT and margin >= _FUZZY_MARGIN) or (
+        top >= _FUZZY_ACCEPT_CLEAR and margin >= _FUZZY_MARGIN_CLEAR
+    ):
+        return [scored[0][1]]
+
+    # Not confident enough to answer, but close enough to ask.
+    return [product for _, product in scored[:3]]
+
+
+def resolve_symbol(
+    db: Session, text: str, *, strict: bool = False
+) -> Optional[InvestmentProduct]:
+    """The instrument a human meant, or None when it is not settled.
+
+    People type "thyao", "THYAO.IS", "THY", "türk hava yolları", "turk hava
+    yollari" and "TEST-THYAO". Requiring the canonical spelling is how the
+    assistant ended up refusing an ordinary buy order for a stock it holds,
+    and how "THY kaç para" became "fiyat verisine ulaşamadım".
+
+    Still conservative where it counts: several candidates means None rather
+    than a guess. Callers that can ask the user should use
+    `resolve_candidates` and offer them.
+    """
+    found = resolve_candidates(db, text, strict=strict)
+    if len(found) == 1:
+        return found[0]
+    if len(found) > 1:
+        log.info(
+            "ambiguous instrument reference %r -> %s, refusing to guess",
+            text, ", ".join(p.symbol for p in found),
+        )
     return None
 
 
@@ -442,6 +555,27 @@ def candle_closes(db: Session, symbol: str, limit: int = 260) -> list[tuple[date
     return [(row.timestamp, float(row.close_price)) for row in reversed(rows)]
 
 
+def symbol_suggestions(db: Session, symbols: Optional[list[str]]) -> list[dict[str, Any]]:
+    """For each query that did not settle, what the user might have meant.
+
+    Separate from `list_instruments` so that function keeps returning a plain
+    list of rows. The cost is one more pass over ~190 products, which is
+    nothing next to being told "bulunamadı" with no idea why.
+
+    An entry with candidates is a question worth asking; an entry without is
+    an honest "nothing close to this".
+    """
+    out: list[dict[str, Any]] = []
+    for query in symbols or []:
+        if resolve_symbol(db, query) is not None:
+            continue
+        out.append({
+            "query": query,
+            "candidates": [p.symbol for p in resolve_candidates(db, query)],
+        })
+    return out
+
+
 def list_instruments(
     db: Session,
     symbols: Optional[list[str]] = None,
@@ -475,7 +609,16 @@ def list_instruments(
         resolved = [p.symbol for p in (resolve_symbol(db, s) for s in symbols) if p]
         # An unresolvable symbol must not silently widen the query to
         # everything; it yields no rows and the caller reports it.
-        statement = statement.where(InvestmentProduct.symbol.in_(resolved or ["\x00"]))
+        #
+        # `false()`, not a sentinel string. This used to be `["\x00"]`, which
+        # Postgres rejects outright -- "A string literal cannot contain NUL" --
+        # so a request where NOTHING resolved answered 500 instead of an empty
+        # list. That is precisely the "koz" case: the one query that most needs
+        # a helpful answer was the one that crashed.
+        statement = (
+            statement.where(InvestmentProduct.symbol.in_(resolved))
+            if resolved else statement.where(false())
+        )
     if filters.get("market"):
         statement = statement.where(InvestmentProduct.market == filters["market"])
     if filters.get("product_type"):

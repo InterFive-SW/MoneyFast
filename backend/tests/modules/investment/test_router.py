@@ -71,7 +71,7 @@ def dash(mocker, holdings, quotes, products, sectors, candles, orders, dividends
     mocker.patch.object(market_service, "dividend_rows", return_value=dividends)
     mocker.patch.object(market_service, "account", return_value=ACCOUNT)
     mocker.patch.object(market_service, "resolve_symbol",
-                        side_effect=lambda _db, s: product(str(s).upper()))
+                        side_effect=lambda _db, s, **_kw: product(str(s).upper()))
     app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
     try:
         with TestClient(app) as client:

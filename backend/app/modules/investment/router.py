@@ -519,7 +519,13 @@ async def stage_transaction(
     # what turned an ordinary buy order into REJECTED_VALIDATION.
     body = request.model_dump()
     raw_symbol = (body.get("instrument") or {}).get("symbol")
-    product = market_service.resolve_symbol(db, raw_symbol) if raw_symbol else None
+    # strict: no fuzzy neighbour on the money path. Resolution accepts
+    # abbreviations and unaccented names everywhere ("thy", "turk hava
+    # yollari"), but a typo like "aselsn" must not quietly become an ASELS
+    # order. Reads may guess; a trade may not.
+    product = (
+        market_service.resolve_symbol(db, raw_symbol, strict=True) if raw_symbol else None
+    )
 
     # Whose portfolio and cash this proposal is measured against. The
     # authenticated identity wins; `mcp` calls with a service identity and

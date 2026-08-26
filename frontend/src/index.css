@@ -1,3 +1,59 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Scrollbars.
+ *
+ * There was no custom CSS at all, so every scrolling region rendered the
+ * browser default: a wide light-grey bar with arrow buttons, sitting on a
+ * slate-900 shell. One global rule covers all 31 scrolling components rather
+ * than touching each one.
+ *
+ * The thumb is translucent rather than a fixed slate value on purpose. It
+ * composites onto whatever surface it sits over, so the sidebar at slate-900
+ * and a widget at slate-800 each get a thumb with the same contrast against
+ * their own ground, without either being told what it sits on.
+ *
+ * Deliberately still visible at rest. The chat sidebar is a long conversation
+ * list and the bar is the only thing saying it continues below the fold;
+ * hiding it entirely trades a cosmetic annoyance for a discoverability bug.
+ */
+@layer base {
+  * {
+    /* Firefox. Ignored by Chromium, which uses the pseudo-elements below. */
+    scrollbar-width: thin;
+    scrollbar-color: rgb(148 163 184 / 0.35) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: rgb(148 163 184 / 0.35);
+    border-radius: 9999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(148 163 184 / 0.6);
+  }
+
+  /* The square where a vertical and a horizontal bar meet. Left alone it
+     renders as an opaque grey block, which is the most visible part of the
+     default treatment on a wide table. */
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Chromium draws increment/decrement arrows on some platforms; they are the
+     chunkiest part of the default bar. */
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+}

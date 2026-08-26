@@ -13,7 +13,7 @@ import { BankingContextType } from '../../pages/Banking'
 
 export default function AccountsView() {
   const navigate = useNavigate()
-  const { data, openCloseAccountModal } = useOutletContext<BankingContextType>()
+  const { data, openFeatureNotReadyModal } = useOutletContext<BankingContextType>()
   const accounts = data.accounts
 
   // Varsayılan olarak ilk hesabı seçili yapıyoruz
@@ -99,9 +99,22 @@ export default function AccountsView() {
               })}
             </div>
 
-            {/* Yeni Hesap Aç Butonu */}
-            <button 
-              onClick={() => navigate('/banking/new-account')}
+            {/*
+              Yeni Hesap Aç.
+
+              Sihirbaza değil "yakında" kutusuna gidiyor: backend'de hesap
+              açma ucu yok, sihirbaz hesabı yalnızca bu bileşenin state'ine
+              ekliyordu. Hesaplar artık gerçek olduğu için o sahte satır
+              listede gerçeklerin yanında duruyor ve ilk tazelemede
+              kayboluyordu — kullanıcıya "başarıyla oluşturuldu" deyip hiçbir
+              yere yazmamak, özelliği kapatmaktan daha kötü.
+
+              AccountHeroWidget'taki "Ek Hesap Başvurusu" zaten böyle
+              davranıyordu; burası ona hizalandı. Uç eklendiğinde
+              NewAccountWizard yerinde duruyor, tek satırla geri bağlanır.
+            */}
+            <button
+              onClick={() => openFeatureNotReadyModal('Yeni Hesap Açma')}
               className="mt-2 w-full py-3 border border-dashed border-slate-600 rounded-2xl text-slate-400 font-medium hover:bg-white/5 hover:text-white transition-colors hover:border-slate-500 flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -143,8 +156,10 @@ export default function AccountsView() {
                     </svg>
                     Hesap Hareketleri
                   </button>
-                  <button 
-                    onClick={() => openCloseAccountModal(selectedAccount.id)}
+                  {/* Kapatma da aynı sebeple "yakında": kapatılan hesap
+                      tazelemede geri geliyordu. */}
+                  <button
+                    onClick={() => openFeatureNotReadyModal('Hesap Kapama')}
                     className="flex-1 bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 font-bold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2"
                   >
                     Hesap Kapama

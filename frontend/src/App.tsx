@@ -24,7 +24,9 @@ import BankingDashboard     from './components/banking/BankingDashboard'
 import AccountsView         from './components/banking/AccountsView'
 import AccountTransactionsView from './components/banking/AccountTransactionsView'
 import MoneyTransferWizard  from './components/banking/MoneyTransferWizard'
-import NewAccountWizard     from './components/banking/NewAccountWizard'
+// NewAccountWizard bilerek route'suz duruyor — backend'de hesap açma ucu
+// olmadığı için sihirbaz hesabı yalnızca ekranda yaratıyordu. Uç eklendiğinde
+// import ve route birlikte geri gelir; bkz. AccountsView'daki açıklama.
 import CardsView            from './components/banking/CardsView'
 import NewCardWizard        from './components/banking/NewCardWizard'
 import Investment           from './pages/Investment'
@@ -72,7 +74,6 @@ export default function App() {
                 <Route path="accounts/:accountId/transactions" element={<AccountTransactionsView />} />
                 <Route path="cards" element={<CardsView />} />
                 <Route path="transfer" element={<MoneyTransferWizard />} />
-                <Route path="new-account" element={<NewAccountWizard />} />
                 <Route path="new-card" element={<NewCardWizard />} />
               </Route>
               <Route path="analytics"  element={<Analytics />}  />

@@ -98,7 +98,7 @@ CHAT_TABLES: Sequence[tuple[str, str, str]] = (
         "ai.messages",
         "conversation_id IN (SELECT id FROM ai.conversations WHERE user_id = :uid)",
         "created_at, id",
-        (),
+        ("conversation_id",),
     ),
 )
 
@@ -129,21 +129,55 @@ def _slug(text_value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (text_value or "").lower()).strip("-") or "user"
 
 
-#: How to express a non-portable id as something stable. Only product_id so
-#: far; the pattern generalises if another generated key ever gets seeded.
-PRODUCT_LOOKUP = "(SELECT id FROM investment.investment_products WHERE symbol = {sym})"
+#: How to express a non-portable id as something stable.
+#:
+#: Two columns need this, for the same underlying reason: the id is generated
+#: on the machine that created the row, so writing it literally produces SQL
+#: that only works on that machine.
+#:
+#: * `product_id` -- instruments are created by a migration with
+#:   `gen_random_uuid()`, so every clone numbers them differently. Looked up by
+#:   symbol, which is stable everywhere.
+#: * `conversation_id` -- conversations are created at runtime with uuid4, so
+#:   two machines chatting on the SAME shared login produce the same
+#:   `(user_id, thread_id)` under different ids. Written literally, the
+#:   conversation row is correctly skipped by ON CONFLICT and then its messages
+#:   fail the foreign key -- which, because a file is one transaction, silently
+#:   discarded that user's ENTIRE seed. Measured: 46 conversations and 13
+#:   positions lost, reported as one line in the log.
+#:
+#: Each entry is (column, "SELECT ... WHERE" template, extra columns to carry).
+_LOOKUPS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "product_id": (
+        "(SELECT id FROM investment.investment_products WHERE symbol = {_symbol})",
+        ("(SELECT symbol FROM investment.investment_products p"
+         " WHERE p.id = t.product_id) AS _symbol",),
+    ),
+    "conversation_id": (
+        "(SELECT id FROM ai.conversations"
+        " WHERE user_id = {_conv_user} AND thread_id = {_conv_thread})",
+        ("(SELECT user_id FROM ai.conversations c"
+         " WHERE c.id = t.conversation_id) AS _conv_user",
+         "(SELECT thread_id FROM ai.conversations c"
+         " WHERE c.id = t.conversation_id) AS _conv_thread"),
+    ),
+}
+
+#: Kept as a name because it reads better at the call site than a dict lookup.
+PRODUCT_LOOKUP = _LOOKUPS["product_id"][0].replace("{_symbol}", "{sym}")
 
 
 def _dump_table(
     session, table: str, where: str, order: str, uid: str,
     resolve: Sequence[str] = (),
 ) -> list[str]:
-    select = "*"
-    if "product_id" in resolve:
-        # Carry the symbol alongside so the emitted SQL can look the id up on
-        # whatever machine loads it.
-        select = "t.*, (SELECT symbol FROM investment.investment_products p" \
-                 " WHERE p.id = t.product_id) AS _symbol"
+    # Carry whatever each lookup needs alongside the row, so the emitted SQL
+    # can resolve the id on the machine that loads it.
+    carried: list[str] = []
+    for column in resolve:
+        carried.extend(_LOOKUPS[column][1])
+    select = "t.*, " + ", ".join(carried) if carried else "*"
+
     rows = session.execute(
         text(f"SELECT {select} FROM {table} t WHERE {where} ORDER BY {order}"),
         {"uid": uid},
@@ -151,20 +185,23 @@ def _dump_table(
     if not rows:
         return []
 
-    columns = [c for c in rows[0].keys() if c != "_symbol"]
+    helpers = {c for c in rows[0].keys() if c.startswith("_")}
+    columns = [c for c in rows[0].keys() if c not in helpers]
     collist = ", ".join(f'"{c}"' for c in columns)
+
     out = [f"-- {table} ({len(rows)})"]
     for row in rows:
-        if "product_id" in resolve:
-            values = ", ".join(
-                PRODUCT_LOOKUP.format(sym=_literal(row["_symbol"]))
-                if c == "product_id" else _literal(row[c])
-                for c in columns
-            )
-        else:
-            values = ", ".join(_literal(row[c]) for c in columns)
+        cells = []
+        for column in columns:
+            if column in resolve:
+                template = _LOOKUPS[column][0]
+                cells.append(template.format(
+                    **{h: _literal(row[h]) for h in helpers}
+                ))
+            else:
+                cells.append(_literal(row[column]))
         out.append(
-            f"INSERT INTO {table} ({collist}) VALUES ({values})"
+            f"INSERT INTO {table} ({collist}) VALUES ({', '.join(cells)})"
             f" ON CONFLICT DO NOTHING;"
         )
     out.append("")

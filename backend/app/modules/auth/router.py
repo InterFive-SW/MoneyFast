@@ -10,6 +10,13 @@ from fastapi import APIRouter, Depends, HTTPException, status, Body
 from pydantic import EmailStr
 
 from app.modules.auth import schemas, service
+from app.modules.auth.schemas import (
+    ForgotPasswordRequest, 
+    ResetPasswordRequest, 
+    VerifyEmailRequest,
+    UserUpdateRequest,
+    ChangePasswordRequest
+)
 from app.core import deps
 from app.core.database import get_db
 from sqlalchemy.orm import Session
@@ -84,19 +91,43 @@ async def refresh(payload: schemas.RefreshRequest, db: Session = Depends(get_db)
 
 
 @router.post(
+    "/verify-email",
+    status_code=status.HTTP_200_OK,
+    summary="E-posta adresini doğrula"
+)
+async def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
+    """
+    Kullanıcının e-posta adresini JWT token üzerinden doğrular.
+    GÜVENLİK: Sadece geçerli ve süresi dolmamış tokenlar kabul edilir.
+    """
+    return service.verify_email(payload.token, db)
+
+
+@router.post(
     "/forgot-password",
     status_code=status.HTTP_200_OK,
     summary="Şifre sıfırlama bağlantısı iste"
 )
-async def forgot_password(email: EmailStr = Body(..., embed=True)):
+async def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
     """
-    Sağlanan e-postaya bir sıfırlama bağlantısı göndererek şifre sıfırlama sürecini başlatır.
+    Kullanıcıya e-posta yoluyla şifre sıfırlama bağlantısı gönderir.
+    GÜVENLİK: TC Kimlik ve E-posta doğrulaması yapılarak yetkisiz erişim önlenir.
     """
-    # TODO: DB Mühendisi - E-postanın veritabanında olup olmadığını kontrol et.
-    # Beklenen fonksiyon imzası: db_get_user_by_email(email: EmailStr)
-    
-    logger.info(f"Password reset link requested and dispatched for email: {email}")
-    return {"message": "If the email is registered, a password reset link has been sent."}
+    logger.info(f"Password reset request received for email: {payload.email}")
+    return service.send_password_reset(payload, db)
+
+
+@router.post(
+    "/reset-password",
+    status_code=status.HTTP_200_OK,
+    summary="Yeni şifre belirle"
+)
+async def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Geçerli bir şifre sıfırlama token'ı ile kullanıcının şifresini yeniler.
+    GÜVENLİK: JWT token'ı doğrulanır, şifre bcrypt ile hashlenerek saklanır.
+    """
+    return service.reset_password(payload, db)
 
 
 @router.get(
@@ -118,6 +149,41 @@ async def get_current_user(user=Depends(deps.get_current_user)):
     konuşmaların bir kullanıcıya bağlanmasını imkânsız kılıyordu.
     """
     return user
+
+
+@router.put(
+    "/me",
+    response_model=schemas.UserResponse,
+    summary="Mevcut kullanıcının profilini güncelle"
+)
+async def update_profile(
+    payload: UserUpdateRequest,
+    db: Session = Depends(get_db),
+    user=Depends(deps.get_current_user)
+):
+    """
+    Kullanıcının kendi profil bilgilerini ve ayarlarını günceller.
+    GÜVENLİK: Yalnızca yetkili alanlar (e-posta, telefon, bildirimler vb.) güncellenir.
+    """
+    return service.update_user_profile(user.tc_no, payload, db)
+
+
+@router.post(
+    "/change-password",
+    status_code=status.HTTP_200_OK,
+    summary="Kullanıcının şifresini değiştir"
+)
+async def change_password(
+    payload: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    user=Depends(deps.get_current_user)
+):
+    """
+    Aktif oturumu olan kullanıcının şifresini güvenli bir şekilde değiştirir.
+    GÜVENLİK: Mevcut şifrenin uyuştuğu servis katmanında teyit edilir.
+    """
+    return service.change_user_password(user.tc_no, payload, db)
+
 
 
 @router.get(

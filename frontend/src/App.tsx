@@ -14,6 +14,8 @@ import DashboardLayout      from './components/layout/DashboardLayout'
 import Landing              from './pages/Landing'
 import Login                from './pages/Login'
 import ForgotPassword       from './pages/ForgotPassword'
+import ResetPassword        from './pages/ResetPassword'
+import VerifyEmail          from './pages/VerifyEmail'
 import Register             from './pages/Register'
 import RegisterPassword     from './pages/RegisterPassword'
 import Dashboard            from './pages/Dashboard'
@@ -39,6 +41,7 @@ import IndicesScreen        from './pages/markets/IndicesScreen'
 import SectorsScreen        from './pages/markets/SectorsScreen'
 import AnalysesScreen       from './pages/markets/AnalysesScreen'
 import Analytics from './pages/Analytics'
+import Settings from './pages/Settings'
 
 export default function App() {
   return (
@@ -54,6 +57,8 @@ export default function App() {
           <Route path="/"                 element={<Landing />}          />
           <Route path="login"             element={<Login />}            />
           <Route path="forgot-password"   element={<ForgotPassword />}   />
+          <Route path="reset-password"    element={<ResetPassword />}    />
+          <Route path="verify-email"      element={<VerifyEmail />}      />
           <Route path="register"          element={<Register />}         />
           <Route path="register/password" element={<RegisterPassword />} />
 
@@ -88,6 +93,7 @@ export default function App() {
                 <Route path="analizler"      element={<AnalysesScreen />} />
               </Route>
               <Route path="risk"       element={<Risk />}       />
+              <Route path="settings"   element={<Settings />}   />
             </Route>
           </Route>
         </Routes>

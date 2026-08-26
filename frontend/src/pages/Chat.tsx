@@ -5,6 +5,8 @@ import ChatInput from '../components/chat/ChatInput';
 import SuggestedPrompts from '../components/chat/SuggestedPrompts';
 import TypingIndicator from '../components/chat/TypingIndicator';
 import ContextPanel from '../components/chat/ContextPanel';
+import PersistenceNotice from '../components/chat/PersistenceNotice';
+import SessionRow from '../components/chat/SessionRow';
 import { useChat } from '../context/ChatContext';
 
 /**
@@ -17,7 +19,7 @@ import { useChat } from '../context/ChatContext';
 export default function Chat() {
   const { 
     sessions, activeSessionId, messages, isTyping, currentThought, justAnsweredId, activeContext, dismissContext,
-    handleSendMessage, createNewSession, loadSession, deleteSession 
+    notice, dismissNotice, handleSendMessage, createNewSession, loadSession, deleteSession, renameSession
   } = useChat();
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -70,27 +72,14 @@ export default function Chat() {
           )}
 
           {sessions.map(session => (
-            <div 
-              key={session.id} 
-              className={`group flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors ${activeSessionId === session.id ? 'bg-brandBlue/20 text-brandBlue' : 'hover:bg-white/5 text-slate-300'}`}
-              onClick={() => loadSession(session.id)}
-            >
-              <div className="flex items-center gap-2 overflow-hidden">
-                <svg className="w-4 h-4 shrink-0 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                </svg>
-                <span className="text-sm truncate font-medium">{session.title}</span>
-              </div>
-              <button 
-                onClick={(e) => { e.stopPropagation(); deleteSession(session.id); }}
-                className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-500 transition-opacity"
-                title="Sohbeti Sil"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            </div>
+            <SessionRow
+              key={session.id}
+              session={session}
+              isActive={activeSessionId === session.id}
+              onSelect={() => loadSession(session.id)}
+              onDelete={() => { void deleteSession(session.id); }}
+              onRename={(title) => { void renameSession(session.id, title); }}
+            />
           ))}
         </div>
       </div>
@@ -146,6 +135,7 @@ export default function Chat() {
             kapatıyordu. Kardeş öğe olunca boşluk kendiliğinden doğru. */}
         <div className="shrink-0 w-full bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pt-4 pb-4 px-4 md:px-8">
           <div className="max-w-3xl mx-auto w-full flex flex-col items-center">
+            <PersistenceNotice message={notice} onDismiss={dismissNotice} />
             <ChatInput onSendMessage={handleSendMessage} disabled={isTyping} />
           </div>
         </div>

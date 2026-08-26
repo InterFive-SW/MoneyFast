@@ -84,4 +84,23 @@ export interface ChatSession {
   title: string;
   messages: ChatMessage[];
   updatedAt: Date;
+  /**
+   * Sunucudan gelen bir oturum önce yalnızca başlığıyla listelenir;
+   * mesajları ilk açılışında yüklenir. Bu bayrak olmasaydı "mesajı olmayan
+   * sohbet" ile "mesajları henüz getirilmemiş sohbet" ayırt edilemezdi.
+   */
+  messagesLoaded?: boolean;
+  /**
+   * `server` ise silme/yeniden adlandırma isteklerinin gideceği bir satır
+   * var. Henüz hiç mesaj gönderilmemiş yerel bir oturumun karşılığı yoktur
+   * ve onu silmeye çalışmak 404 üretir.
+   */
+  origin?: 'server' | 'local';
 }
+
+/**
+ * Bir turun geçmişe yazılıp yazılmadığı ve yazılmadıysa sebebi.
+ * `anonymous` ile `session_expired` bilerek ayrı: ilki hiç kaybı olmayan
+ * bir ziyaretçi, ikincisi kaybı olan biri.
+ */
+export type PersistenceStatus = 'saved' | 'anonymous' | 'session_expired' | 'failed';

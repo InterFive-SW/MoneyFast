@@ -9,6 +9,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiClient } from './client'
 
+/** onSessionExpired is a static, so it is reached through the constructor. */
+const ApiClientClass = apiClient.constructor as unknown as { onSessionExpired(): void }
+
 function mockFetch(body: unknown = {}, ok = true) {
   const fn = vi.fn().mockResolvedValue({
     ok,
@@ -561,5 +564,200 @@ describe('streamChat', () => {
     let answer: any = null
     await apiClient.streamChat({}, { onDone: (p) => { answer = p } })
     expect(answer.final_output).toBe('Tamam')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Conversations
+//
+// The endpoints that make the database the source of truth for chat history.
+// Before them, the session list came entirely from localStorage: history died
+// with the browser profile and the next person to use the machine could read
+// it.
+// ---------------------------------------------------------------------------
+describe('conversations', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('lists conversations with the requested page window', async () => {
+    const fetchMock = mockFetch({ items: [], total: 0, limit: 5, offset: 10 })
+    await apiClient.getConversations({ limit: 5, offset: 10 })
+    expect(calledUrl(fetchMock)).toContain('/api/ai_orchestrator/conversations?')
+    expect(calledUrl(fetchMock)).toContain('limit=5')
+    expect(calledUrl(fetchMock)).toContain('offset=10')
+  })
+
+  it('omits the query string when no window was asked for', async () => {
+    const fetchMock = mockFetch({ items: [], total: 0, limit: 20, offset: 0 })
+    await apiClient.getConversations()
+    expect(calledUrl(fetchMock)).toMatch(/\/conversations$/)
+  })
+
+  it('reads one conversation by thread id', async () => {
+    const fetchMock = mockFetch({ messages: [] })
+    await apiClient.getConversation('t-1')
+    expect(calledUrl(fetchMock)).toMatch(/\/conversations\/t-1$/)
+  })
+
+  it('passes a message window through when one is given', async () => {
+    const fetchMock = mockFetch({ messages: [] })
+    await apiClient.getConversation('t-1', 50)
+    expect(calledUrl(fetchMock)).toContain('limit=50')
+  })
+
+  it('escapes a thread id so it cannot alter the path', async () => {
+    const fetchMock = mockFetch({ messages: [] })
+    await apiClient.getConversation('a/../b')
+    expect(calledUrl(fetchMock)).toContain('a%2F..%2Fb')
+  })
+
+  it('renames a conversation with PATCH', async () => {
+    const fetchMock = mockFetch({ title: 'yeni' })
+    const result = await apiClient.renameConversation('t-1', 'yeni')
+    expect(fetchMock.mock.calls[0][1].method).toBe('PATCH')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ title: 'yeni' })
+    expect(result.title).toBe('yeni')
+  })
+
+  it('surfaces a failed rename rather than pretending it worked', async () => {
+    mockFetch({ detail: 'Sohbet bulunamadı.' }, false)
+    await expect(apiClient.renameConversation('t-1', 'yeni')).rejects.toThrow('API Hatası')
+  })
+
+  it('deletes a conversation and reads the confirmation body', async () => {
+    /* The endpoint answers 200 with a body rather than 204 because
+       request() calls response.json() unconditionally. */
+    const fetchMock = mockFetch({ thread_id: 't-1', status: 'deleted' })
+    const result = await apiClient.deleteConversation('t-1')
+    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE')
+    expect(result).toEqual({ thread_id: 't-1', status: 'deleted' })
+  })
+})
+
+describe('ensureFreshSession', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  function tokenExpiringIn(seconds: number): string {
+    const exp = Math.floor(Date.now() / 1000) + seconds
+    const payload = btoa(JSON.stringify({ sub: '1', exp }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+    return `h.${payload}.s`
+  }
+
+  it('is anonymous when there is no token at all', async () => {
+    expect(await apiClient.ensureFreshSession()).toBe('anonymous')
+  })
+
+  it('leaves a healthy token alone and makes no request', async () => {
+    localStorage.setItem('access_token', tokenExpiringIn(3600))
+    const fetchMock = mockFetch({})
+    expect(await apiClient.ensureFreshSession()).toBe('authenticated')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('refreshes a token that is about to expire', async () => {
+    /* The chat endpoints accept anonymous calls, so an expired token yields
+       200-anonymous rather than a 401 — authedFetch's refresh machinery
+       never fires on this path. That is why the session dropped in silence. */
+    localStorage.setItem('access_token', tokenExpiringIn(10))
+    localStorage.setItem('refresh_token', 'r-1')
+    const fetchMock = mockFetch({ access_token: 'fresh' })
+    expect(await apiClient.ensureFreshSession()).toBe('authenticated')
+    expect(calledUrl(fetchMock)).toContain('/auth/refresh')
+    expect(localStorage.getItem('access_token')).toBe('fresh')
+  })
+
+  it('falls back to anonymous when the refresh fails', async () => {
+    localStorage.setItem('access_token', tokenExpiringIn(10))
+    localStorage.setItem('refresh_token', 'r-1')
+    mockFetch({}, false)
+    expect(await apiClient.ensureFreshSession()).toBe('anonymous')
+  })
+
+  it('does not redirect on failure', async () => {
+    /* Yanking someone to /login mid-sentence loses what they typed. */
+    localStorage.setItem('access_token', tokenExpiringIn(10))
+    mockFetch({}, false)
+    const assign = vi.fn()
+    vi.stubGlobal('location', { pathname: '/chat', assign })
+    await apiClient.ensureFreshSession()
+    expect(assign).not.toHaveBeenCalled()
+  })
+})
+
+describe('streamChat persistence frame', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  function streamOf(chunks: string[]) {
+    const encoder = new TextEncoder()
+    let i = 0
+    const body = {
+      getReader: () => ({
+        read: async () =>
+          i < chunks.length
+            ? { done: false, value: encoder.encode(chunks[i++]) }
+            : { done: true, value: undefined },
+      }),
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, body })))
+  }
+
+  it('reports the saved frame the backend appends after the answer', async () => {
+    /* Dispatch is by payload SHAPE, not by event name, and this frame has
+       neither `stage` nor `final_output` — before the branch existed it was
+       parsed and then silently dropped. */
+    streamOf([
+      'event: done\ndata: {"final_output":"Merhaba"}\n\n',
+      'event: saved\ndata: {"conversation_id":"conv-1","persistence":"saved"}\n\n',
+    ])
+    let saved: any = null
+    const ok = await apiClient.streamChat({ user_message: 'selam' }, {
+      onSaved: (p) => { saved = p },
+    })
+    expect(ok).toBe(true)
+    expect(saved).toEqual({ conversation_id: 'conv-1', persistence: 'saved' })
+  })
+
+  it('carries the reason a turn was not stored', async () => {
+    streamOf([
+      'event: done\ndata: {"final_output":"Merhaba"}\n\n',
+      'event: saved\ndata: {"conversation_id":null,"persistence":"session_expired"}\n\n',
+    ])
+    let saved: any = null
+    await apiClient.streamChat({ user_message: 'selam' }, { onSaved: (p) => { saved = p } })
+    expect(saved.persistence).toBe('session_expired')
+    expect(saved.conversation_id).toBeNull()
+  })
+
+  it('survives a saved frame with no handler attached', async () => {
+    streamOf([
+      'event: done\ndata: {"final_output":"Merhaba"}\n\n',
+      'event: saved\ndata: {"conversation_id":null,"persistence":"anonymous"}\n\n',
+    ])
+    await expect(apiClient.streamChat({ user_message: 'selam' }, {})).resolves.toBe(true)
+  })
+})
+
+describe('onSessionExpired', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('clears the chat store along with the tokens', async () => {
+    /* Clearing tokens but leaving the conversations behind is what handed
+       the next person on a shared browser the previous user's chats. */
+    const { ANON_KEY } = await import('../lib/chatStorage')
+    localStorage.setItem('access_token', 'a')
+    localStorage.setItem('refresh_token', 'r')
+    localStorage.setItem(ANON_KEY, '[{"id":"s"}]')
+    vi.stubGlobal('location', { pathname: '/login', assign: vi.fn() })
+
+    ApiClientClass.onSessionExpired()
+
+    expect(localStorage.getItem('access_token')).toBeNull()
+    expect(localStorage.getItem('refresh_token')).toBeNull()
+    expect(localStorage.getItem(ANON_KEY)).toBeNull()
   })
 })

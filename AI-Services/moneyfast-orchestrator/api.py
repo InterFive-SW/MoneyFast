@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -27,17 +27,22 @@ app = FastAPI(title="MoneyFast Orchestrator", version="1.0.0")
 
 
 class Turn(BaseModel):
-    role: str
-    content: str
+    #: A closed set. `_history_summary` flattens each turn to
+    #: "{role}: {content}" before it reaches the router prompt, so a free-form
+    #: role arrives there looking exactly like an instruction. The backend
+    #: enforces the same constraint; this one guards direct callers.
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
 
 
 class ChatRequest(BaseModel):
     user_message: str = Field(min_length=1, max_length=4000)
     # Resolved from the bearer token by the backend before it reaches here;
-    # see backend/app/core/deps.py. None means anonymous, which the portfolio
-    # tools correctly treat as "no holdings to read".
+    # see backend/app/modules/ai_orchestrator/deps.py. None means anonymous,
+    # which the portfolio tools correctly treat as "no holdings to read".
     user_id: Optional[str] = None
-    thread_id: str = "default"
+    #: Matches the width of `ai.conversations.thread_id` in the backend.
+    thread_id: str = Field("default", min_length=1, max_length=64)
     conversation_history: list[Turn] = []
 
 

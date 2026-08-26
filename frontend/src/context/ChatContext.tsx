@@ -30,7 +30,7 @@ const STORAGE_KEY = 'moneyfast_chat_sessions';
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  
+
   const [isTyping, setIsTyping] = useState<boolean>(false);
   const [currentThought, setCurrentThought] = useState<string | undefined>();
   const [justAnsweredId, setJustAnsweredId] = useState<string | null>(null);
@@ -52,7 +52,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           }))
         }));
         setSessions(parsedSessions);
-        
+
         if (parsedSessions.length > 0) {
           // En son güncellenen oturumu aktif yap
           const sorted = [...parsedSessions].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
@@ -85,7 +85,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       messages: [],
       updatedAt: new Date()
     };
-    
+
     setSessions(prev => [newSession, ...prev]);
     setActiveSessionId(newSessionId);
     setActiveContext(null);
@@ -107,7 +107,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const handleSendMessage = async (text: string) => {
     // Eğer hiç aktif oturum yoksa, veya mesaj listesi boşsa yeni oturumun adını güncelle
     let currentSessionId = activeSessionId;
-    
+
     if (!currentSessionId) {
       currentSessionId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString();
       const newSession: ChatSession = {
@@ -213,12 +213,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
         return session;
       }));
-      
+
     } catch (error) {
       console.error("AI Error:", error);
       setCurrentThought(undefined);
       setIsTyping(false);
-      
+
       const errorResponse: ChatMessage = {
         id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(),
         text: "Üzgünüm, şu anda sunucularıma bağlanamıyorum. Lütfen daha sonra tekrar deneyin.",
@@ -240,7 +240,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ChatContext.Provider value={{ 
+    <ChatContext.Provider value={{
       sessions, activeSessionId, messages, isTyping, currentThought, justAnsweredId, activeContext,
       dismissContext, handleSendMessage, createNewSession, loadSession, deleteSession
     }}>

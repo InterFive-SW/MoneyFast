@@ -21,6 +21,7 @@ export default function RegisterPassword() {
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [isSuccess, setIsSuccess] = useState(false)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -74,8 +75,9 @@ export default function RegisterPassword() {
         password: password
       })
       
-      // Şimdilik başarılı kayıt sonrası login ekranına dön.
-      navigate('/login')
+      // GÜVENLİK: Kullanıcı kaydedildi fakat is_verified=False durumunda.
+      // E-posta adresine doğrulama bağlantısı gönderildi. Kullanıcıyı uyarı ekranına geçiriyoruz.
+      setIsSuccess(true)
     } catch (err: any) {
       setError(err.message || 'Kayıt olurken bir hata oluştu. Lütfen bilgilerinizi kontrol edin.')
     } finally {
@@ -99,9 +101,34 @@ export default function RegisterPassword() {
       {/* İçerik */}
       <main className="flex min-h-screen items-center justify-center px-5 pb-10 pt-28 sm:px-8">
         <section className="relative z-10 w-full max-w-xl rounded-[2.5rem] bg-slate-900/50 backdrop-blur-xl border border-white/10 px-7 py-10 shadow-2xl sm:px-12 sm:py-12">
-          <div className="mx-auto max-w-md">
-            {/* Başlık */}
-            <div className="mb-8 text-center">
+          {isSuccess ? (
+            <div className="mx-auto max-w-md text-center">
+              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400">
+                <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              
+              <h2 className="mb-4 text-2xl font-bold text-white">
+                Hesabınız Oluşturuldu!
+              </h2>
+              
+              <p className="mb-8 text-slate-400">
+                Güvenliğiniz için kayıt olduğunuz e-posta adresine bir doğrulama bağlantısı gönderdik. 
+                Sisteme giriş yapabilmek için lütfen e-postanızı kontrol edin ve hesabınızı doğrulayın.
+              </p>
+
+              <Link
+                to="/login"
+                className="inline-flex items-center justify-center rounded-2xl bg-brandBlue px-6 py-3 font-semibold text-white shadow-lg shadow-brandBlue/20 transition hover:-translate-y-0.5 hover:bg-brandBlue/90"
+              >
+                Giriş Ekranına Git
+              </Link>
+            </div>
+          ) : (
+            <div className="mx-auto max-w-md">
+              {/* Başlık */}
+              <div className="mb-8 text-center">
               <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-brandBlue/10 border border-brandBlue/20 px-3 py-1.5 text-xs font-semibold text-brandBlue">
                 <span className="h-2 w-2 rounded-full bg-brandBlue" />
                 Hesap Oluştur
@@ -241,7 +268,8 @@ export default function RegisterPassword() {
                 ← Önceki adıma dön
               </Link>
             </div>
-          </div>
+            </div>
+          )}
         </section>
       </main>
     </div>

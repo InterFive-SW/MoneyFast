@@ -29,6 +29,7 @@ const ROUTE_TITLE_MAP: Record<string, string> = {
   '/chat':       'AI Finansal Asistan',
   '/risk':       'Risk Analizi',
   '/portfolio':  'Portföy',
+  '/settings':   'Ayarlar',
 }
 
 const FALLBACK_TITLE = 'MoneyFast'

@@ -29,6 +29,7 @@ interface MeResponse {
   tc_no:      string
   email:      string
   phone_number?: string
+  wants_email_notifications: boolean
 }
 
 /** Uygulama genelinde kullanılan normalize edilmiş kullanıcı profili */
@@ -43,6 +44,12 @@ export interface UserProfile {
   tcNo:      string
   /** Avatar için ad ve soyadın baş harfleri — en fazla 2 karakter */
   initials:  string
+  /** E-posta adresi */
+  email:     string
+  /** Telefon numarası */
+  phoneNumber?: string
+  /** E-posta bildirim tercihi */
+  wantsEmailNotifications: boolean
 }
 
 /** Context değer yapısı */
@@ -64,6 +71,8 @@ const FALLBACK_PROFILE: UserProfile = {
   fullName:  'Kullanıcı',
   tcNo:      '',
   initials:  'KL',
+  email:     '',
+  wantsEmailNotifications: true
 }
 
 // ─── JWT Decode Yardımcısı ────────────────────────────────────────────────────
@@ -110,7 +119,16 @@ function buildProfile(data: Partial<MeResponse>, tcNo: string): UserProfile {
   const fullName  = [firstName, lastName].filter(Boolean).join(' ')
   const initials  = [firstName[0], lastName[0]].filter(Boolean).join('').toUpperCase() || 'KL'
 
-  return { firstName, lastName, fullName, tcNo, initials }
+  return { 
+    firstName, 
+    lastName, 
+    fullName, 
+    tcNo, 
+    initials,
+    email: data.email ?? '',
+    phoneNumber: data.phone_number,
+    wantsEmailNotifications: data.wants_email_notifications ?? true
+  }
 }
 
 // ─── Context Kurulumu ─────────────────────────────────────────────────────────

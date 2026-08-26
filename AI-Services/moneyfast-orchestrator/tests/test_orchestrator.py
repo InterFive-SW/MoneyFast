@@ -24,6 +24,7 @@ import sys
 import pytest
 from langgraph.graph import END
 
+import agent_trace
 import orchestrator
 from mcp_client import MCPToolError, MCPUnavailable
 
@@ -465,16 +466,24 @@ class TestMarketResearchNode:
         assert args["min_similarity"] == 0.35
 
     @pytest.mark.asyncio
-    async def test_only_the_last_six_turns_are_sent_as_context(
+    async def test_only_the_context_window_is_sent_as_context(
         self, fake_mcp, patched_llm
     ):
+        """The retriever folds in the newest user turn it finds, so this bound
+        is about payload size rather than about what gets resolved."""
         patched_llm.set_response("{}")
         fake_mcp.responses["rag_semantic_market_search"] = {"results": [1]}
-        history = [{"role": "user", "content": f"turn {i}"} for i in range(20)]
+        history = [
+            {"role": "user", "content": f"turn {i}"}
+            for i in range(orchestrator.HISTORY_MAX_TURNS + 10)
+        ]
         await orchestrator.market_research_node(
             {"user_message": "x", "conversation_history": history}
         )
-        assert len(fake_mcp.calls[0][1]["conversation_context"]) == 6
+        assert (
+            len(fake_mcp.calls[0][1]["conversation_context"])
+            == orchestrator.HISTORY_MAX_TURNS
+        )
 
     @pytest.mark.asyncio
     async def test_missing_history_sends_an_empty_context(self, fake_mcp, patched_llm):
@@ -808,11 +817,61 @@ class TestSynthesisNode:
 
     @pytest.mark.asyncio
     async def test_oversized_payload_is_truncated(self, patched_llm, base_state):
-        """Guards the context window: a 10k-row payload must not blow the turn."""
+        """Guards the context window: a 10k-row payload must not blow the turn.
+
+        Asserted on the specialist slice rather than on the whole prompt,
+        which now also carries the conversation and would make this pass or
+        fail for the wrong reason."""
         huge = {"data": {"rows": ["x" * 100 for _ in range(500)]}}
         await orchestrator.synthesis_node({**base_state, "specialist_output": huge})
         user = patched_llm.calls[0][1].content
-        assert len(user) < 13000
+        embedded = user.split("Specialist output", 1)[1]
+        assert len(embedded) < 13000
+
+    @pytest.mark.asyncio
+    async def test_the_writer_is_given_the_conversation(self, patched_llm, base_state):
+        """The final writer used to be blind to earlier turns, so "peki ya onu
+        satsam?" was rendered by a model that did not know what "onu" was."""
+        history = [
+            {"role": "user", "content": "THYAO hakkında ne biliyorsun?"},
+            {"role": "assistant", "content": "THYAO bir havayolu şirketi."},
+        ]
+        await orchestrator.synthesis_node(
+            {**base_state, "conversation_history": history, "specialist_output": {}}
+        )
+        user = patched_llm.calls[0][1].content
+        assert "THYAO hakkında ne biliyorsun?" in user
+
+    @pytest.mark.asyncio
+    async def test_an_empty_conversation_renders_as_none(self, patched_llm, base_state):
+        """Same idiom the router already uses. An empty placeholder would
+        leave a bare heading the model reads as a truncated instruction."""
+        await orchestrator.synthesis_node(
+            {**base_state, "conversation_history": [], "specialist_output": {}}
+        )
+        user = patched_llm.calls[0][1].content
+        assert "(none)" in user
+
+    @pytest.mark.asyncio
+    async def test_the_revision_pass_is_not_given_the_conversation(
+        self, patched_llm, base_state
+    ):
+        """The revision path sees only the rejected draft and the reason.
+        History there would widen the surface for reintroducing exactly what
+        the compliance gate just blocked."""
+        await orchestrator.synthesis_node(
+            {
+                **base_state,
+                "revision_count": 1,
+                "draft_response": "önceki taslak",
+                "blocked_reason": "tavsiye içeriyor",
+                "conversation_history": [
+                    {"role": "user", "content": "gizli önceki mesaj"}
+                ],
+            }
+        )
+        user = patched_llm.calls[0][1].content
+        assert "gizli önceki mesaj" not in user
 
     @pytest.mark.asyncio
     async def test_missing_specialist_output_is_rendered_as_empty_object(
@@ -859,16 +918,42 @@ class TestSynthesisNode:
     async def test_llm_outage_yields_a_turkish_failure_message(
         self, mocker, base_state, caplog
     ):
-        """Groq 429 or a network drop. The user gets a plain Turkish apology,
-        never a stack trace and never a fabricated answer."""
+        """A network drop. The user gets a plain Turkish apology, never a
+        stack trace and never a fabricated answer. Rate limiting has its own
+        message and its own test below."""
         mocker.patch.object(
-            orchestrator, "_llm_text", side_effect=RuntimeError("groq 429 rate limited")
+            orchestrator, "_llm_text", side_effect=RuntimeError("connection reset by peer")
         )
         with caplog.at_level("ERROR", logger="moneyfast.graph"):
             out = await orchestrator.synthesis_node(base_state)
         assert out["draft_response"] == ""
         assert out["final_output"] == orchestrator.GENERIC_FAILURE_TR
         assert "synthesis" in out["errors"][0]
+
+    @pytest.mark.asyncio
+    async def test_a_rate_limit_says_so_instead_of_the_generic_apology(
+        self, mocker, base_state
+    ):
+        """Under one message a quota exhaustion looked identical to a broken
+        application: four turns in a row, including "selam", answered "Şu anda
+        yanıtı hazırlayamadım" with nothing saying that waiting is the fix."""
+        mocker.patch.object(
+            orchestrator, "_llm_text",
+            side_effect=RuntimeError("Error code: 429 - rate_limit_exceeded"),
+        )
+        out = await orchestrator.synthesis_node(base_state)
+        assert out["final_output"] == orchestrator.RATE_LIMITED_TR
+        assert "yoğunluk sınırına" in out["final_output"]
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_outage_keeps_the_generic_apology(
+        self, mocker, base_state
+    ):
+        mocker.patch.object(
+            orchestrator, "_llm_text", side_effect=RuntimeError("connection reset")
+        )
+        out = await orchestrator.synthesis_node(base_state)
+        assert out["final_output"] == orchestrator.GENERIC_FAILURE_TR
 
     @pytest.mark.asyncio
     async def test_missing_intent_and_agent_use_placeholders(self, patched_llm):
@@ -1138,15 +1223,20 @@ class TestRouteAfterRouter:
     def test_missing_agent_falls_through_to_synthesis(self):
         assert orchestrator.route_after_router({"safety_flags": []}) == "synthesis"
 
-    def test_clarification_short_circuits_before_any_specialist(self):
-        """Asking a question needs no tool call, so skip straight to synthesis."""
+    def test_uncertainty_no_longer_skips_the_specialist(self):
+        """`needs_clarification` used to short-circuit to synthesis, so the
+        tool was never called and the user was told the data could not be
+        retrieved -- when nothing had tried. Measured: "onun son fiyatı ne
+        kadar" routed correctly to MARKET_DATA_AGENT, was flagged uncertain,
+        skipped the tool, and answered "fiyat alınamadı" with the quote one
+        call away."""
         state = {
             "needs_clarification": True,
             "target_agent": "PORTFOLIO_AGENT",
             "primary_intent": "PORTFOLIO_INQUIRY",
             "safety_flags": [],
         }
-        assert orchestrator.route_after_router(state) == "synthesis"
+        assert orchestrator.route_after_router(state) == "portfolio"
 
     def test_unsafe_intent_routes_to_handoff(self):
         state = {"target_agent": "PORTFOLIO_AGENT", "primary_intent": "UNSAFE", "safety_flags": []}
@@ -1160,16 +1250,18 @@ class TestRouteAfterRouter:
         }
         assert orchestrator.route_after_router(state) == "handoff"
 
-    def test_clarification_takes_precedence_over_the_safety_check(self):
-        """Documents the precedence order as it actually is, so a change to it
-        is a deliberate edit rather than a silent regression."""
+    def test_safety_decides_before_anything_else(self):
+        """Precedence, pinned. The old order let `needs_clarification` win
+        over the distress check, so an uncertain distress turn went to
+        synthesis instead of handoff -- a safety gate disabled by a
+        confidence score."""
         state = {
             "needs_clarification": True,
             "primary_intent": "UNSAFE",
             "safety_flags": ["DISTRESS_SIGNAL"],
             "target_agent": "PORTFOLIO_AGENT",
         }
-        assert orchestrator.route_after_router(state) == "synthesis"
+        assert orchestrator.route_after_router(state) == "handoff"
 
     def test_missing_safety_flags_key_is_tolerated(self):
         assert orchestrator.route_after_router({"target_agent": "PORTFOLIO_AGENT"}) == "portfolio"
@@ -1211,20 +1303,52 @@ class TestHelpers:
         assert orchestrator._history_summary({}) is None
         assert orchestrator._history_summary({"conversation_history": []}) is None
 
-    def test_history_summary_keeps_the_last_six_turns(self):
-        history = [{"role": "user", "content": f"turn {i}"} for i in range(10)]
+    def test_history_summary_keeps_the_newest_turns(self):
+        total = orchestrator.HISTORY_MAX_TURNS + 4
+        history = [{"role": "user", "content": f"turn {i}"} for i in range(total)]
         summary = orchestrator._history_summary({"conversation_history": history})
-        assert "turn 9" in summary
-        assert "turn 3" not in summary
+        assert f"turn {total - 1}" in summary
+        assert "turn 0" not in summary
 
     def test_history_summary_defaults_a_missing_role(self):
         summary = orchestrator._history_summary({"conversation_history": [{"content": "x"}]})
-        assert summary == "user: x"
+        assert summary == "kullanıcı: x"
+
+    def test_previous_answers_are_excerpted_not_reproduced(self):
+        """A whole previous answer in the prompt is a template, and synthesis
+        copied one: handed a valid THYAO payload it reproduced the earlier
+        turn's "ASELS verisi alınamadı" word for word. Coreference needs the
+        subject of the last answer, never its body."""
+        long_answer = "ASELS fiyatı 399,75 TL. " + "ayrıntı " * 300
+        summary = orchestrator._history_summary(
+            {"conversation_history": [{"role": "assistant", "content": long_answer}]}
+        )
+        assert "ASELS" in summary
+        assert len(summary) < 400
+        assert summary.endswith("…")
+
+    def test_user_turns_are_kept_whole(self):
+        """The user's own words are short and are what the referent points at."""
+        summary = orchestrator._history_summary(
+            {"conversation_history": [{"role": "user", "content": "ASELS ne durumda?"}]}
+        )
+        assert summary == "kullanıcı: ASELS ne durumda?"
 
     def test_history_summary_is_capped_in_length(self):
         """Long histories must not blow the classifier's context window."""
         history = [{"role": "user", "content": "x" * 5000} for _ in range(6)]
-        assert len(orchestrator._history_summary({"conversation_history": history})) <= 2000
+        summary = orchestrator._history_summary({"conversation_history": history})
+        assert len(summary) <= orchestrator.HISTORY_MAX_CHARS
+
+    def test_history_summary_cap_keeps_the_newest_content(self):
+        """The cap slices the tail, so when it bites it is the oldest turn
+        that loses its opening rather than the newest losing its end."""
+        history = [
+            {"role": "user", "content": "eski " * 3000},
+            {"role": "user", "content": "en yeni soru"},
+        ]
+        summary = orchestrator._history_summary({"conversation_history": history})
+        assert summary.endswith("en yeni soru")
 
     def test_specialist_task_is_valid_json(self, base_state):
         task = json.loads(orchestrator._specialist_task(base_state))
@@ -1243,9 +1367,24 @@ class TestHelpers:
         other = {**base_state, "user_id": "u_999"}
         assert orchestrator._idempotency_key(base_state) != orchestrator._idempotency_key(other)
 
-    def test_idempotency_key_varies_with_history_length(self, base_state):
-        later = {**base_state, "conversation_history": [{"role": "user", "content": "x"}]}
-        assert orchestrator._idempotency_key(base_state) != orchestrator._idempotency_key(later)
+    def test_idempotency_key_varies_between_turns(self, base_state):
+        """Seeded on the turn's trace id. It used to be seeded on the history
+        LENGTH, which stops changing once the window saturates -- so asking
+        the same thing twice produced the same key and the second, legitimate
+        staging request could be deduplicated into the first proposal."""
+        agent_trace.new_turn("t-1")
+        first = orchestrator._idempotency_key(base_state)
+        agent_trace.new_turn("t-1")
+        second = orchestrator._idempotency_key(base_state)
+        assert first != second
+
+    def test_idempotency_key_is_stable_within_one_turn(self, base_state):
+        """The graph repairs bad specialist arguments and calls again; that
+        retry is exactly what idempotency exists to collapse."""
+        agent_trace.new_turn("t-1")
+        assert orchestrator._idempotency_key(base_state) == orchestrator._idempotency_key(
+            base_state
+        )
 
     def test_idempotency_key_is_prefixed_and_bounded(self, base_state):
         key = orchestrator._idempotency_key(base_state)
@@ -1961,6 +2100,81 @@ class TestTransferStaging:
         assert out["specialist_output"]["status"] == "ERROR"
 
 
+class TestRefusedSymbol:
+    """The user says "not that one" and the planner stages it anyway.
+
+    Observed: asked for "thyao değil diğer bahsettiğim hisseyi satın
+    alacağım", a THYAO proposal was produced. The prompt already forbade it;
+    a rule that decides where money goes belongs in code.
+    """
+
+    def _state(self, base_state, message, history=()):
+        return {
+            **base_state,
+            "user_message": message,
+            "conversation_history": [{"role": "user", "content": h} for h in history],
+        }
+
+    def test_a_negated_ticker_is_caught(self, base_state):
+        args = {"instrument": {"symbol": "THYAO"}}
+        state = self._state(base_state, "thyao değil diğer bahsettiğim hisseyi al")
+        assert orchestrator._symbol_refused_in_message(state, args) == "THYAO"
+
+    def test_istemiyorum_counts_as_a_refusal(self, base_state):
+        args = {"instrument": {"symbol": "THYAO"}}
+        state = self._state(base_state, "thyao istemiyorum, aselsan alacağım")
+        assert orchestrator._symbol_refused_in_message(state, args) == "THYAO"
+
+    def test_the_company_name_refuses_its_ticker(self, base_state):
+        """"aselsan istemiyorum" must block ASELS, not just the literal word."""
+        args = {"instrument": {"symbol": "ASELS"}}
+        state = self._state(base_state, "aselsan istemiyorum")
+        assert orchestrator._symbol_refused_in_message(state, args) == "ASELS"
+
+    def test_the_instrument_that_was_asked_for_passes(self, base_state):
+        """"ASELS al, THYAO değil" refuses THYAO and leaves ASELS alone."""
+        args = {"instrument": {"symbol": "ASELS"}}
+        state = self._state(base_state, "asels al, thyao değil")
+        assert orchestrator._symbol_refused_in_message(state, args) is None
+
+    def test_a_plain_request_is_not_a_refusal(self, base_state):
+        args = {"instrument": {"symbol": "THYAO"}}
+        state = self._state(base_state, "thyao 5 adet almak istiyorum")
+        assert orchestrator._symbol_refused_in_message(state, args) is None
+
+    def test_a_distant_refusal_word_does_not_reach_back(self, base_state):
+        """Narrow on purpose: the marker has to follow the symbol closely."""
+        args = {"instrument": {"symbol": "THYAO"}}
+        state = self._state(
+            base_state, "thyao almak istiyorum ama bu fiyattan olmasın diyorum"
+        )
+        assert orchestrator._symbol_refused_in_message(state, args) is None
+
+    def test_a_missing_symbol_is_not_a_refusal(self, base_state):
+        assert orchestrator._symbol_refused_in_message(self._state(base_state, "al"), {}) is None
+        assert (
+            orchestrator._symbol_refused_in_message(
+                self._state(base_state, "al"), {"instrument": {"symbol": ""}}
+            )
+            is None
+        )
+
+    @pytest.mark.asyncio
+    async def test_staging_is_refused_end_to_end(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 10,'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        state = self._state(base_state, "thyao değil diğer bahsettiğim hisseyi alacağım")
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "NEEDS_INPUT"
+        assert out["specialist_output"]["missing_fields"] == ["instrument.symbol"]
+        assert "THYAO" in out["specialist_output"]["clarification_request"]
+        assert not fake_mcp.calls, "the symbol the user refused must not be staged"
+
+
 class TestCurrentTurnAmount:
     """The 250/200 bug: the planner sees the last six turns verbatim, and with
     no precedence rule it staged an amount from the PREVIOUS message while the
@@ -1985,6 +2199,61 @@ class TestCurrentTurnAmount:
         out = await orchestrator.transaction_node(state)
         assert out["specialist_output"]["status"] == "NEEDS_INPUT"
         assert not fake_mcp.calls, "a figure the user did not just say must not be staged"
+
+    @pytest.mark.asyncio
+    async def test_the_guard_reaches_the_whole_widened_window(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """The guard still reaches back across the widened window, but only
+        when THIS turn states a competing figure."""
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 250,'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        history = ["250 adet alacaktım"] + [f"başka konu {i}" for i in range(18)]
+        state = self._state(base_state, "200 adet al", history)
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "NEEDS_INPUT"
+        assert not fake_mcp.calls
+
+    @pytest.mark.asyncio
+    async def test_a_figure_the_user_asked_to_reuse_is_allowed(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """"son söylediğim adet kadar al" delegates to the history on purpose.
+        Refusing it produced a loop with no exit: the planner resolved
+        quantity=2 correctly, the guard rejected it, the assistant asked
+        again, and the user answered "birkaç mesaj önce söyledim" four times
+        before giving up."""
+        fake_mcp.responses["prepare_transaction_proposal"] = {
+            "proposal_id": "p1", "confirmation_required": True,
+        }
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 2,'
+            ' "instrument": {"symbol": "ASELS"}, "source_account_id": "1"}}'
+        )
+        state = self._state(
+            base_state, "son söylediğim adet kadar al", ["ASELS 2 adet almak istiyorum"]
+        )
+        out = await orchestrator.transaction_node(state)
+        assert out["specialist_output"]["status"] == "OK"
+        assert fake_mcp.calls, "the staging call must actually happen"
+
+    @pytest.mark.asyncio
+    async def test_the_clarification_never_names_an_internal_field(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """It read "Tutarı bu mesajda göremedim (quantity=250)". The NAMING
+        rule keeps internal keys off the screen."""
+        patched_llm.set_response(
+            '{"arguments": {"transaction_type": "BUY", "quantity": 250,'
+            ' "instrument": {"symbol": "THYAO"}, "source_account_id": "1"}}'
+        )
+        state = self._state(base_state, "200 adet al", ["250 adet alacaktım"])
+        out = await orchestrator.transaction_node(state)
+        request = out["specialist_output"]["clarification_request"]
+        assert "quantity" not in request
+        assert "notional_amount" not in request
 
     @pytest.mark.asyncio
     async def test_the_amount_from_the_current_turn_is_staged(

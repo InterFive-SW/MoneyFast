@@ -57,10 +57,52 @@ JURISDICTION = os.getenv("JURISDICTION", "TR")
 DEFAULT_LOCALE = os.getenv("DEFAULT_LOCALE", "tr-TR")
 MAX_COMPLIANCE_REVISIONS = int(os.getenv("MAX_COMPLIANCE_REVISIONS", "1"))
 
+#: The context window's safety net, NOT its authority.
+#:
+#: The backend decides how much conversation the model sees
+#: (`ai_orchestrator.service.trim_history`, 20 messages / 7500 characters) and
+#: applies it to both the stored and the client-supplied path. These numbers
+#: are deliberately LOOSER, which makes them provably inert behind the
+#: backend -- 8000 clears 7500 plus the role prefixes -- while still bounding
+#: the CLI and anyone calling this service directly.
+#:
+#: Do not "fix the inconsistency" by making them equal. Equal numbers put two
+#: live trimmers in the path and the next person to widen the window would
+#: have to find both.
+HISTORY_MAX_TURNS = int(os.getenv("HISTORY_MAX_TURNS", "20"))
+HISTORY_MAX_CHARS = int(os.getenv("HISTORY_MAX_CHARS", "8000"))
+
+#: How much of a PREVIOUS ANSWER survives into the prompt. Only the subject
+#: is needed to resolve "ondan 2 adet"; the body is what a model copies when
+#: it should be reading this turn's tool payload instead.
+HISTORY_ANSWER_EXCERPT_CHARS = int(os.getenv("HISTORY_ANSWER_EXCERPT_CHARS", "220"))
+
 GENERIC_FAILURE_TR = (
     "Şu anda yanıtı hazırlayamadım. Kısa bir süre sonra tekrar deneyebilir "
     "misiniz?"
 )
+
+#: Rate limiting deserves its own sentence. Under the generic message a
+#: quota exhaustion looked identical to a broken application: four turns in a
+#: row, including "selam", answered "Şu anda yanıtı hazırlayamadım" with
+#: nothing telling the user that waiting is the fix.
+RATE_LIMITED_TR = (
+    "Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir "
+    "durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam "
+    "ederiz."
+)
+
+#: Substrings that mark a provider quota/rate-limit refusal. Matched on the
+#: exception text because the LLM client wraps the provider's 429 rather than
+#: raising a typed error.
+_RATE_LIMIT_MARKERS = ("rate limit", "rate_limit", "429", "quota", "too many requests")
+
+
+def _failure_message(exc: Exception) -> str:
+    text = str(exc).casefold()
+    return RATE_LIMITED_TR if any(m in text for m in _RATE_LIMIT_MARKERS) else GENERIC_FAILURE_TR
+
+
 #: Transaction types the backend recognises as money transfers. The tool
 #: docstring once documented TRANSFER_INTERNAL/EXTERNAL, which the backend
 #: rejects — the three the backend accepts are the contract.
@@ -339,7 +381,11 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     # Overridden here rather than in the tool, because the caller owns this
     # choice and the contract's default has to stay what it says.
     args["min_similarity"] = float(os.getenv("RAG_MIN_SIMILARITY", "0.35"))
-    args["conversation_context"] = (state.get("conversation_history") or [])[-6:]
+    # The retriever scans this reversed and folds in the newest user turn it
+    # finds, so the count only affects payload size, not what gets resolved.
+    args["conversation_context"] = (state.get("conversation_history") or [])[
+        -HISTORY_MAX_TURNS:
+    ]
     return await _run_tool(
         state, "rag_semantic_market_search", args,
         assumptions=plan.get("assumptions") or [],
@@ -427,14 +473,33 @@ async def transaction_node(state: MoneyFastState) -> dict[str, Any]:
 
     mismatch = _amount_not_in_current_turn(state, args)
     if mismatch is not None:
+        log.warning("staging refused, figure overruled by this turn: %s", mismatch)
         return {
             "specialist_output": {
                 "agent": "TRANSACTION_AGENT",
                 "status": "NEEDS_INPUT",
                 "missing_fields": ["quantity" if "quantity" in mismatch else "notional_amount"],
+                # The field name stays out of the user's sentence: `mismatch`
+                # reads "quantity=250", and the NAMING rule keeps internal
+                # keys off the screen. It is logged instead, where it helps.
                 "clarification_request": (
-                    f"Tutarı bu mesajda göremedim ({mismatch}). Kaç adet ya da kaç TL "
-                    f"olduğunu tekrar yazar mısınız?"
+                    "Bu mesajda yazdığınız adet ile daha önce konuştuğumuz adet "
+                    "farklı görünüyor. Hangisini kullanayım?"
+                ),
+            }
+        }
+
+    refused = _symbol_refused_in_message(state, args)
+    if refused is not None:
+        log.warning("staging refused, user rejected this symbol: %s", refused)
+        return {
+            "specialist_output": {
+                "agent": "TRANSACTION_AGENT",
+                "status": "NEEDS_INPUT",
+                "missing_fields": ["instrument.symbol"],
+                "clarification_request": (
+                    f"{refused} istemediğinizi söylediniz. Hangi hisseyi almak "
+                    "veya satmak istediğinizi yazar mısınız?"
                 ),
             }
         }
@@ -543,6 +608,12 @@ async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
         else:
             task = SYNTHESIS_TASK_TEMPLATE.format(
                 user_message=state["user_message"],
+                # The writer used to be blind to earlier turns, so a
+                # follow-up like "peki ya onu satsam?" was rendered by a
+                # model that did not know what "onu" referred to. The
+                # template's own rules keep this to coreference and tone:
+                # figures still come only from the specialist output below.
+                conversation_summary=_history_summary(state) or "(none)",
                 primary_intent=state.get("primary_intent") or "UNKNOWN",
                 target_agent=state.get("target_agent") or "EDUCATION_AGENT",
                 specialist_json=json.dumps(
@@ -554,7 +625,7 @@ async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
         log.error("synthesis failed: %s", exc)
         return {
             "draft_response": "",
-            "final_output": GENERIC_FAILURE_TR,
+            "final_output": _failure_message(exc),
             "errors": (state.get("errors") or []) + [f"synthesis: {exc}"],
         }
     return {"draft_response": draft}
@@ -659,8 +730,22 @@ SpecialistRoute = Literal[
 
 
 def route_after_router(state: MoneyFastState) -> SpecialistRoute:
-    if state.get("needs_clarification"):
-        return "synthesis"
+    """Pick the specialist. Safety decides first; uncertainty does not decide.
+
+    `needs_clarification` used to short-circuit straight to synthesis, which
+    meant the tool was never called and the user was told the data could not
+    be retrieved -- when nothing had tried to retrieve it. Measured over one
+    session: "onun son fiyatı ne kadar" routed correctly to MARKET_DATA_AGENT,
+    was flagged uncertain, skipped the tool, and answered "fiyat alınamadı"
+    while the quote sat one call away.
+
+    The flag is not ignored, it is demoted. The specialist runs, and it is the
+    specialist that reports NEEDS_INPUT when a field really is missing -- an
+    answer grounded in what the tools could actually resolve, rather than a
+    guess made before asking. Every specialist here is read-only except
+    TRANSACTION, and that one only ever STAGES: nothing reaches the user's
+    money without the on-screen confirmation step.
+    """
     intent = state.get("primary_intent")
     if intent == "UNSAFE" or "DISTRESS_SIGNAL" in (state.get("safety_flags") or []):
         return "handoff"
@@ -872,11 +957,42 @@ async def run_turn_streaming(
 # Helpers
 # ---------------------------------------------------------------------------
 def _history_summary(state: MoneyFastState) -> Optional[str]:
+    """The conversation as a flat transcript.
+
+    Not a summary despite the name: no model is asked to condense anything,
+    which is deliberate -- a generated summary is one more surface that can
+    invent a figure, and this text feeds the router's coreference resolution.
+
+    The character cap slices the TAIL, so when it bites it is the oldest turn
+    that loses its opening rather than the newest turn losing its end.
+    """
     history = state.get("conversation_history") or []
     if not history:
         return None
-    lines = [f"{t.get('role', 'user')}: {t.get('content', '')}" for t in history[-6:]]
-    return "\n".join(lines)[-2000:]
+    lines = []
+    for turn in history[-HISTORY_MAX_TURNS:]:
+        role = turn.get("role", "user")
+        content = str(turn.get("content", ""))
+        if role == "assistant":
+            # Excerpt, not transcript. A whole previous answer sitting in the
+            # prompt is a template, and synthesis copied one: asked for
+            # THYAO's price with a valid THYAO payload in hand, it reproduced
+            # the previous turn's "ASELS verisi alınamadı" word for word.
+            # Coreference needs the SUBJECT of the last answer, never its
+            # body, so the body is the part that goes.
+            content = _excerpt(content)
+            lines.append(f"[önceki yanıt özeti] {content}")
+        else:
+            lines.append(f"kullanıcı: {content}")
+    return "\n".join(lines)[-HISTORY_MAX_CHARS:]
+
+
+def _excerpt(content: str) -> str:
+    """First sentence-ish of an assistant turn, enough to name its subject."""
+    flat = " ".join(content.split())
+    if len(flat) <= HISTORY_ANSWER_EXCERPT_CHARS:
+        return flat
+    return flat[:HISTORY_ANSWER_EXCERPT_CHARS].rstrip() + "…"
 
 
 def _specialist_task(state: MoneyFastState) -> str:
@@ -995,6 +1111,54 @@ def _stated_direction(message: str) -> Optional[str]:
     return None
 
 
+#: Turkish ways of saying "not that one", as they appear right after the
+#: instrument: "THYAO değil", "thyao istemiyorum", "onu yerine".
+_REFUSAL_MARKERS = (
+    "değil", "degil", "istemiyorum", "istemem", "olmasın", "olmasin",
+    "vazgeçtim", "vazgectim", "yerine",
+)
+
+
+def _same_instrument(token: str, symbol: str) -> bool:
+    """Ticker and company name for one instrument: ASELS / aselsan."""
+    if token == symbol:
+        return True
+    if len(token) >= 4 and len(symbol) >= 4:
+        return token.startswith(symbol) or symbol.startswith(token)
+    return False
+
+
+def _symbol_refused_in_message(
+    state: MoneyFastState, args: dict[str, Any]
+) -> Optional[str]:
+    """Return the symbol when THIS turn rejected the one being staged.
+
+    The prompt already forbids it, and the prompt was not enough: asked for
+    "thyao değil diğer bahsettiğim hisseyi satın alacağım", the planner staged
+    THYAO. A rule that decides where money goes belongs in code, the same way
+    the direction check and the crisis resources do -- a sampled token is not
+    a control.
+
+    Narrow on purpose: it fires only when the refusal word follows the symbol
+    closely, so "ASELS al, THYAO değil" blocks THYAO and leaves ASELS alone.
+    """
+    symbol = ((args.get("instrument") or {}).get("symbol") or "").strip().casefold()
+    if not symbol:
+        return None
+
+    tokens = re.findall(r"[0-9a-zçğıöşü]+", (state.get("user_message") or "").casefold())
+    for index, token in enumerate(tokens):
+        if not _same_instrument(token, symbol):
+            continue
+        # Two tokens, not more. At three, "asels al, thyao değil" reached the
+        # "değil" belonging to THYAO and refused the instrument the user had
+        # just asked for.
+        for follower in tokens[index + 1 : index + 3]:
+            if any(follower.startswith(marker) for marker in _REFUSAL_MARKERS):
+                return (args.get("instrument") or {}).get("symbol")
+    return None
+
+
 def _direction_contradicts_message(
     state: MoneyFastState, args: dict[str, Any]
 ) -> Optional[str]:
@@ -1026,14 +1190,29 @@ def _direction_contradicts_message(
 def _amount_not_in_current_turn(
     state: MoneyFastState, args: dict[str, Any]
 ) -> Optional[str]:
-    """Return the offending figure when it appears only in the history.
+    """Return the offending figure when this turn's own number was overruled.
 
-    Deliberately narrow: it fires only when the number is absent from the
-    current message AND present in an earlier one. A figure the user did not
-    write anywhere (a quantity the model inferred from "hepsini sat") is left
-    alone, because that is a different question and the tool validates it.
+    Guards the 250/200 bug: the user said "250 adet alacaktım" earlier, says
+    "200 adet al" now, and the planner stages 250 -- a figure the user has
+    just replaced. That is the case worth blocking, and the signal for it is
+    specific: THIS message states a number, and the planner used a different
+    one that it found in the history.
+
+    It deliberately does NOT fire when this message names no figure at all.
+    "son söylediğim adet kadar al" is the user explicitly delegating to the
+    history, and refusing it produced a loop with no exit: the planner
+    resolved quantity=2 correctly, the guard rejected it, the assistant asked
+    again, and the user answered "birkaç mesaj önce söyledim" four times
+    before giving up. Carrying the figure forward there is what was asked
+    for, it is surfaced as an assumption, and it still cannot move money
+    without the on-screen confirmation.
     """
     message = (state.get("user_message") or "").replace(".", "").replace(",", "")
+    stated_here = set(re.findall(r"\d+(?:\.\d+)?", message))
+    if not stated_here:
+        # No competing figure in this turn: nothing was overruled.
+        return None
+
     history = " ".join(
         str(turn.get("content", "")) for turn in (state.get("conversation_history") or [])
     ).replace(".", "").replace(",", "")
@@ -1049,7 +1228,7 @@ def _amount_not_in_current_turn(
     for field, value in candidates:
         # Compare as the user would have typed it: "250" not "250.0".
         written = str(int(value)) if float(value).is_integer() else str(value)
-        if written not in message and written in history:
+        if written not in stated_here and written in history:
             return f"{field}={written}"
     return None
 
@@ -1161,9 +1340,20 @@ def _with_disclosures(text: str, verdict: dict[str, Any]) -> str:
 
 
 def _idempotency_key(state: MoneyFastState) -> str:
+    """One key per turn.
+
+    The seed used to include `len(conversation_history)`, which is bounded by
+    the window. Once the window saturates the length stops changing, so asking
+    the same thing twice produced the SAME key and the second, legitimate
+    staging request could be deduplicated into the first proposal.
+
+    The turn's trace id is unique per turn and stable across the graph's own
+    argument-repair retry -- which is the retry idempotency exists for.
+    """
     import hashlib
 
-    seed = f"{state.get('user_id')}|{state['user_message']}|{len(state.get('conversation_history') or [])}"
+    trace_id = agent_trace.current_trace_id() or ""
+    seed = f"{state.get('user_id')}|{state['user_message']}|{trace_id}"
     return "idem_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
 
 

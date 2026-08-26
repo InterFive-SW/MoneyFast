@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useChat } from '../../context/ChatContext';
 import MessageBubble from './MessageBubble';
 import ChatInput from './ChatInput';
+import PersistenceNotice from './PersistenceNotice';
 import TypingIndicator from './TypingIndicator';
 
 interface ChatPopupProps {
@@ -19,7 +20,7 @@ interface ChatPopupProps {
  * Global `useChat` context'ini kullanarak sohbet geçmişini ana sayfayla senkron tutar.
  */
 export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
-  const { messages, isTyping, currentThought, handleSendMessage } = useChat();
+  const { messages, isTyping, currentThought, notice, dismissNotice, handleSendMessage } = useChat();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -103,6 +104,7 @@ export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
 
       {/* Girdi Alanı */}
       <div className="p-3 bg-slate-900 border-t border-white/10">
+        <PersistenceNotice message={notice} onDismiss={dismissNotice} />
         <ChatInput onSendMessage={handleSendMessage} disabled={isTyping} />
       </div>
 

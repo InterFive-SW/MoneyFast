@@ -152,8 +152,20 @@ class InstrumentOut(BaseModel):
     week52_low: Optional[float] = None
 
 
+class UnresolvedSymbol(BaseModel):
+    """A query that matched no single instrument, and the near misses.
+
+    `candidates` empty means nothing was close; non-empty means the caller
+    should ask which one rather than reporting a dead end.
+    """
+
+    query: str
+    candidates: List[str] = Field(default_factory=list)
+
+
 class InstrumentListOut(BaseModel):
     instruments: List[InstrumentOut] = Field(default_factory=list)
+    unresolved: List[UnresolvedSymbol] = Field(default_factory=list)
 
 
 class CandleOut(BaseModel):

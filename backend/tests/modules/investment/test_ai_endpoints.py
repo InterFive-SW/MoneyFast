@@ -112,7 +112,7 @@ def resolved():
     """Default resolver: knows THYAO and AAPL, nothing else."""
     known = {"THYAO": Product("THYAO"), "AAPL": Product("AAPL", "USD", "NASDAQ")}
 
-    def _resolve(_db, text):
+    def _resolve(_db, text, **_kwargs):
         if not text:
             return None
         return known.get(str(text).upper().removeprefix("TEST-").removesuffix(".IS"))
@@ -336,7 +336,7 @@ class TestForeignCurrencyStaging:
 
     @pytest.fixture
     def resolved(self):
-        def _resolve(_db, text):
+        def _resolve(_db, text, **_kwargs):
             symbol = (text or "").upper()
             if symbol in {"AAPL", "XAUUSD"}:
                 return Product(symbol, "USD", "NASDAQ")
@@ -395,7 +395,7 @@ class TestMissingExchangeRate:
 
     @pytest.fixture
     def resolved(self):
-        return lambda _db, text: (
+        return lambda _db, text, **_kwargs: (
             Product("AAPL", "USD", "NASDAQ") if (text or "").upper() == "AAPL" else None
         )
 

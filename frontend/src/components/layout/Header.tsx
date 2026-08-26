@@ -35,38 +35,78 @@ function getFormattedDate(): string {
 
 // ─── Bildirim Butonu Alt Bileşeni ─────────────────────────────────────────────
 
+function NotificationButton() {
+  const [isOpen, setIsOpen] = useState(false)
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        aria-label="Bildirimleri görüntüle"
+        className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-slate-900/50 text-slate-400 shadow-sm backdrop-blur-sm transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+          <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+        </svg>
+        <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-brandBlue ring-2 ring-slate-950" />
+      </button>
+
+      {/* Tıklanınca açılacak menü */}
+      {isOpen && (
+        <div className="absolute right-0 mt-2 w-72 rounded-xl border border-white/10 bg-slate-900 p-4 shadow-xl backdrop-blur-md z-50">
+          <h3 className="mb-3 text-sm font-semibold text-white border-b border-white/10 pb-2">Bildirimler</h3>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-brandBlue">Sistem</span>
+              <span className="text-sm text-slate-300">MoneyFast'e hoş geldiniz! Piyasa verileri canlı akışa geçti.</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-emerald-400">Portföy</span>
+              <span className="text-sm text-slate-300">Sektörel dağılım grafikleriniz güncellendi.</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+
 /**
  * Bildirim zili ikonu — okunmamış bildirim rozeti içerir.
  * Gerçek bildirim sayısı ilerideki bildirim modülü entegrasyonuyla bağlanacaktır.
  */
-function NotificationButton() {
-  return (
-    <button
-      type="button"
-      aria-label="Bildirimleri görüntüle"
-      className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-slate-900/50 text-slate-400 shadow-sm backdrop-blur-sm transition hover:border-white/20 hover:bg-white/10 hover:text-white"
-    >
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-      </svg>
-      <span
-        className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-brandBlue ring-2 ring-slate-950"
-        aria-label="Okunmamış bildirim mevcut"
-      />
-    </button>
-  )
-}
+// function NotificationButton() {
+//   return (
+//     <button
+//       type="button"
+//       aria-label="Bildirimleri görüntüle"
+//       className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-slate-900/50 text-slate-400 shadow-sm backdrop-blur-sm transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+//     >
+//       <svg
+//         width="16"
+//         height="16"
+//         viewBox="0 0 24 24"
+//         fill="none"
+//         stroke="currentColor"
+//         strokeWidth="2"
+//         strokeLinecap="round"
+//         strokeLinejoin="round"
+//         aria-hidden="true"
+//       >
+//         <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+//         <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+//       </svg>
+//       <span
+//         className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-brandBlue ring-2 ring-slate-950"
+//         aria-label="Okunmamış bildirim mevcut"
+//       />
+//     </button>
+//   )
+// }
 
 // ─── Ana Bileşen ──────────────────────────────────────────────────────────────
 

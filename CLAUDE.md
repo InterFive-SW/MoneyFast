@@ -284,6 +284,69 @@ Fiyata bağlı kolonları (pozisyon değeri, günlük/toplam getiri) yeniden hes
 işi `useLiveRows` içinde; yalnızca fiyatı tazeleyip yanındaki değeri dondurmak
 satırı kendi içinde tutarsız bırakırdı.
 
+## Veritabanını paylaşmak
+
+Migration'lar şemayı ve enstrüman evrenini kurar ama **hiçbir migration
+kullanıcı oluşturmaz**. Klonlayan bir ekip arkadaşı uygulamayı açar ve giriş
+ekranını geçemez. Elle üretilen her şey — hesap, portföy, izleme listesi,
+sohbet geçmişi — yalnızca kişinin kendi Docker volume'unda durur.
+
+Bu yüzden `seeds/` commit'leniyor: **kullanıcı başına bir dosya**, adı TC
+numarası. İki kişi kendi test kullanıcısını eklediğinde farklı dosyalara
+dokunur, git içerikleri hiç karşılaştırmaz. Ekip arkadaşının yapması gereken
+tek şey:
+
+```
+docker compose up --build
+```
+
+**Yükleme her açılışta** olur: `backend/docker-entrypoint.sh`, `alembic
+upgrade head`'in hemen ardından `scripts/load_seeds.py`'yi çalıştırır. Sıra
+tesadüf değil — seed'ler migration'ların kurduğu enstrümanlara referans verir,
+dolayısıyla yükleme onlardan sonra ve onları uygulayan container'ın içinde
+olmak zorunda. Ayrı bir compose servisi `base-db` sağlıklı olur olmaz
+çalışıyordu, yani şema henüz yokken.
+
+Her ifade `ON CONFLICT DO NOTHING`, ama asıl koruma o değil. Her dosyanın
+başında `-- moneyfast:user id=... tc=...` satırı var ve **aynı TC farklı bir
+id ile zaten kayıtlıysa dosya baştan sona atlanır**. `public.users`'ta `tc_no`
+ve `email` üzerinde unique index var, yani kullanıcı satırı zaten
+çoğaltılamaz; tehlike aşağıda: dosyadaki hesap, pozisyon ve mesajlar
+*seed'in* user id'sini taşır ve modüller şemalar arası foreign key kurmaz
+(bkz. "shared/ kuralı"), dolayısıyla hiçbir şey itiraz etmez. Satırlar
+kimsenin olmayan bir id'ye bağlanır. Tehlike **kopya değil, yetim satır**.
+
+Dışa aktarma **her commit'te** olur: `.githooks/pre-commit`. Klon başına bir
+kez `cd backend && make hooks`. Git, bir klonun çalıştırılabilir hook
+kurmasına bilerek izin vermez, o yüzden bu adım kaçınılmaz — ama export
+başına değil, kişi başına bir kez. Backend ayakta değilse hook bir satır
+yazıp çıkar: bir commit'in Docker'a bağımlı olması kabul edilemez.
+
+Hook'un sadece **senin** verini taşıması ayrı bir kayıt tutmayı gerektirmiyor:
+export deterministik olduğu için, yüklediğin ama dokunmadığın bir kullanıcı
+birebir aynı baytlarla yeniden yazılır — diff yok, stage'lenecek şey yok.
+
+**`product_id` asla olduğu gibi yazılmaz.** Enstrüman id'leri migration içinde
+`gen_random_uuid()` ile üretiliyor, yani her makinede farklı — sabit bir id
+taşıyan seed satırı başkasının veritabanında foreign key hatası verir. Bunun
+yerine sembolden aranıyor:
+`(SELECT id FROM investment.investment_products WHERE symbol = 'THYAO')`.
+
+Çıktı **deterministik** olmak zorunda: her tablo açık `ORDER BY` ile okunur.
+Sıralama sabit olmasaydı aynı veri her seferinde farklı satır sırasıyla
+yazılır ve her export tam bir yeniden yazma gibi görünürdü — yani tam olarak
+kullanıcı başına ayırmanın önlediği çakışma.
+
+`market_quotes`, mumlar ve haberler dışa aktarılmaz: ingestor hepsini kendisi
+üretir. Mumlar bir dönem `seeds/market/candles.sql` olarak commit'leniyordu —
+7,5 MB — çünkü günlük barlar yalnızca 19:15 cron'uydu ve sabah açılan bir
+klon akşama kadar boş grafik gösteriyordu. Artık ingestor açılışta
+`GET /api/market/candles/coverage`'a sorup **yalnızca eksik olanı** çekiyor:
+ilk açılışta evrenin tamamı (ölçülen: 187 sembol, 37.199 bar, 36 saniye),
+yeniden başlatmada tek bir HTTP çağrısı. Bloklamaz — `fetch_candles` sembol
+başına çalıştığı için tek seferlik bir scheduler job'ı olarak kuyruğa girer. `dumps/` ise gitignore'da — `make db-dump` tam bir yedek alır
+(riskli bir işlemden önce) ve birine tam durumunu vermek için kullanılır.
+
 ## Teknoloji stack'i
 
 - Backend: Python + FastAPI + PostgreSQL (SQLAlchemy + Alembic)

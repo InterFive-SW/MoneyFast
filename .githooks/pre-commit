@@ -1,0 +1,53 @@
+#!/bin/sh
+#
+# Export the local database to seeds/users/ and stage the result.
+#
+# Install once per clone:  make hooks   (from backend/)
+#
+# Why commit time and not "on every change": chat writes a row per turn, so a
+# live exporter would leave seeds/ permanently modified and every commit would
+# sweep up seed churn from unrelated work. A commit is the moment the data
+# actually needs to be current -- it is when you are about to share it.
+#
+# Only YOUR data moves, with no ownership registry to maintain. The exporter
+# orders every table explicitly, so a teammate's user that you loaded and did
+# not touch re-exports byte-identically: no diff, nothing staged.
+#
+# Deliberately NO `set -e`. This hook must never be the reason a commit fails,
+# and its exit status is the only thing git looks at. With `set -e` that
+# guarantee depended on every single line returning zero -- and it did not:
+# `git config <unset key>` exits 1, so reading the setting below killed the
+# hook before any of the safety checks ran, and every commit was refused.
+# Every path here ends in an explicit `exit 0`; that is what makes the promise
+# structural instead of a property of the last line anyone happened to add.
+
+ROOT=$(git rev-parse --show-toplevel)
+
+# How to reach Docker. Configurable because it is not the same everywhere: on a
+# machine where the user is not in the `docker` group every call needs sudo, and
+# a hook cannot prompt for a password. `make hooks` detects this and records the
+# working form, so the export does not silently never run.
+#
+#     git config moneyfast.compose "sudo docker compose -f infra/docker-compose.yml"
+COMPOSE="${COMPOSE:-$(git config moneyfast.compose || true)}"
+COMPOSE="${COMPOSE:-docker compose -f infra/docker-compose.yml}"
+
+# A commit must never depend on Docker being up. Nothing here is fatal.
+if ! $COMPOSE ps --status running --services 2>/dev/null | grep -qx backend; then
+  echo "pre-commit: backend is not running, skipping seed export"
+  exit 0
+fi
+
+if ! $COMPOSE exec -T backend python -m scripts.export_seeds >/dev/null 2>&1; then
+  echo "pre-commit: seed export failed, committing without it"
+  exit 0
+fi
+
+# `git add` only what changed; an untouched file produces no diff and so does
+# not appear here at all.
+git -C "$ROOT" add --update "$ROOT/seeds/users" 2>/dev/null || true
+git -C "$ROOT" add "$ROOT/seeds/users" 2>/dev/null || true
+
+CHANGED=$(git -C "$ROOT" diff --cached --name-only -- seeds/users | wc -l)
+[ "$CHANGED" -gt 0 ] && echo "pre-commit: staged $CHANGED seed file(s)"
+exit 0

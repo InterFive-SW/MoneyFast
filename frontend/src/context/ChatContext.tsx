@@ -1,7 +1,7 @@
 // src/context/ChatContext.tsx
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { ChatMessage, ChatSession } from '../types/chat';
-import { api } from '../api/client';
+import { api, StoredMessage } from '../api/client';
 
 interface ChatContextType {
   sessions: ChatSession[];
@@ -25,7 +25,29 @@ interface ChatContextType {
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'moneyfast_chat_sessions';
+/**
+ * Önbellek anahtarının kökü. Kullanıcı kimliği sonuna eklenir.
+ *
+ * Sabit tek bir anahtardı ve kullanıcıya göre ayrılmıyordu: ortak bir
+ * makinede ya da çıkış yapıp başka biriyle girdiğinde, önceki kullanıcının
+ * sohbet başlıkları bir sonrakine görünüyordu.
+ */
+const STORAGE_ROOT = 'moneyfast_chat_sessions';
+
+const storageKeyFor = (userId: string) => `${STORAGE_ROOT}:${userId}`;
+
+/** Sunucudaki bir turu arayüzün mesaj biçimine çevirir.
+ *
+ *  Geri gelen tur SADECE metindir. Widget'lar (portföy tablosu, al/sat
+ *  düğmesi), düşünce adımları ve dipnotlar hiçbir zaman saklanmadı — `meta`
+ *  yalnızca yönlendirme ve uygunluk kaydını tutuyor. Canlı turlar bunları
+ *  göstermeye devam eder; geçmişten gelenler düz metin olarak döner. */
+const toChatMessage = (m: StoredMessage): ChatMessage => ({
+    id: m.id,
+    text: m.content,
+    sender: m.role === 'user' ? 'user' : 'ai',
+    timestamp: new Date(m.created_at),
+});
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -35,43 +57,91 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [currentThought, setCurrentThought] = useState<string | undefined>();
   const [justAnsweredId, setJustAnsweredId] = useState<string | null>(null);
   const [activeContext, setActiveContext] = useState<string | null>(null);
+  /** `${STORAGE_ROOT}:${userId}` — kimlik çözülene kadar null. */
+  const [storageKey, setStorageKey] = useState<string | null>(null);
   const dismissContext = useCallback(() => setActiveContext(null), []);
 
-  // Başlangıçta localStorage'dan verileri çek
+  /**
+   * Geçmiş SUNUCUDAN gelir; localStorage yalnızca çevrimdışı yedektir.
+   *
+   * Eskiden tek kaynak localStorage'dı, yani geçmiş veritabanında değil bir
+   * tarayıcıda yaşıyordu: aynı veritabanını yükleyen bir ekip arkadaşı 45
+   * sohbetin satırlarını alıyor ve boş bir kenar çubuğu görüyordu. Kendi
+   * gizli sekmende de aynısı olurdu.
+   *
+   * Bu yüzden sunucu kazanır. Önbelleği kaynak kabul etmek, tam olarak o
+   * boş listeyi geri getirirdi.
+   */
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        // Tarihleri string'den Date objesine çevir
-        const parsedSessions: ChatSession[] = JSON.parse(stored).map((session: any) => ({
-          ...session,
-          updatedAt: new Date(session.updatedAt),
-          messages: session.messages.map((msg: any) => ({
-            ...msg,
-            timestamp: new Date(msg.timestamp)
-          }))
-        }));
-        setSessions(parsedSessions);
-        
-        if (parsedSessions.length > 0) {
-          // En son güncellenen oturumu aktif yap
-          const sorted = [...parsedSessions].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-          setActiveSessionId(sorted[0].id);
-        }
+    let cancelled = false;
+
+    const hydrate = async () => {
+      // Token yoksa istek 401 döner; oturum açılmadan denemenin anlamı yok.
+      if (!localStorage.getItem('access_token')) return;
+
+      let key: string | null = null;
+      try {
+        const me = await api.getCurrentUser();
+        key = storageKeyFor(me.id);
+        if (cancelled) return;
+        setStorageKey(key);
+      } catch {
+        return; // Kimliği çözemeden hiçbir şeyi kimseye ait sayamayız.
       }
-    } catch (e) {
-      console.error("Geçmiş sohbetler yüklenemedi:", e);
-    }
+
+      // Önce önbellek: ağ yavaşsa ekran boş kalmasın.
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored && !cancelled) {
+          setSessions(JSON.parse(stored).map((session: any) => ({
+            ...session,
+            updatedAt: new Date(session.updatedAt),
+            messages: (session.messages ?? []).map((msg: any) => ({
+              ...msg,
+              timestamp: new Date(msg.timestamp),
+            })),
+          })));
+        }
+      } catch {
+        localStorage.removeItem(key);
+      }
+
+      try {
+        const remote = await api.getConversations();
+        if (cancelled) return;
+
+        // Mesajlar burada gelmez; sohbet açıldığında istenir. Kenar çubuğu
+        // yalnızca başlık ve tarih gösteriyor, en yoğun kullanıcının ise 45
+        // sohbette 292 mesajı var.
+        const restored: ChatSession[] = remote.map((c) => ({
+          id: c.thread_id,
+          title: c.title ?? 'Sohbet',
+          messages: [],
+          updatedAt: new Date(c.updated_at),
+        }));
+        setSessions(restored);
+        if (restored.length > 0) setActiveSessionId(restored[0].id);
+      } catch (e) {
+        // Çevrimdışı: yukarıda yüklenen önbellek ekranda kalır.
+        console.error('Sohbet geçmişi sunucudan alınamadı:', e);
+      }
+    };
+
+    void hydrate();
+    return () => { cancelled = true; };
   }, []);
 
-  // Sessions her değiştiğinde localStorage'a kaydet
+  // Sessions her değiştiğinde önbelleğe yaz. Anahtar çözülene kadar yazmayız:
+  // kullanıcı belli değilken yazılan bir kopya, ayırmaya çalıştığımız şeyin
+  // ta kendisi olurdu.
   useEffect(() => {
+    if (!storageKey) return;
     if (sessions.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+      localStorage.setItem(storageKey, JSON.stringify(sessions));
     } else {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(storageKey);
     }
-  }, [sessions]);
+  }, [sessions, storageKey]);
 
   // Aktif oturumun mesajlarını hesapla
   const activeSession = sessions.find(s => s.id === activeSessionId);
@@ -91,6 +161,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setActiveContext(null);
   };
 
+  /** Bir sohbetin turlarını, henüz getirilmediyse, sunucudan çeker.
+   *
+   *  Boş bir `messages` dizisi "bu sohbet boş" değil "henüz açılmadı"
+   *  demektir: liste uç noktası mesaj taşımıyor. */
+  const ensureMessages = useCallback(async (sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session || session.messages.length > 0) return;
+    try {
+      const rows = await api.getConversationMessages(sessionId);
+      setSessions(prev => prev.map(s =>
+        s.id === sessionId ? { ...s, messages: rows.map(toChatMessage) } : s,
+      ));
+    } catch (e) {
+      // Sunucuda yoksa (yeni, henüz hiç mesaj gönderilmemiş oturum) sorun
+      // değil: dizi boş kalır ve ilk mesajla dolar.
+      console.error('Sohbet mesajları alınamadı:', e);
+    }
+  }, [sessions]);
+
+  // Aktif sohbet değiştiğinde turlarını getir. İlk açılışta en son sohbet
+  // otomatik seçildiği için bu, onun mesajlarını da yükler.
+  useEffect(() => {
+    if (activeSessionId) void ensureMessages(activeSessionId);
+  }, [activeSessionId, ensureMessages]);
+
   const loadSession = (sessionId: string) => {
     setActiveSessionId(sessionId);
     setActiveContext(null); // veya oturumdan yüklenebilir
@@ -102,6 +197,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       setActiveSessionId(null);
       setActiveContext(null);
     }
+    // Sunucuya da gitmeli. Liste artık veritabanından geldiği için, yalnızca
+    // yerelde silinen bir sohbet bir sonraki açılışta geri gelirdi.
+    void api.deleteConversation(sessionId).catch(() => {
+      // Hiç kaydedilmemiş (boş) bir oturumun sunucuda karşılığı yoktur;
+      // 404 burada beklenen durumdur.
+    });
   };
 
   const handleSendMessage = async (text: string) => {

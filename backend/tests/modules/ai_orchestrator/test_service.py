@@ -114,3 +114,71 @@ class TestLoadHistory:
     def test_unknown_conversation_yields_no_history(self):
         db = make_db(existing_conversation=None)
         assert service.load_history(db, "user-1", "t-1") == []
+
+
+class TestReadingHistoryBack:
+    """The read path that was missing entirely.
+
+    Turns were written from the first day and nothing ever returned them: the
+    chat UI restored its sessions from `localStorage`, so the history lived in
+    one browser rather than in the database. A teammate who loaded the seed
+    data received 45 conversations and saw an empty sidebar.
+    """
+
+    def test_conversations_are_listed_newest_first(self):
+        db = MagicMock(spec=Session)
+        rows = [
+            SimpleNamespace(thread_id="t-2", title="Yeni", updated_at="2026-08-26",
+                            message_count=4),
+            SimpleNamespace(thread_id="t-1", title="Eski", updated_at="2026-08-20",
+                            message_count=2),
+        ]
+        chain = db.query.return_value.outerjoin.return_value.filter.return_value
+        chain.group_by.return_value.order_by.return_value.all.return_value = rows
+
+        result = service.list_conversations(db, "user-1")
+
+        assert [r["thread_id"] for r in result] == ["t-2", "t-1"]
+        assert result[0]["message_count"] == 4
+
+    def test_messages_come_back_oldest_first_without_meta(self):
+        """`meta` holds target_agent, primary_intent and compliance_verdict —
+        an operational record of how the turn was handled. Returning it would
+        put internal names on screen, the thing sanitize.py exists to stop."""
+        conversation = SimpleNamespace(id="c-1")
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = conversation
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
+            SimpleNamespace(id="m-1", role="user", content="merhaba",
+                            created_at="2026-08-26T10:00", meta={"target_agent": "X"}),
+        ]
+
+        rows = service.conversation_messages(db, "user-1", "t-1")
+
+        assert rows == [{"id": "m-1", "role": "user", "content": "merhaba",
+                         "created_at": "2026-08-26T10:00"}]
+        assert "meta" not in rows[0]
+
+    def test_a_thread_that_is_not_yours_reads_as_absent(self):
+        """The user_id filter is the access check. A thread id is guessable,
+        so without it anyone could read anyone's conversation by asking."""
+        db = make_db(existing_conversation=None)
+        assert service.conversation_messages(db, "user-1", "someone-elses") is None
+
+
+class TestDeletingAConversation:
+    def test_deleting_removes_it(self):
+        """The sidebar's delete button used to forget a browser copy. Now the
+        list is served from the database, so a delete that did not reach it
+        would undo itself on the next reload."""
+        conversation = SimpleNamespace(id="c-1")
+        db = make_db(existing_conversation=conversation)
+
+        assert service.delete_conversation(db, "user-1", "t-1") is True
+        db.delete.assert_called_once_with(conversation)
+        db.commit.assert_called_once()
+
+    def test_deleting_someone_elses_conversation_is_refused(self):
+        db = make_db(existing_conversation=None)
+        assert service.delete_conversation(db, "user-1", "t-1") is False
+        db.delete.assert_not_called()

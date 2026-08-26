@@ -33,6 +33,23 @@ export type Statement = GetResponseType<paths['/api/banking/accounts/{account_nu
 export type Movement = NonNullable<Statement['movements']>[0];
 export type SpendingSummary = GetResponseType<paths['/api/banking/spending']>;
 export type BalanceHistory = GetResponseType<paths['/api/banking/balance-history']>;
+
+/** Kenar çubuğundaki bir satır. Mesajları taşımaz — bkz. getConversations. */
+export interface ConversationSummary {
+    thread_id: string;
+    title: string | null;
+    updated_at: string;
+    message_count: number;
+}
+
+/** Saklandığı hâliyle bir tur. `meta` yok: yönlendirme/uygunluk kaydı
+ *  kullanıcıya ait bir bilgi değil. */
+export interface StoredMessage {
+    id: string;
+    role: string;
+    content: string;
+    created_at: string;
+}
 export type SavingsGoalItem = GetResponseType<paths['/api/banking/savings-goals']>[0];
 export type TransferRequest = components['schemas']['TransferRequest'];
 export type TransferOut = components['schemas']['TransferOut'];
@@ -320,6 +337,33 @@ class ApiClient {
     /** Portföy analizi — dağılım, trend, performans ve işlem geçmişi tek çağrıda. */
     getPortfolioAnalysis() {
         return this.request<PortfolioAnalysis>('/analytics/portfolio');
+    }
+
+    /**
+     * Kayıtlı sohbetler, en son konuşulan en üstte.
+     *
+     * Turlar ilk günden beri veritabanına yazılıyordu ama hiçbir uç nokta geri
+     * vermiyordu; sohbet geçmişi `localStorage`'dan geliyordu, yani tek bir
+     * tarayıcıda yaşıyordu. Seed verisini yükleyen bir ekip arkadaşı satırları
+     * alıyor, kenar çubuğunu boş görüyordu.
+     */
+    getConversations() {
+        return this.request<ConversationSummary[]>('/ai_orchestrator/conversations');
+    }
+
+    /** Bir sohbetin turları, eskiden yeniye. Liste uç noktası mesaj taşımaz. */
+    getConversationMessages(threadId: string) {
+        return this.request<StoredMessage[]>(
+            `/ai_orchestrator/conversations/${encodeURIComponent(threadId)}/messages`,
+        );
+    }
+
+    /** Sohbeti kalıcı olarak siler; mesajlar CASCADE ile gider. */
+    deleteConversation(threadId: string) {
+        return this.request<void>(
+            `/ai_orchestrator/conversations/${encodeURIComponent(threadId)}`,
+            'DELETE',
+        );
     }
 
     /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */

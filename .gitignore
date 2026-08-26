@@ -13,3 +13,6 @@ traces/
 # hashes, balances, chat history. Backups and hand-offs, never commits --
 # `seeds/` is the reviewable, per-user thing that IS committed.
 dumps/
+
+frontend/junit.xml
+backend/junit.xml

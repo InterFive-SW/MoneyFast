@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
@@ -42,3 +43,34 @@ class ChatResponse(BaseModel):
     widget: Optional[Dict[str, Any]] = None
     context_topic: Optional[str] = None
     conversation_id: Optional[str] = None
+
+
+class ConversationSummary(BaseModel):
+    """One row of the chat sidebar.
+
+    Messages are NOT included. Nothing outside the chat context reads a
+    non-active session's turns, so the list only needs enough to label a row —
+    and the busiest seeded user has 292 messages across 45 threads, which is a
+    lot to send for a sidebar.
+    """
+
+    thread_id: str
+    title: Optional[str] = None
+    updated_at: datetime
+    message_count: int
+
+
+class StoredMessage(BaseModel):
+    """A turn as it was stored.
+
+    No `meta`. It holds `target_agent`, `primary_intent` and
+    `compliance_verdict` — how the turn was routed and judged, never something
+    the reader should see. Leaving it out of the schema is what keeps it off
+    the screen; see AI-Services/moneyfast-orchestrator/sanitize.py for the same
+    concern on the live path.
+    """
+
+    id: str
+    role: str
+    content: str
+    created_at: datetime

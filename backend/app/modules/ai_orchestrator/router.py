@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional
+from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,9 +9,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_optional_user_id
+from app.core.deps import get_current_user_id, get_optional_user_id
 from . import service
-from .schemas import ChatRequest, ChatResponse
+from .schemas import (
+    ChatRequest,
+    ChatResponse,
+    ConversationSummary,
+    StoredMessage,
+)
 
 log = logging.getLogger("moneyfast.ai_orchestrator")
 
@@ -175,6 +180,63 @@ async def chat_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/conversations", response_model=List[ConversationSummary])
+async def list_conversations(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> List[ConversationSummary]:
+    """Kullanıcının kayıtlı sohbetleri, en son konuşulan en üstte.
+
+    Turlar ilk günden beri yazılıyordu ama hiçbir uç nokta geri vermiyordu:
+    sohbet arayüzü oturumları `localStorage`'dan geri yüklüyordu, yani geçmiş
+    veritabanında değil tek bir tarayıcıda yaşıyordu. Seed verisini yükleyen
+    bir ekip arkadaşı satırları alıyor, kenar çubuğunu boş görüyordu.
+
+    `user_id` bearer token'dan gelir — `/chat` ile aynı kural. Yol veya sorgu
+    parametresi olsaydı, thread id'si tahmin edilebilir olduğu için herkes
+    başkasının sohbetini okuyabilirdi.
+    """
+    return [ConversationSummary(**row) for row in service.list_conversations(db, user_id)]
+
+
+@router.get(
+    "/conversations/{thread_id}/messages",
+    response_model=List[StoredMessage],
+)
+async def conversation_messages(
+    thread_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> List[StoredMessage]:
+    """Bir sohbetin turları, eskiden yeniye.
+
+    Sohbet açıldığında istenir; liste uç noktası mesajları taşımaz.
+    Kullanıcıya ait olmayan bir thread 404 döner — boş bir sohbetle
+    "böyle bir sohbetin yok" farklı cevaplardır.
+    """
+    rows = service.conversation_messages(db, user_id, thread_id)
+    if rows is None:
+        raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
+    return [StoredMessage(**row) for row in rows]
+
+
+@router.delete("/conversations/{thread_id}", status_code=204)
+async def delete_conversation(
+    thread_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+) -> None:
+    """Sohbeti kalıcı olarak siler. Mesajlar CASCADE ile birlikte gider.
+
+    Kenar çubuğundaki silme düğmesi hep vardı; liste `localStorage`'dan
+    geldiği sürece yalnızca tarayıcıdaki kopyayı unutması yetiyordu. Liste
+    artık buradan geldiğine göre, veritabanına ulaşmayan bir silme bir sonraki
+    açılışta geri gelirdi.
+    """
+    if not service.delete_conversation(db, user_id, thread_id):
+        raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
 
 
 @router.get("/health")

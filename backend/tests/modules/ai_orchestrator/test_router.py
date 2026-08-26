@@ -9,6 +9,7 @@ başarı, bağlantı reddi, zaman aşımı, orchestrator'ın hata durumu döndü
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -274,3 +275,109 @@ def test_stream_falls_back_to_the_client_history_when_nothing_is_stored(client, 
 
     sent = instance.stream.call_args.kwargs["json"]
     assert sent["conversation_history"] == [{"role": "user", "content": "THYAO"}]
+
+
+class TestChatHistoryEndpoints:
+    """The read path for stored conversations.
+
+    Turns were persisted from day one and no endpoint returned them; the chat
+    UI restored its sessions from `localStorage`, so history lived in a single
+    browser. Anyone else with the same database — a teammate who loaded the
+    seeds, or the same person in a private window — saw an empty sidebar.
+    """
+
+    def _as_user(self, user_id="user-1"):
+        from app.core.database import get_db
+        from app.core.deps import get_current_user_id
+        from app.main import app
+
+        app.dependency_overrides[get_current_user_id] = lambda: user_id
+        app.dependency_overrides[get_db] = lambda: MagicMock()
+
+    def _clear(self):
+        from app.core.database import get_db
+        from app.core.deps import get_current_user_id
+        from app.main import app
+
+        app.dependency_overrides.pop(get_current_user_id, None)
+        app.dependency_overrides.pop(get_db, None)
+
+    def test_listing_requires_a_signed_in_user(self, client):
+        """user_id comes from the bearer token, never a query parameter —
+        the same rule /chat follows."""
+        assert client.get("/api/ai_orchestrator/conversations").status_code == 401
+
+    def test_listing_returns_the_stored_conversations(self, client, mocker):
+        from app.modules.ai_orchestrator import service
+
+        mocker.patch.object(service, "list_conversations", return_value=[
+            {"thread_id": "t-1", "title": "aselsan hissesi var mı",
+             "updated_at": datetime(2026, 8, 25, 12, 51, tzinfo=timezone.utc),
+             "message_count": 18},
+        ])
+        self._as_user()
+        try:
+            response = client.get("/api/ai_orchestrator/conversations")
+        finally:
+            self._clear()
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body[0]["thread_id"] == "t-1"
+        assert body[0]["message_count"] == 18
+        assert "meta" not in body[0]
+
+    def test_messages_are_returned_for_your_own_thread(self, client, mocker):
+        from app.modules.ai_orchestrator import service
+
+        mocker.patch.object(service, "conversation_messages", return_value=[
+            {"id": "m-1", "role": "user", "content": "merhaba",
+             "created_at": datetime(2026, 8, 25, 12, 51, tzinfo=timezone.utc)},
+        ])
+        self._as_user()
+        try:
+            response = client.get("/api/ai_orchestrator/conversations/t-1/messages")
+        finally:
+            self._clear()
+
+        assert response.status_code == 200
+        assert response.json()[0]["content"] == "merhaba"
+        assert "meta" not in response.json()[0]
+
+    def test_someone_elses_thread_is_a_404(self, client, mocker):
+        """A thread id is guessable. Without the ownership filter this would
+        hand one user another user's conversation."""
+        from app.modules.ai_orchestrator import service
+
+        mocker.patch.object(service, "conversation_messages", return_value=None)
+        self._as_user()
+        try:
+            response = client.get("/api/ai_orchestrator/conversations/theirs/messages")
+        finally:
+            self._clear()
+
+        assert response.status_code == 404
+
+    def test_deleting_your_conversation_succeeds(self, client, mocker):
+        from app.modules.ai_orchestrator import service
+
+        mocker.patch.object(service, "delete_conversation", return_value=True)
+        self._as_user()
+        try:
+            response = client.delete("/api/ai_orchestrator/conversations/t-1")
+        finally:
+            self._clear()
+
+        assert response.status_code == 204
+
+    def test_deleting_a_conversation_that_is_not_yours_is_a_404(self, client, mocker):
+        from app.modules.ai_orchestrator import service
+
+        mocker.patch.object(service, "delete_conversation", return_value=False)
+        self._as_user()
+        try:
+            response = client.delete("/api/ai_orchestrator/conversations/theirs")
+        finally:
+            self._clear()
+
+        assert response.status_code == 404

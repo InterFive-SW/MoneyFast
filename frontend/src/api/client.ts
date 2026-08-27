@@ -547,6 +547,25 @@ class ApiClient {
             throw error;
         }
     }
+
+    // Generic put method
+    async put<T>(url: string, data?: any): Promise<T> {
+        const normalizedUrl = url.startsWith('/api') ? url.substring(4) : url;
+        const fullUrl = url.startsWith('http') ? url : `${this.baseUrl}${normalizedUrl}`;
+        try {
+            const response = await this.authedFetch(fullUrl, {
+                method: 'PUT',
+                body: data ? JSON.stringify(data) : undefined,
+            });
+            if (!response.ok) {
+                throw new Error(await describeError(response));
+            }
+            return await response.json();
+        } catch (error) {
+            console.error(`[API Ağ Hatası] PUT ${fullUrl} isteği başarısız oldu:`, error);
+            throw error;
+        }
+    }
 }
 
 /**

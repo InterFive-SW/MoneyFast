@@ -59,6 +59,15 @@ def ticker(price=None, previous=None, volume=None, history=None, raises=False):
     return factory
 
 
+def test_ticker_fixture_populates_every_optional_fast_info_field():
+    value = ticker(price=1.0, previous=0.9, volume=100)()
+    assert value.fast_info == {
+        "last_price": 1.0,
+        "previous_close": 0.9,
+        "last_volume": 100,
+    }
+
+
 def frame_for(prices: dict[str, list[float]], volumes: dict[str, list] | None = None):
     """A real DataFrame shaped the way yf.download returns one.
 
@@ -93,8 +102,10 @@ class TestQuotes:
     """
 
     def test_price_and_change_are_derived_from_two_bars(self, monkeypatch):
-        install_download(monkeypatch, frame_for({"THYAO.IS": [290.0, 300.0]},
-                                                {"THYAO.IS": [100, 250]}))
+        install_download(
+            monkeypatch,
+            frame_for({"THYAO.IS": [290.0, 300.0]}, {"THYAO.IS": [100, 250]}),
+        )
         rows = yfinance_source.fetch_quotes([PRODUCTS[0]])
         assert rows[0]["symbol"] == "TEST-THYAO"
         assert rows[0]["price"] == 300.0
@@ -112,8 +123,11 @@ class TestQuotes:
             calls.append(symbols)
             return frame_for({"THYAO.IS": [290.0, 300.0], "AAPL": [210.0, 215.0]})
 
-        monkeypatch.setitem(sys.modules, "yfinance",
-                            SimpleNamespace(download=_download, Ticker=lambda s: None))
+        monkeypatch.setitem(
+            sys.modules,
+            "yfinance",
+            SimpleNamespace(download=_download, Ticker=lambda s: None),
+        )
         rows = yfinance_source.fetch_quotes(PRODUCTS)
         assert len(calls) == 1, "a small universe still fits one request"
         assert len(rows) == 2
@@ -134,8 +148,11 @@ class TestQuotes:
             calls.append(symbols.split())
             return frame_for({s: [1.0, 2.0] for s in symbols.split()})
 
-        monkeypatch.setitem(sys.modules, "yfinance",
-                            SimpleNamespace(download=_download, Ticker=lambda s: None))
+        monkeypatch.setitem(
+            sys.modules,
+            "yfinance",
+            SimpleNamespace(download=_download, Ticker=lambda s: None),
+        )
         rows = yfinance_source.fetch_quotes(many)
 
         assert len(calls) == 3
@@ -154,8 +171,11 @@ class TestQuotes:
             seen.update(kwargs)
             return frame_for({"THYAO.IS": [290.0, 300.0]})
 
-        monkeypatch.setitem(sys.modules, "yfinance",
-                            SimpleNamespace(download=_download, Ticker=lambda s: None))
+        monkeypatch.setitem(
+            sys.modules,
+            "yfinance",
+            SimpleNamespace(download=_download, Ticker=lambda s: None),
+        )
         yfinance_source.fetch_quotes([PRODUCTS[0]])
         assert seen["timeout"] == yfinance_source.REQUEST_TIMEOUT_SECONDS
 
@@ -177,8 +197,11 @@ class TestQuotes:
                 raise TimeoutError("curl 28")
             return frame_for({s: [1.0, 2.0] for s in symbols.split()})
 
-        monkeypatch.setitem(sys.modules, "yfinance",
-                            SimpleNamespace(download=_download, Ticker=lambda s: None))
+        monkeypatch.setitem(
+            sys.modules,
+            "yfinance",
+            SimpleNamespace(download=_download, Ticker=lambda s: None),
+        )
         rows = yfinance_source.fetch_quotes(many)
 
         assert len(rows) == 3, "the surviving chunk still produced prices"
@@ -190,8 +213,11 @@ class TestQuotes:
         def _download(symbols, **kwargs):
             raise TimeoutError("curl 28")
 
-        monkeypatch.setitem(sys.modules, "yfinance",
-                            SimpleNamespace(download=_download, Ticker=lambda s: None))
+        monkeypatch.setitem(
+            sys.modules,
+            "yfinance",
+            SimpleNamespace(download=_download, Ticker=lambda s: None),
+        )
         assert yfinance_source.fetch_quotes([PRODUCTS[0]]) == []
 
     def test_timestamp_comes_from_the_provider_bar(self, monkeypatch):
@@ -207,15 +233,19 @@ class TestQuotes:
         import pandas as pd
 
         index = pd.date_range("2026-08-20", periods=2, tz="UTC")
-        frame = pd.DataFrame({("Close", "THYAO.IS"): [float("nan"), 300.0]}, index=index)
+        frame = pd.DataFrame(
+            {("Close", "THYAO.IS"): [float("nan"), 300.0]}, index=index
+        )
         install_download(monkeypatch, frame)
         rows = yfinance_source.fetch_quotes([PRODUCTS[0]])
         assert rows[0]["change_amount"] is None
         assert rows[0]["change_percent"] is None
 
     def test_symbol_with_no_data_is_skipped_not_zeroed(self, monkeypatch):
-        install_download(monkeypatch, frame_for({"THYAO.IS": [float("nan")] * 2,
-                                                 "AAPL": [210.0, 215.0]}))
+        install_download(
+            monkeypatch,
+            frame_for({"THYAO.IS": [float("nan")] * 2, "AAPL": [210.0, 215.0]}),
+        )
         rows = yfinance_source.fetch_quotes(PRODUCTS)
         assert [row["symbol"] for row in rows] == ["TEST-AAPL"]
 
@@ -233,7 +263,9 @@ class TestQuotes:
 
     def test_products_without_a_data_symbol_are_not_requested(self, monkeypatch):
         install_download(monkeypatch, frame_for({"AAPL": [210.0, 215.0]}))
-        assert yfinance_source.fetch_quotes([{"symbol": "X", "data_symbol": None}]) == []
+        assert (
+            yfinance_source.fetch_quotes([{"symbol": "X", "data_symbol": None}]) == []
+        )
 
 
 class TestFundamentals:
@@ -251,11 +283,20 @@ class TestFundamentals:
         monkeypatch.setitem(sys.modules, "yfinance", module)
 
     def test_ratios_are_extracted(self, monkeypatch):
-        self._install(monkeypatch, {"THYAO.IS": {
-            "trailingPE": 8.2, "priceToBook": 1.4, "marketCap": 414086529024,
-            "dividendYield": 2.29, "sector": "Industrials",
-            "fiftyTwoWeekHigh": 355.5, "fiftyTwoWeekLow": 210.0,
-        }})
+        self._install(
+            monkeypatch,
+            {
+                "THYAO.IS": {
+                    "trailingPE": 8.2,
+                    "priceToBook": 1.4,
+                    "marketCap": 414086529024,
+                    "dividendYield": 2.29,
+                    "sector": "Industrials",
+                    "fiftyTwoWeekHigh": 355.5,
+                    "fiftyTwoWeekLow": 210.0,
+                }
+            },
+        )
         rows = yfinance_source.fetch_fundamentals([PRODUCTS[0]])
         assert rows[0]["pe_ratio"] == pytest.approx(8.2)
         assert rows[0]["sector"] == "Industrials"
@@ -286,8 +327,11 @@ class TestFundamentals:
                 raise RuntimeError("delisted")
             return SimpleNamespace(info={"trailingPE": 35.6})
 
-        monkeypatch.setitem(sys.modules, "yfinance",
-                            SimpleNamespace(Ticker=_ticker, download=lambda *a, **k: None))
+        monkeypatch.setitem(
+            sys.modules,
+            "yfinance",
+            SimpleNamespace(Ticker=_ticker, download=lambda *a, **k: None),
+        )
         rows = yfinance_source.fetch_fundamentals(PRODUCTS)
         assert [row["symbol"] for row in rows] == ["TEST-AAPL"]
 
@@ -307,7 +351,13 @@ class FakeFrame:
 
 class TestCandles:
     def _bar(self):
-        return {"Open": 290.0, "High": 305.0, "Low": 289.0, "Close": 300.0, "Volume": 1000}
+        return {
+            "Open": 290.0,
+            "High": 305.0,
+            "Low": 289.0,
+            "Close": 300.0,
+            "Volume": 1000,
+        }
 
     def test_bars_are_converted(self, monkeypatch):
         stamp = datetime(2026, 8, 19, tzinfo=timezone.utc)
@@ -387,6 +437,7 @@ class TestFrameShapeGuards:
 
     def _frame(self, closes):
         """A DataFrame stand-in whose "Close" column is whatever we hand it."""
+
         class Frame:
             empty = False
 
@@ -404,11 +455,16 @@ class TestFrameShapeGuards:
         import sys
         import types
 
-        index = SimpleNamespace()
         fake_yf = types.ModuleType("yfinance")
         fake_yf.download = lambda *a, **k: self._frame(closes)
         monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
-        return yfinance_source.fetch_quotes([{"symbol": "THYAO", "data_symbol": "THYAO.IS"}])
+        return yfinance_source.fetch_quotes(
+            [{"symbol": "THYAO", "data_symbol": "THYAO.IS"}]
+        )
+
+    def test_frame_fixture_rejects_unknown_columns(self):
+        with pytest.raises(KeyError):
+            self._frame([])["Open"]
 
     def test_a_column_that_reports_membership_but_raises_on_access(self, monkeypatch):
         """A MultiIndex frame can answer `in` truthfully and still raise when
@@ -451,12 +507,12 @@ class TestFundamentalsSelection:
             asked.append(symbol)
             return SimpleNamespace(info={})
 
-        monkeypatch.setitem(
-            sys.modules, "yfinance", SimpleNamespace(Ticker=_ticker)
+        monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(Ticker=_ticker))
+        yfinance_source.fetch_fundamentals(
+            [
+                {"symbol": "IPEKE"},
+                {"symbol": "KOZAL", "data_symbol": None},
+                {"symbol": "THYAO", "data_symbol": "THYAO.IS"},
+            ]
         )
-        yfinance_source.fetch_fundamentals([
-            {"symbol": "IPEKE"},
-            {"symbol": "KOZAL", "data_symbol": None},
-            {"symbol": "THYAO", "data_symbol": "THYAO.IS"},
-        ])
         assert asked == ["THYAO.IS"], "only the quoted symbol should be requested"

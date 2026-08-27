@@ -16,6 +16,24 @@ from . import config
 
 log = logging.getLogger("moneyfast.ingestor.sinks")
 
+# Mirrored wire-contract limits from backend SocialIngestRequest. Delivery uses
+# the smaller configured post size below; these hard stops prevent a future
+# caller from creating a permanently rejected oversized request.
+BACKEND_SOCIAL_MAX_ACCOUNTS = 100
+BACKEND_SOCIAL_MAX_POSTS = 1_000
+SOCIAL_RESULT_COUNTERS = (
+    "accounts_inserted",
+    "accounts_updated",
+    "accounts_duplicate",
+    "posts_inserted",
+    "posts_updated",
+    "posts_duplicate",
+    "posts_tombstoned",
+    "instruments_matched",
+    "instruments_unresolved",
+    "instrument_links_removed",
+)
+
 
 def _headers() -> dict[str, str]:
     headers = {"content-type": "application/json"}
@@ -159,6 +177,122 @@ def push_news_to_backend(client: httpx.Client, items: list[dict]) -> Optional[di
     except Exception as exc:
         log.error("news ingest failed: %s", exc)
         return None
+
+
+def push_social_to_backend(
+    client: httpx.Client, accounts: list[dict], posts: list[dict]
+) -> Optional[dict]:
+    """Offer normalized public social data to the authenticated Core DB API."""
+
+    if not accounts and not posts:
+        return None
+    if len(accounts) > BACKEND_SOCIAL_MAX_ACCOUNTS:
+        raise ValueError("social account batch exceeds the backend contract")
+    if len(posts) > BACKEND_SOCIAL_MAX_POSTS:
+        raise ValueError("social post batch exceeds the backend contract")
+    try:
+        response = client.post(
+            f"{config.backend_url()}/market/social/ingest",
+            json=_serialise({"accounts": accounts, "posts": posts}),
+            headers=_headers(),
+            timeout=config.request_timeout() * 3,
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result if isinstance(result, dict) else None
+    except Exception as exc:
+        # Never include request headers or bodies here: the same client also
+        # carries the ingestor's service credential.
+        log.error("social ingest failed: %s", type(exc).__name__)
+        return None
+
+
+def deliver_social_batches(
+    client: httpx.Client,
+    accounts: list[dict],
+    posts: list[dict],
+    *,
+    post_batch_size: int | None = None,
+) -> dict[str, Any]:
+    """Deliver each account independently in bounded, atomic chunks.
+
+    Repeating the account in every request keeps each request self-contained.
+    An account is complete only after every one of its post chunks is accepted,
+    allowing the caller to checkpoint successful accounts independently.
+    """
+
+    size = config.x_backend_batch_size() if post_batch_size is None else post_batch_size
+    if not 1 <= size <= BACKEND_SOCIAL_MAX_POSTS:
+        raise ValueError("social post delivery size is outside backend limits")
+
+    account_by_id: dict[str, dict] = {}
+    for account in accounts:
+        external_id = str(account.get("external_account_id") or "")
+        if not external_id or external_id in account_by_id:
+            raise ValueError("social delivery accounts require unique external ids")
+        account_by_id[external_id] = account
+
+    grouped: dict[str, list[dict]] = {external_id: [] for external_id in account_by_id}
+    for post in posts:
+        external_id = str(post.get("account_external_id") or "")
+        if external_id not in grouped:
+            raise ValueError("social post references an account absent from delivery")
+        grouped[external_id].append(post)
+
+    result: dict[str, Any] = {key: 0 for key in SOCIAL_RESULT_COUNTERS}
+    result.update(
+        {
+            "unresolved": [],
+            "requests_succeeded": 0,
+            "requests_failed": 0,
+            "account_delivery": {},
+            "delivery_attempted": False,
+            "delivery_complete": False,
+            "delivery_partial": False,
+        }
+    )
+
+    if not account_by_id:
+        return result
+
+    for external_id, account in account_by_id.items():
+        account_posts = grouped[external_id]
+        chunks = [
+            account_posts[index : index + size]
+            for index in range(0, len(account_posts), size)
+        ] or [[]]
+        delivered = True
+        accepted_chunks = 0
+        for chunk in chunks:
+            response = push_social_to_backend(client, [account], chunk)
+            if response is None:
+                result["requests_failed"] += 1
+                delivered = False
+                break
+            result["requests_succeeded"] += 1
+            accepted_chunks += 1
+            for key in SOCIAL_RESULT_COUNTERS:
+                result[key] += int(response.get(key, 0))
+            unresolved = response.get("unresolved") or []
+            if isinstance(unresolved, list):
+                result["unresolved"].extend(unresolved)
+        result["account_delivery"][external_id] = {
+            "complete": delivered,
+            "chunks_accepted": accepted_chunks,
+            "chunks_required": len(chunks),
+        }
+
+    attempted = result["requests_succeeded"] + result["requests_failed"] > 0
+    completed = sum(
+        1 for item in result["account_delivery"].values() if item["complete"]
+    )
+    failed = sum(
+        1 for item in result["account_delivery"].values() if not item["complete"]
+    )
+    result["delivery_attempted"] = attempted
+    result["delivery_complete"] = attempted and failed == 0
+    result["delivery_partial"] = attempted and completed > 0 and failed > 0
+    return result
 
 
 def push_news_to_rag(client: httpx.Client, items: list[dict]) -> int:

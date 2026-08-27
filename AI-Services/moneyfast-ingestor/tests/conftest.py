@@ -16,7 +16,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ingestor import config  # noqa: E402
 from ingestor.sources import rss_source  # noqa: E402
 
 
@@ -38,10 +37,29 @@ def block_network(monkeypatch):
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
     for name in (
-        "BACKEND_API_BASE_URL", "RAG_API_BASE_URL", "BACKEND_API_KEY", "NEWS_FEEDS",
-        "INGESTOR_USER_AGENT", "INGESTOR_TIMEOUT_SECONDS", "INGESTOR_HOST_DELAY_SECONDS",
-        "INGESTOR_QUOTE_INTERVAL_MINUTES", "INGESTOR_NEWS_INTERVAL_MINUTES",
-        "INGESTOR_HISTORY_DAYS", "INGESTOR_RESPECT_ROBOTS",
+        "BACKEND_API_BASE_URL",
+        "RAG_API_BASE_URL",
+        "BACKEND_API_KEY",
+        "NEWS_FEEDS",
+        "INGESTOR_USER_AGENT",
+        "INGESTOR_TIMEOUT_SECONDS",
+        "INGESTOR_HOST_DELAY_SECONDS",
+        "INGESTOR_QUOTE_INTERVAL_SECONDS",
+        "INGESTOR_NEWS_INTERVAL_MINUTES",
+        "INGESTOR_HISTORY_DAYS",
+        "INGESTOR_RESPECT_ROBOTS",
+        "X_INGEST_ENABLED",
+        "X_BEARER_TOKEN_FILE",
+        "X_BEARER_TOKEN",
+        "X_MONITORED_ACCOUNTS_JSON",
+        "X_INCLUDE_REPLIES",
+        "X_INCLUDE_REPOSTS",
+        "X_POLL_INTERVAL_MINUTES",
+        "X_MAX_PAGES_PER_ACCOUNT",
+        "X_BACKEND_BATCH_SIZE",
+        "X_IDENTITY_REFRESH_HOURS",
+        "X_STATE_FILE",
+        "X_MAX_RETRIES",
     ):
         monkeypatch.delenv(name, raising=False)
 

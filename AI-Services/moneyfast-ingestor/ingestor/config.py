@@ -5,7 +5,10 @@ reimporting the module, matching the pattern in the MCP server's
 `backend_client`.
 """
 
+import json
 import os
+import re
+from pathlib import Path
 from typing import Optional
 
 DEFAULT_BACKEND_URL = "http://backend:8000/api"
@@ -168,3 +171,136 @@ def respect_robots() -> bool:
 #: is what "without getting stopped" actually looks like: backing off when
 #: asked, rather than pretending to be a browser.
 BACKOFF_LADDER = (1, 3, 6)
+
+
+class XConfigurationError(ValueError):
+    """Non-secret X configuration is invalid."""
+
+
+X_SOURCE_TYPES = frozenset(
+    {
+        "official_company",
+        "official_disclosure",
+        "disclosure_aggregator",
+        "news_agency",
+        "financial_media",
+        "analyst",
+    }
+)
+_X_HANDLE = re.compile(r"^[a-z0-9_]{1,15}$")
+
+
+def _bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def x_ingest_enabled() -> bool:
+    return _bool("X_INGEST_ENABLED")
+
+
+def x_bearer_token() -> Optional[str]:
+    """Load the ingestor-only credential without logging or returning its path."""
+
+    path = os.getenv("X_BEARER_TOKEN_FILE", "").strip()
+    if path:
+        try:
+            token = Path(path).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise XConfigurationError("configured X token file is unreadable") from exc
+        if not token:
+            raise XConfigurationError("configured X token file is empty")
+        return token
+    return os.getenv("X_BEARER_TOKEN", "").strip() or None
+
+
+def x_monitored_accounts() -> list[dict]:
+    raw = os.getenv("X_MONITORED_ACCOUNTS_JSON", "").strip()
+    if not raw:
+        raise XConfigurationError("X monitored account allowlist is empty")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise XConfigurationError(
+            "X monitored account allowlist is not valid JSON"
+        ) from exc
+    if not isinstance(value, list) or not value:
+        raise XConfigurationError(
+            "X monitored account allowlist must be a non-empty array"
+        )
+    if len(value) > 100:
+        raise XConfigurationError(
+            "X monitored account allowlist may contain at most 100 entries"
+        )
+
+    accounts: list[dict] = []
+    seen: set[str] = set()
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise XConfigurationError("each X account entry must be an object")
+        handle = str(entry.get("handle") or "").strip().removeprefix("@").lower()
+        source_type = str(entry.get("source_type") or "")
+        try:
+            trust_score = float(entry["trust_score"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise XConfigurationError(
+                "each X account needs a numeric trust_score"
+            ) from exc
+        if not _X_HANDLE.fullmatch(handle):
+            raise XConfigurationError("X account handle is invalid")
+        if handle in seen:
+            raise XConfigurationError("X account handles must be unique")
+        if source_type not in X_SOURCE_TYPES:
+            raise XConfigurationError("X account source_type is unsupported")
+        if not 0.0 <= trust_score <= 1.0:
+            raise XConfigurationError("X account trust_score must be between 0 and 1")
+        seen.add(handle)
+        accounts.append(
+            {
+                "handle": handle,
+                "source_type": source_type,
+                "trust_score": trust_score,
+                "is_active": bool(entry.get("is_active", True)),
+            }
+        )
+    return accounts
+
+
+def x_include_replies() -> bool:
+    return _bool("X_INCLUDE_REPLIES")
+
+
+def x_include_reposts() -> bool:
+    return _bool("X_INCLUDE_REPOSTS")
+
+
+def x_poll_interval_minutes() -> int:
+    return max(5, _int("X_POLL_INTERVAL_MINUTES", 10))
+
+
+def x_max_pages_per_account() -> int:
+    return max(1, min(10, _int("X_MAX_PAGES_PER_ACCOUNT", 3)))
+
+
+def x_backend_batch_size() -> int:
+    """Posts per atomic backend request; bounded by the backend contract."""
+
+    return max(1, min(1_000, _int("X_BACKEND_BATCH_SIZE", 500)))
+
+
+def x_identity_refresh_hours() -> int:
+    """How often cached account names are refreshed by stable X user ID."""
+
+    return max(1, min(168, _int("X_IDENTITY_REFRESH_HOURS", 24)))
+
+
+def x_state_file() -> str:
+    return os.getenv("X_STATE_FILE", "/app/state/x-cursors.json").strip() or (
+        "/app/state/x-cursors.json"
+    )
+
+
+def x_max_retries() -> int:
+    return max(0, min(3, _int("X_MAX_RETRIES", 1)))

@@ -166,10 +166,29 @@ services:
       RAG_API_BASE_URL: http://rag:8100
       BACKEND_API_KEY: ${BACKEND_API_KEY:?Set BACKEND_API_KEY in infra/.env}
       NEWS_FEEDS: ${NEWS_FEEDS:-}
-      INGESTOR_QUOTE_INTERVAL_MINUTES: ${INGESTOR_QUOTE_INTERVAL_MINUTES:-15}
+      INGESTOR_QUOTE_INTERVAL_SECONDS: ${INGESTOR_QUOTE_INTERVAL_SECONDS:-30}
       INGESTOR_NEWS_INTERVAL_MINUTES: ${INGESTOR_NEWS_INTERVAL_MINUTES:-15}
       INGESTOR_HISTORY_DAYS: ${INGESTOR_HISTORY_DAYS:-400}
+      # Official X API collection is disabled by default. These variables are
+      # deliberately present on the ingestor only; no other service receives
+      # the credential or account allowlist.
+      X_INGEST_ENABLED: ${X_INGEST_ENABLED:-false}
+      X_BEARER_TOKEN_FILE: ${X_BEARER_TOKEN_FILE:-}
+      X_BEARER_TOKEN: ${X_BEARER_TOKEN:-}
+      X_MONITORED_ACCOUNTS_JSON: ${X_MONITORED_ACCOUNTS_JSON:-}
+      X_INCLUDE_REPLIES: ${X_INCLUDE_REPLIES:-false}
+      X_INCLUDE_REPOSTS: ${X_INCLUDE_REPOSTS:-false}
+      X_POLL_INTERVAL_MINUTES: ${X_POLL_INTERVAL_MINUTES:-10}
+      X_MAX_PAGES_PER_ACCOUNT: ${X_MAX_PAGES_PER_ACCOUNT:-3}
+      X_BACKEND_BATCH_SIZE: ${X_BACKEND_BATCH_SIZE:-500}
+      X_IDENTITY_REFRESH_HOURS: ${X_IDENTITY_REFRESH_HOURS:-24}
+      X_STATE_FILE: /app/state/x-cursors.json
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      # Durable pagination progress and provider cooldown. Losing it causes a
+      # safe overlapping refetch (Core DB uniqueness is authoritative) but can
+      # also forget an active rate-limit window, so keep it across restarts.
+      - ingestor_x_state:/app/state
     depends_on:
       backend:
         condition: service_started
@@ -214,6 +233,7 @@ services:
 volumes:
   postgres_data:
   vector_db_data:
+  ingestor_x_state:
 
 networks:
   # The only network reachable from the host. Deliberately holds one service:

@@ -1,12 +1,14 @@
 # MoneyFast ingestor
 
-Collects live market prices, daily price history, and Turkish financial news,
-then pushes all of it to the services that own the data.
+Collects live market prices, daily price history, Turkish financial news, and
+optionally an explicit allowlist of public X accounts. It pushes normalized
+data to the services that own it.
 
 ```
 ingestor ──yfinance──► quotes + daily candles ──POST──► backend /api/market/ingest
          ──RSS feeds──► news ─────────────────┬───────► backend /api/market/news/ingest
                                               └───────► rag     /ingest
+         ──X API v2───► public social posts ──────────► backend /api/market/social/ingest
 ```
 
 ## What it does not do
@@ -48,6 +50,7 @@ someone else's server:
 |---|---|---|
 | yfinance | Prices, previous close, daily OHLCV | no |
 | Turkish financial RSS | Headlines, summaries, publication dates | no |
+| Official X API v2 | Selected public-account posts and URL entities | bearer token |
 
 BIST tickers reach yfinance as `<SYMBOL>.IS`. The mapping from our symbols
 (`TEST-THYAO`) to the provider's (`THYAO.IS`) lives in
@@ -69,6 +72,15 @@ cycle self-healing instead of something to reconcile by hand:
 * **News** is deduplicated on a SHA-256 of the article text — not the URL,
   because the same wire story is republished under different links and some
   feeds renumber their URLs on every rebuild.
+* **X posts** are upserted by the stable platform post ID. A file-backed
+  `since_id` cursor reduces requests. It advances only after pagination reaches
+  the end of the account backlog and every backend chunk for that account is
+  accepted. A failed later page or backend chunk leaves the previous cursor in
+  place, so the next cycle replays an overlap; Core DB uniqueness makes that
+  replay idempotent. If `X_MAX_PAGES_PER_ACCOUNT` is reached with more pages,
+  the delivered segment's pagination token and high-water mark are checkpointed
+  while `since_id` stays unchanged. Later cycles resume that backlog and promote
+  the high-water mark only after its final page is delivered.
 
 ## Isolation
 
@@ -83,6 +95,85 @@ the backend's ingest endpoints **refuse** rather than accepting anonymous
 writes — a write endpoint that silently became public because an env var was
 missing is exactly the failure nobody notices.
 
+The X bearer token is ingestor-only. `X_BEARER_TOKEN_FILE` takes precedence
+and is the production path; `X_BEARER_TOKEN` is a local development fallback.
+Neither value is sent to the backend or written to logs.
+
+X collection is disabled by default. A configuration example (the handles are
+examples, not a production list) is:
+
+```dotenv
+X_INGEST_ENABLED=true
+X_MONITORED_ACCOUNTS_JSON=[{"handle":"example_account","source_type":"financial_media","trust_score":0.75},{"handle":"kap_bildirimleri","source_type":"disclosure_aggregator","trust_score":0.85}]
+X_INCLUDE_REPLIES=false
+X_INCLUDE_REPOSTS=false
+X_POLL_INTERVAL_MINUTES=10
+X_MAX_PAGES_PER_ACCOUNT=3
+X_BACKEND_BATCH_SIZE=500
+X_IDENTITY_REFRESH_HOURS=24
+```
+
+The configured handle is a bootstrap locator. After first resolution the state
+file pins that entry to X's stable numeric user ID. Identity refreshes query by
+that ID, not by the old handle, so a renamed account follows its original
+identity and a reassigned handle cannot silently switch the monitored account.
+Changing the configured handle creates a new explicit bootstrap decision.
+
+Backend delivery is account-isolated and uses at most
+`X_BACKEND_BATCH_SIZE` posts per atomic request (default 500, hard maximum
+1,000). The account record is included in every request. A failed chunk blocks
+only that account's checkpoint; independently completed accounts can advance.
+
+An X 429 writes a UTC `blocked_until` value to the same atomic state file.
+Cycles inside that window make no X request and do not sleep in the scheduler
+thread. Provider delays are bounded to 60 seconds through 6 hours; malformed
+headers fall back to the configured polling interval.
+
+Only API-provided expanded/unwound URLs are examined. A KAP provenance link
+must be HTTPS and have the exact host `kap.org.tr` or `www.kap.org.tr`; the
+ingestor never follows redirects or fetches the KAP page. A valid link does
+not verify the post or turn an aggregator into an official disclosure source.
+
+The backend stores these records in dedicated `market.social_*` tables. The
+read-only `GET /api/market/social-signals` route is public for the same reason
+as existing price and news reads: the data is non-user-specific market data.
+It always returns source type, trust score, and verification status, and never
+returns raw metadata. `unverified` remains the default even for an official
+account or a post containing a valid KAP link.
+
+Instrument relations are reconciled snapshots of the latest accepted
+`instrument_references`. An empty list is authoritative and clears every
+existing link for that post. When every supplied reference resolves uniquely,
+newly matched products are added and genuinely stale links are removed. If any
+supplied reference is unknown or ambiguous, reconciliation is not authoritative:
+resolved products are still added, but existing links are preserved because a
+temporary resolver miss is not proof that a prior valid relation disappeared.
+Ambiguous symbols are never guessed; unresolved evidence is returned in the
+ingest response. The current timeline endpoint does not reliably enumerate
+deleted posts, so `is_tombstoned` is storage/API support for a future explicit
+deletion workflow; Phase 1 does not populate tombstones automatically.
+
+Ingestor cycle status distinguishes delivery outcomes explicitly:
+`delivery_attempted`, `delivery_complete`, and `delivery_partial`. Compatibility
+field `backend_written` is true only when delivery was attempted and every
+account chunk succeeded — never when zero backend requests occurred. Provider
+posts rejected during local normalization (malformed id/timestamp, filtered
+reply/repost, invalid shape) are counted in `normalization_rejections`; a fully
+completed provider page may still advance its cursor so malformed records do not
+retry forever, but the rejection remains visible in status aggregates.
+
+The runtime entrypoint repairs ownership only on `/app/state`, then executes the
+application as UID 10004. A container smoke check can verify both privilege
+drop and atomic replacement without touching an existing volume:
+
+```bash
+docker run --rm --mount type=volume,dst=/app/state moneyfast-ingestor:smoke \
+  python -c "from ingestor.sources.x_source import save_state,load_state; import os; assert os.getuid()==10004; assert save_state({'smoke':{'user_id':'1'}}); assert load_state()['smoke']['user_id']=='1'"
+```
+
+Alembic is the runtime schema source of truth. `infra/intertech.sql` remains a
+stale reference snapshot and is intentionally not updated by this phase.
+
 ## Running
 
 ```bash
@@ -93,14 +184,15 @@ docker compose exec ingestor python -m ingestor.run --once
 docker compose exec ingestor python -m ingestor.run --once --news
 ```
 
-Without `--once` it starts the scheduler: quotes every 15 minutes during BIST
-hours (10:00–18:00 Europe/Istanbul, weekdays), news every 15 minutes, candles
-daily at 19:15. It also runs quotes and news immediately on boot, so a cold
-start does not show an empty dashboard for fifteen minutes.
+Without `--once` it starts the scheduler: quotes every 30 seconds for whichever
+configured markets are open, news every 15 minutes, candles daily at 19:15,
+and X at its configured interval when enabled. X is independent and does not
+run during the warm start; a missing token, rate limit, or outage cannot stop
+RSS or market jobs. Quotes and news still run immediately on boot.
 
 ```bash
 make install install-test
-make test          # 90% coverage gate; no network, no database
+make test          # 100% coverage gate; no network, no database
 ```
 
 The suite blocks real sockets. A test that forgets a stub would otherwise hit

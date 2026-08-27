@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from . import config, sinks
-from .sources import rss_source, yfinance_source
+from .sources import rss_source, x_source, yfinance_source
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -108,7 +108,8 @@ def run_quotes(client: httpx.Client, force: bool = False) -> dict:
         # never pricing it would be much harder to notice than one extra
         # request.
         products = [
-            p for p in products
+            p
+            for p in products
             if p.get("market") in trading or p.get("market") not in config.MARKET_HOURS
         ]
         if not products:
@@ -142,7 +143,10 @@ def run_quotes(client: httpx.Client, force: bool = False) -> dict:
     elapsed = time.monotonic() - started
     log.info(
         "quote cycle: %d fetched, %s written, %.2fs (budget %ds)",
-        len(quotes), result.get("quotes_written", 0), elapsed, current_interval_seconds(),
+        len(quotes),
+        result.get("quotes_written", 0),
+        elapsed,
+        current_interval_seconds(),
     )
     if elapsed > current_interval_seconds():
         # Visible rather than silent: the scheduler will coalesce the overlap,
@@ -156,8 +160,11 @@ def run_fundamentals(client: httpx.Client) -> dict:
     products = sinks.fetch_products(client)
     rows = yfinance_source.fetch_fundamentals(products)
     result = sinks.push_fundamentals(client, rows) or {}
-    log.info("fundamentals cycle: %d fetched, %s written",
-             len(rows), result.get("fundamentals_written", 0))
+    log.info(
+        "fundamentals cycle: %d fetched, %s written",
+        len(rows),
+        result.get("fundamentals_written", 0),
+    )
     return {"fetched": len(rows), **result}
 
 
@@ -176,7 +183,9 @@ def run_candles(client: httpx.Client, symbols: set[str] | None = None) -> dict:
     result = sinks.push_market_data(client, [], candles) or {}
     log.info(
         "candle cycle: %d symbols, %d bars offered, %s new",
-        len(products), len(candles), result.get("candles_written", 0),
+        len(products),
+        len(candles),
+        result.get("candles_written", 0),
     )
     return {"fetched": len(candles), **result}
 
@@ -198,16 +207,23 @@ def backfill_candles(client: httpx.Client) -> dict:
     coverage = sinks.fetch_candle_coverage(client)
     products = sinks.fetch_products(client)
     thin = {
-        p["symbol"] for p in products
+        p["symbol"]
+        for p in products
         if coverage.get(p["symbol"], {}).get("bars", 0) < config.CANDLE_MIN_BARS
     }
     if not thin:
-        log.info("candle backfill: all %d instruments covered, nothing to fetch",
-                 len(products))
+        log.info(
+            "candle backfill: all %d instruments covered, nothing to fetch",
+            len(products),
+        )
         return {"fetched": 0, "candles_written": 0}
 
-    log.info("candle backfill: %d of %d instruments below %d bars",
-             len(thin), len(products), config.CANDLE_MIN_BARS)
+    log.info(
+        "candle backfill: %d of %d instruments below %d bars",
+        len(thin),
+        len(products),
+        config.CANDLE_MIN_BARS,
+    )
     return run_candles(client, symbols=thin)
 
 
@@ -217,12 +233,115 @@ def run_news(client: httpx.Client) -> dict:
     embedded = sinks.push_news_to_rag(client, items)
     log.info(
         "news cycle: %d fetched, %s stored, %d embedded",
-        len(items), backend_result.get("news_written", 0), embedded,
+        len(items),
+        backend_result.get("news_written", 0),
+        embedded,
     )
     return {"fetched": len(items), "embedded": embedded, **backend_result}
 
 
-def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False) -> dict:
+def run_x_social(client: httpx.Client) -> dict:
+    """Independent X cycle; failures never affect RSS or market collection."""
+
+    if not config.x_ingest_enabled():
+        return {"skipped": True, "reason": "disabled"}
+    try:
+        token = config.x_bearer_token()
+        configured = config.x_monitored_accounts()
+    except config.XConfigurationError as exc:
+        log.error("X collection disabled for this cycle: %s", exc)
+        return {"disabled": True, "reason": "invalid_configuration"}
+    if token is None:
+        log.error("X collection enabled without a credential")
+        return {"disabled": True, "reason": "missing_token"}
+
+    state = x_source.load_state()
+    now = x_source.utc_now()
+    remaining = x_source.cooldown_remaining(state, now)
+    if remaining:
+        return {
+            "skipped": True,
+            "reason": "provider_cooldown",
+            "retry_after_seconds": remaining,
+        }
+
+    try:
+        batch = x_source.collect(
+            client,
+            token=token,
+            configured=configured,
+            state=state,
+            now=now,
+        )
+    except x_source.XRateLimited as exc:
+        cooldown_saved = x_source.save_state(
+            x_source.provider_cooldown_update(exc.retry_after_seconds, now)
+        )
+        return {
+            "rate_limited": True,
+            "retry_after_seconds": exc.retry_after_seconds,
+            "cooldown_saved": cooldown_saved,
+        }
+    except x_source.XRequestError:
+        return {"unavailable": True, "reason": "x_api_error"}
+
+    cooldown_saved = None
+    cooldown_update = None
+    if batch.status.get("rate_limited"):
+        cooldown_update = x_source.provider_cooldown_update(
+            batch.status["retry_after_seconds"],
+            now,
+        )
+        cooldown_saved = x_source.save_state(cooldown_update)
+
+    result = sinks.deliver_social_batches(
+        client,
+        batch.accounts,
+        batch.posts,
+        post_batch_size=config.x_backend_batch_size(),
+    )
+    safe_updates = {}
+    for external_id, collection_status in batch.account_statuses.items():
+        delivery = result["account_delivery"].get(external_id) or {}
+        if delivery.get("complete"):
+            configured_handle = collection_status["configured_handle"]
+            safe_updates[configured_handle] = batch.state_updates[configured_handle]
+    if cooldown_update is not None:
+        safe_updates.update(cooldown_update)
+    state_saved = x_source.save_state(safe_updates) if safe_updates else None
+    # backend_written remains for compatibility and means delivery was attempted
+    # and every account chunk completed successfully — never "no requests failed".
+    backend_written = bool(result.get("delivery_complete"))
+    summary = {
+        **batch.status,
+        **result,
+        "backend_written": backend_written,
+        "state_saved": state_saved,
+    }
+    if cooldown_saved is not None:
+        summary["cooldown_saved"] = cooldown_saved
+    log.info(
+        "X cycle: %d accounts, %d posts offered, %s inserted, %s updated, "
+        "delivery attempted=%s complete=%s partial=%s failures=%d",
+        summary["accounts_resolved"],
+        summary["posts_offered"],
+        summary.get("posts_inserted", 0),
+        summary.get("posts_updated", 0),
+        summary.get("delivery_attempted"),
+        summary.get("delivery_complete"),
+        summary.get("delivery_partial"),
+        summary["requests_failed"],
+    )
+    return summary
+
+
+def run_once(
+    quotes: bool,
+    candles: bool,
+    news: bool,
+    fundamentals: bool = False,
+    x_social: bool = False,
+) -> dict:
     results = {}
     with httpx.Client() as client:
         # Each job is guarded separately: a dead RSS host must not cost us the
@@ -235,6 +354,8 @@ def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False
             results["news"] = _guard("news", run_news, client)
         if fundamentals:
             results["fundamentals"] = _guard("fundamentals", run_fundamentals, client)
+        if x_social:
+            results["x_social"] = _guard("x-social", run_x_social, client)
     return results
 
 
@@ -268,6 +389,15 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    if config.x_ingest_enabled():
+        scheduler.add_job(
+            _job("x-social", run_x_social),
+            "interval",
+            minutes=config.x_poll_interval_minutes(),
+            id="x-social",
+            max_instances=1,
+            coalesce=True,
+        )
     scheduler.add_job(
         _job("news", run_news),
         "interval",
@@ -332,21 +462,27 @@ def start_scheduler() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="MoneyFast data ingestor")
-    parser.add_argument("--once", action="store_true", help="run each job once and exit")
+    parser.add_argument(
+        "--once", action="store_true", help="run each job once and exit"
+    )
     parser.add_argument("--quotes", action="store_true", help="quotes only")
     parser.add_argument("--candles", action="store_true", help="candles only")
     parser.add_argument("--news", action="store_true", help="news only")
     parser.add_argument("--fundamentals", action="store_true", help="fundamentals only")
+    parser.add_argument("--x-social", action="store_true", help="X social signals only")
     args = parser.parse_args(argv)
 
-    selected = args.quotes or args.candles or args.news or args.fundamentals
+    selected = (
+        args.quotes or args.candles or args.news or args.fundamentals or args.x_social
+    )
     quotes = args.quotes or not selected
     candles = args.candles or not selected
     news = args.news or not selected
     fundamentals = args.fundamentals or not selected
+    x_social = args.x_social or (not selected and config.x_ingest_enabled())
 
     if args.once:
-        results = run_once(quotes, candles, news, fundamentals)
+        results = run_once(quotes, candles, news, fundamentals, x_social)
         log.info("one-shot run complete: %s", results)
         return 0
 

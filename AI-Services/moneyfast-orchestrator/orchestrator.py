@@ -33,10 +33,10 @@ import sys
 from functools import lru_cache
 from typing import Any, Literal, Optional, TypedDict
 
+import agent_trace
+import social_research
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
-
-import agent_trace
 from mcp_client import MCPToolError, MCPUnavailable, get_mcp_client
 from prompts import (
     ORCHESTRATOR_SYSTEM_PROMPT,
@@ -78,8 +78,7 @@ HISTORY_MAX_CHARS = int(os.getenv("HISTORY_MAX_CHARS", "8000"))
 HISTORY_ANSWER_EXCERPT_CHARS = int(os.getenv("HISTORY_ANSWER_EXCERPT_CHARS", "220"))
 
 GENERIC_FAILURE_TR = (
-    "Şu anda yanıtı hazırlayamadım. Kısa bir süre sonra tekrar deneyebilir "
-    "misiniz?"
+    "Şu anda yanıtı hazırlayamadım. Kısa bir süre sonra tekrar deneyebilir misiniz?"
 )
 
 #: Rate limiting deserves its own sentence. Under the generic message a
@@ -100,7 +99,11 @@ _RATE_LIMIT_MARKERS = ("rate limit", "rate_limit", "429", "quota", "too many req
 
 def _failure_message(exc: Exception) -> str:
     text = str(exc).casefold()
-    return RATE_LIMITED_TR if any(m in text for m in _RATE_LIMIT_MARKERS) else GENERIC_FAILURE_TR
+    return (
+        RATE_LIMITED_TR
+        if any(m in text for m in _RATE_LIMIT_MARKERS)
+        else GENERIC_FAILURE_TR
+    )
 
 
 #: Transaction types the backend recognises as money transfers. The tool
@@ -153,6 +156,8 @@ class MoneyFastState(TypedDict, total=False):
     needs_clarification: bool
     clarifying_question: Optional[str]
     tools_used: list[str]
+    #: Structured social citations for the chat client. Empty when unused.
+    citations: list[dict[str, Any]]
     compliance: dict[str, Any]
     blocked_reason: Optional[str]
     revision_count: int
@@ -180,7 +185,9 @@ def get_llm(fast: bool = False):
 
 async def _llm_text(system: str, user: str, fast: bool = False) -> str:
     llm = get_llm(fast)
-    reply = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+    reply = await llm.ainvoke(
+        [SystemMessage(content=system), HumanMessage(content=user)]
+    )
     return (reply.content or "").strip()
 
 
@@ -236,7 +243,9 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
                 "conversation_summary": _history_summary(state),
                 "available_agents": AGENTS,
                 "locale": state.get("locale") or DEFAULT_LOCALE,
-                "user_context_flags": {"has_linked_account": bool(state.get("user_id"))},
+                "user_context_flags": {
+                    "has_linked_account": bool(state.get("user_id"))
+                },
             },
         )
     except (MCPUnavailable, MCPToolError) as exc:
@@ -249,7 +258,9 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
 
     if safety.get("is_overridable") is False:
         target = safety.get("target_agent") or "HUMAN_HANDOFF"
-        log.warning("routing fixed by safety pre-filter: agent=%s flags=%s", target, flags)
+        log.warning(
+            "routing fixed by safety pre-filter: agent=%s flags=%s", target, flags
+        )
         return {
             "primary_intent": safety.get("primary_intent") or "DISTRESS",
             "target_agent": target,
@@ -307,7 +318,10 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
 
     log.info(
         "routed intent=%s agent=%s confidence=%s flags=%s",
-        result.get("primary_intent"), target, result.get("confidence"), flags,
+        result.get("primary_intent"),
+        target,
+        result.get("confidence"),
+        flags,
     )
     return {
         "primary_intent": result.get("primary_intent") or "OUT_OF_SCOPE",
@@ -331,11 +345,15 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
     # Reporting currency follows the session locale, not the model. It is a
     # presentation choice, and letting the model pick means a Turkish user can
     # be shown their portfolio in USD because the plan happened to say so.
-    args["base_currency"] = "USD" if (state.get("locale") or DEFAULT_LOCALE).endswith("US") else "TRY"
+    args["base_currency"] = (
+        "USD" if (state.get("locale") or DEFAULT_LOCALE).endswith("US") else "TRY"
+    )
     args.setdefault("valuation_mode", "LAST_CLOSE")
     args.setdefault("include_closed", False)
     return await _run_tool(
-        state, "get_portfolio_positions", args,
+        state,
+        "get_portfolio_positions",
+        args,
         assumptions=plan.get("assumptions") or [],
         empty_when=lambda p: not p.get("positions"),
     )
@@ -356,7 +374,9 @@ async def market_data_node(state: MoneyFastState) -> dict[str, Any]:
             args["symbols"] = tickers
     args.setdefault("top_k", 20)
     return await _run_tool(
-        state, "get_market_data", args,
+        state,
+        "get_market_data",
+        args,
         assumptions=plan.get("assumptions") or [],
         empty_when=lambda p: not p.get("instruments"),
         repair_prompt=SPECIALIST_PROMPTS["MARKET_DATA_AGENT"],
@@ -386,11 +406,127 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     args["conversation_context"] = (state.get("conversation_history") or [])[
         -HISTORY_MAX_TURNS:
     ]
-    return await _run_tool(
-        state, "rag_semantic_market_search", args,
+    result = await _run_tool(
+        state,
+        "rag_semantic_market_search",
+        args,
         assumptions=plan.get("assumptions") or [],
         empty_when=lambda p: not p.get("results"),
     )
+    return await _attach_social_signals(state, result, args)
+
+
+async def _attach_social_signals(
+    state: MoneyFastState,
+    result: dict[str, Any],
+    plan_args: dict[str, Any],
+) -> dict[str, Any]:
+    """Optionally enrich market research with Phase 1 social evidence.
+
+    Failures never override a successful RAG payload. Disabled/misconfigured
+    flags leave the existing research path unchanged.
+
+    Synthesis receives only a validated ``prompt_context``. Citations are a
+    deterministic subset of evidence IDs present in that context. Malformed MCP
+    payloads are discarded without logging the body.
+    """
+
+    try:
+        config = social_research.load_config()
+    except social_research.SocialResearchConfigError as exc:
+        log.error("social research config invalid: %s", exc)
+        result.setdefault("citations", [])
+        return result
+
+    if not config["enabled"]:
+        log.info("social_signals retrieval_disabled")
+        result["citations"] = []
+        return result
+
+    symbols = social_research.resolve_symbols(
+        plan_args,
+        state.get("entities"),
+        max_instruments=config["max_instruments"],
+    )
+    if not symbols:
+        log.info("social_signals retrieval_skipped reason=no_resolved_symbol")
+        result["citations"] = []
+        return result
+
+    social_args = {
+        "symbols": symbols,
+        "since_hours": config["since_hours"],
+        "limit": config["limit"],
+        "max_per_account": config["max_per_account"],
+        "context_chars": config["context_chars"],
+        "timeout_seconds": config["timeout_seconds"],
+        "retries": config["max_retries"],
+    }
+    tools = list(result.get("tools_used") or state.get("tools_used") or [])
+    specialist = dict(result.get("specialist_output") or {})
+    data = (
+        dict(specialist.get("data") or {})
+        if isinstance(specialist.get("data"), dict)
+        else {}
+    )
+
+    try:
+        social = await get_mcp_client().call("get_social_market_signals", social_args)
+    except (MCPUnavailable, MCPToolError) as exc:
+        log.warning("social_signals graceful_fallback: %s", exc)
+        social = {
+            "status": "unavailable",
+            "reason": "mcp_error",
+            "selected": [],
+            "citations": [],
+            "prompt_context": "",
+            "stats": {"context_chars": 0},
+            "symbols": symbols,
+        }
+
+    tools.append("get_social_market_signals")
+    contract = social_research.validate_mcp_social_payload(
+        social,
+        context_chars=config["context_chars"],
+        limit=config["limit"],
+    )
+    if not contract.ok:
+        log.warning(
+            "social_signals invalid_mcp_social_contract reason=%s",
+            contract.reason,
+        )
+        data["social_signals"] = social_research.social_payload_for_specialist(
+            social if isinstance(social, dict) else {},
+            prompt_context="",
+            status="unavailable",
+            reason="invalid_mcp_social_contract",
+        )
+        specialist["data"] = data
+        specialist["tool"] = specialist.get("tool") or "rag_semantic_market_search"
+        return {
+            **result,
+            "specialist_output": specialist,
+            "tools_used": tools,
+            "citations": [],
+        }
+
+    citations = list(contract.citations)
+    data["social_signals"] = social_research.social_payload_for_specialist(
+        social if isinstance(social, dict) else {},
+        prompt_context=contract.prompt_context,
+        status=contract.status or "ok",
+        reason=contract.reason,
+    )
+    if specialist.get("status") == "EMPTY" and contract.prompt_context:
+        specialist["status"] = "OK"
+    specialist["data"] = data
+    specialist["tool"] = specialist.get("tool") or "rag_semantic_market_search"
+    return {
+        **result,
+        "specialist_output": specialist,
+        "tools_used": tools,
+        "citations": citations,
+    }
 
 
 async def risk_node(state: MoneyFastState) -> dict[str, Any]:
@@ -425,7 +561,9 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     args.setdefault("confidence_level", 0.95)
     args.setdefault("rebalance_assumption", "BUY_AND_HOLD")
     out = await _run_tool(
-        state, "calculate_portfolio_risk_metrics", args,
+        state,
+        "calculate_portfolio_risk_metrics",
+        args,
         assumptions=plan.get("assumptions") or [],
     )
     out["tools_used"] = ["get_portfolio_positions"] + (out.get("tools_used") or [])
@@ -433,7 +571,9 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
 
 
 async def transaction_node(state: MoneyFastState) -> dict[str, Any]:
-    plan = await _llm_json(SPECIALIST_PROMPTS["TRANSACTION_AGENT"], _specialist_task(state))
+    plan = await _llm_json(
+        SPECIALIST_PROMPTS["TRANSACTION_AGENT"], _specialist_task(state)
+    )
     if plan.get("status") == "NEEDS_INPUT" or not plan.get("arguments"):
         return {
             "specialist_output": {
@@ -478,7 +618,9 @@ async def transaction_node(state: MoneyFastState) -> dict[str, Any]:
             "specialist_output": {
                 "agent": "TRANSACTION_AGENT",
                 "status": "NEEDS_INPUT",
-                "missing_fields": ["quantity" if "quantity" in mismatch else "notional_amount"],
+                "missing_fields": [
+                    "quantity" if "quantity" in mismatch else "notional_amount"
+                ],
                 # The field name stays out of the user's sentence: `mismatch`
                 # reads "quantity=250", and the NAMING rule keeps internal
                 # keys off the screen. It is logged instead, where it helps.
@@ -513,7 +655,8 @@ async def transaction_node(state: MoneyFastState) -> dict[str, Any]:
         # Contract violation upstream. Refuse rather than present it.
         log.error("staging returned confirmation_required != true")
         return _tool_error(
-            state, "prepare_transaction_proposal",
+            state,
+            "prepare_transaction_proposal",
             RuntimeError("confirmation_required was not true"),
         )
     return out
@@ -623,9 +766,11 @@ async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
         draft = await _llm_text(ORCHESTRATOR_SYSTEM_PROMPT, task)
     except Exception as exc:  # LLM outage
         log.error("synthesis failed: %s", exc)
+        # Clear citations: a generic failure must not carry an unrelated source list.
         return {
             "draft_response": "",
             "final_output": _failure_message(exc),
+            "citations": [],
             "errors": (state.get("errors") or []) + [f"synthesis: {exc}"],
         }
     return {"draft_response": draft}
@@ -650,10 +795,15 @@ async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
     """Deterministic gate. Fail closed on any error."""
     draft = state.get("draft_response") or ""
     if not draft:
-        return _keep_crisis(state, {
-            "compliance_verdict": "BLOCK",
-            "final_output": state.get("final_output") or GENERIC_FAILURE_TR,
-        })
+        return _keep_crisis(
+            state,
+            {
+                "compliance_verdict": "BLOCK",
+                "final_output": state.get("final_output") or GENERIC_FAILURE_TR,
+                # Generic/empty drafts must not keep social source lists.
+                "citations": [],
+            },
+        )
 
     specialist = state.get("specialist_output") or {}
     try:
@@ -675,57 +825,84 @@ async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
         )
     except (MCPUnavailable, MCPToolError) as exc:
         log.error("compliance unavailable, failing closed: %s", exc)
-        return _keep_crisis(state, {
-            "compliance_verdict": "BLOCK",
-            "final_output": GENERIC_FAILURE_TR,
-            "errors": (state.get("errors") or []) + [f"compliance: {exc}"],
-        })
+        return _keep_crisis(
+            state,
+            {
+                "compliance_verdict": "BLOCK",
+                "final_output": GENERIC_FAILURE_TR,
+                "citations": [],
+                "errors": (state.get("errors") or []) + [f"compliance: {exc}"],
+            },
+        )
 
     decision = (verdict.get("verdict") or "BLOCK").upper()
     log.info(
         "compliance verdict=%s severity=%s audit=%s",
-        decision, verdict.get("max_severity"), verdict.get("audit_id"),
+        decision,
+        verdict.get("max_severity"),
+        verdict.get("audit_id"),
     )
 
     if decision == "PASS":
-        return _keep_crisis(state, {
-            "compliance_verdict": "PASS",
-            "compliance": verdict,
-            "final_output": _without_disclosures(draft, verdict),
-            "disclosures": _disclosure_texts(verdict),
-        })
+        return _keep_crisis(
+            state,
+            {
+                "compliance_verdict": "PASS",
+                "compliance": verdict,
+                "final_output": _without_disclosures(draft, verdict),
+                "disclosures": _disclosure_texts(verdict),
+            },
+        )
     if decision == "REVISE":
         remediated = verdict.get("remediated_response") or ""
         if not remediated:
-            return _keep_crisis(state, {
-                "compliance_verdict": "BLOCK",
+            return _keep_crisis(
+                state,
+                {
+                    "compliance_verdict": "BLOCK",
+                    "compliance": verdict,
+                    "final_output": GENERIC_FAILURE_TR,
+                    "citations": [],
+                },
+            )
+        # Remediated answer still rests on the same specialist evidence;
+        # keep citations that were already validated against selected posts.
+        return _keep_crisis(
+            state,
+            {
+                "compliance_verdict": "REVISE",
                 "compliance": verdict,
-                "final_output": GENERIC_FAILURE_TR,
-            })
-        return _keep_crisis(state, {
-            "compliance_verdict": "REVISE",
-            "compliance": verdict,
-            "final_output": _without_disclosures(remediated, verdict),
-            "disclosures": _disclosure_texts(verdict),
-        })
+                "final_output": _without_disclosures(remediated, verdict),
+                "disclosures": _disclosure_texts(verdict),
+            },
+        )
 
-    # BLOCK
+    # BLOCK — never show an unrelated source list under a refusal.
     reason = verdict.get("blocked_reason_user_facing") or GENERIC_FAILURE_TR
-    return _keep_crisis(state, {
-        "compliance_verdict": "BLOCK",
-        "compliance": verdict,
-        "blocked_reason": reason,
-        "final_output": reason,
-        "revision_count": int(state.get("revision_count") or 0) + 1,
-    })
+    return _keep_crisis(
+        state,
+        {
+            "compliance_verdict": "BLOCK",
+            "compliance": verdict,
+            "blocked_reason": reason,
+            "final_output": reason,
+            "citations": [],
+            "revision_count": int(state.get("revision_count") or 0) + 1,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
 # Conditional edges
 # ---------------------------------------------------------------------------
 SpecialistRoute = Literal[
-    "portfolio", "market_data",
-    "market_research", "risk", "transaction", "handoff", "synthesis"
+    "portfolio",
+    "market_data",
+    "market_research",
+    "risk",
+    "transaction",
+    "handoff",
+    "synthesis",
 ]
 
 
@@ -778,6 +955,7 @@ def _traced(name: str, fn):
     that already names every stage, so both `run_turn` and
     `run_turn_streaming` are covered without either knowing tracing exists.
     """
+
     async def wrapper(state: MoneyFastState) -> dict[str, Any]:
         with agent_trace.span("node", name, input=dict(state)) as sp:
             out = await fn(state)
@@ -814,7 +992,14 @@ def build_graph():
             "synthesis": "synthesis",
         },
     )
-    for node in ("portfolio", "market_data", "market_research", "risk", "transaction", "handoff"):
+    for node in (
+        "portfolio",
+        "market_data",
+        "market_research",
+        "risk",
+        "transaction",
+        "handoff",
+    ):
         g.add_edge(node, "synthesis")
     g.add_edge("synthesis", "compliance")
     g.add_conditional_edges(
@@ -875,6 +1060,7 @@ def _initial_state(
         "needs_clarification": False,
         "clarifying_question": None,
         "tools_used": [],
+        "citations": [],
         "revision_count": 0,
         "errors": [],
     }
@@ -1064,14 +1250,44 @@ async def _repair_args(
 #: order. `sat*` is safer but still needs `satın` carved out, since "satın al"
 #: is a purchase that contains the sell stem.
 _SELL_FORMS = (
-    "satsana", "satsanıza", "satalım", "satayım", "satacağım", "satacagim",
-    "satıcam", "saticam", "satmak", "satıyorum", "satiyorum", "satabilir",
-    "satar", "satış", "satis", "satın", "sat", "bozdur", "bozdurayım",
+    "satsana",
+    "satsanıza",
+    "satalım",
+    "satayım",
+    "satacağım",
+    "satacagim",
+    "satıcam",
+    "saticam",
+    "satmak",
+    "satıyorum",
+    "satiyorum",
+    "satabilir",
+    "satar",
+    "satış",
+    "satis",
+    "satın",
+    "sat",
+    "bozdur",
+    "bozdurayım",
 )
 _BUY_FORMS = (
-    "alsana", "alsanıza", "alayım", "alalım", "alacağım", "alacagim",
-    "alıcam", "alicam", "almak", "alıyorum", "aliyorum", "alabilir",
-    "alırım", "alirim", "alım", "alim", "al",
+    "alsana",
+    "alsanıza",
+    "alayım",
+    "alalım",
+    "alacağım",
+    "alacagim",
+    "alıcam",
+    "alicam",
+    "almak",
+    "alıyorum",
+    "aliyorum",
+    "alabilir",
+    "alırım",
+    "alirim",
+    "alım",
+    "alim",
+    "al",
 )
 _SELL_PHRASES = ("elden çıkar", "elden cikar", "nakde çevir", "nakde cevir")
 _BUY_PHRASES = ("satın al", "satin al")
@@ -1114,8 +1330,15 @@ def _stated_direction(message: str) -> Optional[str]:
 #: Turkish ways of saying "not that one", as they appear right after the
 #: instrument: "THYAO değil", "thyao istemiyorum", "onu yerine".
 _REFUSAL_MARKERS = (
-    "değil", "degil", "istemiyorum", "istemem", "olmasın", "olmasin",
-    "vazgeçtim", "vazgectim", "yerine",
+    "değil",
+    "degil",
+    "istemiyorum",
+    "istemem",
+    "olmasın",
+    "olmasin",
+    "vazgeçtim",
+    "vazgectim",
+    "yerine",
 )
 
 
@@ -1146,7 +1369,9 @@ def _symbol_refused_in_message(
     if not symbol:
         return None
 
-    tokens = re.findall(r"[0-9a-zçğıöşü]+", (state.get("user_message") or "").casefold())
+    tokens = re.findall(
+        r"[0-9a-zçğıöşü]+", (state.get("user_message") or "").casefold()
+    )
     for index, token in enumerate(tokens):
         if not _same_instrument(token, symbol):
             continue
@@ -1213,9 +1438,14 @@ def _amount_not_in_current_turn(
         # No competing figure in this turn: nothing was overruled.
         return None
 
-    history = " ".join(
-        str(turn.get("content", "")) for turn in (state.get("conversation_history") or [])
-    ).replace(".", "").replace(",", "")
+    history = (
+        " ".join(
+            str(turn.get("content", ""))
+            for turn in (state.get("conversation_history") or [])
+        )
+        .replace(".", "")
+        .replace(",", "")
+    )
 
     candidates: list[tuple[str, float]] = []
     quantity = args.get("quantity")
@@ -1370,10 +1600,14 @@ async def _repl() -> None:
             break
         if not message:
             break
-        result = await run_turn(message, user_id="u_local", conversation_history=history)
+        result = await run_turn(
+            message, user_id="u_local", conversation_history=history
+        )
         print("\n" + (result.get("final_output") or GENERIC_FAILURE_TR) + "\n")
         history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": result.get("final_output") or ""})
+        history.append(
+            {"role": "assistant", "content": result.get("final_output") or ""}
+        )
 
 
 if __name__ == "__main__":

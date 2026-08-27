@@ -36,25 +36,63 @@ SOURCE_REPLACEMENTS = {
     "YFINANCE_DELAYED": "sağlayıcı",
     "YFINANCE": "sağlayıcı",
     "MONEYFAST_FIXTURE_ANALYTICS": "dahili analiz",
+    "MONEYFAST_SOCIAL_SIGNALS": "sosyal sinyal",
 }
 
 #: Envelope and payload keys that describe the plumbing rather than the value.
 #: Only these exact words are removed, and only where they appear as an
 #: identifier — see `_IDENT` below.
 INTERNAL_KEYS = (
-    "as_of", "is_delayed", "delay_minutes", "index_lag_minutes",
-    "change_percent", "change_percent_asc", "market_cap", "pe_ratio", "pb_ratio",
-    "dividend_yield", "week52_high", "week52_low", "market_value", "cost_basis",
-    "unrealized_pnl", "unrealized_pnl_pct", "available_quantity", "avg_cost",
-    "instrument_currency", "base_currency", "asset_class", "product_type",
-    "source_account_id", "destination_account_id", "idempotency_key",
-    "proposal_id", "user_id", "trace_id", "top_k", "min_similarity",
-    "max_weight", "order_type", "time_in_force", "price_history",
-    "market_corpus", "valuation_mode", "rebalance_assumption", "confidence_level",
+    "as_of",
+    "is_delayed",
+    "delay_minutes",
+    "index_lag_minutes",
+    "change_percent",
+    "change_percent_asc",
+    "market_cap",
+    "pe_ratio",
+    "pb_ratio",
+    "dividend_yield",
+    "week52_high",
+    "week52_low",
+    "market_value",
+    "cost_basis",
+    "unrealized_pnl",
+    "unrealized_pnl_pct",
+    "available_quantity",
+    "avg_cost",
+    "instrument_currency",
+    "base_currency",
+    "asset_class",
+    "product_type",
+    "source_account_id",
+    "destination_account_id",
+    "idempotency_key",
+    "proposal_id",
+    "user_id",
+    "trace_id",
+    "top_k",
+    "min_similarity",
+    "max_weight",
+    "order_type",
+    "time_in_force",
+    "price_history",
+    "market_corpus",
+    "valuation_mode",
+    "rebalance_assumption",
+    "confidence_level",
+    "verification_status",
+    "source_type",
+    "trust_score",
+    "raw_metadata",
+    "prompt_context",
+    "social_signals",
 )
 
 #: An identifier standing on its own, not part of a longer word.
-_IDENT = re.compile(r"(?<![\w])(" + "|".join(map(re.escape, INTERNAL_KEYS)) + r")(?![\w])")
+_IDENT = re.compile(
+    r"(?<![\w])(" + "|".join(map(re.escape, INTERNAL_KEYS)) + r")(?![\w])"
+)
 
 #: A parenthetical whose whole content is an identifier, optionally followed by
 #: a value: "(change_percent)", "(as_of 2026-08-21 13:32)". Removed entirely —
@@ -111,6 +149,7 @@ def sanitized(text: str, trace_id: str = "") -> str:
     if found:
         log.warning(
             "internal identifiers removed from reply: %s (trace=%s)",
-            ", ".join(sorted(set(found))), trace_id or "-",
+            ", ".join(sorted(set(found))),
+            trace_id or "-",
         )
     return cleaned

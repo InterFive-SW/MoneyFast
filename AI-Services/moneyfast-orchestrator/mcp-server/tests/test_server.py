@@ -17,13 +17,13 @@ import inspect
 import runpy
 
 import pytest
-
 import server
 
 EXPECTED_TOOLS = {
     "get_portfolio_positions",
     "get_market_data",
     "rag_semantic_market_search",
+    "get_social_market_signals",
     "calculate_portfolio_risk_metrics",
     "validate_compliance_rules",
     "classify_and_route_intent",
@@ -51,12 +51,19 @@ class TestWiring:
         assert "empty list is a valid" in instructions
         assert "Fail closed" in instructions
         assert "stages only" in instructions
+        assert "get_social_market_signals" in instructions
 
-    def test_domain_modules_cover_all_seven_domains(self):
+    def test_domain_modules_cover_all_domains(self):
         domains = {name for name, _ in server.DOMAIN_MODULES}
         assert domains == {
-            "orchestrator", "portfolio", "market_data", "market_research",
-            "risk_strategy", "compliance", "transaction",
+            "orchestrator",
+            "portfolio",
+            "market_data",
+            "market_research",
+            "social_signals",
+            "risk_strategy",
+            "compliance",
+            "transaction",
         }
 
     def test_every_domain_module_exposes_register(self):
@@ -78,7 +85,10 @@ class TestWiring:
     def test_build_server_registers_every_domain(self, mocker):
         """Isolated: each register is replaced with a spy, so nothing attaches
         to the real FastMCP instance during this test."""
-        spies = [mocker.patch.object(module, "register") for _, module in server.DOMAIN_MODULES]
+        spies = [
+            mocker.patch.object(module, "register")
+            for _, module in server.DOMAIN_MODULES
+        ]
         server.build_server()
         for spy in spies:
             spy.assert_called_once_with(server.mcp)
@@ -96,7 +106,7 @@ class TestWiring:
 # ==========================================================================
 class TestDiscovery:
     @pytest.mark.asyncio
-    async def test_all_seven_tools_are_discoverable(self):
+    async def test_all_registered_tools_are_discoverable(self):
         tools = await server.mcp.list_tools()
         assert {t.name for t in tools} == EXPECTED_TOOLS
 
@@ -120,8 +130,14 @@ class TestDiscovery:
         tools = {t.name: t for t in await server.mcp.list_tools()}
         assert "user_id" in tools["get_portfolio_positions"].inputSchema["required"]
         assert "query" in tools["rag_semantic_market_search"].inputSchema["required"]
-        assert "positions" in tools["calculate_portfolio_risk_metrics"].inputSchema["required"]
-        assert "idempotency_key" in tools["prepare_transaction_proposal"].inputSchema["required"]
+        assert (
+            "positions"
+            in tools["calculate_portfolio_risk_metrics"].inputSchema["required"]
+        )
+        assert (
+            "idempotency_key"
+            in tools["prepare_transaction_proposal"].inputSchema["required"]
+        )
 
     @pytest.mark.asyncio
     async def test_optional_arguments_are_not_marked_required(self):
@@ -170,7 +186,9 @@ class TestDispatch:
 
     @pytest.mark.asyncio
     async def test_portfolio_dispatch_reaches_the_backend(self, fake_backend):
-        result = await server.mcp.call_tool("get_portfolio_positions", {"user_id": "u_1"})
+        result = await server.mcp.call_tool(
+            "get_portfolio_positions", {"user_id": "u_1"}
+        )
         assert isinstance(self.unwrap(result), dict)
         assert fake_backend.attempts == 1
         assert "/investment/portfolio/u_1/positions" in str(fake_backend.last.url)
@@ -181,7 +199,9 @@ class TestDispatch:
         assert "/search" in str(fake_backend.last.url)
 
     @pytest.mark.asyncio
-    async def test_risk_dispatch_reaches_the_backend(self, fake_backend, sample_positions):
+    async def test_risk_dispatch_reaches_the_backend(
+        self, fake_backend, sample_positions
+    ):
         await server.mcp.call_tool(
             "calculate_portfolio_risk_metrics", {"positions": sample_positions}
         )
@@ -195,14 +215,18 @@ class TestDispatch:
         assert "/compliance/validate" in str(fake_backend.last.url)
 
     @pytest.mark.asyncio
-    async def test_transaction_dispatch_reaches_the_backend(self, fake_backend, stage_args):
+    async def test_transaction_dispatch_reaches_the_backend(
+        self, fake_backend, stage_args
+    ):
         await server.mcp.call_tool("prepare_transaction_proposal", stage_args)
         assert "/investment/transactions/stage" in str(fake_backend.last.url)
 
     @pytest.mark.asyncio
     async def test_routing_dispatch_makes_no_http_call(self, fake_backend):
         """The one tool that stayed local must stay local."""
-        await server.mcp.call_tool("classify_and_route_intent", {"user_message": "merhaba"})
+        await server.mcp.call_tool(
+            "classify_and_route_intent", {"user_message": "merhaba"}
+        )
         assert fake_backend.attempts == 0
 
     @pytest.mark.asyncio
@@ -246,15 +270,15 @@ class TestFailuresSurface:
 
     @pytest.mark.asyncio
     async def test_contract_violation_surfaces(self, fake_backend, stage_payload):
-        fake_backend.json(
-            "stage", {**stage_payload, "confirmation_required": False}
-        )
+        fake_backend.json("stage", {**stage_payload, "confirmation_required": False})
         with pytest.raises(Exception):
             await server.mcp.call_tool(
                 "prepare_transaction_proposal",
                 {
-                    "user_id": "u_1", "transaction_type": "BUY",
-                    "source_account_id": "acc_1", "idempotency_key": "idem_1",
+                    "user_id": "u_1",
+                    "transaction_type": "BUY",
+                    "source_account_id": "acc_1",
+                    "idempotency_key": "idem_1",
                 },
             )
 
@@ -264,7 +288,9 @@ class TestFailuresSurface:
         successfully and returns a payload."""
         portfolio_payload["positions"] = []
         fake_backend.json("portfolio", portfolio_payload)
-        result = await server.mcp.call_tool("get_portfolio_positions", {"user_id": "u_new"})
+        result = await server.mcp.call_tool(
+            "get_portfolio_positions", {"user_id": "u_new"}
+        )
         payload = result[1] if isinstance(result, tuple) else result
         assert isinstance(payload, dict)
 

@@ -17,7 +17,12 @@ CHAT_PAYLOAD = {"user_message": "Portföyümü değerlendirir misin?"}
 
 
 def _install_async_client(
-    mocker, *, post_result=None, post_exception=None, get_result=None, get_exception=None
+    mocker,
+    *,
+    post_result=None,
+    post_exception=None,
+    get_result=None,
+    get_exception=None,
 ):
     """`async with httpx.AsyncClient(...) as client:` bloğunu tamamen mock'lar.
 
@@ -182,7 +187,14 @@ DONE_LINE = 'data: {"final_output": "Merhaba", "primary_intent": "SMALLTALK"}'
 def test_stream_relays_stage_events_and_the_answer(client, mocker):
     _install_stream(
         mocker,
-        ['event: stage', 'data: {"stage": "Yanıt yazılıyor..."}', '', 'event: done', DONE_LINE, ''],
+        [
+            "event: stage",
+            'data: {"stage": "Yanıt yazılıyor..."}',
+            "",
+            "event: done",
+            DONE_LINE,
+            "",
+        ],
     )
     response = client.post(
         "/api/ai_orchestrator/chat/stream",
@@ -200,7 +212,7 @@ def test_stream_records_the_turn_once_the_answer_arrives(client, mocker):
 
     recorded = mocker.patch.object(service, "record_turn", return_value="conv-1")
     mocker.patch.object(service, "load_history", return_value=[])
-    _install_stream(mocker, ['event: done', DONE_LINE, ''])
+    _install_stream(mocker, ["event: done", DONE_LINE, ""])
 
     response = client.post(
         "/api/ai_orchestrator/chat/stream",
@@ -229,7 +241,7 @@ def test_stream_ignores_a_malformed_frame(client, mocker):
 
     recorded = mocker.patch.object(service, "record_turn", return_value="conv-2")
     mocker.patch.object(service, "load_history", return_value=[])
-    _install_stream(mocker, ['data: not-json', '', 'event: done', DONE_LINE, ''])
+    _install_stream(mocker, ["data: not-json", "", "event: done", DONE_LINE, ""])
 
     response = client.post(
         "/api/ai_orchestrator/chat/stream",
@@ -246,7 +258,7 @@ def test_stream_without_an_answer_records_nothing(client, mocker):
 
     recorded = mocker.patch.object(service, "record_turn", return_value="conv-3")
     mocker.patch.object(service, "load_history", return_value=[])
-    _install_stream(mocker, ['event: stage', 'data: {"stage": "..."}', ''])
+    _install_stream(mocker, ["event: stage", 'data: {"stage": "..."}', ""])
 
     client.post(
         "/api/ai_orchestrator/chat/stream",
@@ -261,7 +273,7 @@ def test_stream_falls_back_to_the_client_history_when_nothing_is_stored(client, 
 
     mocker.patch.object(service, "record_turn", return_value="conv-4")
     mocker.patch.object(service, "load_history", return_value=[])
-    instance = _install_stream(mocker, ['event: done', DONE_LINE, ''])
+    instance = _install_stream(mocker, ["event: done", DONE_LINE, ""])
 
     client.post(
         "/api/ai_orchestrator/chat/stream",
@@ -301,7 +313,11 @@ def as_identity(user_id, token_present):
         app.dependency_overrides.pop(resolve_chat_identity, None)
 
 
-ANSWER = {"final_output": "Merhaba", "context_topic": "THYAO", "disclosures": ["Uyarı."]}
+ANSWER = {
+    "final_output": "Merhaba",
+    "context_topic": "THYAO",
+    "disclosures": ["Uyarı."],
+}
 
 
 def test_chat_reports_anonymous_when_no_token_was_sent(client, mocker):
@@ -362,7 +378,9 @@ def test_chat_stores_the_render_envelope_alongside_the_turn(client, mocker):
     assert meta["disclosures"] == ["Uyarı."]
 
 
-def test_client_supplied_history_is_trimmed_before_it_leaves_the_backend(client, mocker):
+def test_client_supplied_history_is_trimmed_before_it_leaves_the_backend(
+    client, mocker
+):
     """The anonymous branch used to pass the client's copy through untouched,
     leaving the only bound on it in a different container."""
     from app.modules.ai_orchestrator import service
@@ -407,7 +425,10 @@ def test_an_oversized_thread_id_is_rejected(client):
 def test_an_empty_history_entry_is_rejected(client):
     response = client.post(
         "/api/ai_orchestrator/chat",
-        json={**CHAT_PAYLOAD, "conversation_history": [{"role": "user", "content": ""}]},
+        json={
+            **CHAT_PAYLOAD,
+            "conversation_history": [{"role": "user", "content": ""}],
+        },
     )
     assert response.status_code == 422
 

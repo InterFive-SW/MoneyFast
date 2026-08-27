@@ -18,12 +18,11 @@ by waiting for them.
 
 from __future__ import annotations
 
-import asyncio
 import socket
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import httpx
 import pytest
@@ -100,6 +99,7 @@ ROUTES = {
     "/compliance/validate": "compliance",
     # Served by the rag service on its own base URL, matched on path alone.
     "/search": "search",
+    "/market/social-signals": "social_signals",
 }
 
 
@@ -126,7 +126,9 @@ class FakeBackend:
         self.set(route, httpx.Response(status, json=payload))
 
     def status(self, route: str, status: int, payload: Any = None) -> None:
-        self.set(route, httpx.Response(status, json=payload or {"error": "backend said no"}))
+        self.set(
+            route, httpx.Response(status, json=payload or {"error": "backend said no"})
+        )
 
     def fail(self, route: str, exc: Optional[BaseException] = None) -> None:
         self.set(route, exc or httpx.ConnectError("connection refused"))
@@ -158,7 +160,9 @@ class FakeBackend:
         route = self._route_for(request.url.path)
         queue = self._queues.get(route)
         if not queue:
-            return httpx.Response(404, json={"error": f"no stub for {request.url.path}"})
+            return httpx.Response(
+                404, json={"error": f"no stub for {request.url.path}"}
+            )
         outcome = queue[0] if len(queue) == 1 else queue.pop(0)
         if isinstance(outcome, BaseException):
             raise outcome
@@ -357,8 +361,14 @@ MARKET_DATA_FIELDS = frozenset({"as_of", "source", "is_delayed"})
 def portfolio_top_level_keys() -> frozenset[str]:
     return frozenset(
         {
-            "as_of", "source", "is_delayed", "delay_minutes", "base_currency",
-            "positions", "totals", "warnings",
+            "as_of",
+            "source",
+            "is_delayed",
+            "delay_minutes",
+            "base_currency",
+            "positions",
+            "totals",
+            "warnings",
         }
     )
 
@@ -371,11 +381,24 @@ def position_keys() -> frozenset[str]:
             # buckets exposure by sector and reported every portfolio as 100%
             # UNCLASSIFIED, not because sectors were unknown but because the
             # positions handed to it never carried the field.
-            "symbol", "isin", "name", "asset_class", "sector", "market",
-            "exchange", "quantity",
-            "avg_cost", "instrument_currency", "last_price", "market_value",
-            "cost_basis", "unrealized_pnl", "unrealized_pnl_pct", "weight",
-            "available_quantity", "opened_at",
+            "symbol",
+            "isin",
+            "name",
+            "asset_class",
+            "sector",
+            "market",
+            "exchange",
+            "quantity",
+            "avg_cost",
+            "instrument_currency",
+            "last_price",
+            "market_value",
+            "cost_basis",
+            "unrealized_pnl",
+            "unrealized_pnl_pct",
+            "weight",
+            "available_quantity",
+            "opened_at",
         }
     )
 
@@ -391,8 +414,18 @@ def rag_top_level_keys() -> frozenset[str]:
 def rag_result_keys() -> frozenset[str]:
     return frozenset(
         {
-            "chunk_id", "doc_id", "title", "snippet", "publisher", "author",
-            "published_at", "url", "tickers", "doc_type", "language", "score",
+            "chunk_id",
+            "doc_id",
+            "title",
+            "snippet",
+            "publisher",
+            "author",
+            "published_at",
+            "url",
+            "tickers",
+            "doc_type",
+            "language",
+            "score",
             "is_opinion",
         }
     )
@@ -401,7 +434,15 @@ def rag_result_keys() -> frozenset[str]:
 @pytest.fixture(scope="session")
 def risk_top_level_keys() -> frozenset[str]:
     return frozenset(
-        {"as_of", "source", "is_delayed", "window", "metrics", "assumptions", "data_quality"}
+        {
+            "as_of",
+            "source",
+            "is_delayed",
+            "window",
+            "metrics",
+            "assumptions",
+            "data_quality",
+        }
     )
 
 
@@ -409,8 +450,13 @@ def risk_top_level_keys() -> frozenset[str]:
 def compliance_top_level_keys() -> frozenset[str]:
     return frozenset(
         {
-            "verdict", "rule_pack_version", "violations", "required_disclosures",
-            "remediated_response", "blocked_reason_user_facing", "audit_id",
+            "verdict",
+            "rule_pack_version",
+            "violations",
+            "required_disclosures",
+            "remediated_response",
+            "blocked_reason_user_facing",
+            "audit_id",
         }
     )
 
@@ -419,9 +465,17 @@ def compliance_top_level_keys() -> frozenset[str]:
 def routing_top_level_keys() -> frozenset[str]:
     return frozenset(
         {
-            "primary_intent", "confidence", "target_agent", "secondary_intents",
-            "is_compound", "sub_requests", "entities", "required_tools",
-            "needs_clarification", "clarifying_question", "routing_rationale",
+            "primary_intent",
+            "confidence",
+            "target_agent",
+            "secondary_intents",
+            "is_compound",
+            "sub_requests",
+            "entities",
+            "required_tools",
+            "needs_clarification",
+            "clarifying_question",
+            "routing_rationale",
             "safety_flags",
             # Added when routing moved to the orchestrator: tells the caller
             # whether it may substitute its own decision. False means safety
@@ -435,9 +489,18 @@ def routing_top_level_keys() -> frozenset[str]:
 def proposal_top_level_keys() -> frozenset[str]:
     return frozenset(
         {
-            "proposal_id", "status", "expires_at", "confirmation_required",
-            "summary", "estimate", "impact", "blockers", "warnings",
-            "missing_fields", "disclosures", "audit_id",
+            "proposal_id",
+            "status",
+            "expires_at",
+            "confirmation_required",
+            "summary",
+            "estimate",
+            "impact",
+            "blockers",
+            "warnings",
+            "missing_fields",
+            "disclosures",
+            "audit_id",
         }
     )
 
@@ -446,8 +509,18 @@ def proposal_top_level_keys() -> frozenset[str]:
 def sample_positions() -> list[dict[str, Any]]:
     """Minimum viable position payload accepted by the risk tool."""
     return [
-        {"symbol": "THYAO", "quantity": 500.0, "market_value": 145875.0, "asset_class": "EQUITY"},
-        {"symbol": "ASELS", "quantity": 300.0, "market_value": 47670.0, "asset_class": "EQUITY"},
+        {
+            "symbol": "THYAO",
+            "quantity": 500.0,
+            "market_value": 145875.0,
+            "asset_class": "EQUITY",
+        },
+        {
+            "symbol": "ASELS",
+            "quantity": 300.0,
+            "market_value": 47670.0,
+            "asset_class": "EQUITY",
+        },
     ]
 
 

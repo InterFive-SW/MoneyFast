@@ -12,15 +12,14 @@ import json
 import logging
 from typing import Any, Literal, Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-
 import agent_trace
 import sanitize
 import widgets
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from mcp_client import get_mcp_client
 from orchestrator import run_turn, run_turn_streaming
+from pydantic import BaseModel, Field
 
 log = logging.getLogger("moneyfast.api")
 app = FastAPI(title="MoneyFast Orchestrator", version="1.0.0")
@@ -46,11 +45,29 @@ class ChatRequest(BaseModel):
     conversation_history: list[Turn] = []
 
 
+class Citation(BaseModel):
+    """Safe public citation for research answers that used social signals."""
+
+    evidence_id: str = Field(min_length=32, max_length=32, pattern=r"^[a-f0-9]{32}$")
+    platform: str = Field(pattern=r"^x$")
+    handle: str = Field(min_length=1, max_length=50, pattern=r"^[A-Za-z0-9_]+$")
+    display_name: Optional[str] = Field(default=None, max_length=120)
+    published_at: Optional[str] = None
+    post_url: str = Field(
+        pattern=r"^https://(?:www\.)?(?:x\.com|twitter\.com)/[A-Za-z0-9_]+/status/[0-9]+/?$"
+    )
+    kap_url: Optional[str] = None
+    verification_status: Optional[str] = None
+    source_type: Optional[str] = None
+    excerpt: Optional[str] = Field(default=None, max_length=280)
+    matched_symbols: list[str] = Field(default_factory=list)
+
+
 class ChatResponse(BaseModel):
     final_output: str
     #: Mandatory notices for this turn, verbatim. Sent as a list rather than
     #: appended to `final_output` so the chat renders them as a footnote.
-    disclosures: list[str] = []
+    disclosures: list[str] = Field(default_factory=list)
     primary_intent: Optional[str] = None
     target_agent: Optional[str] = None
     compliance_verdict: Optional[str] = None
@@ -58,6 +75,15 @@ class ChatResponse(BaseModel):
     # of the model. See widgets.py.
     widget: Optional[dict[str, Any]] = None
     context_topic: Optional[str] = None
+    #: Structured social citations. Empty when unused; never invents URLs.
+    citations: list[Citation] = Field(default_factory=list)
+
+
+@app.on_event("startup")
+async def _validate_social_config() -> None:
+    import social_research
+
+    social_research.validate_config_at_startup()
 
 
 @app.get("/healthz")
@@ -105,6 +131,7 @@ def _response_payload(state: dict[str, Any]) -> ChatResponse:
         disclosures=state.get("disclosures") or [],
         widget=widget,
         context_topic=context_topic,
+        citations=state.get("citations") or [],
     )
 
 

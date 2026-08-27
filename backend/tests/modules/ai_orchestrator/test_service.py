@@ -48,17 +48,28 @@ class TestRecordTurn:
     def test_stores_both_sides_of_the_exchange(self):
         db = make_db()
         conversation_id = service.record_turn(
-            db, "user-1", "t-1", "portföyüm?", "Portföyünüz...", meta={"target_agent": "PORTFOLIO_AGENT"}
+            db,
+            "user-1",
+            "t-1",
+            "portföyüm?",
+            "Portföyünüz...",
+            meta={"target_agent": "PORTFOLIO_AGENT"},
         )
         assert conversation_id is not None
         # One conversation plus two messages.
         assert db.add.call_count == 3
-        roles = [call.args[0].role for call in db.add.call_args_list if hasattr(call.args[0], "role")]
+        roles = [
+            call.args[0].role
+            for call in db.add.call_args_list
+            if hasattr(call.args[0], "role")
+        ]
         assert roles == ["user", "assistant"]
 
     def test_meta_is_attached_to_the_assistant_message_only(self):
         db = make_db()
-        service.record_turn(db, "user-1", "t-1", "soru", "cevap", meta={"compliance_verdict": "PASS"})
+        service.record_turn(
+            db, "user-1", "t-1", "soru", "cevap", meta={"compliance_verdict": "PASS"}
+        )
         added = [c.args[0] for c in db.add.call_args_list if hasattr(c.args[0], "role")]
         user_msg, assistant_msg = added
         assert user_msg.meta == {}
@@ -67,7 +78,9 @@ class TestRecordTurn:
     def test_reuses_an_existing_conversation(self):
         existing = SimpleNamespace(id="conv-1", updated_at=None)
         db = make_db(existing_conversation=existing)
-        assert service.record_turn(db, "user-1", "t-1", "ikinci soru", "cevap") == "conv-1"
+        assert (
+            service.record_turn(db, "user-1", "t-1", "ikinci soru", "cevap") == "conv-1"
+        )
         # Only the two messages; no second conversation row.
         assert db.add.call_count == 2
         assert existing.updated_at is not None

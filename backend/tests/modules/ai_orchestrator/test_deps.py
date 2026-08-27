@@ -34,9 +34,7 @@ class TestResolveChatIdentity:
     def test_valid_token_resolves_to_the_user_id(self):
         token = create_access_token(data={"sub": "98765432109"})
         identity = deps.resolve_chat_identity(token=token, db=make_db(ACTIVE_USER))
-        assert identity == deps.ChatIdentity(
-            user_id="user-abc-123", token_present=True
-        )
+        assert identity == deps.ChatIdentity(user_id="user-abc-123", token_present=True)
 
     def test_unresolvable_token_is_anonymous_but_flagged(self):
         """The whole point of the type. A malformed token grants nothing, but

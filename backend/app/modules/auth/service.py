@@ -1,4 +1,4 @@
-from fastapi import HTTPException, status
+from fastapi import BackgroundTasks, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.security import (
@@ -80,7 +80,7 @@ def refresh_access_token(refresh_token: str, db: Session) -> TokenResponse:
     return TokenResponse(access_token=create_access_token(data={"sub": user.tc_no}))
 
 
-def create_user(payload: RegisterRequest, db: Session) -> UserResponse:
+def create_user(payload: RegisterRequest, db: Session, background_tasks: BackgroundTasks) -> UserResponse:
     existing_tc = db.query(User).filter(User.tc_no == payload.tc_no).first()
     if existing_tc:
         raise HTTPException(
@@ -123,9 +123,9 @@ def create_user(payload: RegisterRequest, db: Session) -> UserResponse:
     db.commit()
     db.refresh(user)
     
-    # E-posta doğrulama token'ını oluştur ve gönder (Terminal mock servisine düşer).
+    # E-posta doğrulama token'ını oluştur ve gönder (Gerçek SMTP - Asenkron).
     token = create_verification_token(email=user.email)
-    send_verification_email(user.email, token)
+    background_tasks.add_task(send_verification_email, user.email, token)
     
     return UserResponse.model_validate(user)
 
@@ -159,7 +159,7 @@ def verify_email(token: str, db: Session) -> dict:
     return {"message": "Hesabınız başarıyla doğrulandı. Şimdi giriş yapabilirsiniz."}
 
 
-def send_password_reset(payload: ForgotPasswordRequest, db: Session) -> dict:
+def send_password_reset(payload: ForgotPasswordRequest, db: Session, background_tasks: BackgroundTasks) -> dict:
     """
     Şifre sıfırlama işlemi için e-posta gönderir.
     GÜVENLİK: İşlemin onaylanması için TC Kimlik ve E-posta adresinin tamamen
@@ -180,7 +180,7 @@ def send_password_reset(payload: ForgotPasswordRequest, db: Session) -> dict:
         )
         
     token = create_reset_token(email=user.email)
-    send_password_reset_email(user.email, token)
+    background_tasks.add_task(send_password_reset_email, user.email, token)
     
     return {"message": "Şifre sıfırlama bağlantısı e-posta adresinize gönderildi."}
 

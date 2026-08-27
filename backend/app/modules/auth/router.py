@@ -6,7 +6,7 @@ Veritabanı ekibi tarafından uygulanacak veritabanı işlemleri için yer tutuc
 """
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from pydantic import EmailStr
 
 from app.modules.auth import schemas, service
@@ -40,7 +40,7 @@ router = APIRouter(tags=["Authentication"])
     status_code=status.HTTP_201_CREATED,
     summary="Yeni bir kullanıcı kaydet"
 )
-async def register(user_in: schemas.RegisterRequest, db: Session = Depends(get_db)):
+async def register(user_in: schemas.RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Girdilerini doğrulayarak ve şifrelerini güvenli bir şekilde hashleyerek yeni bir kullanıcı kaydeder.
 
@@ -50,7 +50,7 @@ async def register(user_in: schemas.RegisterRequest, db: Session = Depends(get_d
 
     Şifre hash'leme ve tekillik kontrolleri `service.create_user` içinde.
     """
-    return service.create_user(user_in, db)
+    return service.create_user(user_in, db, background_tasks)
 
 
 @router.post(
@@ -108,13 +108,13 @@ async def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db
     status_code=status.HTTP_200_OK,
     summary="Şifre sıfırlama bağlantısı iste"
 )
-async def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+async def forgot_password(payload: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Kullanıcıya e-posta yoluyla şifre sıfırlama bağlantısı gönderir.
     GÜVENLİK: TC Kimlik ve E-posta doğrulaması yapılarak yetkisiz erişim önlenir.
     """
     logger.info(f"Password reset request received for email: {payload.email}")
-    return service.send_password_reset(payload, db)
+    return service.send_password_reset(payload, db, background_tasks)
 
 
 @router.post(

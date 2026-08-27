@@ -28,6 +28,20 @@ class TestUuidDefault:
         assert investment_models._uuid() != investment_models._uuid()
 
 
+class TestRiskModelDefaults:
+    def test_risk_uuid_default_is_a_uuid_string(self):
+        from app.modules.risk import models as risk_models
+
+        assert uuid.UUID(risk_models._uuid())
+
+    def test_risk_timestamp_is_timezone_aware_utc(self):
+        from app.modules.risk import models as risk_models
+
+        value = risk_models._now()
+        assert value.tzinfo is not None
+        assert value.utcoffset() == timezone.utc.utcoffset(None)
+
+
 class TestTimestampDefault:
     def test_investment_timestamp_is_timezone_aware_utc(self):
         """A naive default would make `expires_at < now` raise TypeError, and

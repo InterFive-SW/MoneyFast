@@ -1,12 +1,20 @@
 import { useState, useEffect } from 'react'
 import { apiClient } from '../api/client'
-import type { RiskProfile } from '../api/client'
+import type { RiskLookback, RiskProfile, RiskSuggestion } from '../api/client'
 
 import RiskScoreWidget from '../components/risk/RiskScoreWidget'
 import FinancialBalanceWidget from '../components/risk/FinancialBalanceWidget'
 import RiskFactorsWidget from '../components/risk/RiskFactorsWidget'
 import RiskRecommendationsWidget from '../components/risk/RiskRecommendationsWidget'
 import ScoreBreakdown from '../components/risk/ScoreBreakdown'
+import RiskMetricsPanel from '../components/risk/RiskMetricsPanel'
+import RiskConcentrationPanel from '../components/risk/RiskConcentrationPanel'
+import RiskNarrativeCard from '../components/risk/RiskNarrativeCard'
+import EmptyPortfolioCard from '../components/risk/EmptyPortfolioCard'
+import SuitabilityCard from '../components/risk/SuitabilityCard'
+import QuestionnaireModal from '../components/risk/QuestionnaireModal'
+import SimulationPanel from '../components/risk/SimulationPanel'
+import RiskHistoryPanel from '../components/risk/RiskHistoryPanel'
 
 /**
  * Risk Analizi sayfası.
@@ -17,21 +25,62 @@ import ScoreBreakdown from '../components/risk/ScoreBreakdown'
  * 1200 ms'lik sahte bir gecikme uyguluyordu: 68 puan, dört uydurma bulgu ve
  * hiç ölçülmemiş bir borç/gelir oranı.
  */
+/** Sayfadan seçilebilen pencereler. Uzun aralıklar için yeterli mum yoksa
+ *  yanıtın `data_quality` bloğu bunu zaten söylüyor. */
+const LOOKBACKS: { value: RiskLookback; label: string }[] = [
+  { value: '1M', label: '1 Ay' },
+  { value: '3M', label: '3 Ay' },
+  { value: '6M', label: '6 Ay' },
+  { value: '1Y', label: '1 Yıl' },
+]
+
+/**
+ * Bir önerinin gideceği ekran, ya da hedefi yoksa `null`.
+ *
+ * Hedefi olmayan öneride düğme hiç çizilmez; tıklanıp hiçbir şey yapmayan
+ * bir düğme, kullanıcıya özelliğin bozuk olduğunu söyler.
+ */
+function suggestionTarget(
+  suggestion: RiskSuggestion,
+  largestSymbol: string | null,
+): string | null {
+  if (suggestion.id === 'review-largest' && largestSymbol) {
+    return `/investment/hisseler/${largestSymbol}`
+  }
+  if (suggestion.id === 'sector-weight') return '/analytics'
+  return null
+}
+
 export default function Risk() {
   const [data, setData] = useState<RiskProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
+  const [lookback, setLookback] = useState<RiskLookback>('1Y')
+  const [surveyOpen, setSurveyOpen] = useState(false)
+  // Anket kaydedilince profili yeniden çekmek için: karşılaştırma
+  // sunucuda üretiliyor, istemcide tahmin edilmiyor.
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
+    let cancelled = false
+    setLoading(true)
     apiClient
-      .getRiskProfile()
-      .then(setData)
+      .getRiskProfile(lookback)
+      .then((profile) => {
+        if (!cancelled) setData(profile)
+      })
       .catch((error) => {
+        if (cancelled) return
         console.error('Risk profili alınamadı', error)
         setFailed(true)
       })
-      .finally(() => setLoading(false))
-  }, [])
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [lookback, reloadKey])
 
   if (loading) {
     return (
@@ -57,6 +106,10 @@ export default function Risk() {
 
   const cashflow = data.cashflow
   const noPositions = (data.position_count ?? 0) === 0
+  const metrics = (data.metrics ?? {}) as Record<string, unknown>
+  const concentration = metrics.concentration as Record<string, unknown> | undefined
+  const largestSymbol =
+    ((concentration?.largest_position as { symbol?: string } | undefined)?.symbol) ?? null
 
   return (
     <div className="min-h-screen p-6 sm:p-8">
@@ -67,12 +120,30 @@ export default function Risk() {
             Portföyünüzün ölçülen oynaklığı, yoğunlaşması ve geçmiş düşüşleri.
           </p>
         </div>
-        <div className="text-sm font-medium text-slate-400">
-          Son hesaplama:{' '}
-          {new Date(data.as_of).toLocaleDateString('tr-TR', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          <div className="flex gap-1 rounded-lg bg-white/5 p-1">
+            {LOOKBACKS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setLookback(option.value)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                  lookback === option.value
+                    ? 'bg-brandBlue text-white'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div className="text-sm font-medium text-slate-400">
+            Son hesaplama:{' '}
+            {new Date(data.as_of).toLocaleDateString('tr-TR', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </div>
         </div>
       </div>
 
@@ -86,6 +157,18 @@ export default function Risk() {
           </ul>
         </div>
       )}
+
+      {/* Rakam yığınından önce üç cümle. Aynı metriklerden üretiliyor. */}
+      {!noPositions && <RiskNarrativeCard metrics={metrics} lookback={lookback} />}
+
+      {/* Yumuşak kapı: anket yoksa kart bir çağrıya dönüşür, sayfa kapanmaz. */}
+      <div className="mb-6">
+        <SuitabilityCard
+          suitability={data.suitability}
+          declared={data.declared}
+          onStart={() => setSurveyOpen(true)}
+        />
+      </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-1">
@@ -104,18 +187,32 @@ export default function Risk() {
             />
           )}
           {noPositions ? (
-            <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-6 text-sm text-slate-400">
-              Portföyünüzde değerlenebilir pozisyon bulunmadığı için risk
-              ölçütleri hesaplanamadı.
-            </div>
+            <EmptyPortfolioCard />
           ) : (
             <>
+              {/* Motorun hesaplayıp sayfanın hiç göstermediği blok. */}
+              <RiskMetricsPanel
+                metrics={metrics}
+                currency={cashflow?.currency_code ?? 'TRY'}
+              />
+              <RiskConcentrationPanel concentration={concentration} />
+              <RiskHistoryPanel />
+              <SimulationPanel lookback={lookback} />
               <RiskFactorsWidget factors={data.findings ?? []} />
-              <RiskRecommendationsWidget recommendations={data.suggestions ?? []} />
+              <RiskRecommendationsWidget
+                recommendations={data.suggestions ?? []}
+                resolveTarget={(rec) => suggestionTarget(rec, largestSymbol)}
+              />
             </>
           )}
         </div>
       </div>
+
+      <QuestionnaireModal
+        open={surveyOpen}
+        onClose={() => setSurveyOpen(false)}
+        onSaved={() => setReloadKey((value) => value + 1)}
+      />
     </div>
   )
 }

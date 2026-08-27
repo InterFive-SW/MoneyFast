@@ -369,3 +369,73 @@ def test_a_single_lookup_omits_the_methodology_block():
     """"Sıralama: fiyat yüksekten düşüğe, en fazla 10" under a one-stock price
     describes a screen that never happened."""
     assert "belongs to a SCREEN" in prompts.ORCHESTRATOR_SYSTEM_PROMPT
+
+
+# --------------------------------------------------------------------------
+# Risk score and declared tolerance (v2.4).
+#
+# Two separate hazards, and they pull in opposite directions. The score is
+# inverted, so a model that reads it naively tells a user with a calm
+# portfolio that their risk is 83. And the comparison against the declared
+# tolerance is the ONE place this product puts a measurement and a personal
+# declaration in the same sentence -- narrow enough to be a statement of two
+# facts, and one clause away from being advice.
+# --------------------------------------------------------------------------
+def test_the_inverted_score_is_spelled_out():
+    """A HIGHER score is a CALMER portfolio, and the band beside it runs the
+    other way. Left unstated, "riskiniz 83" is the natural sentence to write
+    and it is backwards."""
+    text = prompts.ORCHESTRATOR_SYSTEM_PROMPT
+    assert "INVERTED" in text
+    assert "riskiniz 83" in text
+    assert "100'e yakın puan daha sakin bir portföy demek" in text
+
+
+def test_the_tolerance_comparison_is_permitted_but_fenced():
+    text = prompts.ORCHESTRATOR_SYSTEM_PROMPT
+    assert "declared" in text and "questionnaire" in text
+    # Permitted, and named as the single exception rather than left to be
+    # inferred against the blanket non-advisory rule above it.
+    assert "ONE narrow exception" in text
+    # ...and fenced on the far side: the comparison ends the thought.
+    assert "state the comparison and STOP" in text
+    assert "Never follow it with what to" in text
+
+
+def test_a_tolerance_is_never_inferred_from_the_portfolio():
+    """Inferring the declaration from the measurement compares the
+    measurement against itself and then reports agreement."""
+    text = prompts.ORCHESTRATOR_SYSTEM_PROMPT
+    assert "NEVER infer a tolerance from the portfolio" in text
+
+
+def test_the_non_advisory_rule_still_stands_above_the_exception():
+    """The exception narrows one clause. Everything else holds."""
+    text = prompts.ORCHESTRATOR_SYSTEM_PROMPT
+    assert "Never tell the user to buy, sell, hold, increase, reduce or avoid" in text
+    assert text.index("NON-ADVISORY STANCE") < text.index("RISK SCORE AND DECLARED")
+
+
+def test_the_risk_specialist_still_forbids_threshold_judgements():
+    """Reaching a score must not loosen the planner's own limits."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "Never emit a threshold judgement" in text
+    assert "Never recommend a rebalance, hedge or target weight" in text
+
+
+def test_the_risk_specialist_does_not_plan_the_summary_call():
+    """The graph fetches it. A planner that tries to request it produces an
+    argument the tool binding does not accept."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "fetched alongside without your planning it" in text
+    assert "do not request it" in text
+
+
+def test_the_risk_specialist_names_the_closed_lookback_set():
+    """Measured on the live path: with the set unnamed, the planner wrote
+    "1y" on one turn and "365" on the next, and the user was told the data
+    could not be retrieved."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    for window in ("1M", "3M", "6M", "1Y", "3Y", "5Y", "MAX"):
+        assert f'"{window}"' in text
+    assert "Never a" in text and "day count" in text

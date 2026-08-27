@@ -47,6 +47,40 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+#: A daily bar older than this is stale rather than merely settled. One
+#: calendar day covers the ordinary case (yesterday's close, read this
+#: morning); a weekend or a holiday pushes past it, which is correct -- on a
+#: Sunday the newest close really is two days old.
+FRESH_WITHIN_DAYS = 1
+
+
+def _is_delayed(newest: Any) -> bool:
+    """Whether the terminal observation lags today.
+
+    Was hardcoded `False` on every response, with the reasoning that a daily
+    close is settled by the time we hold it. Settled and current are different
+    claims: after a long weekend the newest close is three days old, and the
+    contract's `is_delayed` is what the assistant renders as freshness. An
+    unreadable or missing stamp counts as delayed -- the cautious direction,
+    since the alternative asserts currency we cannot demonstrate.
+    """
+    if not hasattr(newest, "astimezone"):
+        return True
+    age = datetime.now(timezone.utc) - newest.astimezone(timezone.utc)
+    return age.days > FRESH_WITHIN_DAYS
+
+
+def history_limit(lookback: str) -> int:
+    """Bars to read for `lookback`, including the one the first return needs.
+
+    Lives here rather than in the router so the window arithmetic has one
+    home. The router passes this to `market_service.candle_closes`, whose own
+    default cap of 260 was silently truncating every window longer than a
+    year.
+    """
+    return returns_math.window_for(lookback) + 1
+
+
 def _weights(positions: List[Dict[str, Any]]) -> Dict[str, float]:
     total = sum(abs(float(p["market_value"])) for p in positions)
     if total == 0:
@@ -124,6 +158,11 @@ def calculate(
 
     window = returns_math.window_for(lookback)
     benchmark = benchmark_symbol or DEFAULT_BENCHMARK
+    # What the window would need. Reported alongside what was actually
+    # obtained, because the two diverge silently: the candle reader has its
+    # own row cap, so a 5Y request came back as roughly one year while the
+    # response still said "5Y".
+    bars_requested = window + 1
 
     # ---- gather history --------------------------------------------------
     series: Dict[str, List[float]] = {}
@@ -209,9 +248,7 @@ def calculate(
     return {
         "as_of": _iso(window_stamps[-1]) if window_stamps else _now_iso(),
         "source": SOURCE,
-        # The terminal bar is the provider's most recent daily close, which is
-        # settled by the time we hold it.
-        "is_delayed": False,
+        "is_delayed": _is_delayed(window_stamps[-1] if window_stamps else None),
         "window": {
             "start_date": _date(window_stamps[0]) if window_stamps else "",
             "end_date": _date(window_stamps[-1]) if window_stamps else "",
@@ -221,6 +258,11 @@ def calculate(
         "metrics": computed,
         "assumptions": {
             "lookback": lookback,
+            #: How many bars the requested window needs. `window.observation_count`
+            #: says how many were actually usable; when the two differ the
+            #: history simply is not there, and the reader can see that rather
+            #: than trusting the label.
+            "lookback_bars_requested": bars_requested,
             # Echoes what was requested, not what was obtainable. The MCP
             # normalizer forces beta to None when this field is empty, so
             # blanking it after successfully computing a beta would discard
@@ -312,3 +354,126 @@ def _iso(stamp: Any) -> str:
     if hasattr(stamp, "astimezone"):
         return stamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     return str(stamp)
+
+
+# ---------------------------------------------------------------------------
+# "What if" simulation
+# ---------------------------------------------------------------------------
+def apply_changes(
+    positions: List[Dict[str, Any]], changes: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """A hypothetical portfolio: today's holdings plus the caller's deltas.
+
+    Pure, and deliberately so -- the whole simulation needs no new mathematics
+    because `calculate` already takes an arbitrary position list. The only new
+    thing is producing a different list.
+
+    Each change is pre-resolved by the caller and carries `unit_value`: the
+    value of ONE unit in the base currency. Prices belong to the router's
+    database work, not here.
+
+    Two rules that keep the result honest:
+
+    * A delta that would take a holding below zero closes it at zero. Nobody
+      can sell more than they hold, and a negative weight would give the
+      concentration maths a share of the portfolio that does not exist.
+    * A position reduced to nothing is REMOVED rather than kept at zero. A
+      zero-value row still counts as a name in `effective_n`, so leaving it
+      would report a diversification the user no longer has.
+    """
+    merged = {position["symbol"]: dict(position) for position in positions}
+
+    for change in changes:
+        symbol = change["symbol"]
+        delta = float(change["quantity_delta"])
+        unit_value = float(change["unit_value"])
+
+        existing = merged.get(symbol)
+        if existing is None:
+            if delta <= 0:
+                # Selling something that is not held is not a portfolio, it is
+                # a typo. Ignored rather than modelled as a short.
+                continue
+            merged[symbol] = {
+                "symbol": symbol,
+                "quantity": delta,
+                "market_value": delta * unit_value,
+                "asset_class": change.get("asset_class") or "EQUITY",
+                "sector": change.get("sector") or "UNCLASSIFIED",
+                "instrument_currency": change.get("instrument_currency") or "TRY",
+            }
+            continue
+
+        quantity = max(0.0, float(existing["quantity"]) + delta)
+        if quantity == 0.0:
+            del merged[symbol]
+            continue
+        existing["quantity"] = quantity
+        existing["market_value"] = quantity * unit_value
+
+    return list(merged.values())
+
+
+def summarise_for_simulation(metrics: Dict[str, Any], scored: Dict[str, Any]) -> Dict[str, Any]:
+    """The handful of figures the before/after comparison shows.
+
+    A subset on purpose: putting the full metric block on both sides would
+    invite the reader to diff twenty numbers, most of which move for reasons
+    the change did not cause.
+    """
+    concentration = metrics.get("concentration") or {}
+    drawdown = metrics.get("max_drawdown") or {}
+    return {
+        "score": scored.get("score"),
+        "level": scored.get("level"),
+        "volatility": metrics.get("volatility_annualized"),
+        "hhi": concentration.get("hhi"),
+        "effective_n": concentration.get("effective_n"),
+        "max_drawdown": drawdown.get("value"),
+    }
+
+
+def summarise_for_agent(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """The figures the score is actually built from, flattened.
+
+    A subset, and for a different reason than the simulation's: this payload
+    goes to a language model, which will quote whatever it is handed. The
+    full metric block travels on `calculate_portfolio_risk_metrics` in the
+    same turn, so repeating twenty numbers here only creates a second place
+    for them to be quoted from -- and two sources for one figure is how a
+    turn ends up stating both.
+
+    Nested values are lifted out (`max_drawdown.value` rather than the dict)
+    because the model reads these as plain facts, not as a structure to
+    navigate.
+    """
+    concentration = metrics.get("concentration") or {}
+    drawdown = metrics.get("max_drawdown") or {}
+    return {
+        "volatility_annualized": metrics.get("volatility_annualized"),
+        "max_drawdown": drawdown.get("value"),
+        "hhi": concentration.get("hhi"),
+        "effective_n": concentration.get("effective_n"),
+        "top_3_weight": concentration.get("top_3_weight"),
+        "largest_position": concentration.get("largest_position"),
+    }
+
+
+def _delta(after: Optional[float], before: Optional[float]) -> Optional[float]:
+    """Difference, or None when either side could not be measured.
+
+    Zero would read as "no change", which is a different claim from "we could
+    not tell".
+    """
+    if after is None or before is None:
+        return None
+    return round(after - before, 6)
+
+
+def simulation_deltas(
+    current: Dict[str, Any], hypothetical: Dict[str, Any]
+) -> Dict[str, Optional[float]]:
+    return {
+        key: _delta(hypothetical.get(key), current.get(key))
+        for key in ("score", "volatility", "hhi", "effective_n", "max_drawdown")
+    }

@@ -23,6 +23,56 @@ from backend_client import (
 )
 
 TOOL = "calculate_portfolio_risk_metrics"
+SUMMARY_TOOL = "get_risk_profile_summary"
+
+#: The four values `suitability.alignment` may take. An unrecognised one is a
+#: contract drift, not a label to pass through: the model would narrate it.
+ALIGNMENTS = frozenset(
+    {"ALIGNED", "PORTFOLIO_RISKIER", "PORTFOLIO_CALMER", "UNKNOWN"}
+)
+
+#: The windows the backend accepts. Anything else makes `returns.window_for`
+#: fall back to 252 bars, so an unrecognised value used to return a year of
+#: data under whatever label the caller sent.
+LOOKBACKS = ("1M", "3M", "6M", "1Y", "3Y", "5Y", "MAX")
+
+#: What the planning model writes instead, canonicalised. Measured, not
+#: imagined: two consecutive live turns produced "1y" and "365" for the same
+#: question. The same lesson as `market_data_tools.ALLOWED_SORTS` -- the
+#: prompt now names the closed set, and this makes the naming true.
+#:
+#: Day counts map to the CALENDAR window that contains them, which is what
+#: the caller meant; `period` is a calendar range on the backend side too.
+#: An unrecognised value still raises: quietly rounding an unknown window to
+#: 1Y is the behaviour this whole path exists to prevent.
+_LOOKBACK_SYNONYMS = {
+    "30": "1M", "30D": "1M", "1MO": "1M",
+    "90": "3M", "90D": "3M", "3MO": "3M", "QUARTER": "3M",
+    "180": "6M", "180D": "6M", "6MO": "6M",
+    "252": "1Y", "365": "1Y", "365D": "1Y", "12M": "1Y", "1YR": "1Y",
+    "YTD": "1Y", "YEAR": "1Y",
+    "1095": "3Y", "36M": "3Y", "3YR": "3Y",
+    "1825": "5Y", "60M": "5Y", "5YR": "5Y",
+    "ALL": "MAX", "INCEPTION": "MAX",
+}
+
+
+def canonical_lookback(value: Optional[str], tool: str) -> str:
+    """Normalise a window, or say plainly that it is not one.
+
+    Casing is normalised rather than rejected -- the backend body model has
+    always done that, and only the query string did not, which is how a
+    perfectly valid "1y" reached the user as "Verilere ulaşamadım".
+    """
+    if not value:
+        return "1Y"
+    upper = str(value).strip().upper()
+    resolved = _LOOKBACK_SYNONYMS.get(upper, upper)
+    if resolved not in LOOKBACKS:
+        raise InvalidInputError(
+            f"{tool}: lookback {value!r} is not one of {', '.join(LOOKBACKS)}."
+        )
+    return resolved
 
 
 async def calculate_portfolio_risk_metrics(
@@ -150,7 +200,7 @@ async def calculate_portfolio_risk_metrics(
           before emission.
     """
     rebalance_assumption = rebalance_assumption or "BUY_AND_HOLD"
-    lookback = lookback or "1Y"
+    lookback = canonical_lookback(lookback, TOOL)
     # Fail before the network call: an empty position set cannot produce a
     # meaningful metric, and the contract documents this as InvalidInputError
     # rather than an empty result.
@@ -238,6 +288,184 @@ def _normalize_quality(raw: Any) -> dict[str, Any]:
     }
 
 
+async def get_risk_profile_summary(
+    user_id: str,
+    lookback: Optional[str] = "1Y",
+) -> dict[str, Any]:
+    """
+    Returns the user's risk profile as the application itself presents it: a
+    0-100 score, a band label, and - when the user has completed the risk
+    questionnaire - a comparison between the measured band and the tolerance
+    they declared.
+
+    This is the INTERPRETED layer. calculate_portfolio_risk_metrics returns raw
+    statistics and no score; the score and band do not exist anywhere else, so
+    a figure quoted from here is the same figure the user sees on the risk
+    page. Quoting a volatility percentage as though it were "their risk level"
+    is what this tool exists to stop.
+
+    WHEN TO USE
+        - "How risky am I", "what is my risk score", "is my portfolio in line
+          with my risk profile", "what did I say my risk tolerance was".
+        - Alongside calculate_portfolio_risk_metrics when the user asks both
+          what the number is and what it means.
+
+    WHEN NOT TO USE
+        - To obtain volatility, VaR, beta, Sharpe or a correlation matrix.
+          Those live on calculate_portfolio_risk_metrics; the subset returned
+          here is only what the score is built from.
+        - To decide, or imply, what the user SHOULD hold. The alignment field
+          states how two measurements compare. It is not a recommendation and
+          carries none.
+
+    Args:
+        user_id (str): REQUIRED. Resolved by the orchestrator from the verified
+            session, never from the user's message.
+        lookback (str): Window the measurement is taken over. One of "1M",
+            "3M", "6M", "1Y", "3Y", "5Y", "MAX". Default "1Y", which is what
+            the risk page shows unless the user changed it.
+
+    Returns:
+        dict with exactly these top-level keys:
+
+        as_of (str): ISO 8601 UTC timestamp of the measurement.
+        score (float | None): 0-100. INVERTED relative to intuition: a HIGHER
+            score is a CALMER portfolio. None when nothing could be measured;
+            never present a None score as a number or as zero.
+        level (str | None): The measured risk band, "Dusuk" | "Orta" |
+            "Yuksek" (returned in Turkish). This is a RISK level, so it runs
+            opposite to the score: a high score yields the lowest band.
+        position_count (int): Positions that could be valued and measured.
+
+        suitability (dict):
+            measured_level (str | None): The band above, repeated here so the
+                comparison is self-contained.
+            declared_tolerance (str | None): What the user answered in the
+                questionnaire. None when they have not taken it.
+            alignment (str): "ALIGNED" | "PORTFOLIO_RISKIER" |
+                "PORTFOLIO_CALMER" | "UNKNOWN". "UNKNOWN" means one of the two
+                sides is missing, NOT that they disagree.
+            statement (str): Turkish, already worded as a statement of fact.
+                Prefer relaying this over composing the comparison yourself.
+
+        declared (dict | None): tolerance_level (str), investment_horizon
+            (str), assessed_at (str), questionnaire_version (str). None until
+            the questionnaire is completed.
+
+        metrics (dict): Only what the score is built from -
+            volatility_annualized (float | None), max_drawdown (float | None,
+            negative fraction), hhi (float | None), effective_n (float | None),
+            top_3_weight (float | None), largest_position (dict | None).
+
+        findings (list[dict]): label (str), detail (str), severity (str).
+            Already in Turkish and already user-facing.
+        data_quality (dict): Same block calculate_portfolio_risk_metrics
+            returns. Inspect before presenting any figure.
+        warnings (list[str]): Positions left out of the measurement, in
+            Turkish. Name them rather than reporting a total that quietly
+            excludes a holding.
+
+    Raises:
+        AuthorizationError: The MCP server is not configured with service
+            credentials for the backend, or they were rejected.
+        InvalidInputError: Unknown user, or an unsupported lookback.
+
+    Constraints:
+        - The score is a MEASUREMENT of past behaviour, not a rating of the
+          user and not a forecast.
+        - alignment describes how a measurement compares to the user's own
+          declaration. Do NOT convert it into an instruction: stating that the
+          measured level sits above the declared one is permitted, telling the
+          user to reduce their risk is not.
+        - When declared is None, say the questionnaire has not been completed.
+          Do NOT infer a tolerance from the portfolio - that would compare the
+          measurement against itself.
+    """
+    if not user_id:
+        raise InvalidInputError(f"{SUMMARY_TOOL}: user_id is required.")
+
+    payload = await backend_client.request(
+        "GET",
+        f"/risk/profile/{user_id}",
+        tool=SUMMARY_TOOL,
+        # Canonicalised by the same function the metrics tool uses: the score
+        # and the statistics beside it must describe the same window, or the
+        # turn reports two answers about two different portfolios-in-time.
+        params={"lookback": canonical_lookback(lookback, SUMMARY_TOOL)},
+    )
+    return _normalize_summary(payload)
+
+
+def _normalize_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    """Project the backend response onto the exact v2.4 payload.
+
+    No freshness block. `backend_client.freshness` requires source and
+    is_delayed, which describe a price feed; this payload is an interpretation
+    computed from one. Stamping it with a provider name would attribute the
+    score to a source that never produced it.
+    """
+    backend_client.require(
+        payload,
+        ("as_of", "score", "level", "position_count", "suitability",
+         "declared", "metrics", "findings", "data_quality", "warnings"),
+        SUMMARY_TOOL,
+    )
+
+    suitability = payload["suitability"]
+    if not isinstance(suitability, dict):
+        raise ContractViolationError(f"{SUMMARY_TOOL}: 'suitability' must be an object.")
+    backend_client.require(
+        suitability,
+        ("measured_level", "declared_tolerance", "alignment", "statement"),
+        SUMMARY_TOOL,
+    )
+    alignment = suitability["alignment"]
+    if alignment not in ALIGNMENTS:
+        raise ContractViolationError(
+            f"{SUMMARY_TOOL}: unknown alignment {alignment!r}."
+        )
+
+    metrics = payload["metrics"]
+    if not isinstance(metrics, dict):
+        raise ContractViolationError(f"{SUMMARY_TOOL}: 'metrics' must be an object.")
+    quality = payload["data_quality"]
+    if not isinstance(quality, dict):
+        raise ContractViolationError(f"{SUMMARY_TOOL}: 'data_quality' must be an object.")
+
+    return {
+        "as_of": str(payload["as_of"]),
+        # None is carried through rather than coerced. A portfolio that could
+        # not be measured has no score, and 0.0 would read as the worst
+        # possible one on a scale where high means calm.
+        "score": _optional_float(payload["score"]),
+        "level": payload["level"],
+        "position_count": int(payload["position_count"]),
+        "suitability": {
+            "measured_level": suitability["measured_level"],
+            "declared_tolerance": suitability["declared_tolerance"],
+            "alignment": alignment,
+            "statement": str(suitability["statement"]),
+        },
+        "declared": payload["declared"],
+        "metrics": metrics,
+        "findings": list(payload["findings"] or []),
+        "data_quality": quality,
+        "warnings": list(payload["warnings"] or []),
+    }
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ContractViolationError(
+            f"{SUMMARY_TOOL}: 'score' must be a number or null, got {value!r}."
+        ) from exc
+
+
 def register(mcp: FastMCP) -> None:
     """Attach this domain's tools to the shared FastMCP instance."""
     mcp.tool()(calculate_portfolio_risk_metrics)
+    mcp.tool()(get_risk_profile_summary)

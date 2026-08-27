@@ -1,0 +1,272 @@
+/**
+ * Risk metriklerini okunabilir Türkçeye çeviren katman.
+ *
+ * `GET /api/risk/profile` bu metriklerin hepsini baştan beri döndürüyordu ve
+ * sayfa hiçbirini render etmiyordu: VaR, CVaR, Sharpe, beta, aşağı yönlü
+ * sapma, drawdown'ın tepe/dip tarihleri, sektör ve para birimi kırılımları.
+ * Hesaplanıyor, ağdan taşınıyor, atılıyordu.
+ *
+ * Buradaki iki kural bileşenlerde değil burada, çünkü kapsama kapısı
+ * (`vitest.config.ts`) `src/lib/**`'ı sayıyor ve JSX'i saymıyor:
+ *
+ * 1. **Ölçülemeyen bir değer asla sıfır olarak gösterilmez.** `null` gelen
+ *    bir oynaklık "risk yok" değil, "ölçemedik" demektir; sıfır yazmak
+ *    kullanıcıya olmayan bir güvence verir.
+ * 2. **Hiçbir alan adı ekrana çıkmaz.** CLAUDE.md'nin NAMING kuralı gereği
+ *    `max_drawdown`, `hhi`, `value_fraction` gibi anahtarlar kullanıcıya
+ *    gösterilmez; ne anlama geldikleri yazılır.
+ */
+
+/** Ölçülemeyen değerin tek gösterimi. Sıfır değil, çizgi değil, cümle. */
+export const NOT_MEASURED = 'ölçülemedi'
+
+/** Bir metriğin kart başlığı ve altındaki tek cümlelik açıklaması. */
+export interface MetricCopy {
+    label: string
+    hint: string
+}
+
+/**
+ * Kart metinleri. Açıklamalar kasıtlı olarak tanım cümlesidir, yorum değil:
+ * "oynaklığınız yüksek" bir eşik yargısıdır ve `ORCHESTRATOR_SYSTEM_PROMPT`'un
+ * yasakladığı şeydir; "yıllık dalgalanmanın ölçüsü" bir tanımdır.
+ */
+export const METRIC_COPY: Record<string, MetricCopy> = {
+    volatility_annualized: {
+        label: 'Yıllık oynaklık',
+        hint: 'Portföy değerinin bir yıl içinde ortalamadan ne kadar saptığının ölçüsü.',
+    },
+    downside_deviation_annualized: {
+        label: 'Aşağı yönlü sapma',
+        hint: 'Yalnızca kayıp günlerinin dalgalanması; yukarı hareketler sayılmaz.',
+    },
+    sharpe_ratio: {
+        label: 'Sharpe oranı',
+        hint: 'Alınan dalgalanma başına elde edilen getiri. Faizsiz getiriye göre ölçülür.',
+    },
+    beta: {
+        label: 'Endekse duyarlılık',
+        hint: 'Endeks %1 hareket ettiğinde portföyün tarihsel olarak ne kadar hareket ettiği.',
+    },
+    correlation_to_benchmark: {
+        label: 'Endeksle birlikte hareket',
+        hint: '1’e yakın değer endeksle aynı yönde, 0 ilişkisiz, -1 ters yönde demek.',
+    },
+}
+
+const PERCENT_METRICS = new Set([
+    'volatility_annualized',
+    'downside_deviation_annualized',
+])
+
+/** `0.4796` -> `%47,96`. Yüzde işareti Türkçe konvansiyonuyla başta. */
+export function formatPercent(value: number | null | undefined, digits = 2): string {
+    if (value === null || value === undefined || Number.isNaN(value)) return NOT_MEASURED
+    return `%${(value * 100).toLocaleString('tr-TR', {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+    })}`
+}
+
+/** `0.9969` -> `0,99`. Oranlar yüzde değildir; Sharpe ve beta buradan geçer. */
+export function formatRatio(value: number | null | undefined, digits = 2): string {
+    if (value === null || value === undefined || Number.isNaN(value)) return NOT_MEASURED
+    return value.toLocaleString('tr-TR', {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+    })
+}
+
+/** Bir metriği kendi birimiyle biçimler. Hangisinin yüzde olduğunu tek yer bilir. */
+export function formatMetric(name: string, value: number | null | undefined): string {
+    return PERCENT_METRICS.has(name) ? formatPercent(value) : formatRatio(value)
+}
+
+/** `2026-05-05` -> `5 Mayıs 2026`. Geçersiz veya boş tarih `null` döner. */
+export function formatDate(value: string | null | undefined): string | null {
+    if (!value) return null
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return null
+    return parsed.toLocaleDateString('tr-TR', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+    })
+}
+
+export interface DrawdownView {
+    depth: string
+    peak: string | null
+    trough: string | null
+    /** Toparlanma olmadıysa `null` — "henüz toparlanmadı" ayrı bir bilgidir. */
+    recovery: string | null
+    recovered: boolean
+    durationDays: number | null
+}
+
+/**
+ * En derin düşüşü bir zaman şeridine çevirir.
+ *
+ * `recovery_date: null` "toparlanma yok" demek, "veri yok" değil — ikisi
+ * ayrı gösterilir, çünkü hâlâ dipte olan bir portföy toparlanmış olandan
+ * farklı bir durumdur.
+ */
+export function describeDrawdown(raw: unknown): DrawdownView | null {
+    if (!raw || typeof raw !== 'object') return null
+    const block = raw as Record<string, unknown>
+    const value = typeof block.value === 'number' ? block.value : null
+    if (value === null) return null
+    return {
+        depth: formatPercent(Math.abs(value)),
+        peak: formatDate(block.peak_date as string | null),
+        trough: formatDate(block.trough_date as string | null),
+        recovery: formatDate(block.recovery_date as string | null),
+        recovered: Boolean(block.recovery_date),
+        durationDays:
+            typeof block.duration_days === 'number' ? block.duration_days : null,
+    }
+}
+
+export interface LossEstimateView {
+    fraction: string
+    amount: number | null
+    confidence: string
+    hint: string
+}
+
+/**
+ * VaR / CVaR kartı.
+ *
+ * `hint` metni MCP sözleşmesinin şartı: bu sayılar TARİHSEL ölçümlerdir,
+ * bir kayıp tahmini ya da üst sınırı değildir. Sözleşme bunu kelimesi
+ * kelimesine şart koşuyor, o yüzden metin burada sabit.
+ */
+export function describeLossEstimate(
+    raw: unknown,
+    kind: 'var' | 'cvar',
+): LossEstimateView | null {
+    if (!raw || typeof raw !== 'object') return null
+    const block = raw as Record<string, unknown>
+    const fraction = typeof block.value_fraction === 'number' ? block.value_fraction : null
+    if (fraction === null) return null
+    const confidence =
+        typeof block.confidence_level === 'number'
+            ? formatPercent(block.confidence_level, 0)
+            : NOT_MEASURED
+    return {
+        fraction: formatPercent(Math.abs(fraction)),
+        amount: typeof block.value_currency === 'number' ? Math.abs(block.value_currency) : null,
+        confidence,
+        hint:
+            kind === 'var'
+                ? `Geçmiş günlerin ${confidence}’inde günlük kayıp bu seviyenin altında kalmış. Gelecek için bir sınır değildir.`
+                : `Kaybın bu eşiği aştığı günlerde ortalama kayıp. Geçmiş ölçümdür, tahmin değildir.`,
+    }
+}
+
+export interface BreakdownSlice {
+    label: string
+    weight: number
+    percent: string
+}
+
+/**
+ * Ham enum -> Türkçe.
+ *
+ * `investment_products.product_type` `stock`/`commodity`/`fx`/`index` tutuyor
+ * ve MCP yolundaki sözleşme `EQUITY`/`ETF` gibi büyük harfli değerler
+ * kullanıyor. NAMING kuralı alan adlarını olduğu kadar enum değerlerini de
+ * yasaklıyor: "stock" bir varlık sınıfı adı değil, bir veritabanı değeri.
+ */
+const LABELS: Record<string, string> = {
+    UNCLASSIFIED: 'Sınıflandırılmamış',
+    STOCK: 'Hisse senedi',
+    EQUITY: 'Hisse senedi',
+    COMMODITY: 'Emtia',
+    FX: 'Döviz',
+    INDEX: 'Endeks',
+    ETF: 'Borsa yatırım fonu',
+    FUND: 'Fon',
+    BOND: 'Tahvil',
+    CASH: 'Nakit',
+}
+
+/**
+ * `{"stock": 0.7, "commodity": 0.3}` -> ağırlığa göre azalan dilimler.
+ *
+ * Tanınmayan bir etiket olduğu gibi geçer: sektör adları (`Technology`,
+ * `Basic Materials`) zaten okunabilir ve onları bir haritaya hapsetmek, yeni
+ * bir sektör eklendiği gün onu görünmez kılardı.
+ */
+export function toBreakdown(raw: unknown): BreakdownSlice[] {
+    if (!raw || typeof raw !== 'object') return []
+    return Object.entries(raw as Record<string, unknown>)
+        .filter(([, weight]) => typeof weight === 'number')
+        .map(([label, weight]) => ({
+            label: LABELS[label.toUpperCase()] ?? label,
+            weight: weight as number,
+            percent: formatPercent(weight as number, 1),
+        }))
+        .sort((a, b) => b.weight - a.weight)
+}
+
+/**
+ * Etkin pozisyon sayısı: HHI'nin tersi.
+ *
+ * "1,6 pozisyona denk" cümlesi, 0,62'lik bir HHI'den çok daha okunabilir.
+ */
+export function describeEffectiveN(value: number | null | undefined): string {
+    if (value === null || value === undefined || Number.isNaN(value)) return NOT_MEASURED
+    return `${formatRatio(value, 1)} pozisyona denk`
+}
+
+/**
+ * Veri kalitesi uyarısı — güvenilir değilse bir cümle, güvenilirse hiçbir şey.
+ *
+ * Sessiz kalmak, altmış günden az gözlemle hesaplanmış bir oynaklığı kesin
+ * bir rakam gibi göstermek demekti.
+ */
+export function reliabilityNotice(raw: unknown): string | null {
+    if (!raw || typeof raw !== 'object') return null
+    const block = raw as Record<string, unknown>
+    if (block.is_statistically_reliable === true) return null
+    const excluded = Array.isArray(block.excluded_symbols) ? block.excluded_symbols : []
+    const tail = excluded.length
+        ? ` Yeterli fiyat geçmişi olmayanlar hesaba katılmadı: ${excluded.join(', ')}.`
+        : ''
+    return `Bu ölçümler istatistiksel olarak güvenilir sayılacak kadar uzun bir geçmişe dayanmıyor.${tail}`
+}
+
+/**
+ * Uyum rozetinin metni ve rengi.
+ *
+ * Ham enum (`PORTFOLIO_RISKIER`) kullanıcıya asla yazılmaz — bkz. NAMING
+ * kuralı. Renk bir yargı değil bir yön: portföy beyanın üzerindeyse dikkat
+ * çeken, altındaysa sakin bir ton. "İyi/kötü" demiyor, hangi tarafta
+ * olduğunu söylüyor.
+ *
+ * `UNKNOWN` bir uyuşmazlık DEĞİL: iki taraftan biri henüz yok. Rozet bunu
+ * nötr tonla ve "anket bekliyor" diyerek gösteriyor, çünkü kırmızı bir
+ * "bilinmiyor" doldurulmamış bir formu bir sorun gibi okutur.
+ */
+export interface AlignmentBadge {
+    label: string
+    tone: string
+}
+
+export const ALIGNMENT_BADGE: Record<string, AlignmentBadge> = {
+    ALIGNED: { label: 'Beyanınızla aynı bandda', tone: 'bg-emerald-500/10 text-emerald-400' },
+    PORTFOLIO_RISKIER: {
+        label: 'Beyanınızın üzerinde',
+        tone: 'bg-rose-500/10 text-rose-400',
+    },
+    PORTFOLIO_CALMER: {
+        label: 'Beyanınızın altında',
+        tone: 'bg-sky-500/10 text-sky-400',
+    },
+    UNKNOWN: { label: 'Anket bekliyor', tone: 'bg-white/5 text-slate-400' },
+}
+
+export function alignmentBadge(alignment: string | null | undefined): AlignmentBadge {
+    return ALIGNMENT_BADGE[alignment ?? ''] ?? ALIGNMENT_BADGE.UNKNOWN
+}

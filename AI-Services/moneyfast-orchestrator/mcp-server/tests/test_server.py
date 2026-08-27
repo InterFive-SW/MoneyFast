@@ -25,6 +25,7 @@ EXPECTED_TOOLS = {
     "get_market_data",
     "rag_semantic_market_search",
     "calculate_portfolio_risk_metrics",
+    "get_risk_profile_summary",
     "validate_compliance_rules",
     "classify_and_route_intent",
     "prepare_transaction_proposal",
@@ -41,7 +42,7 @@ HTTP_TOOLS = EXPECTED_TOOLS - {"classify_and_route_intent"}
 class TestWiring:
     def test_server_identity_constants(self):
         assert server.SERVER_NAME == "moneyfast"
-        assert server.CONTRACT_VERSION == "v2.2"
+        assert server.CONTRACT_VERSION == "v2.4"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -96,7 +97,7 @@ class TestWiring:
 # ==========================================================================
 class TestDiscovery:
     @pytest.mark.asyncio
-    async def test_all_seven_tools_are_discoverable(self):
+    async def test_all_eight_tools_are_discoverable(self):
         tools = await server.mcp.list_tools()
         assert {t.name for t in tools} == EXPECTED_TOOLS
 

@@ -7,8 +7,8 @@ forget: `(user_id, captured_on)` makes a second read on the same day unable to
 insert a second row, so the table stays bounded at roughly 365 rows per user
 per year without a cleanup job.
 
-Revision ID: 0013
-Revises: 0012
+Revision ID: 0014
+Revises: 0013
 Create Date: 2026-08-27
 """
 
@@ -17,8 +17,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0013"
-down_revision: Union[str, None] = "0012"
+revision: str = "0014"
+down_revision: Union[str, None] = "0013"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

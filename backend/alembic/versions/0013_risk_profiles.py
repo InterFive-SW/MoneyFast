@@ -8,8 +8,8 @@ owns identity rather than risk tolerance. `user_id` carries no foreign key, the
 same way `ai.conversations` references a user: one database, no import graph
 between modules.
 
-Revision ID: 0012
-Revises: 0011
+Revision ID: 0013
+Revises: 0012
 Create Date: 2026-08-27
 """
 
@@ -19,8 +19,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0012"
-down_revision: Union[str, None] = "0011"
+revision: str = "0013"
+down_revision: Union[str, None] = "0012"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

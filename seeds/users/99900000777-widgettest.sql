@@ -9,7 +9,7 @@
 -- Synthetic data only (see CLAUDE.md). Do not hand-edit; re-export.
 
 -- public.users (1)
-INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number") VALUES ('37cdf939-e626-4c9d-a5e2-9e7095085609', 'widgettest@moneyfast-test.com', '$2b$12$.psPJGLpMKITTO6UfcaVKObYs02ft/Vhqce7fJy8Mpx5rfsU94/ZO', TRUE, '2026-08-21T03:19:05.836877+00:00', '99900000777', 'TEST', 'Widget', '5550000777') ON CONFLICT DO NOTHING;
+INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "wants_email_notifications") VALUES ('37cdf939-e626-4c9d-a5e2-9e7095085609', 'widgettest@moneyfast-test.com', '$2b$12$.psPJGLpMKITTO6UfcaVKObYs02ft/Vhqce7fJy8Mpx5rfsU94/ZO', TRUE, '2026-08-21T03:19:05.836877+00:00', '99900000777', 'TEST', 'Widget', '5550000777', FALSE, TRUE) ON CONFLICT DO NOTHING;
 
 -- investment.investment_accounts (1)
 INSERT INTO investment.investment_accounts ("id", "user_id", "account_number", "name", "currency_code", "cash_balance", "status", "created_at") VALUES ('5e653f44-0287-4b02-97ab-9f787c2bea7c', '37cdf939-e626-4c9d-a5e2-9e7095085609', 'TR-37CDF939E626', 'Yatırım Hesabı', 'TRY', 1492.9632, 'active', '2026-08-21T03:19:05.844941+00:00') ON CONFLICT DO NOTHING;

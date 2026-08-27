@@ -85,7 +85,11 @@ class TestInstruments:
 
     @pytest.mark.parametrize("rows", [[]])
     def test_no_matches_is_an_empty_list_not_an_error(self, api):
-        assert api.get("/api/market/instruments?max_pe=1").json() == {"instruments": []}
+        # `unresolved` rides along so a query that matched nothing can say
+        # what it might have meant instead of a bare "bulunamadı".
+        assert api.get("/api/market/instruments?max_pe=1").json() == {
+            "instruments": [], "unresolved": []
+        }
 
     def test_limit_is_bounded(self, api):
         assert api.get("/api/market/instruments?limit=0").status_code == 422

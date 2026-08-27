@@ -241,13 +241,42 @@ def _normalize(
 
     warnings: list[str] = []
     returned = {item["symbol"].upper() for item in instruments}
-    missing = [
-        symbol for symbol in requested_symbols
-        if symbol.upper().replace(".IS", "") not in returned
-    ]
-    if missing:
+
+    # Which queries actually failed is the BACKEND's answer, not something to
+    # infer here. Diffing what was typed against what came back marks "THY" as
+    # missing when THYAO is sitting in the payload -- the resolver did its job
+    # and the user would still be told the stock was not found. Only fall back
+    # to the diff for a backend that predates the field.
+    unresolved_field = (payload.get("unresolved") if isinstance(payload, dict) else None)
+    if unresolved_field is not None:
+        missing = [
+            str(item.get("query", "")) for item in unresolved_field
+            if isinstance(item, dict) and item.get("query")
+        ]
+    else:
+        missing = [
+            symbol for symbol in requested_symbols
+            if symbol.upper().replace(".IS", "") not in returned
+        ]
+    # The backend now says what a failed query might have meant. Prefer that
+    # over the bare "not found": "koz" matching KOZAL and KOZAA is a question
+    # the user can answer in one word, not a dead end.
+    suggested = {
+        str(item.get("query", "")).upper(): [str(c) for c in (item.get("candidates") or [])]
+        for item in (unresolved_field or [])
+        if isinstance(item, dict)
+    }
+    for symbol in sorted(missing):
+        candidates = suggested.get(symbol.upper())
+        if candidates:
+            warnings.append(
+                f"«{symbol}» için tam eşleşme yok. Bunlardan biri mi: "
+                + ", ".join(candidates) + "?"
+            )
+    plain = [s for s in sorted(missing) if not suggested.get(s.upper())]
+    if plain:
         warnings.append(
-            "Şu semboller bulunamadı veya fiyatı yok: " + ", ".join(sorted(missing))
+            "Şu semboller bulunamadı veya fiyatı yok: " + ", ".join(plain)
         )
     if any(key in filters for key in ("max_pe", "min_pe", "max_pb")):
         warnings.append(

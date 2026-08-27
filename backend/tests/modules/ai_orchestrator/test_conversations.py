@@ -102,14 +102,16 @@ def test_list_rejects_an_out_of_range_limit(client):
             client.get("/api/ai_orchestrator/conversations?limit=0").status_code == 422
         )
         assert (
-            client.get("/api/ai_orchestrator/conversations?limit=101").status_code == 422
+            client.get("/api/ai_orchestrator/conversations?limit=101").status_code
+            == 422
         )
 
 
 def test_list_rejects_a_negative_offset(client):
     with as_user():
         assert (
-            client.get("/api/ai_orchestrator/conversations?offset=-1").status_code == 422
+            client.get("/api/ai_orchestrator/conversations?offset=-1").status_code
+            == 422
         )
 
 
@@ -196,9 +198,7 @@ def test_detail_passes_the_requested_window_through(client, mocker):
 def test_detail_rejects_an_out_of_range_limit(client):
     with as_user():
         assert (
-            client.get(
-                "/api/ai_orchestrator/conversations/t-1?limit=501"
-            ).status_code
+            client.get("/api/ai_orchestrator/conversations/t-1?limit=501").status_code
             == 422
         )
 
@@ -270,7 +270,9 @@ def test_delete_returns_a_body_rather_than_204(client, mocker):
 def test_delete_of_an_unknown_thread_is_not_found(client, mocker):
     mocker.patch.object(service, "delete_conversation", return_value=False)
     with as_user():
-        assert client.delete("/api/ai_orchestrator/conversations/t-1").status_code == 404
+        assert (
+            client.delete("/api/ai_orchestrator/conversations/t-1").status_code == 404
+        )
 
 
 def test_delete_requires_authentication(client):

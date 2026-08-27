@@ -11,6 +11,7 @@ Talks to the `mcp` MCP server over SSE across a Docker network.
 | `prompts.py` | Turkish user-facing prompt + 5 backend specialist prompts |
 | `mcp_client.py` | MCP SSE client, retry, fail-closed error types |
 | `api.py` | FastAPI: `/chat`, `/healthz`, `/readyz` |
+| `social_research.py` | Feature flag + config for optional X social evidence on market research |
 
 ## Graph
 
@@ -61,3 +62,7 @@ python orchestrator.py "nereden başlamalıyım?"
   `draft_response` stay server side.
 - Groq enforces per-minute token limits. A portfolio turn costs roughly three
   LLM calls; add a 429 backoff before you put real traffic on this.
+- Market research can optionally attach Phase 1 social signals after RAG via
+  MCP tool `get_social_market_signals`. Disabled by default
+  (`MARKET_RESEARCH_SOCIAL_SIGNALS_ENABLED=false`). Social posts are supporting
+  evidence only; answers may include structured `citations` (never raw metadata).

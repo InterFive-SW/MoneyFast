@@ -25,3 +25,11 @@ Two things bite here:
 
 If you already publish an image for this service, delete this directory and
 switch `docker-compose.yml` to the commented `image:` line.
+
+## Social signals (Phase 2)
+
+`get_social_market_signals` calls backend `GET /api/market/social-signals`
+through `backend_client` (no DB credentials, no X bearer token). Selection —
+ranking, per-account diversity, dedupe, KAP URL re-validation, prompt
+delimiting — is deterministic in `social_signals_client.py` before any LLM
+sees the text. Soft-fails on backend errors so market research still answers.

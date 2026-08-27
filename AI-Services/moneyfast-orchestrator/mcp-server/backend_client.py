@@ -153,6 +153,15 @@ def timeout() -> httpx.Timeout:
     )
 
 
+def _resolve_timeout(override: Optional[float] = None) -> httpx.Timeout:
+    if override is None:
+        return timeout()
+    connect = min(
+        override, _float_env("BACKEND_CONNECT_TIMEOUT", DEFAULT_CONNECT_TIMEOUT)
+    )
+    return httpx.Timeout(override, connect=connect)
+
+
 def max_retries() -> int:
     return _int_env("BACKEND_MAX_RETRIES", DEFAULT_MAX_RETRIES)
 
@@ -208,7 +217,9 @@ def _map_status(tool: str, response: httpx.Response) -> BackendError:
         )
     if status in RETRYABLE_STATUS:
         return UpstreamUnavailableError(f"{tool}: backend returned {status}. {excerpt}")
-    return InvalidInputError(f"{tool}: backend rejected the request ({status}). {excerpt}")
+    return InvalidInputError(
+        f"{tool}: backend rejected the request ({status}). {excerpt}"
+    )
 
 
 async def request(
@@ -220,8 +231,11 @@ async def request(
     params: Optional[Mapping[str, Any]] = None,
     json_body: Optional[Mapping[str, Any]] = None,
     headers: Optional[Mapping[str, str]] = None,
-) -> dict:
-    """Call the backend and return the decoded JSON object.
+    accept: str = "object",
+    timeout_seconds: Optional[float] = None,
+    retries: Optional[int] = None,
+) -> Any:
+    """Call the backend and return the decoded JSON payload.
 
     Args:
         method: HTTP verb, e.g. "GET" or "POST".
@@ -235,28 +249,37 @@ async def request(
         params: Query string parameters. None values are dropped.
         json_body: Request body. None values are dropped.
         headers: Extra headers merged over the defaults.
+        accept: Expected JSON shape. ``"object"`` (default) requires a dict;
+            ``"list"`` requires a JSON array (Phase 1 ``GET /social-signals``);
+            ``"any"`` accepts either.
+        timeout_seconds: Optional per-call read timeout override.
+        retries: Optional per-call retry budget override.
 
     Returns:
-        The response body as a dict.
+        The response body as a dict, or a list when ``accept="list"``.
 
     Raises:
         AuthorizationError: 401 or 403.
         InvalidInputError: other deterministic 4xx.
         UpstreamUnavailableError: transport failure, timeout, or 5xx after the
             retry budget is spent.
-        ContractViolationError: body is not a JSON object.
+        ContractViolationError: body is not the expected JSON shape.
 
     No other exception type escapes: an unexpected error is wrapped as
     UpstreamUnavailableError so a tool call can never crash the MCP server.
     """
+    if accept not in {"object", "list", "any"}:
+        raise ValueError(f"unsupported accept mode: {accept!r}")
+
     url = f"{(base.rstrip('/') if base else base_url())}{path}"
-    attempts = max_retries() + 1
+    attempts = (retries if retries is not None else max_retries()) + 1
     last: Optional[BackendError] = None
+    call_timeout = _resolve_timeout(timeout_seconds)
 
     for attempt in range(1, attempts + 1):
         try:
             async with httpx.AsyncClient(
-                timeout=timeout(), transport=_transport, follow_redirects=False
+                timeout=call_timeout, transport=_transport, follow_redirects=False
             ) as client:
                 response = await client.request(
                     method,
@@ -281,13 +304,25 @@ async def request(
                     f"{tool}: backend returned a non-JSON body. {_excerpt(response)}"
                 ) from exc
 
-            if not isinstance(payload, dict):
+            if accept == "object" and not isinstance(payload, dict):
                 raise ContractViolationError(
                     f"{tool}: expected a JSON object, got {type(payload).__name__}."
                 )
+            if accept == "list" and not isinstance(payload, list):
+                raise ContractViolationError(
+                    f"{tool}: expected a JSON array, got {type(payload).__name__}."
+                )
+            if accept == "any" and not isinstance(payload, (dict, list)):
+                raise ContractViolationError(
+                    f"{tool}: expected JSON object or array, got {type(payload).__name__}."
+                )
             return payload
 
-        except (httpx.TimeoutException, httpx.TransportError, httpx.RequestError) as exc:
+        except (
+            httpx.TimeoutException,
+            httpx.TransportError,
+            httpx.RequestError,
+        ) as exc:
             last = UpstreamUnavailableError(f"{tool}: {url} unreachable: {exc}")
             if attempt < attempts:
                 await _backoff(tool, attempt, exc.__class__.__name__)
@@ -297,7 +332,9 @@ async def request(
             raise
         except Exception as exc:  # never let an unexpected error escape a tool
             log.exception("%s: unexpected failure calling %s", tool, url)
-            raise UpstreamUnavailableError(f"{tool}: unexpected failure: {exc}") from exc
+            raise UpstreamUnavailableError(
+                f"{tool}: unexpected failure: {exc}"
+            ) from exc
 
     # Unreachable in practice; retries either return, continue or raise.
     raise last or UpstreamUnavailableError(f"{tool}: {url} unreachable.")
@@ -305,7 +342,9 @@ async def request(
 
 async def _backoff(tool: str, attempt: int, reason: Any) -> None:
     delay = 0.5 * (2 ** (attempt - 1))
-    log.warning("%s: attempt %d failed (%s), retrying in %.1fs", tool, attempt, reason, delay)
+    log.warning(
+        "%s: attempt %d failed (%s), retrying in %.1fs", tool, attempt, reason, delay
+    )
     await asyncio.sleep(delay)
 
 

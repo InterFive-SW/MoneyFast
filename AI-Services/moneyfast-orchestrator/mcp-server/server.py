@@ -7,8 +7,8 @@ module level so they can be imported and unit-tested without a running
 server.
 
 Contracts follow "MCP Tools Interface Definitions v2.2": the six v2.1 tools
-are unchanged, and get_market_data is added because v2.1 had no way to reach
-the price of an instrument the user does not own.
+are unchanged, get_market_data was added in v2.2, and Phase 2 adds
+get_social_market_signals for Market Research social evidence.
 
 Six of the seven tools call a real HTTP service: get_portfolio_positions,
 prepare_transaction_proposal, calculate_portfolio_risk_metrics and
@@ -23,11 +23,9 @@ Run:
     mcp dev server.py                # inspector UI
 """
 
-#from __future__ import annotations
+# from __future__ import annotations
 
 import logging
-
-from mcp.server.fastmcp import FastMCP
 
 import backend_client
 import compliance_tools
@@ -36,7 +34,9 @@ import market_research_tools
 import orchestrator_tools
 import portfolio_tools
 import risk_strategy_tools
+import social_signals_tools
 import transaction_tools
+from mcp.server.fastmcp import FastMCP
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("moneyfast.mcp")
@@ -45,13 +45,15 @@ SERVER_NAME = "moneyfast"
 CONTRACT_VERSION = "v2.2"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Seven tools across seven domains.
+MoneyFast tool server. Eight tools across research and account domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
-         rag_semantic_market_search and calculate_portfolio_risk_metrics
-         return as_of, source and is_delayed at the top level. Propagate
-         them.
+         rag_semantic_market_search, get_social_market_signals and
+         calculate_portfolio_risk_metrics return freshness fields where
+         applicable. Propagate them.
+Social:  get_social_market_signals is supporting evidence only. Never treat
+         unverified posts as official disclosures; prefer kap_url when present.
 Prices:  get_market_data is the ONLY source for the price or valuation of an
          instrument the user does not hold. A null fundamental means the
          provider does not publish it; report "veri yok", never 0.
@@ -71,6 +73,7 @@ DOMAIN_MODULES = (
     ("portfolio", portfolio_tools),
     ("market_data", market_data_tools),
     ("market_research", market_research_tools),
+    ("social_signals", social_signals_tools),
     ("risk_strategy", risk_strategy_tools),
     ("compliance", compliance_tools),
     ("transaction", transaction_tools),

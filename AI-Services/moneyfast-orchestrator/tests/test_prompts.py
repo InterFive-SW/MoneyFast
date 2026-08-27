@@ -14,9 +14,9 @@ type checker cannot:
 
 from __future__ import annotations
 
+import prompts
 import pytest
 
-import prompts
 
 def flat(text: str) -> str:
     """Collapse newlines so assertions survive line wrapping.
@@ -75,7 +75,9 @@ def test_synthesis_template_puts_this_turns_data_after_the_background():
     and the payload, and the last thing the model read before writing was a
     previous answer. The payload goes last, next to the instruction."""
     template = prompts.SYNTHESIS_TASK_TEMPLATE
-    assert template.index("{conversation_summary}") < template.index("{specialist_json}")
+    assert template.index("{conversation_summary}") < template.index(
+        "{specialist_json}"
+    )
     assert template.index("END OF BACKGROUND") < template.index("{specialist_json}")
 
 
@@ -184,13 +186,21 @@ def test_turkish_orthography_is_not_ascii_substituted():
 
 
 def test_expectation_management_rejection_is_present():
-    assert "**Kimse size kazandırır diyemez.**" in flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
+    assert "**Kimse size kazandırır diyemez.**" in flat(
+        prompts.ORCHESTRATOR_SYSTEM_PROMPT
+    )
 
 
 def test_five_onboarding_steps_are_present_in_order():
     prompt = prompts.ORCHESTRATOR_SYSTEM_PROMPT
     prompt = flat(prompt)
-    steps = ["Acil durum fonu", "Risk profili", "Küçük başla", "Öğren", "Uzun vadeli düşün"]
+    steps = [
+        "Acil durum fonu",
+        "Risk profili",
+        "Küçük başla",
+        "Öğren",
+        "Uzun vadeli düşün",
+    ]
     positions = [prompt.find(s) for s in steps]
     assert all(p > 0 for p in positions), dict(zip(steps, positions))
     assert positions == sorted(positions), "the five steps must stay in order"
@@ -223,7 +233,7 @@ def test_column_sets_are_specified_per_tool():
 
 
 def test_price_headers_never_assert_a_currency():
-    """"Fiyat (TL)" is a claim about every row and is false the moment a USD
+    """ "Fiyat (TL)" is a claim about every row and is false the moment a USD
     instrument appears -- which is how AAPL rendered as a blank cell."""
     text = prompts.ORCHESTRATOR_SYSTEM_PROMPT
     assert "NEVER put a currency in a price column header" in text
@@ -271,7 +281,6 @@ def test_every_specialist_is_english_only(agent):
     "agent,tool",
     [
         ("PORTFOLIO_AGENT", "get_portfolio_positions"),
-        ("MARKET_RESEARCH_AGENT", "rag_semantic_market_search"),
         ("RISK_STRATEGY_AGENT", "calculate_portfolio_risk_metrics"),
         ("TRANSACTION_AGENT", "prepare_transaction_proposal"),
     ],
@@ -280,9 +289,22 @@ def test_tool_binding_names_exactly_one_tool(agent, tool):
     assert f"TOOL BINDING: {tool} only" in prompts.SPECIALIST_PROMPTS[agent]
 
 
+def test_market_research_plans_rag_and_mentions_social_attachment():
+    text = prompts.SPECIALIST_PROMPTS["MARKET_RESEARCH_AGENT"]
+    assert "rag_semantic_market_search" in text
+    assert "get_social_market_signals" in text
+    assert "TOOL BINDING: rag_semantic_market_search only for planning" in text
+    assert "supporting evidence" in text.lower() or "SUPPORTING EVIDENCE" in text
+
+
 @pytest.mark.parametrize(
     "agent",
-    ["PORTFOLIO_AGENT", "MARKET_RESEARCH_AGENT", "RISK_STRATEGY_AGENT", "TRANSACTION_AGENT"],
+    [
+        "PORTFOLIO_AGENT",
+        "MARKET_RESEARCH_AGENT",
+        "RISK_STRATEGY_AGENT",
+        "TRANSACTION_AGENT",
+    ],
 )
 def test_tool_using_specialists_carry_the_json_envelope_rule(agent):
     """The nodes parse the reply as JSON, so the instruction has to be there."""
@@ -332,7 +354,10 @@ def test_specialist_prompts_are_short_enough_to_be_cheap():
 
 
 def test_no_prompt_is_empty_or_whitespace():
-    everything = [prompts.ORCHESTRATOR_SYSTEM_PROMPT, *prompts.SPECIALIST_PROMPTS.values()]
+    everything = [
+        prompts.ORCHESTRATOR_SYSTEM_PROMPT,
+        *prompts.SPECIALIST_PROMPTS.values(),
+    ]
     for text in everything:
         assert text.strip()
 
@@ -342,7 +367,7 @@ def test_no_prompt_is_empty_or_whitespace():
 # there to prevent, because a prompt rule with no example drifts.
 # --------------------------------------------------------------------------
 def test_a_choice_question_never_gets_the_empty_screen_text():
-    """"en mantıklısı hangisini almak olur" was answered with
+    """ "en mantıklısı hangisini almak olur" was answered with
     "Bu kriterlere uyan hisse bulunamadı." -- an empty-filter report, which
     reads as a data outage rather than the refusal it should be."""
     text = prompts.ORCHESTRATOR_SYSTEM_PROMPT
@@ -354,18 +379,22 @@ def test_a_choice_question_never_gets_the_empty_screen_text():
 def test_named_advice_questions_route_where_the_numbers_are():
     """EDUCATION_AGENT holds no tools, so the refusal arrived with nothing
     under it and then claimed the data could not be retrieved."""
-    assert "An advice question that NAMES instruments goes to MARKET_DATA_AGENT" \
+    assert (
+        "An advice question that NAMES instruments goes to MARKET_DATA_AGENT"
         in prompts.ROUTER_PROMPT
+    )
 
 
 def test_comparing_two_instruments_is_a_data_question():
-    """"aselsanı THYAO ile karşılaştır" went to the document search and
+    """ "aselsanı THYAO ile karşılaştır" went to the document search and
     returned nothing, while the same two answered instantly when asked for as
     "fiyatlarını getir"."""
-    assert "COMPARING two named instruments is MARKET_DATA_AGENT" in prompts.ROUTER_PROMPT
+    assert (
+        "COMPARING two named instruments is MARKET_DATA_AGENT" in prompts.ROUTER_PROMPT
+    )
 
 
 def test_a_single_lookup_omits_the_methodology_block():
-    """"Sıralama: fiyat yüksekten düşüğe, en fazla 10" under a one-stock price
+    """ "Sıralama: fiyat yüksekten düşüğe, en fazla 10" under a one-stock price
     describes a screen that never happened."""
     assert "belongs to a SCREEN" in prompts.ORCHESTRATOR_SYSTEM_PROMPT

@@ -6,11 +6,18 @@ Each module exposes a `register(mcp)` function; the tool callables stay at
 module level so they can be imported and unit-tested without a running
 server.
 
-Contracts follow "MCP Tools Interface Definitions v2.2": the six v2.1 tools
-are unchanged, and get_market_data is added because v2.1 had no way to reach
-the price of an instrument the user does not own.
+Contracts follow "MCP Tools Interface Definitions v2.4": the six v2.1 tools
+are unchanged, get_market_data was added at v2.2 because v2.1 had no way to
+reach the price of an instrument the user does not own, v2.3 put cash on
+get_portfolio_positions, and v2.4 adds get_risk_profile_summary -- the risk
+score and band are produced by the backend's profile layer and no v2.1 tool
+could reach them, so the assistant answered "how risky is my portfolio" with a
+volatility figure while the risk page answered with a 0-100 score.
 
-Six of the seven tools call a real HTTP service: get_portfolio_positions,
+The constant below sat at v2.2 through the v2.3 change; it is corrected here
+rather than left drifting further.
+
+Seven of the eight tools call a real HTTP service: get_portfolio_positions,
 prepare_transaction_proposal, calculate_portfolio_risk_metrics and
 validate_compliance_rules reach the backend, and rag_semantic_market_search
 reaches the rag service. Only classify_and_route_intent is computed locally,
@@ -42,10 +49,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 log = logging.getLogger("moneyfast.mcp")
 
 SERVER_NAME = "moneyfast"
-CONTRACT_VERSION = "v2.2"
+CONTRACT_VERSION = "v2.4"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Seven tools across seven domains.
+MoneyFast tool server. Eight tools across seven domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,

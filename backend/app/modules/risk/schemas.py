@@ -5,9 +5,10 @@ snake_case because that is what the contract specifies; this module has no
 frontend consumer.
 """
 
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 LOOKBACKS = ("1M", "3M", "6M", "1Y", "3Y", "5Y", "MAX")
 METRICS = (
@@ -27,10 +28,34 @@ class PositionIn(BaseModel):
     symbol: str
     quantity: float = 0.0
     market_value: float
-    asset_class: str = "EQUITY"
-    instrument_currency: str = "TRY"
+    #: All three are Optional with a default, and the validator below turns an
+    #: explicit null into that default. A bare `str = "..."` only fills in an
+    #: ABSENT key, and `get_portfolio_positions` sends `"sector": null` for an
+    #: unclassified instrument -- so the whole chat risk path answered 422 and
+    #: the user was told the data could not be retrieved.
+    asset_class: Optional[str] = "EQUITY"
+    instrument_currency: Optional[str] = "TRY"
+    #: Declared, because `extra: "ignore"` silently dropped it. The engine
+    #: reads `position["sector"]` for its breakdown, so every portfolio that
+    #: arrived through this model reported `{"UNCLASSIFIED": 1.0}` -- the
+    #: sector was carried all the way from the database and then stripped one
+    #: layer before it was used.
+    sector: Optional[str] = "UNCLASSIFIED"
 
     model_config = {"extra": "ignore"}
+
+    @field_validator("asset_class", "instrument_currency", "sector", mode="before")
+    @classmethod
+    def _null_means_unknown(cls, value, info):
+        """`null` and "not sent" say the same thing here: nobody knows.
+
+        Distinguishing them would mean carrying a None into the engine, which
+        groups weights by these values -- a None bucket renders as an unnamed
+        slice of the pie rather than as "Sınıflandırılmamış".
+        """
+        if value is None:
+            return cls.model_fields[info.field_name].default
+        return value
 
 
 class RiskRequest(BaseModel):
@@ -41,6 +66,39 @@ class RiskRequest(BaseModel):
     confidence_level: float = 0.95
     risk_free_rate: Optional[float] = None
     rebalance_assumption: str = "BUY_AND_HOLD"
+
+    @field_validator("lookback")
+    @classmethod
+    def _known_lookback(cls, value: str) -> str:
+        """Reject an unknown window instead of quietly using a different one.
+
+        `returns.window_for` falls back to 252 bars for anything it does not
+        recognise, so a typo produced a year of data under whatever label the
+        caller sent. The caller was never told.
+        """
+        upper = value.upper()
+        if upper not in LOOKBACKS:
+            raise ValueError(f"lookback {value!r} geçersiz; beklenen: {', '.join(LOOKBACKS)}")
+        return upper
+
+    @field_validator("metrics")
+    @classmethod
+    def _known_metrics(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        """An unrecognised metric name computes nothing and says nothing.
+
+        The service matches uppercase, so casing is normalised here rather
+        than rejected -- but a name that is not in the contract is an error,
+        not an empty result.
+        """
+        if value is None:
+            return None
+        normalised = [item.upper() for item in value]
+        unknown = [item for item in normalised if item not in METRICS]
+        if unknown:
+            raise ValueError(
+                f"metrics {', '.join(unknown)} geçersiz; beklenen: {', '.join(METRICS)}"
+            )
+        return normalised
 
 
 class Window(BaseModel):
@@ -53,6 +111,10 @@ class Window(BaseModel):
 class DataQuality(BaseModel):
     coverage: float
     excluded_symbols: List[str] = Field(default_factory=list)
+    #: Always zero, and correctly so: nothing in this module fills gaps. A
+    #: symbol with too little history is excluded and named rather than
+    #: interpolated, so there is no filled day to count. The field stays
+    #: because the contract declares it.
     gap_filled_days: int = 0
     # Defaults False on purpose. The optimistic default would let a
     # three-observation window be presented as a firm volatility figure.
@@ -134,4 +196,213 @@ class RiskProfileOut(BaseModel):
     #: The raw engine output, so nothing on the page is unverifiable.
     metrics: Dict[str, Any] = Field(default_factory=dict)
     position_count: int = 0
+    warnings: List[str] = Field(default_factory=list)
+    #: None until the questionnaire is completed. The page stays open either
+    #: way -- a soft gate: measurement is shown, comparison waits.
+    declared: Optional["DeclaredProfileOut"] = None
+    #: Always present. With no declaration it carries `alignment: "UNKNOWN"`
+    #: and the call-to-action wording, so the page never has to guess.
+    suitability: Optional["SuitabilityOut"] = None
+
+
+# ---------------------------------------------------------------------------
+# Risk tolerance questionnaire
+# ---------------------------------------------------------------------------
+class QuestionOptionOut(BaseModel):
+    value: str
+    label: str
+
+
+class QuestionOut(BaseModel):
+    key: str
+    prompt: str
+    #: One line under the question explaining why it is being asked. A
+    #: suitability test that reads like a form gets abandoned; one that
+    #: explains itself gets finished.
+    helper: Optional[str] = None
+    options: List[QuestionOptionOut]
+
+
+class QuestionnaireOut(BaseModel):
+    version: str
+    questions: List[QuestionOut]
+
+
+class AssessmentRequest(BaseModel):
+    """Answers, keyed by question. Every question is required.
+
+    A partial questionnaire scored with the blanks as zeros would report a
+    cautious tolerance for someone who simply stopped halfway -- and that
+    answer would then be compared against their portfolio as if they had
+    given it.
+    """
+
+    answers: Dict[str, str]
+
+
+class DeclaredProfileOut(BaseModel):
+    """What the user said, and when they said it."""
+
+    tolerance_level: str
+    investment_horizon: str
+    assessed_at: datetime
+    questionnaire_version: str
+
+
+class SuitabilityOut(BaseModel):
+    """Measurement beside declaration.
+
+    Both fields carry the SAME three labels (Düşük/Orta/Yüksek) rather than
+    two numbers. The measured score is inverted -- 100 means calm -- and the
+    questionnaire's raw score is not, so comparing the numbers would be read
+    backwards sooner or later.
+    """
+
+    #: The measured portfolio risk level. None when nothing was measurable.
+    measured_level: Optional[str] = None
+    #: What the user declared. None until the questionnaire is completed.
+    declared_tolerance: Optional[str] = None
+    #: ALIGNED | PORTFOLIO_RISKIER | PORTFOLIO_CALMER | UNKNOWN
+    alignment: str = "UNKNOWN"
+    #: Turkish, and a statement of fact rather than a suitability claim.
+    statement: str = ""
+
+
+class AssessmentResultOut(DeclaredProfileOut):
+    raw_score: float
+
+
+# ---------------------------------------------------------------------------
+# "What if" simulation
+# ---------------------------------------------------------------------------
+class PositionChange(BaseModel):
+    """One hypothetical trade.
+
+    The DELTA comes from the caller, never from the server. That is what keeps
+    this a calculator rather than a recommendation engine: nothing here
+    proposes a change, it only measures one the user described.
+    """
+
+    symbol: str = Field(..., min_length=1, max_length=32)
+    #: Positive adds, negative reduces. Zero is accepted and changes nothing,
+    #: which is a useful way to confirm the two sides agree.
+    quantity_delta: float
+
+
+class SimulationRequest(BaseModel):
+    changes: List[PositionChange] = Field(..., min_length=1, max_length=10)
+    lookback: str = "1Y"
+
+    @field_validator("lookback")
+    @classmethod
+    def _known_lookback(cls, value: str) -> str:
+        upper = value.upper()
+        if upper not in LOOKBACKS:
+            raise ValueError(f"lookback {value!r} geçersiz; beklenen: {', '.join(LOOKBACKS)}")
+        return upper
+
+
+class SimulationSideOut(BaseModel):
+    """One side of the comparison. A subset of the metrics on purpose —
+    showing all twenty invites diffing numbers the change did not move."""
+
+    score: Optional[float] = None
+    level: Optional[str] = None
+    volatility: Optional[float] = None
+    hhi: Optional[float] = None
+    effective_n: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    position_count: int = 0
+
+
+class AppliedChangeOut(BaseModel):
+    """What the server actually did with each requested change.
+
+    Echoed back because a silently dropped change would leave the user reading
+    a comparison of something they did not ask for.
+    """
+
+    symbol: str
+    quantity_delta: float
+    applied: bool
+    note: Optional[str] = None
+
+
+class SimulationOut(BaseModel):
+    as_of: str
+    current: SimulationSideOut
+    hypothetical: SimulationSideOut
+    #: after - before, per metric. None where either side was unmeasurable —
+    #: zero would read as "no change", a different claim from "we cannot tell".
+    deltas: Dict[str, Optional[float]] = Field(default_factory=dict)
+    changes: List[AppliedChangeOut] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Risk history
+# ---------------------------------------------------------------------------
+class SnapshotOut(BaseModel):
+    """One day's measurement.
+
+    Every metric is optional: a day on which something could not be measured
+    is recorded as unmeasured rather than as zero, and the chart draws a gap
+    instead of a crash the portfolio never had.
+    """
+
+    captured_on: date
+    score: Optional[float] = None
+    level: Optional[str] = None
+    volatility: Optional[float] = None
+    hhi: Optional[float] = None
+    max_drawdown: Optional[float] = None
+    position_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class RiskHistoryOut(BaseModel):
+    #: The window every point was measured over. Stated because the series
+    #: would be meaningless if the points came from different windows.
+    lookback: str
+    days: int
+    points: List[SnapshotOut] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# AI-facing summary
+#
+# Read by the MCP tool server, not the frontend. Deliberately narrower than
+# `RiskProfileOut`: this payload reaches a language model, and the page's
+# cashflow block carries the user's income and spending, which answer no risk
+# question and have no business in a prompt.
+#
+# Frozen against "MCP Tools Interface Definitions v2.4" -- the tool layer
+# raises ContractViolationError on a missing key rather than defaulting it, so
+# every field below is always present.
+# ---------------------------------------------------------------------------
+class RiskSummaryOut(BaseModel):
+    """The interpreted layer: a score, a level, and the declared comparison.
+
+    `POST /calculate` returns raw statistics and nothing else; the score and
+    the band are produced here, by `profile.py`. Without this endpoint the
+    chat agent had no access to either, so "how risky is my portfolio" was
+    answered with a volatility figure while the risk page showed a 0-100
+    score -- two answers to one question, from one system.
+    """
+
+    as_of: str
+    #: None when nothing could be measured. Never defaulted: a score the
+    #: engine refused to produce must not reach the model as a number.
+    score: Optional[float] = None
+    level: Optional[str] = None
+    position_count: int = 0
+    #: Same shape the page reads, so the two surfaces cannot diverge.
+    suitability: SuitabilityOut
+    declared: Optional[DeclaredProfileOut] = None
+    #: The subset the score is built from, so a stated figure is traceable.
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    #: What the score is made of, already in Turkish.
+    findings: List[RiskFinding] = Field(default_factory=list)
+    data_quality: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)

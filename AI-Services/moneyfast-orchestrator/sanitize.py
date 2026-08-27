@@ -36,6 +36,15 @@ SOURCE_REPLACEMENTS = {
     "YFINANCE_DELAYED": "sağlayıcı",
     "YFINANCE": "sağlayıcı",
     "MONEYFAST_FIXTURE_ANALYTICS": "dahili analiz",
+    # Alignment enums, from the risk profile summary. Same failure mode as a
+    # source enum -- "durumunuz PORTFOLIO_RISKIER" is a database row, not an
+    # answer -- but these need a MEANING rather than a category name, because
+    # the enum IS the finding. The tool also returns a ready-made Turkish
+    # sentence; these replacements are what happens when the model composes
+    # its own instead.
+    "PORTFOLIO_RISKIER": "beyan ettiğiniz bandın üzerinde",
+    "PORTFOLIO_CALMER": "beyan ettiğiniz bandın altında",
+    "ALIGNED": "beyan ettiğiniz bandla aynı",
 }
 
 #: Envelope and payload keys that describe the plumbing rather than the value.
@@ -51,6 +60,15 @@ INTERNAL_KEYS = (
     "proposal_id", "user_id", "trace_id", "top_k", "min_similarity",
     "max_weight", "order_type", "time_in_force", "price_history",
     "market_corpus", "valuation_mode", "rebalance_assumption", "confidence_level",
+    # Risk profile summary (v2.4). `measured_level` and `declared_tolerance`
+    # name the two halves of the one comparison this product is allowed to
+    # make, so they are the likeliest of these to be written out verbatim.
+    "profile_summary", "measured_level", "declared_tolerance", "alignment",
+    "tolerance_level", "investment_horizon", "questionnaire_version",
+    "position_count", "effective_n", "top_3_weight", "largest_position",
+    "volatility_annualized", "risk_free_rate", "observation_count",
+    "data_quality", "is_statistically_reliable", "excluded_symbols",
+    "gap_filled_days",
 )
 
 #: An identifier standing on its own, not part of a longer word.

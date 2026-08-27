@@ -512,19 +512,25 @@ class TestMarketResearchNode:
 class TestRiskNode:
     @pytest.mark.asyncio
     async def test_fetches_positions_before_computing_metrics(
-        self, fake_mcp, patched_llm, base_state, positions_payload
+        self, fake_mcp, patched_llm, base_state, positions_payload, risk_summary_payload
     ):
         """The risk tool has no position access by design, so the graph makes
-        two calls in a fixed order."""
+        three calls in a fixed order: holdings, the profile summary, then the
+        statistics."""
         patched_llm.set_response('{"arguments": {"lookback": "3Y"}}')
         fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_risk_profile_summary"] = risk_summary_payload
         fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
         out = await orchestrator.risk_node(base_state)
         assert [name for name, _ in fake_mcp.calls] == [
-            "get_portfolio_positions", "calculate_portfolio_risk_metrics"
+            "get_portfolio_positions",
+            "get_risk_profile_summary",
+            "calculate_portfolio_risk_metrics",
         ]
         assert out["tools_used"] == [
-            "get_portfolio_positions", "calculate_portfolio_risk_metrics"
+            "get_portfolio_positions",
+            "calculate_portfolio_risk_metrics",
+            "get_risk_profile_summary",
         ]
         assert out["specialist_output"]["status"] == "OK"
 
@@ -536,11 +542,124 @@ class TestRiskNode:
         fake_mcp.responses["get_portfolio_positions"] = positions_payload
         fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {}}
         await orchestrator.risk_node(base_state)
-        risk_args = fake_mcp.calls[1][1]
+        risk_args = dict(fake_mcp.calls)["calculate_portfolio_risk_metrics"]
         assert risk_args["positions"] == positions_payload["positions"]
         assert risk_args["lookback"] == "1Y"
         assert risk_args["confidence_level"] == 0.95
         assert risk_args["rebalance_assumption"] == "BUY_AND_HOLD"
+
+
+class TestRiskProfileSummary:
+    """The score and the band exist only behind the summary tool.
+
+    Without it the assistant answered "portföyüm ne kadar riskli" with an
+    annualised volatility percentage while the risk page answered "83 puan,
+    Düşük" for the same portfolio. One system, one question, two answers, and
+    no way for the user to tell which was the answer.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_summary_rides_along_with_the_metrics(
+        self, fake_mcp, patched_llm, base_state, positions_payload, risk_summary_payload
+    ):
+        """Inside `data`, not beside it: synthesis reads `data`, and a sibling
+        key would need every consumer to learn about it."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_risk_profile_summary"] = risk_summary_payload
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
+        out = await orchestrator.risk_node(base_state)
+        data = out["specialist_output"]["data"]
+        assert data["metrics"] == {"beta": 1.1}
+        assert data["profile_summary"]["score"] == 83.4
+        assert data["profile_summary"]["suitability"]["alignment"] == "PORTFOLIO_CALMER"
+
+    @pytest.mark.asyncio
+    async def test_it_asks_for_the_same_window_as_the_metrics(
+        self, fake_mcp, patched_llm, base_state, positions_payload, risk_summary_payload
+    ):
+        """A score measured over 1Y beside statistics measured over 3Y would
+        be two answers about two different portfolios-in-time."""
+        patched_llm.set_response('{"arguments": {"lookback": "3Y"}}')
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_risk_profile_summary"] = risk_summary_payload
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {}}
+        await orchestrator.risk_node(base_state)
+        summary_args = dict(fake_mcp.calls)["get_risk_profile_summary"]
+        assert summary_args["lookback"] == "3Y"
+        assert summary_args["user_id"] == base_state["user_id"]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_summary_does_not_cost_the_turn_its_statistics(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """Best-effort on purpose. Failing the whole turn over the summary
+        would trade a partial answer for none."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_risk_profile_summary"] = MCPUnavailable("profile down")
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "OK"
+        assert "profile_summary" not in out["specialist_output"]["data"]
+        assert "get_risk_profile_summary" not in out["tools_used"]
+
+    @pytest.mark.asyncio
+    async def test_an_empty_summary_is_not_attached(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """An empty block would give the model a score-shaped hole to narrate.
+        Absent says "no score this turn", which is the truth."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_risk_profile_summary"] = {}
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {}}
+        out = await orchestrator.risk_node(base_state)
+        assert "profile_summary" not in out["specialist_output"]["data"]
+
+    @pytest.mark.asyncio
+    async def test_a_rejected_argument_gets_one_correction_attempt(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """The market-data node has had this since a bad enum became
+        "Verilere ulaşamadım"; the risk node reproduced the same failure with
+        a lookback of "365"."""
+        patched_llm.set_responses([
+            '{"arguments": {"lookback": "son 3 ay"}}',
+            '{"arguments": {"lookback": "3M"}}',
+        ])
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = [
+            MCPToolError("lookback 'son 3 ay' is not one of 1M, 3M, 6M, 1Y."),
+            {"metrics": {"beta": 1.1}},
+        ]
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_a_failed_metric_call_still_reports_the_error(
+        self, fake_mcp, patched_llm, base_state, positions_payload, risk_summary_payload
+    ):
+        """The summary cannot rescue a turn whose statistics failed: `data` is
+        None on the error path and there is nowhere honest to put it."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_risk_profile_summary"] = risk_summary_payload
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = MCPToolError("no history")
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "ERROR"
+        assert out["specialist_output"]["data"] is None
+
+    @pytest.mark.asyncio
+    async def test_an_empty_portfolio_never_asks_for_a_score(
+        self, fake_mcp, patched_llm, base_state, empty_positions_payload
+    ):
+        """Nothing to measure means nothing to score."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = empty_positions_payload
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+        assert [name for name, _ in fake_mcp.calls] == ["get_portfolio_positions"]
 
     @pytest.mark.asyncio
     async def test_empty_portfolio_short_circuits_before_the_risk_call(

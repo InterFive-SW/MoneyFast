@@ -72,7 +72,8 @@ const WIDGETS = [
   'AssetAllocationWidget', 'DividendCalendarWidget', 'InvestmentBalanceWidget',
   'MarketTickerWidget', 'MiniTickerWidget', 'NewsWidget', 'OrderHistoryWidget',
   'PortfolioChartWidget', 'PositionsWidget', 'ProfitLossHeatmapWidget',
-  'QuickActionsWidget', 'RecentTransactionsWidget', 'SavingsGoalWidget',
+  'QuickActionsWidget', 'RecentTransactionsWidget', 'RiskSummaryWidget',
+  'SavingsGoalWidget',
   'SectorAllocationWidget', 'SpendingOverviewWidget', 'TopMoversWidget',
   'TotalBalanceWidget', 'WatchlistWidget',
 ]

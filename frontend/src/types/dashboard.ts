@@ -29,6 +29,7 @@ export type WidgetType =
   | 'dividend-calendar'
   | 'sector-allocation-pie'
   | 'heatmap'
+  | 'risk-summary'
   // Bireysel/Banka Widget'ları
   | 'total-balance'
   | 'recent-transactions'

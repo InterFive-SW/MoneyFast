@@ -139,6 +139,11 @@ services:
       # Container-internal port, not the host mapping. See docs/DOCKER_NETWORKING.md.
       BACKEND_API_BASE_URL: http://backend:8000/api
       RAG_API_BASE_URL: http://rag:8100
+      # get_risk_profile_summary names its user in the path rather than
+      # resolving one from a session, so the backend guards it with this key.
+      # backend_client sends it as a bearer header on every call; the
+      # session-scoped endpoints ignore it.
+      BACKEND_API_KEY: ${BACKEND_API_KEY:?Set BACKEND_API_KEY in infra/.env}
     expose:
       - "8000"
     healthcheck:

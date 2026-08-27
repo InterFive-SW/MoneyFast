@@ -42,7 +42,108 @@ export type MarketInstrument = NonNullable<
     GetResponseType<paths['/api/market/instruments']>['instruments']
 >[0];
 export type NewsItem = GetResponseType<paths['/api/market/news']>[0];
-export type RiskProfile = GetResponseType<paths['/api/risk/profile']>;
+/** Kullanıcının ankette beyan ettiği tolerans. Anket doldurulmadan `null`. */
+export interface DeclaredRiskProfile {
+    tolerance_level: string;
+    investment_horizon: string;
+    assessed_at: string;
+    questionnaire_version: string;
+}
+
+/**
+ * Ölçüm ile beyanın karşılaştırması.
+ *
+ * İki taraf da AYNI üç etiketi taşır (Düşük/Orta/Yüksek), iki sayı değil:
+ * ölçülen puan ters (100 = sakin), anketin ham puanı değil.
+ */
+export interface RiskSuitability {
+    measured_level: string | null;
+    declared_tolerance: string | null;
+    alignment: 'ALIGNED' | 'PORTFOLIO_RISKIER' | 'PORTFOLIO_CALMER' | 'UNKNOWN';
+    statement: string;
+}
+
+/**
+ * `declared` ve `suitability` burada elle yazılı: `generated/schema.d.ts` bu
+ * alanlar eklenmeden önce üretilmişti. Yeniden üretimi ayrı ve opsiyonel bir
+ * adım (CONTRACT_WORKFLOW.md).
+ */
+export type RiskProfile = GetResponseType<paths['/api/risk/profile']> & {
+    declared?: DeclaredRiskProfile | null;
+    suitability?: RiskSuitability | null;
+};
+/** Uç noktanın kabul ettiği kapalı küme; sunucu bunun dışını 422 ile reddeder. */
+export type RiskLookback = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX';
+
+/** Anket soruları. Puanlar istemciye HİÇ gelmez: seçeneğin ağırlığını
+ *  görmek anketi bir teste çevirir ve insanlar teste cevap verir. */
+export interface RiskQuestion {
+    key: string;
+    prompt: string;
+    helper: string | null;
+    options: { value: string; label: string }[];
+}
+
+export interface RiskQuestionnaire {
+    version: string;
+    questions: RiskQuestion[];
+}
+
+/** Simülasyonun bir tarafı. Metriklerin tamamı değil, kıyaslanabilir olanlar. */
+export interface RiskSimulationSide {
+    score: number | null;
+    level: string | null;
+    volatility: number | null;
+    hhi: number | null;
+    effective_n: number | null;
+    max_drawdown: number | null;
+    position_count: number;
+}
+
+export interface RiskSimulationChange {
+    symbol: string;
+    quantity_delta: number;
+    applied: boolean;
+    note: string | null;
+}
+
+export interface RiskSimulation {
+    as_of: string;
+    current: RiskSimulationSide;
+    hypothetical: RiskSimulationSide;
+    /** sonra - önce. Ölçülemeyen tarafta `null` — sıfır "değişmedi" demek. */
+    deltas: Record<string, number | null>;
+    changes: RiskSimulationChange[];
+    warnings: string[];
+}
+
+/** Bir günün ölçümü. Her metrik opsiyonel: ölçülemeyen bir gün sıfır
+ *  değil, boşluk olarak çizilir. */
+export interface RiskSnapshot {
+    captured_on: string;
+    score: number | null;
+    level: string | null;
+    volatility: number | null;
+    hhi: number | null;
+    max_drawdown: number | null;
+    position_count: number;
+}
+
+export interface RiskHistory {
+    /** Her noktanın ölçüldüğü pencere. Noktalar farklı pencerelerden gelseydi
+     *  seri anlamsız olurdu. */
+    lookback: string;
+    days: number;
+    points: RiskSnapshot[];
+}
+
+export interface RiskAssessmentResult {
+    tolerance_level: string;
+    investment_horizon: string;
+    assessed_at: string;
+    questionnaire_version: string;
+    raw_score: number;
+}
 export type RiskFinding = NonNullable<RiskProfile['findings']>[0];
 export type RiskSuggestion = NonNullable<RiskProfile['suggestions']>[0];
 
@@ -293,8 +394,35 @@ class ApiClient {
      * Risk sayfasının profili: puan, puanı üreten bileşenler, bulgular ve
      * nakit akışı. Sayfa daha önce sabit bir fixture okuyordu.
      */
-    getRiskProfile() {
-        return this.request<RiskProfile>('/risk/profile');
+    getRiskQuestionnaire() {
+        return this.request<RiskQuestionnaire>('/risk/questionnaire');
+    }
+
+    submitRiskAssessment(answers: Record<string, string>) {
+        return this.post<RiskAssessmentResult>('/api/risk/assessment', { answers });
+    }
+
+    simulateRisk(
+        changes: { symbol: string; quantity_delta: number }[],
+        lookback?: RiskLookback,
+    ) {
+        return this.post<RiskSimulation>('/api/risk/simulate', {
+            changes,
+            ...(lookback ? { lookback } : {}),
+        });
+    }
+
+    getRiskHistory(days?: number) {
+        const suffix = days === undefined ? '' : `?days=${days}`;
+        return this.request<RiskHistory>(`/risk/history${suffix}`);
+    }
+
+    getRiskProfile(lookback?: RiskLookback) {
+        // Uç nokta bu parametreyi baştan beri kabul ediyordu; istemci hiç
+        // geçmiyordu, dolayısıyla sayfa her zaman bir yıllık pencereyi
+        // gösteriyor ve kullanıcı onu değiştiremiyordu.
+        const suffix = lookback ? `?lookback=${lookback}` : '';
+        return this.request<RiskProfile>(`/risk/profile${suffix}`);
     }
 
     getDividends() {

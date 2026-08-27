@@ -249,6 +249,36 @@ describe('remaining query and URL branches', () => {
     await apiClient.post('https://example.test/hook', {})
     expect(calledUrl(fetchMock)).toBe('https://example.test/hook')
   })
+
+  /* `put` arrived on main with the Settings page and no test. It shares every
+     branch with `post` -- the duplicate /api strip, the absolute-URL escape,
+     the optional body -- and each of those is a way for a save to be sent to
+     the wrong URL, silently. */
+  it('strips a duplicate /api prefix on a PUT', async () => {
+    const fetchMock = mockFetch({})
+    await apiClient.put('/api/auth/settings', { wants_email_notifications: false })
+    expect(calledUrl(fetchMock)).toBe('/api/auth/settings')
+    expect(fetchMock.mock.calls[0][1].method).toBe('PUT')
+  })
+
+  it('passes an absolute PUT URL through untouched', async () => {
+    const fetchMock = mockFetch({})
+    await apiClient.put('https://example.test/hook', {})
+    expect(calledUrl(fetchMock)).toBe('https://example.test/hook')
+  })
+
+  it('sends no body when none is given', async () => {
+    /* `JSON.stringify(undefined)` is the string "undefined", which a backend
+       reads as a malformed body rather than as no body at all. */
+    const fetchMock = mockFetch({})
+    await apiClient.put('/api/auth/verify')
+    expect(fetchMock.mock.calls[0][1].body).toBeUndefined()
+  })
+
+  it('turns a failed PUT into a thrown error', async () => {
+    mockFetch({ detail: 'olmadı' }, false)
+    await expect(apiClient.put('/api/auth/settings', {})).rejects.toThrow()
+  })
 })
 
 
@@ -806,5 +836,102 @@ describe('transfers and error messages', () => {
       json: () => Promise.reject(new Error('not json')),
     }))
     await expect(apiClient.createTransfer({} as never)).rejects.toThrow(/502/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Risk tolerans anketi
+// ---------------------------------------------------------------------------
+describe('risk questionnaire', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('anketi getirir', async () => {
+    const fetchMock = mockFetch({ version: 'v1', questions: [] })
+    const result = await apiClient.getRiskQuestionnaire()
+    expect(calledUrl(fetchMock)).toContain('/api/risk/questionnaire')
+    expect(result.version).toBe('v1')
+  })
+
+  it('cevapları gövdede gönderir', async () => {
+    const fetchMock = mockFetch({ tolerance_level: 'Orta', raw_score: 50 })
+    const result = await apiClient.submitRiskAssessment({ horizon: 'over_5y' })
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      answers: { horizon: 'over_5y' },
+    })
+    expect(result.tolerance_level).toBe('Orta')
+  })
+
+  it('eksik anket reddedilirse sunucunun gerekçesini taşır', async () => {
+    /* Sunucu 422 ile hangi sorunun eksik olduğunu söylüyor; onu jenerik bir
+       "API Hatası"na çevirmek, kullanıcıya hiçbir şey anlatmaz. Sessizce
+       başarı döndürmek ise daha kötü: beyan etmediği bir toleransı beyan
+       ettiğine inanır. */
+    mockFetch({ detail: 'Şu sorular yanıtlanmadı: goal' }, false)
+    await expect(apiClient.submitRiskAssessment({})).rejects.toThrow(
+      'Şu sorular yanıtlanmadı: goal',
+    )
+  })
+
+  it('lookback verilmezse profil sorgusuna parametre eklemez', async () => {
+    const fetchMock = mockFetch({})
+    await apiClient.getRiskProfile()
+    expect(calledUrl(fetchMock)).toMatch(/\/risk\/profile$/)
+  })
+
+  it('lookback verilirse geçirir', async () => {
+    const fetchMock = mockFetch({})
+    await apiClient.getRiskProfile('3M')
+    expect(calledUrl(fetchMock)).toContain('lookback=3M')
+  })
+})
+
+describe('risk simulation', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('değişiklikleri gövdede gönderir', async () => {
+    const fetchMock = mockFetch({ current: {}, hypothetical: {}, deltas: {} })
+    await apiClient.simulateRisk([{ symbol: 'NVDA', quantity_delta: 10 }])
+    expect(calledUrl(fetchMock)).toContain('/api/risk/simulate')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      changes: [{ symbol: 'NVDA', quantity_delta: 10 }],
+    })
+  })
+
+  it('pencere verilirse gövdeye ekler, verilmezse hiç yazmaz', async () => {
+    /* `lookback: undefined` göndermek sunucuda varsayılanı ezmeye çalışır;
+       alanı hiç yazmamak varsayılanın kullanılmasını sağlar. */
+    const fetchMock = mockFetch({})
+    await apiClient.simulateRisk([{ symbol: 'NVDA', quantity_delta: 1 }], '3M')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).lookback).toBe('3M')
+  })
+
+  it('boş portföy hatasında sunucunun gerekçesini taşır', async () => {
+    mockFetch({ detail: 'Karşılaştırma için önce değerlenebilir bir pozisyon gerekiyor.' }, false)
+    await expect(
+      apiClient.simulateRisk([{ symbol: 'NVDA', quantity_delta: 1 }]),
+    ).rejects.toThrow('pozisyon gerekiyor')
+  })
+})
+
+describe('risk history', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('gün sayısı verilmezse sorguya parametre eklemez', async () => {
+    /* Sunucunun kendi varsayılanı var; `?days=undefined` göndermek onu
+       ezmeye çalışıp 422 alırdı. */
+    const fetchMock = mockFetch({ lookback: '1Y', days: 90, points: [] })
+    await apiClient.getRiskHistory()
+    expect(calledUrl(fetchMock)).toMatch(/\/risk\/history$/)
+  })
+
+  it('gün sayısı verilirse geçirir', async () => {
+    const fetchMock = mockFetch({ lookback: '1Y', days: 30, points: [] })
+    const result = await apiClient.getRiskHistory(30)
+    expect(calledUrl(fetchMock)).toContain('days=30')
+    expect(result.days).toBe(30)
   })
 })

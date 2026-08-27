@@ -249,3 +249,77 @@ def suggestions_from(metrics: dict[str, Any]) -> list[dict[str, Any]]:
         })
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# Suitability: measurement against the user's own declared tolerance
+# ---------------------------------------------------------------------------
+#: Ordered low to high so the two labels can be compared by position. The
+#: comparison is deliberately made on LABELS, never on the two scores: the
+#: measured score is inverted (100 = calm) and the questionnaire's raw score is
+#: not, so any arithmetic between them would be read backwards by someone
+#: eventually. On the label scale there is no arithmetic to get wrong.
+_LEVEL_ORDER = ("Düşük", "Orta", "Yüksek")
+
+ALIGNMENT_UNKNOWN = "UNKNOWN"
+ALIGNMENT_ALIGNED = "ALIGNED"
+ALIGNMENT_RISKIER = "PORTFOLIO_RISKIER"
+ALIGNMENT_CALMER = "PORTFOLIO_CALMER"
+
+
+def suitability(
+    measured_level: Optional[str], declared_tolerance: Optional[str]
+) -> dict[str, Any]:
+    """Compare what was measured against what the user said they tolerate.
+
+    This is the one place the product is allowed to put those two things in the
+    same sentence, and it stays on the right side of the advisory line because
+    both halves are facts: one is computed from price history, the other is
+    what the user themselves answered. Neither is a judgement about them, and
+    nothing here says what to do about a mismatch.
+
+    `compliance/rules.py:SUI-001` blocks "risk profilinize uygun" because a
+    suitability CLAIM has no basis. A comparison is not that claim, and the
+    wording below avoids the banned phrasing on purpose rather than by luck.
+    """
+    if measured_level not in _LEVEL_ORDER or declared_tolerance not in _LEVEL_ORDER:
+        return {
+            "measured_level": measured_level,
+            "declared_tolerance": declared_tolerance,
+            "alignment": ALIGNMENT_UNKNOWN,
+            "statement": (
+                "Karşılaştırma için hem ölçülebilir bir portföy hem de "
+                "tamamlanmış bir risk anketi gerekiyor."
+            ),
+        }
+
+    measured_index = _LEVEL_ORDER.index(measured_level)
+    declared_index = _LEVEL_ORDER.index(declared_tolerance)
+
+    if measured_index == declared_index:
+        alignment = ALIGNMENT_ALIGNED
+        statement = (
+            f"Ölçülen portföy riskiniz \"{measured_level}\" seviyesinde ve ankette "
+            f"belirttiğiniz tolerans da \"{declared_tolerance}\". İkisi aynı bandda."
+        )
+    elif measured_index > declared_index:
+        alignment = ALIGNMENT_RISKIER
+        statement = (
+            f"Ölçülen portföy riskiniz \"{measured_level}\" seviyesinde; ankette "
+            f"belirttiğiniz tolerans \"{declared_tolerance}\". Portföy, beyan "
+            "ettiğiniz bandın üzerinde ölçülüyor."
+        )
+    else:
+        alignment = ALIGNMENT_CALMER
+        statement = (
+            f"Ölçülen portföy riskiniz \"{measured_level}\" seviyesinde; ankette "
+            f"belirttiğiniz tolerans \"{declared_tolerance}\". Portföy, beyan "
+            "ettiğiniz bandın altında ölçülüyor."
+        )
+
+    return {
+        "measured_level": measured_level,
+        "declared_tolerance": declared_tolerance,
+        "alignment": alignment,
+        "statement": statement,
+    }

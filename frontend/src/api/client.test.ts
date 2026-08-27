@@ -249,6 +249,36 @@ describe('remaining query and URL branches', () => {
     await apiClient.post('https://example.test/hook', {})
     expect(calledUrl(fetchMock)).toBe('https://example.test/hook')
   })
+
+  /* `put` arrived on main with the Settings page and no test. It shares every
+     branch with `post` -- the duplicate /api strip, the absolute-URL escape,
+     the optional body -- and each of those is a way for a save to be sent to
+     the wrong URL, silently. */
+  it('strips a duplicate /api prefix on a PUT', async () => {
+    const fetchMock = mockFetch({})
+    await apiClient.put('/api/auth/settings', { wants_email_notifications: false })
+    expect(calledUrl(fetchMock)).toBe('/api/auth/settings')
+    expect(fetchMock.mock.calls[0][1].method).toBe('PUT')
+  })
+
+  it('passes an absolute PUT URL through untouched', async () => {
+    const fetchMock = mockFetch({})
+    await apiClient.put('https://example.test/hook', {})
+    expect(calledUrl(fetchMock)).toBe('https://example.test/hook')
+  })
+
+  it('sends no body when none is given', async () => {
+    /* `JSON.stringify(undefined)` is the string "undefined", which a backend
+       reads as a malformed body rather than as no body at all. */
+    const fetchMock = mockFetch({})
+    await apiClient.put('/api/auth/verify')
+    expect(fetchMock.mock.calls[0][1].body).toBeUndefined()
+  })
+
+  it('turns a failed PUT into a thrown error', async () => {
+    mockFetch({ detail: 'olmadı' }, false)
+    await expect(apiClient.put('/api/auth/settings', {})).rejects.toThrow()
+  })
 })
 
 

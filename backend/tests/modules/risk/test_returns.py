@@ -453,3 +453,113 @@ class TestSmallSamples:
         not an estimate at all."""
         assert returns.parametric_var([0.01] * 5) is None
 
+
+
+class TestRiskContributions:
+    """Which position the risk is coming from.
+
+    The question that follows "your risk is High" and had no answer.
+    Concentration reports weights; weights are not risk.
+    """
+
+    def test_shares_sum_to_the_whole(self):
+        """By construction: the weighted covariances of the constituents with
+        the portfolio ARE the portfolio's variance. A set of shares that did
+        not add up would mean the arithmetic had drifted."""
+        def reader(symbol):
+            return _bars([10.0, 11.0, 10.5, 12.0, 11.5]) if symbol == "A" else _bars(
+                [5.0, 5.2, 5.1, 5.4, 5.2]
+            )
+
+        rows = returns.risk_contributions(
+            [
+                {"symbol": "A", "market_value": 700.0},
+                {"symbol": "B", "market_value": 300.0},
+            ],
+            reader,
+        )
+        assert sum(row["contribution"] for row in rows) == pytest.approx(1.0, abs=1e-6)
+
+    def test_a_single_holding_carries_all_of_it(self):
+        rows = returns.risk_contributions(
+            [{"symbol": "A", "market_value": 100.0}],
+            lambda s: _bars([10.0, 11.0, 10.5, 12.0]),
+        )
+        assert len(rows) == 1
+        assert rows[0]["contribution"] == pytest.approx(1.0)
+        assert rows[0]["weight"] == pytest.approx(1.0)
+
+    def test_a_steady_holding_carries_less_risk_than_its_weight(self):
+        """The finding the panel exists to show.
+
+        A large, barely-moving holding beside a small, violent one: the weights
+        say one thing and the risk says another, and that gap is the point.
+        """
+        def reader(symbol):
+            if symbol == "STEADY":
+                return _bars([100.0, 100.1, 100.0, 100.1, 100.0])
+            return _bars([10.0, 13.0, 9.0, 14.0, 8.0])
+
+        rows = returns.risk_contributions(
+            [
+                {"symbol": "STEADY", "market_value": 900.0},
+                {"symbol": "WILD", "market_value": 100.0},
+            ],
+            reader,
+        )
+        by_symbol = {row["symbol"]: row for row in rows}
+        assert by_symbol["STEADY"]["weight"] == pytest.approx(0.9)
+        assert by_symbol["STEADY"]["contribution"] < 0.9
+        assert by_symbol["WILD"]["contribution"] > 0.1
+
+    def test_largest_contributor_comes_first(self):
+        def reader(symbol):
+            if symbol == "QUIET":
+                return _bars([100.0, 100.1, 100.0, 100.1, 100.0])
+            return _bars([10.0, 13.0, 9.0, 14.0, 8.0])
+
+        rows = returns.risk_contributions(
+            [
+                {"symbol": "QUIET", "market_value": 500.0},
+                {"symbol": "LOUD", "market_value": 500.0},
+            ],
+            reader,
+        )
+        assert rows[0]["symbol"] == "LOUD"
+
+    def test_a_hedge_may_carry_a_negative_share(self):
+        """A holding that moves against the rest damps the portfolio's swings.
+        That is a finding, not an error, so the sign is not clamped."""
+        def reader(symbol):
+            return _bars([10.0, 12.0, 10.0, 12.0, 10.0]) if symbol == "UP" else _bars(
+                [10.0, 8.0, 10.0, 8.0, 10.0]
+            )
+
+        rows = returns.risk_contributions(
+            [
+                {"symbol": "UP", "market_value": 700.0},
+                {"symbol": "DOWN", "market_value": 300.0},
+            ],
+            reader,
+        )
+        assert min(row["contribution"] for row in rows) < 0
+
+    def test_a_portfolio_that_never_moved_has_nothing_to_apportion(self):
+        """Zero shares would claim each holding contributes nothing, which is
+        a different statement from "there is nothing to divide"."""
+        assert returns.risk_contributions(
+            [{"symbol": "A", "market_value": 100.0}],
+            lambda s: _bars([10.0, 10.0, 10.0, 10.0]),
+        ) == []
+
+    def test_no_holdings_is_safe(self):
+        assert returns.risk_contributions([], lambda s: []) == []
+
+    def test_too_little_shared_history_yields_nothing(self):
+        def reader(symbol):
+            return _bars([10.0, 11.0, 12.0]) if symbol == "A" else _bars([5.0, 6.0, 7.0], 7)
+
+        assert returns.risk_contributions(
+            [{"symbol": "A", "market_value": 1.0}, {"symbol": "B", "market_value": 1.0}],
+            reader,
+        ) == []

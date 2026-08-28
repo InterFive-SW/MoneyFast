@@ -335,3 +335,58 @@ export function measurementCaption(
 
     return parts.length ? parts.join(' · ') : null
 }
+
+export interface ContributionRow {
+    symbol: string
+    weight: number
+    contribution: number
+    /** Risk payı ile ağırlık arasındaki fark. Asıl bilgi bu. */
+    gap: number
+}
+
+/**
+ * Risk katkısı satırları, payı büyükten küçüğe.
+ *
+ * Ağırlık ve risk payı yan yana duruyor çünkü **ikisinin ayrışması** asıl
+ * bilgi: yoğunlaşma "etkin çeşitlilik 5,8" diyor ama beş pozisyonun beşi de
+ * bankaysa birlikte hareket ederler ve portföy ağırlıkların söylediğinden
+ * çok daha az çeşitlendirilmiştir.
+ */
+export function toContributions(raw: unknown): ContributionRow[] {
+    if (!Array.isArray(raw)) return []
+    return raw
+        .filter(
+            (row): row is { symbol: string; weight: number; contribution: number } =>
+                !!row &&
+                typeof row.symbol === 'string' &&
+                typeof row.weight === 'number' &&
+                typeof row.contribution === 'number',
+        )
+        .map((row) => ({
+            symbol: row.symbol,
+            weight: row.weight,
+            contribution: row.contribution,
+            gap: row.contribution - row.weight,
+        }))
+        .sort((a, b) => b.contribution - a.contribution)
+}
+
+/**
+ * Bir satırın tek cümlelik okunuşu.
+ *
+ * Tanım cümlesi, yargı değil: "riskin %62'sini taşıyor" bir ölçümdür,
+ * "azaltın" bir tavsiye. `ORCHESTRATOR_SYSTEM_PROMPT`'un yasakladığı ikincisi.
+ */
+export function describeContribution(row: ContributionRow): string {
+    if (row.contribution < 0) {
+        return 'Portföyün dalgalanmasını azaltan yönde hareket etmiş.'
+    }
+    // Eşik değil, okunabilirlik: ağırlığa çok yakın bir pay hakkında
+    // söylenecek bir şey yok, uydurmak yerine susulur.
+    if (Math.abs(row.gap) < 0.05) {
+        return 'Riskteki payı ağırlığıyla yaklaşık aynı.'
+    }
+    return row.gap > 0
+        ? 'Riskteki payı ağırlığından büyük: portföyün geri kalanıyla birlikte hareket ediyor.'
+        : 'Riskteki payı ağırlığından küçük: portföyün geri kalanından bağımsız hareket etmiş.'
+}

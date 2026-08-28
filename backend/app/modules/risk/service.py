@@ -139,6 +139,7 @@ def calculate(
     risk_free_rate: Optional[float] = None,
     rebalance_assumption: str = "BUY_AND_HOLD",
     closes_for: Optional[Callable[[str], List[tuple]]] = None,
+    include_contributions: bool = False,
 ) -> Dict[str, Any]:
     """Compute the requested metrics.
 
@@ -268,6 +269,14 @@ def calculate(
 
     if wanted("CORRELATION_MATRIX"):
         computed["correlation_matrix"] = _correlation_matrix(series)
+
+    # Off by default rather than behind a metric name: the MCP contract's
+    # `metrics` list is frozen, and adding a value to it would put an
+    # undocumented key in front of the model. The page asks for it explicitly.
+    if include_contributions:
+        computed["risk_contributions"] = returns_math.risk_contributions(
+            positions, windowed
+        )
 
     resolved_rate = risk_free_rate if risk_free_rate is not None else DEFAULT_RISK_FREE_RATE
 

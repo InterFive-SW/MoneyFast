@@ -137,6 +137,10 @@ def _measure(db: Session, user_id: str, lookback: str) -> dict:
             closes_for=lambda symbol: market_service.candle_closes(
                 db, symbol, limit=service.history_limit(lookback)
             ),
+            # "Riskim Yüksek" dedikten sonraki ilk soru: hangi pozisyon
+            # yüzünden. Yalnızca sayfa istiyor -- MCP sözleşmesinin metrik
+            # listesi donuk.
+            include_contributions=True,
         )
         metrics = result.get("metrics") or {}
         metrics["data_quality"] = result.get("data_quality") or {}

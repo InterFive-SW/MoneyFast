@@ -4,6 +4,7 @@ import EmptyPortfolioCard from '../../components/risk/EmptyPortfolioCard'
 import FinancialBalanceWidget from '../../components/risk/FinancialBalanceWidget'
 import QuestionnaireModal from '../../components/risk/QuestionnaireModal'
 import RiskConcentrationPanel from '../../components/risk/RiskConcentrationPanel'
+import RiskContributionPanel from '../../components/risk/RiskContributionPanel'
 import RiskFactorsWidget from '../../components/risk/RiskFactorsWidget'
 import RiskMetricsPanel from '../../components/risk/RiskMetricsPanel'
 import RiskNarrativeCard from '../../components/risk/RiskNarrativeCard'
@@ -101,6 +102,9 @@ export default function RiskSekmesi() {
                                 currency={cashflow?.currency_code ?? 'TRY'}
                             />
                             <RiskConcentrationPanel concentration={concentration} />
+                            {/* Yoğunlaşmanın hemen ardından: ağırlıkları
+                                gördükten sonraki soru "peki risk hangisinden". */}
+                            <RiskContributionPanel raw={metrics.risk_contributions} />
                             <RiskFactorsWidget factors={risk.findings ?? []} />
                             <RiskRecommendationsWidget
                                 recommendations={risk.suggestions ?? []}

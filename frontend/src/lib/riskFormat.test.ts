@@ -10,7 +10,9 @@ import {
     METRIC_COPY,
     alignmentBadge,
     benchmarkName,
+    describeContribution,
     measurementCaption,
+    toContributions,
     NOT_MEASURED,
     describeDrawdown,
     describeEffectiveN,
@@ -417,5 +419,97 @@ describe('benchmarkName', () => {
         expect(benchmarkName(null)).toBeNull()
         expect(benchmarkName('')).toBeNull()
         expect(benchmarkName(42)).toBeNull()
+    })
+})
+
+
+describe('toContributions', () => {
+    /* Ağırlık ve risk payı yan yana duruyor çünkü İKİSİNİN AYRIŞMASI asıl
+       bilgi: yoğunlaşma "etkin çeşitlilik 5,8" der ama beş pozisyonun beşi de
+       bankaysa birlikte hareket ederler. */
+    const RAW = [
+        { symbol: 'AKBNK', weight: 0.3, contribution: 0.55 },
+        { symbol: 'DOAS', weight: 0.6, contribution: 0.5 },
+        { symbol: 'ALTIN', weight: 0.1, contribution: -0.05 },
+    ]
+
+    it('payı büyükten küçüğe sıralar', () => {
+        expect(toContributions(RAW).map((r) => r.symbol)).toEqual([
+            'AKBNK', 'DOAS', 'ALTIN',
+        ])
+    })
+
+    it('ağırlıkla pay arasındaki farkı hesaplar', () => {
+        const rows = toContributions(RAW)
+        expect(rows[0].gap).toBeCloseTo(0.25)
+        expect(rows[1].gap).toBeCloseTo(-0.1)
+    })
+
+    it('eksi payı kırpmaz', () => {
+        /* Dalgalanmayı azaltan bir pozisyon bir bulgudur, hata değil. */
+        expect(toContributions(RAW)[2].contribution).toBe(-0.05)
+    })
+
+    it('şekli bozuk satırları atar', () => {
+        expect(
+            toContributions([
+                { symbol: 'A', weight: 0.5, contribution: 0.5 },
+                { symbol: 'B', weight: null, contribution: 0.5 },
+                null,
+                { weight: 0.1, contribution: 0.1 },
+            ]),
+        ).toHaveLength(1)
+    })
+
+    it('liste değilse boş döner', () => {
+        expect(toContributions(null)).toEqual([])
+        expect(toContributions({ symbol: 'A' })).toEqual([])
+        expect(toContributions(undefined)).toEqual([])
+    })
+})
+
+describe('describeContribution', () => {
+    const row = (weight: number, contribution: number) => ({
+        symbol: 'X', weight, contribution, gap: contribution - weight,
+    })
+
+    it('hiçbir cümle ne yapılacağını söylemez', () => {
+        /* Riskin nereden geldiğini söylemek bir ÖLÇÜM, azaltmayı önermek bir
+           TAVSİYE. Ayrım kipte: "dalgalanmayı azaltan" pozisyonun ne yaptığını
+           anlatır, "riskinizi azaltın" kullanıcıya ne yapacağını söyler.
+           Aranan şey emir kipi ve öneri sözcükleri, kökler değil. */
+        const sentences = [
+            describeContribution(row(0.3, 0.6)),
+            describeContribution(row(0.6, 0.3)),
+            describeContribution(row(0.5, 0.5)),
+            describeContribution(row(0.2, -0.1)),
+        ]
+        for (const sentence of sentences) {
+            expect(sentence).not.toMatch(
+                /\b(azalt|artır|çeşitlendir|dengele|sat|al)(ın|ınız|manız|malısınız)\b/i,
+            )
+            expect(sentence).not.toMatch(/öneri|tavsiye|gerekir|meli|malı/i)
+        }
+    })
+
+    it('cümleler geçmişi anlatır, gelecek için bir şey vaat etmez', () => {
+        expect(describeContribution(row(0.2, -0.1))).toMatch(/etmiş|ediyor/)
+        expect(describeContribution(row(0.6, 0.3))).toMatch(/etmiş|ediyor/)
+    })
+
+    it('payı ağırlığından büyükse birlikte hareketi söyler', () => {
+        expect(describeContribution(row(0.3, 0.6))).toContain('birlikte hareket')
+    })
+
+    it('payı ağırlığından küçükse bağımsızlığı söyler', () => {
+        expect(describeContribution(row(0.6, 0.3))).toContain('bağımsız')
+    })
+
+    it('ağırlığa yakın bir pay hakkında bir şey uydurmaz', () => {
+        expect(describeContribution(row(0.5, 0.52))).toContain('yaklaşık aynı')
+    })
+
+    it('eksi pay dalgalanmayı azaltmak diye okunur', () => {
+        expect(describeContribution(row(0.2, -0.1))).toContain('azaltan')
     })
 })

@@ -435,3 +435,72 @@ def paired_returns(
         simple_returns([value for _, value in shared]),
         simple_returns([day_map[day] for day, _ in shared]),
     )
+
+
+def risk_contributions(
+    holdings: Sequence[Any], closes_for: Any, base_currency: str = "TRY"
+) -> list[dict[str, Any]]:
+    """Each holding's share of the portfolio's volatility, largest first.
+
+    Answers the question that follows "your risk is High" and had no answer:
+    which position is it coming from.
+
+    **Weight is not risk.** Concentration reports that five positions carry a
+    fifth each; if all five are banks they move together and the portfolio is
+    far less diversified than the weights suggest. Conversely a large holding
+    that moves against the rest can carry less risk than its weight implies.
+    The gap between the two numbers is the whole point, which is why both are
+    returned.
+
+    Marginal contribution to variance: `w_i * cov(r_i, r_p) / var(r_p)`. The
+    shares sum to 1.0 by construction, because the weighted covariances of the
+    constituents with the portfolio ARE the portfolio's variance.
+
+    A share can be negative -- that is a holding that has been damping the
+    portfolio's swings, not an error.
+    """
+    priced, values, _ = _base_prices(holdings, closes_for, base_currency)
+    if not priced:
+        return []
+
+    common = sorted(set.intersection(*(set(days) for days in priced.values())))
+    if len(common) < 3:
+        return []
+
+    total = sum(values[symbol] for symbol in priced)
+    per_symbol = {
+        symbol: simple_returns([days[day] for day in common])
+        for symbol, days in priced.items()
+    }
+    # Decomposed against the CURRENT-WEIGHT portfolio, not the drifting
+    # buy-and-hold one. Two reasons, and they agree:
+    #
+    # The question is "which of the positions I hold TODAY drives my risk",
+    # and today's weights are fixed weights. And the identity only holds for
+    # fixed weights -- measured against the drifting series the shares summed
+    # to 1.00988, which is not a rounding artefact but a different portfolio.
+    length = min(len(r) for r in per_symbol.values())
+    portfolio = [
+        sum(per_symbol[symbol][index] * values[symbol] for symbol in priced) / total
+        for index in range(length)
+    ]
+    variance = stdev(portfolio) ** 2
+    if variance == 0:
+        # A portfolio that never moved has no risk to apportion. Zero shares
+        # would claim each holding contributes nothing, which is a different
+        # statement from "there is nothing to divide".
+        return []
+
+    out = []
+    for symbol, series in per_symbol.items():
+        weight = values[symbol] / total
+        out.append(
+            {
+                "symbol": symbol,
+                "weight": round(weight, 6),
+                "contribution": round(
+                    weight * covariance(series, portfolio) / variance, 6
+                ),
+            }
+        )
+    return sorted(out, key=lambda row: row["contribution"], reverse=True)

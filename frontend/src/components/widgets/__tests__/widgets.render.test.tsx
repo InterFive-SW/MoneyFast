@@ -16,6 +16,27 @@ import { render, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import payloads from './payloads.json'
 
+// Same mock as performanceChart.render.test.tsx: lightweight-charts paints to
+// a canvas jsdom lacks and otherwise throws unhandled "Value is null" errors
+// after the test finishes. Behaviour under test is mount survival, not pixels.
+vi.mock('lightweight-charts', () => {
+  const series = { setData: vi.fn(), priceScale: () => ({ applyOptions: vi.fn() }) }
+  return {
+    createChart: () => ({
+      addSeries: () => series,
+      priceScale: () => ({ applyOptions: vi.fn() }),
+      timeScale: () => ({ fitContent: vi.fn(), applyOptions: vi.fn() }),
+      applyOptions: vi.fn(),
+      resize: vi.fn(),
+      remove: vi.fn(),
+    }),
+    CandlestickSeries: 'candlestick',
+    HistogramSeries: 'histogram',
+    ColorType: { Solid: 'solid' },
+    CrosshairMode: { Normal: 0 },
+  }
+})
+
 const POPULATED = payloads as Record<string, unknown>
 
 /** Same endpoints, but every collection drained -- a brand-new account. */

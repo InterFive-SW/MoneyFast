@@ -74,6 +74,20 @@ export interface ConversationMessage {
     content: string;
     created_at: string;
     disclosures: string[];
+    /** Optional structured research citations; absent on older payloads. */
+    citations?: unknown[] | null;
+}
+
+/** Orchestrator /chat and SSE `done` payload fields the chat UI consumes. */
+export interface ChatApiResponse {
+    final_output?: string;
+    text?: string;
+    id?: string;
+    disclosures?: string[] | null;
+    citations?: unknown[] | null;
+    widget?: unknown;
+    context_topic?: string | null;
+    persistence?: string | null;
 }
 
 export interface ConversationDetail extends ConversationSummary {

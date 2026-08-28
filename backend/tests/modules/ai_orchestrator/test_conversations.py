@@ -152,6 +152,77 @@ def test_detail_reads_disclosures_back_from_the_message_meta(client, mocker):
     assert body["messages"][1]["disclosures"] == ["Yatırım tavsiyesi değildir."]
 
 
+def test_detail_reads_citations_back_from_the_message_meta(client, mocker):
+    """Citations ride the same JSONB envelope as disclosures — no migration."""
+    citation = {
+        "evidence_id": "1ac7a52713bdf683e6be98a05ae4dfe6",
+        "platform": "x",
+        "handle": "kap_bildirimleri",
+        "post_url": "https://x.com/kap_bildirimleri/status/123",
+        "kap_url": "https://kap.org.tr/tr/Bildirim/1",
+    }
+    rows = [
+        make_message("user", "soru", offset=0),
+        make_message(
+            "assistant",
+            "cevap",
+            meta={"disclosures": [], "citations": [citation]},
+            offset=1,
+        ),
+    ]
+    mocker.patch.object(service, "get_conversation", return_value=make_conversation())
+    mocker.patch.object(service, "list_messages", return_value=(rows, False))
+    with as_user():
+        body = client.get("/api/ai_orchestrator/conversations/t-1").json()
+    assert body["messages"][0]["citations"] == []
+    assert body["messages"][1]["citations"] == [citation]
+
+
+def test_detail_tolerates_legacy_meta_without_citations(client, mocker):
+    """Pre-Phase-3 JSONB rows have no citations key — must still load."""
+    rows = [
+        make_message("user", "soru", offset=0),
+        make_message(
+            "assistant",
+            "cevap",
+            meta={"disclosures": ["Uyarı."], "context_topic": "ASELS"},
+            offset=1,
+        ),
+    ]
+    mocker.patch.object(service, "get_conversation", return_value=make_conversation())
+    mocker.patch.object(service, "list_messages", return_value=(rows, False))
+    with as_user():
+        body = client.get("/api/ai_orchestrator/conversations/t-1").json()
+    assert body["messages"][1]["citations"] == []
+    assert body["messages"][1]["disclosures"] == ["Uyarı."]
+    assert body["context_topic"] == "ASELS"
+
+
+def test_detail_tolerates_malformed_legacy_citations_meta(client, mocker):
+    """Corrupt JSONB must not 500 conversation history."""
+    rows = [
+        make_message(
+            "assistant",
+            "cevap",
+            meta={"citations": "not-a-list", "disclosures": ["ok"]},
+            offset=0,
+        ),
+        make_message(
+            "assistant",
+            "ikinci",
+            meta={"citations": [None, "x", {"handle": "ok"}], "disclosures": 12},
+            offset=1,
+        ),
+    ]
+    mocker.patch.object(service, "get_conversation", return_value=make_conversation())
+    mocker.patch.object(service, "list_messages", return_value=(rows, False))
+    with as_user():
+        body = client.get("/api/ai_orchestrator/conversations/t-1").json()
+    assert body["messages"][0]["citations"] == []
+    assert body["messages"][0]["disclosures"] == ["ok"]
+    assert body["messages"][1]["citations"] == [{"handle": "ok"}]
+    assert body["messages"][1]["disclosures"] == []
+
 def test_detail_surfaces_the_latest_context_topic(client, mocker):
     """The context panel follows the newest assistant turn that had a subject,
     so switching topics and back does not blank the panel."""

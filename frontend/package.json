@@ -12,6 +12,9 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "lightweight-charts": "^5.2.1",
     "react": "^18.3.1",

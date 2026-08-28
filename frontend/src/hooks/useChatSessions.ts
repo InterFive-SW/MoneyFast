@@ -24,6 +24,7 @@ import {
     writeAnonSessions,
 } from '../lib/chatStorage'
 import type { ChatMessage, ChatSession, PersistenceStatus } from '../types/chat'
+import { normalizeCitations } from '../lib/researchCitations'
 
 const NEW_SESSION_TITLE = 'Yeni Sohbet'
 const TITLE_PREVIEW_CHARS = 30
@@ -86,6 +87,7 @@ function toMessages(detail: ConversationDetail): ChatMessage[] {
         sender: message.role === 'user' ? 'user' : 'ai',
         timestamp: new Date(message.created_at),
         disclosures: message.disclosures ?? [],
+        citations: normalizeCitations(message.citations),
         // Widget'lar bilerek geri yüklenmiyor: eski bir portföy widget'ı geçmiş
         // bir turun fiyatlarını gösterir, eski bir işlem widget'ı ise süresi
         // dolmuş bir öneri için "Onayla" düğmesi sunar.
@@ -347,6 +349,7 @@ export function useChatSessions() {
                     timestamp: new Date(),
                     widget: data.widget,
                     disclosures: data.disclosures ?? [],
+                    citations: normalizeCitations(data.citations),
                 }
                 setJustAnsweredId(answer.id)
                 patchSession(sessionId, (session) => ({

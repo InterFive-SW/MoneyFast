@@ -288,6 +288,10 @@ class MessageOut(BaseModel):
     #: Read back from `Message.meta` so a reopened bubble keeps the notices it
     #: was first shown with.
     disclosures: list[str] = Field(default_factory=list)
+    #: Structured research citations from the same meta envelope. Stored as
+    #: opaque dicts so a tightened citation schema cannot 500 history loads;
+    #: the frontend re-validates before rendering links.
+    citations: list[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ConversationDetailOut(ConversationSummary):

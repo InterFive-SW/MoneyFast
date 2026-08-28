@@ -3,6 +3,7 @@ import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload, PortfolioWidgetPa
 import ChartWidget from './widgets/ChartWidget';
 import ActionWidget from './widgets/ActionWidget';
 import PortfolioWidget from './widgets/PortfolioWidget';
+import CitationList from './CitationList';
 import Markdown from './Markdown';
 import { useTypewriter } from '../../hooks/useTypewriter';
 
@@ -73,6 +74,11 @@ export default function MessageBubble({ message, animate = false }: MessageBubbl
           )}
           {message.widget && message.widget.type === 'portfolio' && (
             <PortfolioWidget payload={message.widget.payload as PortfolioWidgetPayload} />
+          )}
+
+          {/* Sources before legal footnotes — same compact footnote language. */}
+          {!isUser && message.citations && message.citations.length > 0 && (
+            <CitationList citations={message.citations} />
           )}
 
           {/*

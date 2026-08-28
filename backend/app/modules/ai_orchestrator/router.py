@@ -64,11 +64,11 @@ def _history_for(
 def _turn_meta(answer: dict) -> dict:
     """What gets stored alongside the assistant message.
 
-    `context_topic` and `disclosures` are here so a reopened conversation can
-    render its bubbles the way they were first shown. Widgets deliberately are
-    not: a restored portfolio widget would display an earlier turn's prices,
-    and a restored action widget would offer an "Onayla" button for a proposal
-    that has since expired.
+    `context_topic`, `disclosures`, and `citations` are here so a reopened
+    conversation can render its bubbles the way they were first shown.
+    Widgets deliberately are not: a restored portfolio widget would display
+    an earlier turn's prices, and a restored action widget would offer an
+    "Onayla" button for a proposal that has since expired.
     """
     return {
         "primary_intent": answer.get("primary_intent"),
@@ -76,7 +76,29 @@ def _turn_meta(answer: dict) -> dict:
         "compliance_verdict": answer.get("compliance_verdict"),
         "context_topic": answer.get("context_topic"),
         "disclosures": answer.get("disclosures") or [],
+        # Structured research citations (Phase 3). Same JSONB envelope as
+        # disclosures — no migration. Frontend re-validates URLs on render.
+        "citations": answer.get("citations") or [],
     }
+
+
+def _citations_from_meta(meta: dict | None) -> list:
+    """Opaque citation dicts from JSONB, fail-closed on legacy junk.
+
+    Older rows have no ``citations`` key; a corrupted value must not 500 the
+    conversation detail endpoint — the frontend re-validates before rendering.
+    """
+    raw = (meta or {}).get("citations") or []
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
+
+
+def _disclosures_from_meta(meta: dict | None) -> list:
+    raw = (meta or {}).get("disclosures") or []
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, str)]
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -296,7 +318,8 @@ def get_conversation(
                 role=row.role,
                 content=row.content,
                 created_at=row.created_at,
-                disclosures=(row.meta or {}).get("disclosures") or [],
+                disclosures=_disclosures_from_meta(row.meta),
+                citations=_citations_from_meta(row.meta),
             )
             for row in rows
         ],

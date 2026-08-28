@@ -8,7 +8,7 @@ so the tests use series whose answers can be worked out on paper.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -138,23 +138,282 @@ class TestSharpe:
         assert returns.sharpe(series, 0.40) < returns.sharpe(series, 0.10)
 
 
-class TestPortfolioReturns:
-    def test_weighted_combination(self):
-        series = {"A": [0.10, 0.10], "B": [0.0, 0.0]}
-        combined = returns.portfolio_returns(series, {"A": 0.5, "B": 0.5})
-        assert combined == pytest.approx([0.05, 0.05])
+#: Five consecutive days, oldest first, as the candle reader hands them over.
+def _bars(prices, start_day=5):
+    return [
+        (datetime(2026, 8, start_day + i, 18, 0, tzinfo=timezone.utc), price)
+        for i, price in enumerate(prices)
+    ]
 
-    def test_truncates_to_the_shortest_history(self):
-        """Padding a short series would silently assume the missing days were
-        flat, understating the portfolio's volatility."""
-        series = {"A": [0.01] * 10, "B": [0.02] * 3}
-        assert len(returns.portfolio_returns(series, {"A": 0.5, "B": 0.5})) == 3
 
-    def test_zero_weights_yield_no_series(self):
-        assert returns.portfolio_returns({"A": [0.01, 0.02]}, {"A": 0.0}) == []
+class TestValueSeries:
+    """The single portfolio series both `risk` and `analytics` read.
 
-    def test_empty_input_is_safe(self):
-        assert returns.portfolio_returns({}, {}) == []
+    It replaced `portfolio_returns`, which lined constituents up by tail
+    INDEX. That is only correct when every holding traded on exactly the same
+    days, and measured against live data they do not: XU100 was missing four
+    days the holdings had, which put every earlier observation against the
+    wrong day and produced a beta of 0.0062 against the index a 94%-DOAS
+    portfolio actually tracks closely.
+    """
+
+    def test_value_follows_the_holdings(self):
+        holdings = [{"symbol": "A", "market_value": 100.0, "instrument_currency": "TRY"}]
+        dates, values, excluded = returns.value_series(
+            holdings, lambda s: _bars([100.0, 110.0, 120.0])
+        )
+        assert len(dates) == 3
+        assert excluded == []
+        # Carried as market value scaled by its own price index, so the LAST
+        # day reproduces the holding's current value exactly.
+        assert values[-1] == pytest.approx(100.0)
+        assert values[0] == pytest.approx(100.0 * (100.0 / 120.0))
+
+    def test_only_days_every_holding_traded_are_used(self):
+        """A date one name is missing is dropped for everyone.
+
+        Carrying its previous close forward would move the portfolio on a day
+        that name did not trade.
+        """
+        def reader(symbol):
+            return _bars([10.0, 11.0, 12.0, 13.0]) if symbol == "A" else _bars([5.0, 5.5, 6.0], 6)
+
+        dates, values, _ = returns.value_series(
+            [
+                {"symbol": "A", "market_value": 100.0},
+                {"symbol": "B", "market_value": 100.0},
+            ],
+            reader,
+        )
+        # A covers the 5th-8th, B the 6th-8th. The shared span is three days.
+        assert len(dates) == 3
+        assert dates[0].isoformat() == "2026-08-06"
+
+    def test_alignment_is_by_date_not_by_position(self):
+        """The regression this whole builder exists for.
+
+        Both series are four bars long, but B is missing the 6th and has the
+        9th instead. Index alignment would pair the 5th with the 5th and then
+        silently pair the 7th with the 8th. Date alignment keeps only the days
+        both actually have.
+        """
+        def reader(symbol):
+            if symbol == "A":
+                return _bars([10.0, 11.0, 12.0, 13.0])
+            return [
+                (datetime(2026, 8, d, 18, 0, tzinfo=timezone.utc), p)
+                for d, p in [(5, 5.0), (7, 6.0), (8, 7.0), (9, 8.0)]
+            ]
+
+        dates, _, _ = returns.value_series(
+            [{"symbol": "A", "market_value": 1.0}, {"symbol": "B", "market_value": 1.0}],
+            reader,
+        )
+        assert [d.day for d in dates] == [5, 7, 8]
+
+    def test_a_foreign_holding_is_converted_at_each_day_rate(self):
+        """`analytics` summed price x quantity with no conversion, adding
+        dollars to lira. Every day is converted at THAT day's rate; a day
+        without a rate is dropped rather than valued at an invented one."""
+        def reader(symbol):
+            if symbol == "USD":
+                return _bars([10.0, 10.0, 10.0])
+            return _bars([30.0, 40.0, 50.0])  # USDTRY
+
+        dates, values, _ = returns.value_series(
+            [{"symbol": "USD", "market_value": 500.0, "instrument_currency": "USD"}],
+            reader,
+        )
+        assert len(dates) == 3
+        # Price flat, rate up 30 -> 50: in lira the holding rose by the rate.
+        assert values[0] == pytest.approx(500.0 * (300.0 / 500.0))
+        assert values[-1] == pytest.approx(500.0)
+
+    def test_the_rate_series_is_fetched_once_per_currency(self):
+        """Six Nasdaq holdings should cost one USDTRY read, not six.
+
+        `closes_for` is a database call per invocation, so a cache miss per
+        holding turns a page load into a query storm on exactly the portfolios
+        that hold the most names.
+        """
+        calls: list[str] = []
+
+        def reader(symbol):
+            calls.append(symbol)
+            if symbol == "USDTRY":
+                return _bars([30.0, 31.0, 32.0])
+            return _bars([10.0, 11.0, 12.0])
+
+        returns.value_series(
+            [
+                {"symbol": "AAPL", "market_value": 100.0, "instrument_currency": "USD"},
+                {"symbol": "MSFT", "market_value": 100.0, "instrument_currency": "USD"},
+                {"symbol": "NVDA", "market_value": 100.0, "instrument_currency": "USD"},
+            ],
+            reader,
+        )
+        assert calls.count("USDTRY") == 1
+
+    def test_a_holding_whose_rate_is_missing_is_excluded_not_assumed(self):
+        def reader(symbol):
+            return [] if symbol == "GBPTRY" else _bars([10.0, 11.0, 12.0])
+
+        _, _, excluded = returns.value_series(
+            [{"symbol": "GBX", "market_value": 100.0, "instrument_currency": "GBP"}],
+            reader,
+        )
+        assert excluded == ["GBX"]
+
+    def test_a_thin_history_is_excluded_and_named(self):
+        _, _, excluded = returns.value_series(
+            [{"symbol": "NEW", "market_value": 100.0}], lambda s: _bars([10.0, 11.0])
+        )
+        assert excluded == ["NEW"]
+
+    def test_a_worthless_holding_is_skipped_without_being_blamed(self):
+        """It contributes nothing either way, and letting its trading days
+        constrain the shared window would shorten the series for every other
+        holding on account of a position worth zero."""
+        def reader(symbol):
+            return _bars([10.0, 11.0, 12.0]) if symbol == "A" else _bars([1.0, 1.0], 9)
+
+        dates, _, excluded = returns.value_series(
+            [
+                {"symbol": "A", "market_value": 100.0},
+                {"symbol": "EMPTY", "market_value": 0.0},
+            ],
+            reader,
+        )
+        assert excluded == []
+        assert len(dates) == 3
+
+    def test_non_positive_closes_are_dropped(self):
+        """A zero close produces an infinite return that poisons everything
+        downstream."""
+        dates, _, _ = returns.value_series(
+            [{"symbol": "A", "market_value": 100.0}],
+            lambda s: _bars([10.0, 0.0, 12.0, 13.0]),
+        )
+        assert len(dates) == 3
+
+    def test_no_holdings_is_safe(self):
+        assert returns.value_series([], lambda s: []) == ([], [], [])
+
+    def test_a_single_shared_day_is_not_a_series(self):
+        def reader(symbol):
+            return _bars([10.0, 11.0, 12.0]) if symbol == "A" else _bars([5.0, 6.0, 7.0], 7)
+
+        dates, values, _ = returns.value_series(
+            [{"symbol": "A", "market_value": 1.0}, {"symbol": "B", "market_value": 1.0}],
+            reader,
+        )
+        assert (dates, values) == ([], [])
+
+
+class TestRebalancedReturns:
+    """DAILY_REBALANCE really is a different portfolio.
+
+    The contract offers two rebalancing assumptions and the parameter was
+    accepted, echoed in `assumptions`, and then ignored -- one fixed
+    computation came back under whichever name was asked for.
+    """
+
+    def test_weights_reset_each_day(self):
+        """Two equal holdings, one doubling and one flat.
+
+        Rebalanced, each day's return is the average of the constituents'.
+        Buy-and-hold lets the winner's weight grow, so the two series differ.
+        """
+        def reader(symbol):
+            return _bars([10.0, 20.0, 40.0]) if symbol == "UP" else _bars([10.0, 10.0, 10.0])
+
+        holdings = [
+            {"symbol": "UP", "market_value": 100.0},
+            {"symbol": "FLAT", "market_value": 100.0},
+        ]
+        rebalanced = returns.rebalanced_returns(holdings, reader)
+        # Each day UP returns +100%, FLAT 0%: the average is +50%.
+        assert rebalanced == pytest.approx([0.5, 0.5])
+
+        _, values, _ = returns.value_series(holdings, reader)
+        assert returns.simple_returns(values) != pytest.approx(rebalanced)
+
+    def test_weighted_by_market_value_not_headcount(self):
+        def reader(symbol):
+            return _bars([10.0, 20.0, 40.0]) if symbol == "UP" else _bars([10.0, 10.0, 10.0])
+
+        rebalanced = returns.rebalanced_returns(
+            [
+                {"symbol": "UP", "market_value": 300.0},
+                {"symbol": "FLAT", "market_value": 100.0},
+            ],
+            reader,
+        )
+        assert rebalanced == pytest.approx([0.75, 0.75])
+
+    def test_only_shared_days_are_used(self):
+        def reader(symbol):
+            return _bars([10.0, 11.0, 12.0, 13.0]) if symbol == "A" else _bars([5.0, 6.0, 7.0], 6)
+
+        rebalanced = returns.rebalanced_returns(
+            [{"symbol": "A", "market_value": 1.0}, {"symbol": "B", "market_value": 1.0}],
+            reader,
+        )
+        # Three shared days give two returns.
+        assert len(rebalanced) == 2
+
+    def test_no_history_is_no_series(self):
+        assert returns.rebalanced_returns([], lambda s: []) == []
+
+    def test_too_few_shared_days_is_no_series(self):
+        def reader(symbol):
+            return _bars([10.0, 11.0, 12.0]) if symbol == "A" else _bars([5.0, 6.0, 7.0], 7)
+
+        assert returns.rebalanced_returns(
+            [{"symbol": "A", "market_value": 1.0}, {"symbol": "B", "market_value": 1.0}],
+            reader,
+        ) == []
+
+    def test_a_worthless_portfolio_yields_no_series(self):
+        """A holding worth nothing is skipped before it can be weighted, so
+        an all-zero portfolio has no constituents rather than a zero divisor."""
+        assert returns.rebalanced_returns(
+            [{"symbol": "A", "market_value": 0.0}], lambda s: _bars([10.0, 11.0, 12.0])
+        ) == []
+
+
+class TestPairedReturns:
+    def test_pairs_only_days_both_sides_have(self):
+        dates = [date(2026, 8, d) for d in (5, 6, 7, 8)]
+        values = [100.0, 101.0, 102.0, 103.0]
+        # The benchmark is missing the 6th -- exactly XU100's real defect.
+        bars = [
+            (datetime(2026, 8, d, 18, 0, tzinfo=timezone.utc), p)
+            for d, p in [(5, 10.0), (7, 10.5), (8, 10.8)]
+        ]
+        left, right = returns.paired_returns(dates, values, bars)
+        assert len(left) == len(right) == 2
+        # The portfolio return for the 7th is measured from the 5th, because
+        # that is the previous day the pair actually shares.
+        assert left[0] == pytest.approx(102.0 / 100.0 - 1)
+
+    def test_too_little_overlap_is_no_pairing(self):
+        dates = [date(2026, 8, 5), date(2026, 8, 6)]
+        bars = [(datetime(2026, 8, 5, 18, 0, tzinfo=timezone.utc), 10.0)]
+        assert returns.paired_returns(dates, [1.0, 2.0], bars) == ([], [])
+
+
+class TestAlignTo:
+    def test_returns_closes_on_the_given_days_only(self):
+        dates = [date(2026, 8, 5), date(2026, 8, 7)]
+        bars = [
+            (datetime(2026, 8, d, 18, 0, tzinfo=timezone.utc), p)
+            for d, p in [(5, 10.0), (6, 11.0), (7, 12.0)]
+        ]
+        assert returns.align_to(dates, bars) == [10.0, 12.0]
+
+    def test_no_overlap_is_empty(self):
+        assert returns.align_to([date(2026, 1, 1)], []) == []
 
 
 class TestLookbackWindows:
@@ -194,13 +453,3 @@ class TestSmallSamples:
         not an estimate at all."""
         assert returns.parametric_var([0.01] * 5) is None
 
-    def test_portfolio_returns_with_all_zero_weights(self):
-        assert returns.portfolio_returns({"A": [0.01, 0.02]}, {"A": 0.0, "B": 0.0}) == []
-
-
-class TestPortfolioReturnsGuards:
-    def test_a_negative_total_weight_yields_no_series(self):
-        """Short positions can make the weights sum to zero. Dividing by that
-        would raise; an empty series says "not measurable" instead."""
-        series = {"A": [0.01, 0.02], "B": [0.03, 0.04]}
-        assert returns.portfolio_returns(series, {"A": 1.0, "B": -1.0}) == []

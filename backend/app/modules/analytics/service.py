@@ -31,8 +31,15 @@ log = logging.getLogger("moneyfast.analytics")
 #: bars is arithmetic, not evidence.
 MIN_RELIABLE_OBSERVATIONS = 60
 
-#: Bars pulled per symbol for the trend. About a year of trading days.
-TREND_WINDOW = 260
+#: Bars pulled per symbol for the trend: exactly the risk module's 1Y window.
+#:
+#: It was 260 — "about a year" — while risk asked for 253, and the two then
+#: measured the same portfolio over different spans. With one series behind
+#: both, a window that is merely close is the last thing that can still make
+#: them disagree, and on a single screen showing both that difference has
+#: nowhere to hide. Ties to the shared table rather than restating 253, so a
+#: change to the window definition moves both.
+TREND_WINDOW = risk_returns.window_for("1Y") + 1
 
 
 def _percent(part: float, whole: float) -> float:
@@ -139,11 +146,37 @@ def build(
         label = sector_map.get(row["symbol"]) or "Bilinmiyor"
         sectors[label] = sectors.get(label, 0.0) + value
 
-    trend, excluded = _trend([row for row, _, _ in valued], closes_for)
+    # The same series `risk` measures. Built once, in `risk/returns.py`:
+    # this page and the risk page were computing volatility and max drawdown
+    # from two differently-built series and reporting different numbers for
+    # one portfolio. It also fixes a currency bug this module had on its own --
+    # `_trend` summed `quantity x close` with no conversion, adding dollars to
+    # lira, while the allocation block three lines above converted properly.
+    dates, trend_values, excluded = risk_returns.value_series(
+        [
+            {**row, "market_value": market_value}
+            for row, market_value, _ in valued
+        ],
+        closes_for,
+        base_currency,
+    )
+    trend = [
+        {
+            "date": datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
+            "value": round(value, 2),
+        }
+        for day, value in zip(dates, trend_values)
+    ]
     if excluded:
+        # Names them AND says what their absence costs. The series ends at the
+        # value of what it could measure, so with something left out the last
+        # point sits below the total shown above it -- a gap the reader would
+        # otherwise have to notice and explain to themselves.
         warnings.append(
-            "Fiyat geçmişi olmayan enstrümanlar trend hesabının dışında: "
-            + ", ".join(excluded)
+            "Fiyat geçmişi yetersiz olduğu için trend hesabının dışında kalan "
+            "enstrümanlar: " + ", ".join(excluded)
+            + ". Grafikteki değer bu pozisyonları içermez, dolayısıyla "
+            "yukarıdaki toplamın altında kalır."
         )
     if trend:
         warnings.append(
@@ -151,9 +184,9 @@ def build(
             "değerlenmesidir; hesabın geçmişteki gerçek değeri değildir."
         )
 
-    values = [point["value"] for point in trend]
+    values = trend_values
     series = risk_returns.simple_returns(values)
-    drawdown = risk_returns.max_drawdown(values) if values else None
+    drawdown = risk_returns.max_drawdown(values, dates) if values else None
 
     performance = {
         "observations": len(values),
@@ -198,45 +231,6 @@ def build(
         "excluded_symbols": excluded,
         "warnings": warnings,
     }
-
-
-def _trend(
-    priced: list[dict[str, Any]], closes_for: Callable[[str], list[tuple[datetime, float]]]
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Portfolio value per day, from each holding's close.
-
-    Only dates where EVERY included symbol has a bar are used. Carrying a stale
-    price forward for one name would show the portfolio moving on a day that
-    name did not trade, which is a fabricated data point.
-    """
-    per_symbol: dict[str, dict[datetime, float]] = {}
-    excluded: list[str] = []
-
-    for row in priced:
-        closes = closes_for(row["symbol"])
-        if len(closes) < 2:
-            excluded.append(row["symbol"])
-            continue
-        per_symbol[row["symbol"]] = {stamp.date(): close for stamp, close in closes}
-
-    if not per_symbol:
-        return [], sorted(excluded)
-
-    common = set.intersection(*(set(days) for days in per_symbol.values()))
-    if not common:
-        return [], sorted(excluded)
-
-    quantities = {row["symbol"]: row["quantity"] for row in priced}
-    trend = [
-        {
-            "date": datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
-            "value": round(
-                sum(quantities[symbol] * days[day] for symbol, days in per_symbol.items()), 2
-            ),
-        }
-        for day in sorted(common)
-    ]
-    return trend, sorted(excluded)
 
 
 def _activity(proposals: list[Any]) -> dict[str, Any]:

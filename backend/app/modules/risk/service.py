@@ -165,38 +165,43 @@ def calculate(
     bars_requested = window + 1
 
     # ---- gather history --------------------------------------------------
-    series: Dict[str, List[float]] = {}
-    stamps: Dict[str, List[Any]] = {}
-    excluded: List[str] = []
-
-    for symbol in symbols:
+    def windowed(symbol: str) -> List[tuple]:
+        """The requested window of one instrument's closes, oldest first."""
         bars = list(closes_for(symbol)) if closes_for else []
-        bars = bars[-(window + 1):]
-        if len(bars) < 3:
-            # Too little to say anything. Named rather than silently treated
-            # as flat, which would drag portfolio volatility toward zero.
-            excluded.append(symbol)
-            continue
-        stamps[symbol] = [stamp for stamp, _ in bars]
-        series[symbol] = returns_math.simple_returns([close for _, close in bars])
+        return bars[-(window + 1):]
 
-    benchmark_bars = list(closes_for(benchmark)) if closes_for else []
-    benchmark_bars = benchmark_bars[-(window + 1):]
-    benchmark_returns = (
-        returns_math.simple_returns([close for _, close in benchmark_bars])
-        if len(benchmark_bars) >= 3
-        else []
+    # Per-symbol return series, kept for the correlation matrix. These are in
+    # each instrument's OWN currency and are not what the portfolio figures
+    # are built from -- see `value_series`.
+    series: Dict[str, List[float]] = {}
+    for symbol in symbols:
+        bars = windowed(symbol)
+        if len(bars) >= 3:
+            series[symbol] = returns_math.simple_returns([close for _, close in bars])
+
+    # The single portfolio series. Date-aligned, base-currency, buy-and-hold.
+    # Both this module and `analytics` read it, so the two can no longer
+    # report different volatility for the same portfolio.
+    dates, values, excluded = returns_math.value_series(positions, windowed)
+    # The value series IS the buy-and-hold portfolio. Daily rebalancing is a
+    # different portfolio -- weights reset every day -- and the caller picks.
+    # Until now the parameter was accepted, echoed and ignored: whichever
+    # assumption was requested, one fixed computation came back under its name.
+    portfolio = (
+        returns_math.rebalanced_returns(positions, windowed)
+        if (rebalance_assumption or "").upper() == "DAILY_REBALANCE"
+        else returns_math.simple_returns(values)
     )
+    observations = len(portfolio)
 
-    weights = _weights(positions)
+    benchmark_bars = windowed(benchmark)
+
+    dropped = set(excluded)
     covered_value = sum(
-        abs(float(p["market_value"])) for p in positions if p["symbol"] in series
+        abs(float(p["market_value"])) for p in positions if p["symbol"] not in dropped
     )
     total_value = sum(abs(float(p["market_value"])) for p in positions)
     coverage = round(covered_value / total_value, 4) if total_value else 0.0
-
-    portfolio = returns_math.portfolio_returns(series, weights)
-    observations = len(portfolio)
     reliable = observations >= returns_math.MIN_RELIABLE_OBSERVATIONS and coverage >= 0.90
 
     # ---- metrics ---------------------------------------------------------
@@ -210,7 +215,22 @@ def calculate(
         computed["downside_deviation_annualized"] = returns_math.downside_deviation(portfolio)
 
     if wanted("MAX_DRAWDOWN"):
-        computed["max_drawdown"] = _portfolio_drawdown(portfolio, stamps)
+        # From the SAME series every other metric uses, so a drawdown and a
+        # volatility on one screen always describe one portfolio. Reading it
+        # off the value series instead would be right for buy-and-hold and
+        # quietly wrong for a rebalanced one, which is the shape of bug this
+        # whole change exists to remove.
+        #
+        # Drawdown is scale-invariant, so the level the path starts at is
+        # arbitrary; the dates are the portfolio's own.
+        levels = [100.0]
+        for value in portfolio:
+            levels.append(levels[-1] * (1.0 + value))
+        computed["max_drawdown"] = (
+            returns_math.max_drawdown(levels, dates[-len(levels):])
+            if len(levels) >= 2
+            else None
+        )
 
     if wanted("VAR"):
         computed["var"] = _var_block(
@@ -228,14 +248,21 @@ def calculate(
         )
 
     if wanted("BETA"):
-        if benchmark_returns and portfolio:
-            size = min(len(portfolio), len(benchmark_returns))
-            computed["beta"] = returns_math.beta(portfolio[-size:], benchmark_returns[-size:])
+        # Paired on the dates BOTH the portfolio and the index actually have.
+        # Lining the two up by length instead was measurably wrong: XU100 is
+        # missing four days the holdings have, so every observation before the
+        # gap was compared against a different day and beta for a 94%-DOAS
+        # portfolio came out as 0.0062 against the Turkish index.
+        paired_portfolio, paired_benchmark = returns_math.paired_returns(
+            dates, values, benchmark_bars
+        )
+        if paired_portfolio and paired_benchmark:
+            computed["beta"] = returns_math.beta(paired_portfolio, paired_benchmark)
             computed["correlation_to_benchmark"] = returns_math.correlation(
-                portfolio[-size:], benchmark_returns[-size:]
+                paired_portfolio, paired_benchmark
             )
         else:
-            # No benchmark history is not the same as zero sensitivity.
+            # No overlapping history is not the same as zero sensitivity.
             computed["beta"] = None
             computed["correlation_to_benchmark"] = None
 
@@ -243,15 +270,17 @@ def calculate(
         computed["correlation_matrix"] = _correlation_matrix(series)
 
     resolved_rate = risk_free_rate if risk_free_rate is not None else DEFAULT_RISK_FREE_RATE
-    window_stamps = next(iter(stamps.values()), [])
 
     return {
-        "as_of": _iso(window_stamps[-1]) if window_stamps else _now_iso(),
+        # The portfolio's own dates now, not whichever symbol came first out
+        # of a dict. The window reported and the window measured are the same
+        # thing for the first time.
+        "as_of": _iso(dates[-1]) if dates else _now_iso(),
         "source": SOURCE,
-        "is_delayed": _is_delayed(window_stamps[-1] if window_stamps else None),
+        "is_delayed": _is_delayed(dates[-1] if dates else None),
         "window": {
-            "start_date": _date(window_stamps[0]) if window_stamps else "",
-            "end_date": _date(window_stamps[-1]) if window_stamps else "",
+            "start_date": _date(dates[0]) if dates else "",
+            "end_date": _date(dates[-1]) if dates else "",
             "observation_count": observations,
             "frequency": "DAILY",
         },
@@ -269,7 +298,9 @@ def calculate(
             # the number we just produced. Whether history existed is reported
             # separately.
             "benchmark_symbol": benchmark,
-            "benchmark_history_available": bool(benchmark_returns),
+            "benchmark_history_available": bool(
+                returns_math.align_to(dates, benchmark_bars)
+            ),
             "requested_metrics": metrics,
             "rebalance_assumption": rebalance_assumption,
             "confidence_level": confidence_level,
@@ -289,20 +320,6 @@ def calculate(
             "is_statistically_reliable": reliable,
         },
     }
-
-
-def _portfolio_drawdown(portfolio: List[float], stamps: Dict[str, List[Any]]) -> Optional[Dict]:
-    """Drawdown of the synthetic portfolio index built from its return series."""
-    if len(portfolio) < 2:
-        return None
-    level = 100.0
-    levels = [level]
-    for value in portfolio:
-        level *= 1.0 + value
-        levels.append(level)
-    dates = next(iter(stamps.values()), None)
-    aligned = dates[-len(levels):] if dates and len(dates) >= len(levels) else None
-    return returns_math.max_drawdown(levels, aligned)
 
 
 def _var_block(

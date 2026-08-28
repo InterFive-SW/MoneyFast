@@ -62,9 +62,9 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     #: Turn record plus a small render envelope. The operational half (routed
-    #: agent, intent, compliance verdict) is for debugging; `context_topic`
-    #: and `disclosures` are read back when a conversation is reopened, so a
-    #: historical bubble carries the notices it was first shown with. Being
-    #: JSONB, adding either cost no migration.
+    #: agent, intent, compliance verdict) is for debugging; `context_topic`,
+    #: `disclosures`, and `citations` are read back when a conversation is
+    #: reopened, so a historical bubble carries the notices and sources it was
+    #: first shown with. Being JSONB, adding either cost no migration.
     meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)

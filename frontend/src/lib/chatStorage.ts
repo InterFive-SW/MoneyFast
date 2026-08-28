@@ -14,6 +14,7 @@
  */
 
 import type { ChatMessage, ChatSession } from '../types/chat'
+import { reviveCitations } from './researchCitations'
 
 /** Silinir, asla okunmaz. Kimin yazdığı bilinemez. */
 export const LEGACY_KEY = 'moneyfast_chat_sessions'
@@ -43,14 +44,43 @@ export function purgeLegacyChatSessions(): void {
     localStorage.removeItem(LEGACY_KEY)
 }
 
+function reviveMessage(raw: unknown): ChatMessage {
+    const message = (raw && typeof raw === 'object' ? raw : {}) as Record<
+        string,
+        unknown
+    >
+    const sender = message.sender === 'user' || message.sender === 'ai'
+        ? message.sender
+        : 'ai'
+    const timestamp = new Date(
+        typeof message.timestamp === 'string' || message.timestamp instanceof Date
+            ? (message.timestamp as string | Date)
+            : Date.now(),
+    )
+
+    // Citations only belong on assistant bubbles. User rows never acquire them,
+    // and anything stored is revalidated — localStorage is an untrusted boundary.
+    const citations =
+        sender === 'ai' ? reviveCitations(message.citations) : undefined
+
+    return {
+        id: typeof message.id === 'string' ? message.id : String(message.id ?? ''),
+        text: typeof message.text === 'string' ? message.text : '',
+        sender,
+        timestamp: Number.isNaN(timestamp.getTime()) ? new Date(0) : timestamp,
+        disclosures: Array.isArray(message.disclosures)
+            ? message.disclosures.filter((d): d is string => typeof d === 'string')
+            : [],
+        ...(citations && citations.length > 0 ? { citations } : {}),
+        // Widgets are never restored from anon storage (same policy as server).
+    }
+}
+
 function reviveSession(raw: any): ChatSession {
     return {
         ...raw,
         updatedAt: new Date(raw.updatedAt),
-        messages: (raw.messages ?? []).map((message: any): ChatMessage => ({
-            ...message,
-            timestamp: new Date(message.timestamp),
-        })),
+        messages: (raw.messages ?? []).map(reviveMessage),
     }
 }
 

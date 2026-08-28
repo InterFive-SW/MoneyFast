@@ -364,8 +364,38 @@ def test_chat_reports_a_failure_when_the_row_could_not_be_written(client, mocker
 
 
 def test_chat_stores_the_render_envelope_alongside_the_turn(client, mocker):
-    """context_topic and disclosures are read back when a conversation is
-    reopened, so a historical bubble keeps the notices it was shown with."""
+    """context_topic, disclosures, and citations are read back when a
+    conversation is reopened, so a historical bubble keeps the notices and
+    sources it was shown with."""
+    from app.modules.ai_orchestrator import service
+    from app.modules.ai_orchestrator.schemas import make_evidence_id
+
+    post_url = "https://x.com/kap_bildirimleri/status/123"
+    kap_url = "https://kap.org.tr/tr/Bildirim/1234567"
+    citation = {
+        "evidence_id": make_evidence_id("x", "kap_bildirimleri", post_url, kap_url),
+        "platform": "x",
+        "handle": "kap_bildirimleri",
+        "post_url": post_url,
+        "kap_url": kap_url,
+        "verification_status": "officially_verified",
+        "source_type": "disclosure_aggregator",
+        "matched_symbols": ["ASELS"],
+    }
+    answer = {**ANSWER, "citations": [citation]}
+    _install_async_client(mocker, post_result=_fake_response(answer))
+    mocker.patch.object(service, "load_history", return_value=[])
+    record = mocker.patch.object(service, "record_turn", return_value="conv-9")
+    with as_identity("user-1", True):
+        client.post("/api/ai_orchestrator/chat", json=CHAT_PAYLOAD)
+    meta = record.call_args.kwargs["meta"]
+    assert meta["context_topic"] == "THYAO"
+    assert meta["disclosures"] == ["Uyarı."]
+    assert meta["citations"][0]["evidence_id"] == citation["evidence_id"]
+    assert meta["citations"][0]["post_url"] == citation["post_url"]
+
+
+def test_chat_stores_empty_citations_when_absent(client, mocker):
     from app.modules.ai_orchestrator import service
 
     _install_async_client(mocker, post_result=_fake_response(ANSWER))
@@ -374,9 +404,7 @@ def test_chat_stores_the_render_envelope_alongside_the_turn(client, mocker):
     with as_identity("user-1", True):
         client.post("/api/ai_orchestrator/chat", json=CHAT_PAYLOAD)
     meta = record.call_args.kwargs["meta"]
-    assert meta["context_topic"] == "THYAO"
-    assert meta["disclosures"] == ["Uyarı."]
-
+    assert meta["citations"] == []
 
 def test_client_supplied_history_is_trimmed_before_it_leaves_the_backend(
     client, mocker

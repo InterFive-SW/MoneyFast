@@ -1,4 +1,6 @@
 // src/types/chat.ts
+import type { SafeResearchCitation } from '../lib/researchCitations'
+
 export type SenderType = 'user' | 'ai';
 
 export interface ThoughtStep {
@@ -74,6 +76,11 @@ export interface ChatMessage {
    * gerçekten gerektiği yerde de atlatıyordu.
    */
   disclosures?: string[];
+  /**
+   * Market-research social citations for this assistant turn only.
+   * Never inferred from prose — only structured API payloads.
+   */
+  citations?: SafeResearchCitation[];
 }
 
 /**

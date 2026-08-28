@@ -84,7 +84,7 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 /** `Array.prototype.at` needs ES2022; tsconfig targets lower. */
-function lastMessage(messages: { id: string; text: string }[]) {
+function lastMessage(messages: { id: string; text: string; citations?: unknown }[]) {
   return messages[messages.length - 1]
 }
 
@@ -113,6 +113,37 @@ describe('hydration', () => {
       'Yatırım tavsiyesi değildir.',
     ])
     expect(result.current.activeContext).toBe('THYAO')
+  })
+
+  it('loads citations onto the matching assistant message from history', async () => {
+    const citation = {
+      evidence_id: '1ac7a52713bdf683e6be98a05ae4dfe6',
+      platform: 'x',
+      handle: 'kap_bildirimleri',
+      display_name: 'KAP Bildirimleri',
+      published_at: '2026-08-27T09:00:00+00:00',
+      post_url: 'https://x.com/kap_bildirimleri/status/123',
+      kap_url: 'https://kap.org.tr/tr/Bildirim/1',
+      verification_status: 'officially_verified',
+      source_type: 'disclosure_aggregator',
+      excerpt: 'Kısa güvenli özet',
+      matched_symbols: ['ASELS'],
+    }
+    vi.mocked(apiClient.getConversation).mockResolvedValue({
+      ...DETAIL,
+      messages: [
+        DETAIL.messages[0],
+        { ...DETAIL.messages[1], citations: [citation] },
+      ],
+    })
+    const { result } = await mounted()
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+    expect(result.current.messages[0].citations).toEqual([])
+    expect(result.current.messages[1].citations).toHaveLength(1)
+    expect(result.current.messages[1].citations?.[0].evidence_id).toBe(
+      citation.evidence_id,
+    )
+    expect(result.current.messages[1].citations?.[0].kapUrl).toBe(citation.kap_url)
   })
 
   it('deletes the legacy key without ever reading it', async () => {
@@ -597,6 +628,70 @@ describe('edge cases', () => {
     const { result } = await mounted()
     await act(async () => { await result.current.handleSendMessage('selam') })
     expect(lastMessage(result.current.messages)?.id).toBe('srv-1')
+  })
+
+  it('attaches citations only to the new assistant answer', async () => {
+    const citation = {
+      evidence_id: '1ac7a52713bdf683e6be98a05ae4dfe6',
+      platform: 'x',
+      handle: 'kap_bildirimleri',
+      post_url: 'https://x.com/kap_bildirimleri/status/123',
+      kap_url: null,
+    }
+    vi.mocked(apiClient.streamChat).mockImplementation(async (_b, handlers) => {
+      handlers.onDone?.({
+        id: 'ans-1',
+        final_output: 'Araştırma özeti',
+        disclosures: [],
+        citations: [citation],
+      })
+      return true
+    })
+    const { result } = await mounted()
+    await waitFor(() => expect(result.current.messages).toHaveLength(2))
+    const priorAssistant = result.current.messages[1]
+    await act(async () => { await result.current.handleSendMessage('ASELS haber') })
+    const msgs = result.current.messages
+    const answer = msgs[msgs.length - 1]
+    expect(answer.id).toBe('ans-1')
+    expect(answer.citations).toHaveLength(1)
+    expect(answer.citations?.[0].postUrl).toBe(citation.post_url)
+    // Prior history bubble must not inherit the new turn's citations.
+    const stillPrior = msgs.find((m) => m.id === priorAssistant.id)
+    expect(stillPrior?.citations ?? []).toEqual([])
+  })
+
+  it('normalizes missing citations on a live answer to an empty list', async () => {
+    vi.mocked(apiClient.streamChat).mockImplementation(async (_b, handlers) => {
+      handlers.onDone?.({ final_output: 'Eski şekil yanıt', disclosures: [] })
+      return true
+    })
+    const { result } = await mounted()
+    await act(async () => { await result.current.handleSendMessage('selam') })
+    expect(lastMessage(result.current.messages)?.citations).toEqual([])
+  })
+
+  it('drops malformed live citations without breaking the answer', async () => {
+    vi.mocked(apiClient.streamChat).mockImplementation(async (_b, handlers) => {
+      handlers.onDone?.({
+        final_output: 'Cevap',
+        disclosures: [],
+        citations: [
+          {
+            evidence_id: '1ac7a52713bdf683e6be98a05ae4dfe6',
+            platform: 'x',
+            handle: 'evil',
+            post_url: 'https://x.com.evil.example/a/status/1',
+          },
+        ],
+      })
+      return true
+    })
+    const { result } = await mounted()
+    await act(async () => { await result.current.handleSendMessage('selam') })
+    const answer = lastMessage(result.current.messages)
+    expect(answer?.text).toBe('Cevap')
+    expect(answer?.citations).toEqual([])
   })
 })
 

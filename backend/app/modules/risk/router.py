@@ -128,6 +128,8 @@ def _measure(db: Session, user_id: str, lookback: str) -> dict:
     positions, _rates, warnings = _current_positions(db, user_id)
 
     metrics: dict = {}
+    window: dict = {}
+    assumptions: dict = {}
     if positions:
         result = service.calculate(
             positions=positions,
@@ -135,9 +137,20 @@ def _measure(db: Session, user_id: str, lookback: str) -> dict:
             closes_for=lambda symbol: market_service.candle_closes(
                 db, symbol, limit=service.history_limit(lookback)
             ),
+            # "Riskim Yüksek" dedikten sonraki ilk soru: hangi pozisyon
+            # yüzünden. Yalnızca sayfa istiyor -- MCP sözleşmesinin metrik
+            # listesi donuk.
+            include_contributions=True,
         )
         metrics = result.get("metrics") or {}
         metrics["data_quality"] = result.get("data_quality") or {}
+        # Carried out of the engine instead of dropped here. The page was
+        # showing a Sharpe ratio and a beta without saying what either was
+        # measured against or over what span -- and the MCP contract requires
+        # the rate to be disclosed alongside Sharpe, which the chat path did
+        # and the page did not.
+        window = result.get("window") or {}
+        assumptions = result.get("assumptions") or {}
     else:
         warnings.append("Portföyünüzde değerlenebilir pozisyon bulunamadı.")
 
@@ -152,6 +165,8 @@ def _measure(db: Session, user_id: str, lookback: str) -> dict:
     return {
         "positions": positions,
         "metrics": metrics,
+        "window": window,
+        "assumptions": assumptions,
         "scored": scored,
         "declared": declared,
         "suitability": profile.suitability(
@@ -226,6 +241,8 @@ async def risk_profile(
             ),
         },
         metrics=metrics,
+        window=measured["window"],
+        assumptions=measured["assumptions"],
         position_count=len(positions),
         warnings=measured["warnings"],
         declared=_declared_payload(measured["declared"]),

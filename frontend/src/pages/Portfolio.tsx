@@ -6,7 +6,6 @@ import PortfolioHighlights from '../components/portfolio/PortfolioHighlights'
 import QuickTradeLauncher from '../components/portfolio/QuickTradeLauncher'
 import PortfolioPerformanceChart from '../components/portfolio/PortfolioPerformanceChart'
 import PositionsWidget from '../components/widgets/PositionsWidget'
-import AssetAllocationWidget from '../components/widgets/AssetAllocationWidget'
 import WatchlistWidget from '../components/widgets/WatchlistWidget'
 
 export default function Portfolio() {
@@ -48,10 +47,11 @@ export default function Portfolio() {
           <PositionsWidget />
         </div>
 
+        {/* Varlık dağılımı buradan çıktı: Analiz ekranında da vardı ve aynı
+            bilgiyi iki ekranda göstermenin bir sebebi yok. Portföyüm artık
+            operasyonel ekran — ne tutuyorum, ne izliyorum; dağılım ve
+            performans yorumu Analiz'in işi. */}
         <div className="flex flex-col gap-6">
-          <div className="h-[280px]">
-            <AssetAllocationWidget />
-          </div>
           <PortfolioHighlights positions={positions} loading={loading} />
           <div className="h-[360px]">
             <WatchlistWidget />

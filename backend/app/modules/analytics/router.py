@@ -18,6 +18,7 @@ from app.modules.investment import ai_service, market_service
 from app.modules.investment.models import TransactionProposal
 
 from . import service
+from .deps import lookback_param
 from .schemas import PortfolioAnalysis
 
 router = APIRouter(tags=["analytics"])
@@ -29,6 +30,7 @@ router = APIRouter(tags=["analytics"])
     summary="Portföy analizi (dağılım, trend, performans, işlem geçmişi)",
 )
 async def portfolio_analysis(
+    lookback: str = Depends(lookback_param),
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -63,8 +65,12 @@ async def portfolio_analysis(
         sector_map=market_service.sector_by_symbol(db),
         # Injected so the service stays pure and testable without a session,
         # matching how risk/service.py takes its price reader.
+        # The window the caller asked for, resolved the same way `risk` does
+        # it. One selector drives both endpoints; a fixed window here would
+        # leave the trend chart still showing a year while the metrics
+        # beside it moved to three months.
         closes_for=lambda symbol: market_service.candle_closes(
-            db, symbol, limit=service.TREND_WINDOW
+            db, symbol, limit=service.window_limit(lookback)
         ),
         proposals=proposals,
         as_of=as_of,

@@ -270,3 +270,180 @@ export const ALIGNMENT_BADGE: Record<string, AlignmentBadge> = {
 export function alignmentBadge(alignment: string | null | undefined): AlignmentBadge {
     return ALIGNMENT_BADGE[alignment ?? ''] ?? ALIGNMENT_BADGE.UNKNOWN
 }
+
+/**
+ * Ölçümün künyesi: neyi, ne kadar süreyle, neye göre ölçtük.
+ *
+ * Sayfa Sharpe oranını ve betayı gösteriyordu ama ikisinin de neye göre
+ * hesaplandığını söylemiyordu. MCP sözleşmesi Sharpe sunulurken faizin
+ * açıklanmasını şart koşuyor; sohbet yolu bunu yapıyordu, sayfa yapmıyordu.
+ *
+ * Alan adı ve enum ekrana çıkmaz: `XU100` yerine "BIST 100",
+ * `FIXTURE_POLICY_RATE` yerine "politika faizi".
+ */
+const BENCHMARK_NAMES: Record<string, string> = {
+    XU100: 'BIST 100',
+    XU030: 'BIST 30',
+    SPX: 'S&P 500',
+    NDX: 'Nasdaq 100',
+}
+
+export function benchmarkName(symbol: unknown): string | null {
+    if (typeof symbol !== 'string' || !symbol) return null
+    return BENCHMARK_NAMES[symbol.toUpperCase()] ?? symbol.toUpperCase()
+}
+
+/**
+ * `27 Oca 2025 – 24 Ağu 2026 arası 253 işlem günü · BIST 100'e göre ·
+ *  Sharpe %42,5 politika faizine göre`
+ *
+ * Söylenemeyen parça hiç yazılmaz. Eksik bir tarih aralığını "—" ile
+ * doldurmak, ölçümün kapsamı hakkında bilgi veriyormuş gibi yapmak olurdu.
+ */
+export function measurementCaption(
+    window: unknown,
+    assumptions: unknown,
+): string | null {
+    const w = (window ?? {}) as Record<string, unknown>
+    const a = (assumptions ?? {}) as Record<string, unknown>
+    const parts: string[] = []
+
+    const start = formatDate(w.start_date as string | null)
+    const end = formatDate(w.end_date as string | null)
+    const count = typeof w.observation_count === 'number' ? w.observation_count : null
+    if (start && end && count) {
+        parts.push(`${start} – ${end} arası ${count} işlem günü`)
+    } else if (count) {
+        parts.push(`${count} işlem günü`)
+    }
+
+    // Yalnızca gerçekten geçmişi bulunan bir ölçüt anılır: adı yazıp
+    // altında "ölçülemedi" göstermek, olmayan bir karşılaştırma vaat eder.
+    const benchmark = benchmarkName(a.benchmark_symbol)
+    if (benchmark && a.benchmark_history_available) {
+        parts.push(`${benchmark}’e göre`)
+    }
+
+    const rate = typeof a.risk_free_rate === 'number' ? a.risk_free_rate : null
+    if (rate !== null) {
+        const source =
+            a.risk_free_rate_source === 'CALLER_SUPPLIED'
+                ? 'belirtilen faiz'
+                : 'politika faizi'
+        parts.push(`Sharpe ${formatPercent(rate, 1)} ${source}ne göre`)
+    }
+
+    return parts.length ? parts.join(' · ') : null
+}
+
+export interface ContributionRow {
+    symbol: string
+    weight: number
+    contribution: number
+    /** Risk payı ile ağırlık arasındaki fark. Asıl bilgi bu. */
+    gap: number
+}
+
+/**
+ * Risk katkısı satırları, payı büyükten küçüğe.
+ *
+ * Ağırlık ve risk payı yan yana duruyor çünkü **ikisinin ayrışması** asıl
+ * bilgi: yoğunlaşma "etkin çeşitlilik 5,8" diyor ama beş pozisyonun beşi de
+ * bankaysa birlikte hareket ederler ve portföy ağırlıkların söylediğinden
+ * çok daha az çeşitlendirilmiştir.
+ */
+export function toContributions(raw: unknown): ContributionRow[] {
+    if (!Array.isArray(raw)) return []
+    return raw
+        .filter(
+            (row): row is { symbol: string; weight: number; contribution: number } =>
+                !!row &&
+                typeof row.symbol === 'string' &&
+                typeof row.weight === 'number' &&
+                typeof row.contribution === 'number',
+        )
+        .map((row) => ({
+            symbol: row.symbol,
+            weight: row.weight,
+            contribution: row.contribution,
+            gap: row.contribution - row.weight,
+        }))
+        .sort((a, b) => b.contribution - a.contribution)
+}
+
+/**
+ * Bir satırın tek cümlelik okunuşu.
+ *
+ * Tanım cümlesi, yargı değil: "riskin %62'sini taşıyor" bir ölçümdür,
+ * "azaltın" bir tavsiye. `ORCHESTRATOR_SYSTEM_PROMPT`'un yasakladığı ikincisi.
+ */
+export function describeContribution(row: ContributionRow): string {
+    if (row.contribution < 0) {
+        return 'Portföyün dalgalanmasını azaltan yönde hareket etmiş.'
+    }
+    // Eşik değil, okunabilirlik: ağırlığa çok yakın bir pay hakkında
+    // söylenecek bir şey yok, uydurmak yerine susulur.
+    if (Math.abs(row.gap) < 0.05) {
+        return 'Riskteki payı ağırlığıyla yaklaşık aynı.'
+    }
+    return row.gap > 0
+        ? 'Riskteki payı ağırlığından büyük: portföyün geri kalanıyla birlikte hareket ediyor.'
+        : 'Riskteki payı ağırlığından küçük: portföyün geri kalanından bağımsız hareket etmiş.'
+}
+
+export interface ComparisonPoint {
+    date: string
+    value: number
+    /** Endeksin portföyün başlangıç değerine ölçeklenmiş hâli; ortak olmayan
+     *  günlerde `null` — grafik orada çizgiyi kesintiye uğratır. */
+    benchmark: number | null
+}
+
+/**
+ * Portföy ile endeksi tek eksende karşılaştırılabilir kılar.
+ *
+ * Endeks, portföyün İLK değerine ölçekleniyor: ikisi aynı noktadan başlıyor
+ * ve sonrasındaki ayrışma tamamen göreli performans. Her ikisini 100'e
+ * normalize etmek de aynı bilgiyi verirdi ama portföyün TL büyüklüğünü
+ * ekrandan silerdi — bu yol ikisini birden korur.
+ *
+ * Ortak olmayan gün `null` bırakılır, önceki değere sabitlenmez: endeksi
+ * işlem görmediği bir günde yatay çizmek, olmayan bir hareketsizliği
+ * göstermek olur.
+ */
+export function toComparisonSeries(
+    trend: unknown,
+    benchmark: unknown,
+): ComparisonPoint[] {
+    const points = Array.isArray(trend) ? trend : []
+    if (points.length === 0) return []
+
+    const rawBenchmark = Array.isArray((benchmark as { points?: unknown })?.points)
+        ? ((benchmark as { points: { date: string; value: number }[] }).points)
+        : []
+    const byDay = new Map(rawBenchmark.map((p) => [String(p.date).slice(0, 10), p.value]))
+
+    // Ölçeklemenin dayanağı endeksin ilk ORTAK günü; portföyün ilk günü
+    // endekste yoksa oradan ölçeklemek iki seriyi farklı noktadan başlatırdı.
+    const firstShared = points
+        .map((p) => byDay.get(String((p as { date: string }).date).slice(0, 10)))
+        .find((value) => typeof value === 'number')
+    const first = points[0] as { value?: number }
+    // Ölçek yoksa çizgi de yok. Sayı olmayan bir başlangıç değerini 0 saymak
+    // düz bir sıfır çizgisi üretirdi — endeksin yaptığı hakkında bir iddia,
+    // üstelik yanlış olanı.
+    const base = typeof first?.value === 'number' && firstShared ? first.value : null
+
+    return points.map((point) => {
+        const day = String((point as { date: string }).date).slice(0, 10)
+        const raw = byDay.get(day)
+        return {
+            date: day,
+            value: (point as { value: number }).value,
+            benchmark:
+                typeof raw === 'number' && base !== null && firstShared
+                    ? Math.round((base * (raw / firstShared)) * 100) / 100
+                    : null,
+        }
+    })
+}

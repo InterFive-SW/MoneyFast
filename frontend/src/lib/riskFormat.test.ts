@@ -9,6 +9,11 @@ import { describe, expect, it } from 'vitest'
 import {
     METRIC_COPY,
     alignmentBadge,
+    benchmarkName,
+    describeContribution,
+    measurementCaption,
+    toComparisonSeries,
+    toContributions,
     NOT_MEASURED,
     describeDrawdown,
     describeEffectiveN,
@@ -319,5 +324,273 @@ describe('alignmentBadge', () => {
         expect(alignmentBadge(undefined).label).toBe('Anket bekliyor')
         expect(alignmentBadge(null).label).toBe('Anket bekliyor')
         expect(alignmentBadge('MOSTLY_FINE').label).toBe('Anket bekliyor')
+    })
+})
+
+
+describe('measurementCaption', () => {
+    /* Sayfa Sharpe oranını ve betayı gösteriyordu ama ikisinin de neye göre
+       hesaplandığını söylemiyordu. MCP sözleşmesi Sharpe sunulurken faizin
+       açıklanmasını şart koşuyor; sohbet yolu yapıyordu, sayfa yapmıyordu. */
+    const WINDOW = {
+        start_date: '2025-01-27',
+        end_date: '2026-08-24',
+        observation_count: 253,
+        frequency: 'DAILY',
+    }
+    const ASSUMPTIONS = {
+        benchmark_symbol: 'XU100',
+        benchmark_history_available: true,
+        risk_free_rate: 0.425,
+        risk_free_rate_source: 'FIXTURE_POLICY_RATE',
+    }
+
+    it('aralığı, ölçütü ve faizi tek satırda söyler', () => {
+        const caption = measurementCaption(WINDOW, ASSUMPTIONS)
+        expect(caption).toContain('253 işlem günü')
+        expect(caption).toContain('BIST 100')
+        expect(caption).toContain('%42,5')
+    })
+
+    it('hiçbir alan adı veya enum ekrana çıkmaz', () => {
+        const caption = measurementCaption(WINDOW, ASSUMPTIONS) ?? ''
+        expect(caption).not.toContain('XU100')
+        expect(caption).not.toContain('FIXTURE_POLICY_RATE')
+        expect(caption).not.toMatch(/[a-z]+_[a-z]+/)
+    })
+
+    it('geçmişi olmayan bir ölçütün adını anmaz', () => {
+        /* Adını yazıp altında "ölçülemedi" göstermek, olmayan bir
+           karşılaştırma vaat eder. */
+        const caption = measurementCaption(WINDOW, {
+            ...ASSUMPTIONS,
+            benchmark_history_available: false,
+        })
+        expect(caption).not.toContain('BIST 100')
+        expect(caption).toContain('253 işlem günü')
+    })
+
+    it('caller tarafından verilen faizi politika faizi diye anmaz', () => {
+        const caption = measurementCaption(WINDOW, {
+            ...ASSUMPTIONS,
+            risk_free_rate_source: 'CALLER_SUPPLIED',
+        })
+        expect(caption).toContain('belirtilen faiz')
+        expect(caption).not.toContain('politika faizi')
+    })
+
+    it('tarih yoksa yalnızca gözlem sayısını söyler', () => {
+        const caption = measurementCaption(
+            { observation_count: 67 },
+            {},
+        )
+        expect(caption).toBe('67 işlem günü')
+    })
+
+    it('söylenecek bir şey yoksa satır hiç yazılmaz', () => {
+        /* Eksik bir aralığı "—" ile doldurmak, ölçümün kapsamı hakkında
+           bilgi veriyormuş gibi yapmak olurdu. */
+        expect(measurementCaption({}, {})).toBeNull()
+        expect(measurementCaption(null, null)).toBeNull()
+        expect(measurementCaption(undefined, undefined)).toBeNull()
+    })
+
+    it('bozuk tarihler satırı çökertmez', () => {
+        const caption = measurementCaption(
+            { start_date: 'dün', end_date: '', observation_count: 12 },
+            {},
+        )
+        expect(caption).toBe('12 işlem günü')
+    })
+})
+
+describe('benchmarkName', () => {
+    it('bilinen endeksleri okunur adıyla verir', () => {
+        expect(benchmarkName('XU100')).toBe('BIST 100')
+        expect(benchmarkName('spx')).toBe('S&P 500')
+    })
+
+    it('tanımadığı sembolü olduğu gibi bırakır', () => {
+        /* Bir haritaya hapsetmek, yeni bir ölçüt eklendiği gün onu
+           görünmez kılardı. */
+        expect(benchmarkName('XU050')).toBe('XU050')
+    })
+
+    it('sembol yoksa ad da yok', () => {
+        expect(benchmarkName(null)).toBeNull()
+        expect(benchmarkName('')).toBeNull()
+        expect(benchmarkName(42)).toBeNull()
+    })
+})
+
+
+describe('toContributions', () => {
+    /* Ağırlık ve risk payı yan yana duruyor çünkü İKİSİNİN AYRIŞMASI asıl
+       bilgi: yoğunlaşma "etkin çeşitlilik 5,8" der ama beş pozisyonun beşi de
+       bankaysa birlikte hareket ederler. */
+    const RAW = [
+        { symbol: 'AKBNK', weight: 0.3, contribution: 0.55 },
+        { symbol: 'DOAS', weight: 0.6, contribution: 0.5 },
+        { symbol: 'ALTIN', weight: 0.1, contribution: -0.05 },
+    ]
+
+    it('payı büyükten küçüğe sıralar', () => {
+        expect(toContributions(RAW).map((r) => r.symbol)).toEqual([
+            'AKBNK', 'DOAS', 'ALTIN',
+        ])
+    })
+
+    it('ağırlıkla pay arasındaki farkı hesaplar', () => {
+        const rows = toContributions(RAW)
+        expect(rows[0].gap).toBeCloseTo(0.25)
+        expect(rows[1].gap).toBeCloseTo(-0.1)
+    })
+
+    it('eksi payı kırpmaz', () => {
+        /* Dalgalanmayı azaltan bir pozisyon bir bulgudur, hata değil. */
+        expect(toContributions(RAW)[2].contribution).toBe(-0.05)
+    })
+
+    it('şekli bozuk satırları atar', () => {
+        expect(
+            toContributions([
+                { symbol: 'A', weight: 0.5, contribution: 0.5 },
+                { symbol: 'B', weight: null, contribution: 0.5 },
+                null,
+                { weight: 0.1, contribution: 0.1 },
+            ]),
+        ).toHaveLength(1)
+    })
+
+    it('liste değilse boş döner', () => {
+        expect(toContributions(null)).toEqual([])
+        expect(toContributions({ symbol: 'A' })).toEqual([])
+        expect(toContributions(undefined)).toEqual([])
+    })
+})
+
+describe('describeContribution', () => {
+    const row = (weight: number, contribution: number) => ({
+        symbol: 'X', weight, contribution, gap: contribution - weight,
+    })
+
+    it('hiçbir cümle ne yapılacağını söylemez', () => {
+        /* Riskin nereden geldiğini söylemek bir ÖLÇÜM, azaltmayı önermek bir
+           TAVSİYE. Ayrım kipte: "dalgalanmayı azaltan" pozisyonun ne yaptığını
+           anlatır, "riskinizi azaltın" kullanıcıya ne yapacağını söyler.
+           Aranan şey emir kipi ve öneri sözcükleri, kökler değil. */
+        const sentences = [
+            describeContribution(row(0.3, 0.6)),
+            describeContribution(row(0.6, 0.3)),
+            describeContribution(row(0.5, 0.5)),
+            describeContribution(row(0.2, -0.1)),
+        ]
+        for (const sentence of sentences) {
+            expect(sentence).not.toMatch(
+                /\b(azalt|artır|çeşitlendir|dengele|sat|al)(ın|ınız|manız|malısınız)\b/i,
+            )
+            expect(sentence).not.toMatch(/öneri|tavsiye|gerekir|meli|malı/i)
+        }
+    })
+
+    it('cümleler geçmişi anlatır, gelecek için bir şey vaat etmez', () => {
+        expect(describeContribution(row(0.2, -0.1))).toMatch(/etmiş|ediyor/)
+        expect(describeContribution(row(0.6, 0.3))).toMatch(/etmiş|ediyor/)
+    })
+
+    it('payı ağırlığından büyükse birlikte hareketi söyler', () => {
+        expect(describeContribution(row(0.3, 0.6))).toContain('birlikte hareket')
+    })
+
+    it('payı ağırlığından küçükse bağımsızlığı söyler', () => {
+        expect(describeContribution(row(0.6, 0.3))).toContain('bağımsız')
+    })
+
+    it('ağırlığa yakın bir pay hakkında bir şey uydurmaz', () => {
+        expect(describeContribution(row(0.5, 0.52))).toContain('yaklaşık aynı')
+    })
+
+    it('eksi pay dalgalanmayı azaltmak diye okunur', () => {
+        expect(describeContribution(row(0.2, -0.1))).toContain('azaltan')
+    })
+})
+
+
+describe('toComparisonSeries', () => {
+    /* Endeks, portföyün İLK değerine ölçekleniyor: ikisi aynı noktadan
+       başlar ve sonraki ayrışma tamamen göreli performanstır. */
+    const TREND = [
+        { date: '2026-08-05T00:00:00Z', value: 1000 },
+        { date: '2026-08-06T00:00:00Z', value: 1100 },
+        { date: '2026-08-07T00:00:00Z', value: 900 },
+    ]
+    const BENCH = {
+        symbol: 'XU100',
+        points: [
+            { date: '2026-08-05T00:00:00Z', value: 9000 },
+            { date: '2026-08-06T00:00:00Z', value: 9450 },
+            { date: '2026-08-07T00:00:00Z', value: 8100 },
+        ],
+    }
+
+    it('endeksi portföyün başlangıç değerine ölçekler', () => {
+        const series = toComparisonSeries(TREND, BENCH)
+        expect(series[0].benchmark).toBe(1000)
+        // Endeks %5 yükseldi: 1000 -> 1050.
+        expect(series[1].benchmark).toBe(1050)
+        // %10 düştü: 1000 -> 900.
+        expect(series[2].benchmark).toBe(900)
+    })
+
+    it('portföy değerlerini olduğu gibi bırakır', () => {
+        expect(toComparisonSeries(TREND, BENCH).map((p) => p.value)).toEqual([
+            1000, 1100, 900,
+        ])
+    })
+
+    it('endeksin işlem görmediği günü boş bırakır, önceki değere sabitlemez', () => {
+        /* Yatay çizmek, olmayan bir hareketsizliği göstermek olur. */
+        const series = toComparisonSeries(TREND, {
+            symbol: 'XU100',
+            points: [BENCH.points[0], BENCH.points[2]],
+        })
+        expect(series[1].benchmark).toBeNull()
+        expect(series[2].benchmark).toBe(900)
+    })
+
+    it('ölçekleme ilk ORTAK günden yapılır', () => {
+        /* Portföyün ilk günü endekste yoksa oradan ölçeklemek iki seriyi
+           farklı noktadan başlatırdı. */
+        const series = toComparisonSeries(TREND, {
+            symbol: 'XU100',
+            points: [BENCH.points[1], BENCH.points[2]],
+        })
+        expect(series[0].benchmark).toBeNull()
+        expect(series[1].benchmark).toBe(1000)
+    })
+
+    it('endeks yoksa yalnızca portföy kalır', () => {
+        const series = toComparisonSeries(TREND, null)
+        expect(series).toHaveLength(3)
+        expect(series.every((p) => p.benchmark === null)).toBe(true)
+    })
+
+    it('trend yoksa seri de yok', () => {
+        expect(toComparisonSeries(null, BENCH)).toEqual([])
+        expect(toComparisonSeries([], BENCH)).toEqual([])
+    })
+
+    it('ölçeklenecek bir başlangıç değeri yoksa çizgi çizilmez', () => {
+        /* Sayı olmayan bir başlangıcı 0 saymak düz bir sıfır çizgisi
+           üretirdi — endeksin yaptığı hakkında yanlış bir iddia. */
+        const series = toComparisonSeries(
+            [{ date: '2026-08-05T00:00:00Z', value: null }, TREND[1]],
+            BENCH,
+        )
+        expect(series.every((p) => p.benchmark === null)).toBe(true)
+    })
+
+    it('tarihleri güne indirger', () => {
+        expect(toComparisonSeries(TREND, BENCH)[0].date).toBe('2026-08-05')
     })
 })

@@ -29,7 +29,22 @@ export type MarketTicker = GetResponseType<paths['/api/market/tickers']>[0];
 // tipini almak için önce boş olmayan hâline daraltılır.
 export type CandleSeries = GetResponseType<paths['/api/market/candles']>;
 export type Candle = NonNullable<CandleSeries['candles']>[0];
-export type PortfolioAnalysis = GetResponseType<paths['/api/analytics/portfolio']>;
+/**
+ * `benchmark` burada elle yazılı: `generated/schema.d.ts` bu alan eklenmeden
+ * önce üretilmişti. Yeniden üretimi ayrı ve opsiyonel bir adım
+ * (CONTRACT_WORKFLOW.md).
+ */
+export interface BenchmarkSeries {
+    symbol: string;
+    points: { date: string; value: number }[];
+}
+
+export type PortfolioAnalysis = GetResponseType<paths['/api/analytics/portfolio']> & {
+    /** Endeksin, portföyün kendi günlerindeki ham kapanışları. Örtüşen geçmiş
+     *  yoksa `null` — kısmi örtüşmeden çizilen bir karşılaştırma çizgisi,
+     *  birinin barı olmayan günlerde ayrışma gösterir. */
+    benchmark?: BenchmarkSeries | null;
+};
 export type BankAccount = GetResponseType<paths['/api/banking/accounts']>[0];
 export type Statement = GetResponseType<paths['/api/banking/accounts/{account_number}/statement']>;
 export type Movement = NonNullable<Statement['movements']>[0];
@@ -71,6 +86,11 @@ export interface RiskSuitability {
 export type RiskProfile = GetResponseType<paths['/api/risk/profile']> & {
     declared?: DeclaredRiskProfile | null;
     suitability?: RiskSuitability | null;
+    /** Ölçümün kapsadığı aralık: başlangıç/bitiş tarihi ve gözlem sayısı. */
+    window?: Record<string, unknown> | null;
+    /** Neye göre ölçüldüğü: karşılaştırma ölçütü, Sharpe'ın netleştirildiği
+     *  faiz, yeniden dengeleme varsayımı. */
+    assumptions?: Record<string, unknown> | null;
 };
 /** Uç noktanın kabul ettiği kapalı küme; sunucu bunun dışını 422 ile reddeder. */
 export type RiskLookback = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX';
@@ -548,8 +568,12 @@ class ApiClient {
     }
 
     /** Portföy analizi — dağılım, trend, performans ve işlem geçmişi tek çağrıda. */
-    getPortfolioAnalysis() {
-        return this.request<PortfolioAnalysis>('/analytics/portfolio');
+    getPortfolioAnalysis(lookback?: RiskLookback) {
+        // Aynı pencere risk uç noktasına da gidiyor: Analiz ekranındaki tek
+        // dönem seçici ikisini birden sürüyor. Geçilmezse sunucu 1Y kullanır,
+        // ki o da risk modülünün 1Y'siyle aynı tablodan çözülüyor.
+        const suffix = lookback ? `?lookback=${lookback}` : '';
+        return this.request<PortfolioAnalysis>(`/analytics/portfolio${suffix}`);
     }
 
     /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */

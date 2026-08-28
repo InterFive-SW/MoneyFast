@@ -195,6 +195,13 @@ class RiskProfileOut(BaseModel):
     cashflow: Optional[CashflowOut] = None
     #: The raw engine output, so nothing on the page is unverifiable.
     metrics: Dict[str, Any] = Field(default_factory=dict)
+    #: What the numbers cover: start/end date, observation count, frequency.
+    window: Dict[str, Any] = Field(default_factory=dict)
+    #: What they were measured AGAINST: the benchmark, the risk-free rate the
+    #: Sharpe ratio is net of, the rebalancing assumption. `POST /calculate`
+    #: has always produced these; this endpoint dropped them, so the page
+    #: rendered a Sharpe and a beta with nothing to interpret them by.
+    assumptions: Dict[str, Any] = Field(default_factory=dict)
     position_count: int = 0
     warnings: List[str] = Field(default_factory=list)
     #: None until the questionnaire is completed. The page stays open either

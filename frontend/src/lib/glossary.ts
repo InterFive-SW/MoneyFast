@@ -160,6 +160,22 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
             'ağırlıklar yeniden dağıtılır.',
         anchors: ['70 ve üzeri: Düşük risk', '45–70 arası: Orta', '45 altı: Yüksek'],
     },
+    risk_contribution: {
+        title: 'Riskteki pay',
+        short: 'Portföyün dalgalanmasının ne kadarının o pozisyondan geldiği.',
+        long:
+            'Ağırlıkla aynı şey DEĞİLDİR. Ağırlık, pozisyonun portföydeki büyüklüğü; ' +
+            'riskteki pay ise dalgalanmaya ne kadar katkı verdiği. Birlikte hareket ' +
+            'eden pozisyonlar — örneğin hepsi aynı sektörden olanlar — ağırlıklarının ' +
+            'toplamından daha fazla risk taşır. Portföyün geri kalanının tersine ' +
+            'hareket eden bir pozisyonun payı eksi çıkabilir: dalgalanmayı azaltmış ' +
+            'demektir. Paylar toplamı %100’dür.',
+        anchors: [
+            'Pay > ağırlık: geri kalanla birlikte hareket ediyor',
+            'Pay < ağırlık: bağımsız hareket etmiş',
+            'Pay eksi: dalgalanmayı azaltmış',
+        ],
+    },
     reliability: {
         title: 'İstatistiksel güvenilirlik',
         short: 'Ölçümün arkasında yeterli gözlem olup olmadığı.',

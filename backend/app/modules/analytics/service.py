@@ -31,15 +31,20 @@ log = logging.getLogger("moneyfast.analytics")
 #: bars is arithmetic, not evidence.
 MIN_RELIABLE_OBSERVATIONS = 60
 
-#: Bars pulled per symbol for the trend: exactly the risk module's 1Y window.
-#:
-#: It was 260 — "about a year" — while risk asked for 253, and the two then
-#: measured the same portfolio over different spans. With one series behind
-#: both, a window that is merely close is the last thing that can still make
-#: them disagree, and on a single screen showing both that difference has
-#: nowhere to hide. Ties to the shared table rather than restating 253, so a
-#: change to the window definition moves both.
-TREND_WINDOW = risk_returns.window_for("1Y") + 1
+
+def window_limit(lookback: str = "1Y") -> int:
+    """Bars to read per symbol for `lookback`, including the one the first
+    return needs.
+
+    The same arithmetic `risk.service.history_limit` does, off the same table,
+    so one period selector can drive both endpoints and mean the same thing.
+    It replaced a fixed 260 -- "about a year" -- while risk asked for 253, and
+    the two then measured the same portfolio over different spans. With one
+    series behind both, a window that is merely close was the last thing that
+    could still make them disagree, and on a single screen showing both that
+    difference has nowhere to hide.
+    """
+    return risk_returns.window_for(lookback) + 1
 
 
 def _percent(part: float, whole: float) -> float:

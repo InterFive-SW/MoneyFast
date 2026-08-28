@@ -548,8 +548,12 @@ class ApiClient {
     }
 
     /** Portföy analizi — dağılım, trend, performans ve işlem geçmişi tek çağrıda. */
-    getPortfolioAnalysis() {
-        return this.request<PortfolioAnalysis>('/analytics/portfolio');
+    getPortfolioAnalysis(lookback?: RiskLookback) {
+        // Aynı pencere risk uç noktasına da gidiyor: Analiz ekranındaki tek
+        // dönem seçici ikisini birden sürüyor. Geçilmezse sunucu 1Y kullanır,
+        // ki o da risk modülünün 1Y'siyle aynı tablodan çözülüyor.
+        const suffix = lookback ? `?lookback=${lookback}` : '';
+        return this.request<PortfolioAnalysis>(`/analytics/portfolio${suffix}`);
     }
 
     /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */

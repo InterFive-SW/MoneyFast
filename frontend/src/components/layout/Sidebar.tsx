@@ -67,14 +67,6 @@ function IconChat({ className }: IconProps) {
   )
 }
 
-function IconShield({ className }: IconProps) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-    </svg>
-  )
-}
-
 function IconLogout({ className }: IconProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -119,10 +111,9 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard',  label: 'Genel Bakış',        icon: <IconDashboard  className="h-[18px] w-[18px] shrink-0" />, end: true },
   { to: '/banking',    label: 'Banka İşlemleri',    icon: <IconBanking    className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/portfolio',  label: 'Portföyüm',          icon: <IconPortfolio  className="h-[18px] w-[18px] shrink-0" /> },
-  { to: '/analytics',  label: 'Portföy Analizi',    icon: <IconAnalytics  className="h-[18px] w-[18px] shrink-0" /> },
+  { to: '/analiz',     label: 'Analiz',             icon: <IconAnalytics  className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/investment', label: 'Piyasalar',          icon: <IconMarkets    className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/chat',       label: 'Yapay Zeka Asistan', icon: <IconChat       className="h-[18px] w-[18px] shrink-0" /> },
-  { to: '/risk',       label: 'Risk Analizi',       icon: <IconShield     className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/settings',   label: 'Ayarlar',            icon: <IconSettings   className="h-[18px] w-[18px] shrink-0" /> },
 ]
 

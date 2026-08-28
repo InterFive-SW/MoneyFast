@@ -35,7 +35,7 @@ export default function RiskSummaryWidget() {
                     Risk Özeti
                     <Term termKey="risk_score" />
                 </h3>
-                <Link to="/risk" className="text-xs font-medium text-sky-400 hover:text-sky-300">
+                <Link to="/analiz/risk" className="text-xs font-medium text-sky-400 hover:text-sky-300">
                     Detay →
                 </Link>
             </div>

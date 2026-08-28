@@ -10,10 +10,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, waitFor, act, fireEvent } from '@testing-library/react'
 import * as apiClientModule from '../../../api/client'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import payloads from '../../widgets/__tests__/payloads.json'
 
-import Risk from '../../../pages/Risk'
+import Analiz from '../../../pages/Analiz'
+import RiskSekmesi from '../../../pages/analiz/RiskSekmesi'
+import Senaryo from '../../../pages/analiz/Senaryo'
 
 const PROFILE = (payloads as Record<string, any>)['/api/risk/profile']
 
@@ -40,10 +42,35 @@ const EMPTY = {
 
 let consoleError: ReturnType<typeof vi.spyOn>
 
+/** The Analiz shell calls TWO endpoints. Routed, so the risk payload is not
+ *  quietly served as a portfolio analysis and vice versa. */
 function stubFetch(body: unknown, ok = true) {
-  vi.stubGlobal('fetch', vi.fn(() =>
-    Promise.resolve({ ok, status: ok ? 200 : 500, json: () => Promise.resolve(body) }),
-  ))
+  vi.stubGlobal('fetch', vi.fn((url: string) => {
+    const isRisk = String(url).includes('/risk/profile')
+    return Promise.resolve({
+      ok: isRisk ? ok : true,
+      status: isRisk && !ok ? 500 : 200,
+      json: () => Promise.resolve(isRisk ? body : ANALYSIS),
+    })
+  }))
+}
+
+/** A minimal, valid /api/analytics/portfolio body for the summary bar. */
+const ANALYSIS = {
+  base_currency: 'TRY',
+  total_value: 55000, cash: 25000, invested: 30000,
+  unrealised_pnl: 5000, unrealised_pnl_percent: 20,
+  allocation: [], sectors: [], trend: [],
+  performance: {
+    observations: 0, start_value: null, end_value: null,
+    total_return_percent: null, annualised_volatility: null,
+    max_drawdown_percent: null, is_statistically_reliable: false,
+  },
+  activity: {
+    confirmed_count: 0, buy_count: 0, sell_count: 0,
+    total_traded_value: 0, last_transaction_at: null,
+  },
+  excluded_symbols: [], warnings: [],
 }
 
 beforeEach(() => {
@@ -60,21 +87,58 @@ afterEach(() => {
 })
 
 async function mount() {
-  const view = render(<MemoryRouter><Risk /></MemoryRouter>)
+  const view = render(
+    <MemoryRouter initialEntries={['/analiz/risk']}>
+      <Routes>
+        <Route path="/analiz" element={<Analiz />}>
+          <Route path="risk" element={<RiskSekmesi />} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  )
   await waitFor(() => expect(view.container).toBeTruthy())
   await new Promise((r) => setTimeout(r, 80))
   const crash = consoleError.mock.calls.find((c: unknown[]) =>
     String(c[0]).includes('The above error occurred'))
-  expect(crash?.[0] ?? null, 'Risk page threw during render').toBe(null)
+  expect(crash?.[0] ?? null, 'Analiz > Risk threw during render').toBe(null)
   return view
 }
 
-describe('Risk page', () => {
+/** The Senaryo tab, where the simulation and the score history now live.
+ *  They were wedged between metric cards on the risk page; both answer
+ *  questions about time rather than about the portfolio's present state. */
+async function mountSenaryo() {
+  const view = render(
+    <MemoryRouter initialEntries={['/analiz/senaryo']}>
+      <Routes>
+        <Route path="/analiz" element={<Analiz />}>
+          <Route path="senaryo" element={<Senaryo />} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  )
+  await waitFor(() => expect(view.container).toBeTruthy())
+  await new Promise((r) => setTimeout(r, 80))
+  const crash = consoleError.mock.calls.find((c: unknown[]) =>
+    String(c[0]).includes('The above error occurred'))
+  expect(crash?.[0] ?? null, 'Analiz > Senaryo threw during render').toBe(null)
+  return view
+}
+
+describe('Analiz > Risk', () => {
   it('renders a scored profile', async () => {
     stubFetch(PROFILE)
     const { container } = await mount()
-    expect(container.textContent).toContain('Risk Analizi')
+    expect(container.textContent).toContain('Analiz')
     expect(container.textContent).toContain('Puan nasıl oluştu')
+  })
+
+  it('states which way the score runs, beside the score', async () => {
+    /* The scale is INVERTED and the screen is called analysis, so a reader
+       meeting 83 for the first time reads it as high risk. */
+    stubFetch(PROFILE)
+    const { container } = await mount()
+    expect(container.textContent).toContain('100’e yakın daha sakin')
   })
 
   it('survives a brand-new account with nothing to measure', async () => {
@@ -115,7 +179,7 @@ describe('Risk page', () => {
 // `data.metrics`'i alıp render etmeden atıyordu. Bu testler onların ekrana
 // ulaştığını sabitliyor.
 // --------------------------------------------------------------------------
-describe('Risk page — ölçülen metrikler', () => {
+describe('Analiz > Risk — ölçülen metrikler', () => {
   it('VaR, CVaR, Sharpe ve betayı gösterir', async () => {
     stubFetch(PROFILE)
     const { container } = await mount()
@@ -202,7 +266,7 @@ describe('Risk page — ölçülen metrikler', () => {
 // Kullanıcı dostu katman: düz Türkçe özet, terim açıklamaları, öğretici boş
 // durum. Sayfa doğrudan bir rakam yığınıyla açılıyordu.
 // --------------------------------------------------------------------------
-describe('Risk page — anlaşılırlık', () => {
+describe('Analiz > Risk — anlaşılırlık', () => {
   it('rakamlardan önce düz Türkçe bir özet gösterir', async () => {
     stubFetch(PROFILE)
     const { container } = await mount()
@@ -274,7 +338,7 @@ const DECLARED = {
   questionnaire_version: 'v1',
 }
 
-describe('Risk page — uyum karşılaştırması', () => {
+describe('Analiz > Risk — uyum karşılaştırması', () => {
   it('anket doldurulmamışken sayfayı kapatmaz, çağrı gösterir', async () => {
     /* Yumuşak kapı: ölçüm gösterilir, karşılaştırma bekler. Sayfayı
        kapatmak, kullanıcıyı kendi ölçümünden de mahrum bırakırdı. */
@@ -388,10 +452,10 @@ const SIMULATION = {
   warnings: [],
 }
 
-describe('Risk page — ne olurdu', () => {
+describe('Analiz > Senaryo — ne olurdu', () => {
   it('sembol ve adet girişi sunar', async () => {
     stubFetch(PROFILE)
-    const { container } = await mount()
+    const { container } = await mountSenaryo()
     expect(container.textContent).toContain('Ne olurdu?')
     expect(container.querySelector('input[aria-label="Sembol"]')).not.toBeNull()
     expect(container.querySelector('input[aria-label="Adet"]')).not.toBeNull()
@@ -399,13 +463,13 @@ describe('Risk page — ne olurdu', () => {
 
   it('hiçbir emir iletilmediğini söyler', async () => {
     stubFetch(PROFILE)
-    const { container } = await mount()
+    const { container } = await mountSenaryo()
     expect(container.textContent).toContain('Hiçbir emir iletilmez')
   })
 
   it('girdi tamamlanmadan hesaplama düğmesi kapalı', async () => {
     stubFetch(PROFILE)
-    const { container } = await mount()
+    const { container } = await mountSenaryo()
     const button = Array.from(container.querySelectorAll('button')).find(
       (b) => b.textContent === 'Hesapla',
     )
@@ -414,7 +478,7 @@ describe('Risk page — ne olurdu', () => {
 
   it('sonuç geldiğinde iki ölçümü yan yana koyar', async () => {
     stubFetch(PROFILE)
-    const { container } = await mount()
+    const { container } = await mountSenaryo()
     vi.spyOn(apiClientModule.apiClient, 'simulateRisk').mockResolvedValue(SIMULATION as never)
 
     const symbol = container.querySelector('input[aria-label="Sembol"]') as HTMLInputElement
@@ -438,7 +502,7 @@ describe('Risk page — ne olurdu', () => {
   it('sonuç hiçbir yerde daha iyi/kötü demez', async () => {
     /* Hesap makinesi, öneri motoru değil: iki ölçüm konur, yorumu okuyan yapar. */
     stubFetch(PROFILE)
-    const { container } = await mount()
+    const { container } = await mountSenaryo()
     vi.spyOn(apiClientModule.apiClient, 'simulateRisk').mockResolvedValue(SIMULATION as never)
     const symbol = container.querySelector('input[aria-label="Sembol"]') as HTMLInputElement
     const qty = container.querySelector('input[aria-label="Adet"]') as HTMLInputElement
@@ -459,7 +523,7 @@ describe('Risk page — ne olurdu', () => {
 
   it('uygulanamayan bir değişikliği sessizce yutmaz', async () => {
     stubFetch(PROFILE)
-    const { container } = await mount()
+    const { container } = await mountSenaryo()
     vi.spyOn(apiClientModule.apiClient, 'simulateRisk').mockResolvedValue({
       ...SIMULATION,
       changes: [{ symbol: 'YOKBOYLE', quantity_delta: 5, applied: false, note: 'Bu sembol bulunamadı.' }],
@@ -481,7 +545,7 @@ describe('Risk page — ne olurdu', () => {
 // --------------------------------------------------------------------------
 // Faz 4: risk geçmişi
 // --------------------------------------------------------------------------
-describe('Risk page — geçmiş', () => {
+describe('Analiz > Senaryo — geçmiş', () => {
   /** Profil ve geçmiş iki ayrı uç nokta; tek gövdeli stub ikisine de aynı
    *  yanıtı verir ve panel gerçekte olmayan bir şekli görür. */
   function stubBoth(historyBody: unknown) {
@@ -497,7 +561,7 @@ describe('Risk page — geçmiş', () => {
 
   it('hiç ölçüm yokken ne zaman çizileceğini söyler', async () => {
     stubBoth({ lookback: '1Y', days: 90, points: [] })
-    const { container } = await mount()
+    const { container } = await mountSenaryo()
     expect(container.textContent).toContain('Henüz kayıtlı ölçüm yok')
   })
 
@@ -509,7 +573,7 @@ describe('Risk page — geçmiş', () => {
       points: [{ captured_on: '2026-08-27', score: 83.4, level: 'Düşük',
                  volatility: 0.18, hhi: 0.16, max_drawdown: -0.11, position_count: 14 }],
     })
-    const { container } = await mount()
+    const { container } = await mountSenaryo()
     expect(container.textContent).toContain('Şimdilik tek bir ölçüm var')
   })
 
@@ -523,7 +587,7 @@ describe('Risk page — geçmiş', () => {
           volatility: 0.18, hhi: 0.16, max_drawdown: -0.11, position_count: 14 },
       ],
     })
-    const { container } = await mount()
+    const { container } = await mountSenaryo()
     const text = container.textContent ?? ''
     expect(text).toContain('Risk puanınızın seyri')
     expect(text).toContain('+3,4 puan')
@@ -532,7 +596,7 @@ describe('Risk page — geçmiş', () => {
 
   it('geçmişe dönük puan üretmediğini açıkça söyler', async () => {
     stubBoth({ lookback: '1Y', days: 90, points: [] })
-    const { container } = await mount()
+    const { container } = await mountSenaryo()
     expect(container.textContent).toContain('Geçmişe dönük')
   })
 })

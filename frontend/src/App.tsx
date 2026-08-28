@@ -32,7 +32,6 @@ import MoneyTransferWizard  from './components/banking/MoneyTransferWizard'
 import CardsView            from './components/banking/CardsView'
 import NewCardWizard        from './components/banking/NewCardWizard'
 import Investment           from './pages/Investment'
-import Risk                 from './pages/Risk'
 import StocksScreen         from './pages/markets/StocksScreen'
 import StockDetail          from './pages/markets/StockDetail'
 import FundsScreen          from './pages/markets/FundsScreen'
@@ -40,7 +39,10 @@ import FundDetail           from './pages/markets/FundDetail'
 import IndicesScreen        from './pages/markets/IndicesScreen'
 import SectorsScreen        from './pages/markets/SectorsScreen'
 import AnalysesScreen       from './pages/markets/AnalysesScreen'
-import Analytics from './pages/Analytics'
+import Analiz from './pages/Analiz'
+import GenelBakis from './pages/analiz/GenelBakis'
+import RiskSekmesi from './pages/analiz/RiskSekmesi'
+import Senaryo from './pages/analiz/Senaryo'
 import Settings from './pages/Settings'
 
 export default function App() {
@@ -81,7 +83,16 @@ export default function App() {
                 <Route path="transfer" element={<MoneyTransferWizard />} />
                 <Route path="new-card" element={<NewCardWizard />} />
               </Route>
-              <Route path="analytics"  element={<Analytics />}  />
+              <Route path="analiz" element={<Analiz />}>
+                <Route index             element={<Navigate to="genel" replace />} />
+                <Route path="genel"      element={<GenelBakis />} />
+                <Route path="risk"       element={<RiskSekmesi />} />
+                <Route path="senaryo"    element={<Senaryo />} />
+              </Route>
+              {/* Portföy Analizi ve Risk Analizi tek çatı altında
+                  birleşti. Eski adresler yer imlerinde ve paylaşılan
+                  bağlantılarda duruyor, o yüzden 404 değil yönlendirme. */}
+              <Route path="analytics"  element={<Navigate to="/analiz/genel" replace />} />
               <Route path="investment" element={<Investment />}>
                 <Route index                element={<Navigate to="hisseler" replace />} />
                 <Route path="hisseler"       element={<StocksScreen />}  />
@@ -92,7 +103,7 @@ export default function App() {
                 <Route path="sektorler"      element={<SectorsScreen />} />
                 <Route path="analizler"      element={<AnalysesScreen />} />
               </Route>
-              <Route path="risk"       element={<Risk />}       />
+              <Route path="risk"       element={<Navigate to="/analiz/risk" replace />} />
               <Route path="settings"   element={<Settings />}   />
             </Route>
           </Route>

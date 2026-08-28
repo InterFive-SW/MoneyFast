@@ -27,7 +27,7 @@ const ROUTE_TITLE_MAP: Record<string, string> = {
   '/banking':    'Cüzdan & İşlemler',
   '/investment': 'Yatırımlar',
   '/chat':       'AI Finansal Asistan',
-  '/risk':       'Risk Analizi',
+  '/analiz':     'Analiz',
   '/portfolio':  'Portföy',
   '/settings':   'Ayarlar',
 }

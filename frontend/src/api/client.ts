@@ -71,6 +71,11 @@ export interface RiskSuitability {
 export type RiskProfile = GetResponseType<paths['/api/risk/profile']> & {
     declared?: DeclaredRiskProfile | null;
     suitability?: RiskSuitability | null;
+    /** Ölçümün kapsadığı aralık: başlangıç/bitiş tarihi ve gözlem sayısı. */
+    window?: Record<string, unknown> | null;
+    /** Neye göre ölçüldüğü: karşılaştırma ölçütü, Sharpe'ın netleştirildiği
+     *  faiz, yeniden dengeleme varsayımı. */
+    assumptions?: Record<string, unknown> | null;
 };
 /** Uç noktanın kabul ettiği kapalı küme; sunucu bunun dışını 422 ile reddeder. */
 export type RiskLookback = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX';

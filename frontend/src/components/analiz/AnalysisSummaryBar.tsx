@@ -1,6 +1,6 @@
 import type { PortfolioAnalysis, RiskLookback, RiskProfile } from '../../api/client'
 import { formatMoney } from '../../lib/money'
-import { alignmentBadge } from '../../lib/riskFormat'
+import { alignmentBadge, measurementCaption } from '../../lib/riskFormat'
 import Term from '../common/Term'
 
 /**
@@ -53,6 +53,7 @@ export default function AnalysisSummaryBar({
     const pnlPercent = analysis?.unrealised_pnl_percent ?? null
     const level = risk?.level ?? null
     const badge = alignmentBadge(risk?.suitability?.alignment)
+    const caption = measurementCaption(risk?.window, risk?.assumptions)
 
     return (
         <div className="mb-6 rounded-2xl border border-white/10 bg-slate-900/50 p-5 backdrop-blur-xl">
@@ -130,6 +131,14 @@ export default function AnalysisSummaryBar({
                     ))}
                 </div>
             </div>
+
+            {/* Neyi, ne kadar süreyle, neye göre ölçtüğümüz. Sharpe ve beta
+                bunlar olmadan yorumlanamaz ve sayfa ikisini de gösteriyordu. */}
+            {caption && (
+                <p className="mt-4 border-t border-white/5 pt-3 text-[11px] text-slate-500">
+                    {caption}
+                </p>
+            )}
         </div>
     )
 }

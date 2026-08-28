@@ -270,3 +270,68 @@ export const ALIGNMENT_BADGE: Record<string, AlignmentBadge> = {
 export function alignmentBadge(alignment: string | null | undefined): AlignmentBadge {
     return ALIGNMENT_BADGE[alignment ?? ''] ?? ALIGNMENT_BADGE.UNKNOWN
 }
+
+/**
+ * Ölçümün künyesi: neyi, ne kadar süreyle, neye göre ölçtük.
+ *
+ * Sayfa Sharpe oranını ve betayı gösteriyordu ama ikisinin de neye göre
+ * hesaplandığını söylemiyordu. MCP sözleşmesi Sharpe sunulurken faizin
+ * açıklanmasını şart koşuyor; sohbet yolu bunu yapıyordu, sayfa yapmıyordu.
+ *
+ * Alan adı ve enum ekrana çıkmaz: `XU100` yerine "BIST 100",
+ * `FIXTURE_POLICY_RATE` yerine "politika faizi".
+ */
+const BENCHMARK_NAMES: Record<string, string> = {
+    XU100: 'BIST 100',
+    XU030: 'BIST 30',
+    SPX: 'S&P 500',
+    NDX: 'Nasdaq 100',
+}
+
+export function benchmarkName(symbol: unknown): string | null {
+    if (typeof symbol !== 'string' || !symbol) return null
+    return BENCHMARK_NAMES[symbol.toUpperCase()] ?? symbol.toUpperCase()
+}
+
+/**
+ * `27 Oca 2025 – 24 Ağu 2026 arası 253 işlem günü · BIST 100'e göre ·
+ *  Sharpe %42,5 politika faizine göre`
+ *
+ * Söylenemeyen parça hiç yazılmaz. Eksik bir tarih aralığını "—" ile
+ * doldurmak, ölçümün kapsamı hakkında bilgi veriyormuş gibi yapmak olurdu.
+ */
+export function measurementCaption(
+    window: unknown,
+    assumptions: unknown,
+): string | null {
+    const w = (window ?? {}) as Record<string, unknown>
+    const a = (assumptions ?? {}) as Record<string, unknown>
+    const parts: string[] = []
+
+    const start = formatDate(w.start_date as string | null)
+    const end = formatDate(w.end_date as string | null)
+    const count = typeof w.observation_count === 'number' ? w.observation_count : null
+    if (start && end && count) {
+        parts.push(`${start} – ${end} arası ${count} işlem günü`)
+    } else if (count) {
+        parts.push(`${count} işlem günü`)
+    }
+
+    // Yalnızca gerçekten geçmişi bulunan bir ölçüt anılır: adı yazıp
+    // altında "ölçülemedi" göstermek, olmayan bir karşılaştırma vaat eder.
+    const benchmark = benchmarkName(a.benchmark_symbol)
+    if (benchmark && a.benchmark_history_available) {
+        parts.push(`${benchmark}’e göre`)
+    }
+
+    const rate = typeof a.risk_free_rate === 'number' ? a.risk_free_rate : null
+    if (rate !== null) {
+        const source =
+            a.risk_free_rate_source === 'CALLER_SUPPLIED'
+                ? 'belirtilen faiz'
+                : 'politika faizi'
+        parts.push(`Sharpe ${formatPercent(rate, 1)} ${source}ne göre`)
+    }
+
+    return parts.length ? parts.join(' · ') : null
+}

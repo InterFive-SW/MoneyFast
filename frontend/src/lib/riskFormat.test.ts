@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest'
 import {
     METRIC_COPY,
     alignmentBadge,
+    benchmarkName,
+    measurementCaption,
     NOT_MEASURED,
     describeDrawdown,
     describeEffectiveN,
@@ -319,5 +321,101 @@ describe('alignmentBadge', () => {
         expect(alignmentBadge(undefined).label).toBe('Anket bekliyor')
         expect(alignmentBadge(null).label).toBe('Anket bekliyor')
         expect(alignmentBadge('MOSTLY_FINE').label).toBe('Anket bekliyor')
+    })
+})
+
+
+describe('measurementCaption', () => {
+    /* Sayfa Sharpe oranını ve betayı gösteriyordu ama ikisinin de neye göre
+       hesaplandığını söylemiyordu. MCP sözleşmesi Sharpe sunulurken faizin
+       açıklanmasını şart koşuyor; sohbet yolu yapıyordu, sayfa yapmıyordu. */
+    const WINDOW = {
+        start_date: '2025-01-27',
+        end_date: '2026-08-24',
+        observation_count: 253,
+        frequency: 'DAILY',
+    }
+    const ASSUMPTIONS = {
+        benchmark_symbol: 'XU100',
+        benchmark_history_available: true,
+        risk_free_rate: 0.425,
+        risk_free_rate_source: 'FIXTURE_POLICY_RATE',
+    }
+
+    it('aralığı, ölçütü ve faizi tek satırda söyler', () => {
+        const caption = measurementCaption(WINDOW, ASSUMPTIONS)
+        expect(caption).toContain('253 işlem günü')
+        expect(caption).toContain('BIST 100')
+        expect(caption).toContain('%42,5')
+    })
+
+    it('hiçbir alan adı veya enum ekrana çıkmaz', () => {
+        const caption = measurementCaption(WINDOW, ASSUMPTIONS) ?? ''
+        expect(caption).not.toContain('XU100')
+        expect(caption).not.toContain('FIXTURE_POLICY_RATE')
+        expect(caption).not.toMatch(/[a-z]+_[a-z]+/)
+    })
+
+    it('geçmişi olmayan bir ölçütün adını anmaz', () => {
+        /* Adını yazıp altında "ölçülemedi" göstermek, olmayan bir
+           karşılaştırma vaat eder. */
+        const caption = measurementCaption(WINDOW, {
+            ...ASSUMPTIONS,
+            benchmark_history_available: false,
+        })
+        expect(caption).not.toContain('BIST 100')
+        expect(caption).toContain('253 işlem günü')
+    })
+
+    it('caller tarafından verilen faizi politika faizi diye anmaz', () => {
+        const caption = measurementCaption(WINDOW, {
+            ...ASSUMPTIONS,
+            risk_free_rate_source: 'CALLER_SUPPLIED',
+        })
+        expect(caption).toContain('belirtilen faiz')
+        expect(caption).not.toContain('politika faizi')
+    })
+
+    it('tarih yoksa yalnızca gözlem sayısını söyler', () => {
+        const caption = measurementCaption(
+            { observation_count: 67 },
+            {},
+        )
+        expect(caption).toBe('67 işlem günü')
+    })
+
+    it('söylenecek bir şey yoksa satır hiç yazılmaz', () => {
+        /* Eksik bir aralığı "—" ile doldurmak, ölçümün kapsamı hakkında
+           bilgi veriyormuş gibi yapmak olurdu. */
+        expect(measurementCaption({}, {})).toBeNull()
+        expect(measurementCaption(null, null)).toBeNull()
+        expect(measurementCaption(undefined, undefined)).toBeNull()
+    })
+
+    it('bozuk tarihler satırı çökertmez', () => {
+        const caption = measurementCaption(
+            { start_date: 'dün', end_date: '', observation_count: 12 },
+            {},
+        )
+        expect(caption).toBe('12 işlem günü')
+    })
+})
+
+describe('benchmarkName', () => {
+    it('bilinen endeksleri okunur adıyla verir', () => {
+        expect(benchmarkName('XU100')).toBe('BIST 100')
+        expect(benchmarkName('spx')).toBe('S&P 500')
+    })
+
+    it('tanımadığı sembolü olduğu gibi bırakır', () => {
+        /* Bir haritaya hapsetmek, yeni bir ölçüt eklendiği gün onu
+           görünmez kılardı. */
+        expect(benchmarkName('XU050')).toBe('XU050')
+    })
+
+    it('sembol yoksa ad da yok', () => {
+        expect(benchmarkName(null)).toBeNull()
+        expect(benchmarkName('')).toBeNull()
+        expect(benchmarkName(42)).toBeNull()
     })
 })

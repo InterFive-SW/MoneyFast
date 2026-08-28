@@ -1222,3 +1222,59 @@ class TestNullPositionFields:
              "sector": "Technology"},
         ]}).json()
         assert body["metrics"]["concentration"]["by_sector"] == {"Technology": 1.0}
+
+
+
+class TestMeasurementDisclosure:
+    """The page showed a Sharpe ratio and a beta with nothing to read them by.
+
+    `POST /calculate` has produced `window` and `assumptions` all along; the
+    profile endpoint dropped both, so the screen could not say what span the
+    numbers covered, which index the beta was against, or which rate the
+    Sharpe was net of. The MCP contract requires that last one to be disclosed
+    wherever Sharpe is presented -- the chat path did it, the page did not.
+    """
+
+    def test_the_window_reaches_the_page(self, as_user, mocker):
+        _stub(mocker, [_holding()])
+        body = as_user.get(PROFILE_URL).json()
+        assert set(body["window"]) == {
+            "start_date", "end_date", "observation_count", "frequency",
+        }
+
+    def test_the_rate_behind_sharpe_is_disclosed(self, as_user, mocker):
+        _stub(mocker, [_holding()])
+        assumptions = as_user.get(PROFILE_URL).json()["assumptions"]
+        assert assumptions["risk_free_rate"] == pytest.approx(
+            service.DEFAULT_RISK_FREE_RATE
+        )
+        assert assumptions["risk_free_rate_source"] == "FIXTURE_POLICY_RATE"
+
+    def test_the_benchmark_is_named(self, as_user, mocker):
+        """Beta was computed against XU100 by default and the user was never
+        told which index they were being compared to."""
+        _stub(mocker, [_holding()])
+        assumptions = as_user.get(PROFILE_URL).json()["assumptions"]
+        assert assumptions["benchmark_symbol"] == service.DEFAULT_BENCHMARK
+        assert "benchmark_history_available" in assumptions
+
+    def test_an_empty_portfolio_discloses_nothing_rather_than_zeroes(
+        self, as_user, mocker
+    ):
+        """Nothing was measured, so there is no span and no rate to state.
+        Empty blocks say that; a zeroed observation count would describe a
+        measurement that never happened."""
+        _stub(mocker, [])
+        body = as_user.get(PROFILE_URL).json()
+        assert body["window"] == {}
+        assert body["assumptions"] == {}
+
+    def test_the_agent_summary_does_not_carry_them(self, client, service_auth, mocker):
+        """The agent reaches the same figures through
+        `calculate_portfolio_risk_metrics`, whose contract already carries
+        both blocks. Duplicating them here would give one turn two places to
+        quote the same window from."""
+        _stub(mocker, [_holding()])
+        body = client.get(SUMMARY_URL, headers=service_auth).json()
+        assert "window" not in body
+        assert "assumptions" not in body

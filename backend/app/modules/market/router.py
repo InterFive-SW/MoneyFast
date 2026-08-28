@@ -11,16 +11,22 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.modules.investment import market_service
-from . import service, stream
+
+from . import service, social_service, stream
 from .schemas import (
-    IngestResult,
-    FundamentalsIngestRequest,
     CandleSeriesOut,
+    FundamentalsIngestRequest,
+    IngestResult,
     InstrumentListOut,
     MarketTicker,
     NewsIngestRequest,
     NewsItem,
     QuoteIngestRequest,
+    SocialIngestRequest,
+    SocialIngestResult,
+    SocialSignalOut,
+    SocialSourceType,
+    SocialVerificationStatus,
 )
 
 log = logging.getLogger("moneyfast.market")
@@ -140,8 +146,11 @@ async def list_instruments(
     gelmemeli; verisi olmayan bir hisse ucuz görünmemeli.
     """
     filters = {
-        "sector": sector, "market": market,
-        "max_pe": max_pe, "min_pe": min_pe, "max_pb": max_pb,
+        "sector": sector,
+        "market": market,
+        "max_pe": max_pe,
+        "min_pe": min_pe,
+        "max_pb": max_pb,
     }
     try:
         rows = market_service.list_instruments(
@@ -189,7 +198,12 @@ async def get_candles(
     """
     product = market_service.resolve_symbol(db, symbol)
     if product is None:
-        return {"symbol": symbol.upper(), "currency": "TRY", "interval": "1d", "candles": []}
+        return {
+            "symbol": symbol.upper(),
+            "currency": "TRY",
+            "interval": "1d",
+            "candles": [],
+        }
     return {
         "symbol": product.symbol,
         "currency": product.currency_code or "TRY",
@@ -224,7 +238,9 @@ async def market_stream(request: Request):
                 if await request.is_disconnected():
                     break
                 try:
-                    frame = await asyncio.wait_for(queue.get(), timeout=stream.HEARTBEAT_SECONDS)
+                    frame = await asyncio.wait_for(
+                        queue.get(), timeout=stream.HEARTBEAT_SECONDS
+                    )
                     yield f"event: quotes\ndata: {json.dumps(frame)}\n\n"
                 except asyncio.TimeoutError:
                     # A comment line: valid SSE, ignored by EventSource, and
@@ -252,10 +268,14 @@ async def market_stream(request: Request):
     summary="Fiyat ve mum verisi yükle (servisler arası)",
     dependencies=[Depends(require_service_token)],
 )
-async def ingest_market_data(request: QuoteIngestRequest, db: Session = Depends(get_db)):
+async def ingest_market_data(
+    request: QuoteIngestRequest, db: Session = Depends(get_db)
+):
     """`ingestor` servisinin fiyat ve OHLCV verisi yazdığı uç nokta."""
     quotes = market_service.upsert_quotes(db, [q.model_dump() for q in request.quotes])
-    candles = market_service.upsert_candles(db, [c.model_dump() for c in request.candles])
+    candles = market_service.upsert_candles(
+        db, [c.model_dump() for c in request.candles]
+    )
     log.info("ingested %d quotes and %d new candles", quotes, candles)
     return {"quotes_written": quotes, "candles_written": candles, "news_written": 0}
 
@@ -288,22 +308,86 @@ async def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db))
 
 
 @router.post(
+    "/social/ingest",
+    response_model=SocialIngestResult,
+    summary="Normalize edilmiş sosyal sinyalleri yükle (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+async def ingest_social(request: SocialIngestRequest, db: Session = Depends(get_db)):
+    """Atomically persist an ingestor batch; no upstream credential is accepted."""
+
+    try:
+        result = social_service.ingest_batch(
+            db,
+            [item.model_dump() for item in request.accounts],
+            [item.model_dump() for item in request.posts],
+        )
+    except social_service.SocialBatchConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except social_service.SocialBatchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    log.info(
+        "social ingest: %d inserted, %d updated, %d duplicate, %d unresolved",
+        result["posts_inserted"],
+        result["posts_updated"],
+        result["posts_duplicate"],
+        result["instruments_unresolved"],
+    )
+    return result
+
+
+@router.get(
+    "/social-signals",
+    response_model=List[SocialSignalOut],
+    summary="Doğrulanma durumu etiketli sosyal piyasa sinyalleri",
+)
+async def social_signals(
+    symbol: Optional[str] = Query(default=None, min_length=1, max_length=255),
+    since_hours: int = Query(default=24, ge=1, le=168),
+    limit: int = Query(default=20, ge=1, le=100),
+    minimum_trust_score: Optional[float] = Query(default=None, ge=0.0, le=1.0),
+    verification_status: Optional[SocialVerificationStatus] = Query(default=None),
+    source_type: Optional[SocialSourceType] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Public like other non-user-specific market reads; raw metadata is omitted."""
+
+    return social_service.list_signals(
+        db,
+        symbol=symbol,
+        since_hours=since_hours,
+        limit=limit,
+        minimum_trust_score=minimum_trust_score,
+        verification_status=verification_status,
+        source_type=source_type,
+    )
+
+
+@router.post(
     "/fundamentals/ingest",
     response_model=IngestResult,
     summary="Temel oranları yükle (servisler arası)",
     dependencies=[Depends(require_service_token)],
 )
-async def ingest_fundamentals(request: FundamentalsIngestRequest, db: Session = Depends(get_db)):
+async def ingest_fundamentals(
+    request: FundamentalsIngestRequest, db: Session = Depends(get_db)
+):
     """
     Değerleme oranlarını günceller.
 
     Eksik değerler NULL olarak yazılır, sıfıra çevrilmez: kazanç verisi
     yayımlanmayan bir şirket, "en düşük F/K" taramasının başında görünmemeli.
     """
-    written = market_service.upsert_fundamentals(db, [i.model_dump() for i in request.items])
+    written = market_service.upsert_fundamentals(
+        db, [i.model_dump() for i in request.items]
+    )
     log.info("ingested fundamentals for %d instruments", written)
-    return {"quotes_written": 0, "candles_written": 0, "news_written": 0,
-            "fundamentals_written": written}
+    return {
+        "quotes_written": 0,
+        "candles_written": 0,
+        "news_written": 0,
+        "fundamentals_written": written,
+    }
 
 
 def _relative_time(moment: datetime) -> str:
@@ -321,10 +405,7 @@ def _relative_time(moment: datetime) -> str:
     return f"{hours // 24} gün önce"
 
 
-@router.get(
-    "/health",
-    summary="Market modülü sağlık durumu"
-)
+@router.get("/health", summary="Market modülü sağlık durumu")
 async def health_check():
     """
     Market modülünün durumunu (health check) kontrol eder.

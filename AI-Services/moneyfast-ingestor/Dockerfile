@@ -42,8 +42,16 @@ RUN make test
 # ---------------------------------------------------------------------------
 FROM base AS runtime
 
-RUN useradd --create-home --uid 10004 ingestuser \
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gosu \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --create-home --uid 10004 ingestuser \
+ && mkdir -p /app/state \
  && chown -R ingestuser:ingestuser /app
-USER ingestuser
+
+COPY docker-entrypoint.sh /usr/local/bin/moneyfast-ingestor-entrypoint
+RUN chmod 0555 /usr/local/bin/moneyfast-ingestor-entrypoint
+
+ENTRYPOINT ["moneyfast-ingestor-entrypoint"]
 
 CMD ["python", "-m", "ingestor.run"]

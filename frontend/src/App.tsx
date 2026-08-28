@@ -41,8 +41,13 @@ import IndicesScreen        from './pages/markets/IndicesScreen'
 import SectorsScreen        from './pages/markets/SectorsScreen'
 import AnalysesScreen       from './pages/markets/AnalysesScreen'
 import Analytics from './pages/Analytics'
-import Settings from './pages/Settings'
 
+import SettingsLayout from './pages/settings/SettingsLayout'
+import ProfileSettings from './pages/settings/ProfileSettings'
+import SecuritySettings from './pages/settings/SecuritySettings'
+import NotificationSettings from './pages/settings/NotificationSettings'
+import AppearanceSettings from './pages/settings/AppearanceSettings'
+import PrivacySettings from './pages/settings/PrivacySettings'
 export default function App() {
   return (
     /*
@@ -93,7 +98,14 @@ export default function App() {
                 <Route path="analizler"      element={<AnalysesScreen />} />
               </Route>
               <Route path="risk"       element={<Risk />}       />
-              <Route path="settings"   element={<Settings />}   />
+              <Route path="settings" element={<SettingsLayout />}>
+                <Route index element={<Navigate to="profile" replace />} />
+                <Route path="profile" element={<ProfileSettings />} />
+                <Route path="security" element={<SecuritySettings />} />
+                <Route path="notifications" element={<NotificationSettings />} />
+                <Route path="appearance" element={<AppearanceSettings />} />
+                <Route path="privacy" element={<PrivacySettings />} />
+              </Route>
             </Route>
           </Route>
         </Routes>

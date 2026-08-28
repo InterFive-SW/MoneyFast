@@ -1,0 +1,5 @@
+const fs = require('fs')
+console.log("Checking for weird characters...")
+const code = fs.readFileSync('src/pages/settings/AppearanceSettings.tsx', 'utf8')
+if (code.includes('\u200B')) console.log("Found zero width space!")
+if (code.includes('\u00A0')) console.log("Found non-breaking space!")

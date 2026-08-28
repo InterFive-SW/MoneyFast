@@ -15,7 +15,8 @@ from app.modules.auth.schemas import (
     ResetPasswordRequest, 
     VerifyEmailRequest,
     UserUpdateRequest,
-    ChangePasswordRequest
+    ChangePasswordRequest,
+    DeleteAccountRequest
 )
 from app.core import deps
 from app.core.database import get_db
@@ -184,6 +185,54 @@ async def change_password(
     """
     return service.change_user_password(user.tc_no, payload, db)
 
+
+@router.post(
+    "/export-data",
+    status_code=status.HTTP_200_OK,
+    summary="KVKK/GDPR veri dışa aktarma talebi oluştur"
+)
+async def export_data(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user=Depends(deps.get_current_user)
+):
+    """Kullanıcının tüm kişisel verilerinin dışa aktarılması talebini alır.
+
+    KVKK/GDPR UYUM:
+    6698 sayılı KVKK ve AB Genel Veri Koruma Tüzüğü (GDPR) kapsamında
+    kullanıcılar, platformda saklanan tüm kişisel verilerinin makine
+    tarafından okunabilir bir formatta (JSON/CSV/ZIP) kendilerine
+    teslim edilmesini talep etme hakkına sahiptir. Bu endpoint o
+    talebi başlatır; dosya hazırlandığında kullanıcının kayıtlı
+    e-posta adresine gönderilir.
+    """
+    return await service.request_data_export(user.tc_no, db, background_tasks)
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_200_OK,
+    summary="Kullanıcı hesabını kalıcı olarak kapat (soft delete)"
+)
+async def delete_account(
+    payload: DeleteAccountRequest,
+    db: Session = Depends(get_db),
+    user=Depends(deps.get_current_user)
+):
+    """Kullanıcı hesabını kalıcı olarak devre dışı bırakır.
+
+    GÜVENLİK & MİMARİ KARAR:
+    Bu endpoint, kullanıcı kaydını veritabanından SILMEZ (hard delete).
+    Bunun yerine `is_active=False` yaparak (soft delete) hesabı devre
+    dışı bırakır. Bu yaklaşım:
+      • MASAK ve finansal düzenleme uyumunu korur (işlem geçmişi saklı kalır).
+      • Kullanıcının tekrar giriş yapmasını engeller.
+      • Yasal inceleme durumunda verilerin erişilebilir kalmasını sağlar.
+
+    Frontend'de çok adımlı onay modalı ("KAPAT" yazma zorunluluğu) ile
+    korunur; yetkisiz veya kazara tetiklenmesi önlenir.
+    """
+    return service.deactivate_account(user.tc_no, payload.reason, db)
 
 
 @router.get(

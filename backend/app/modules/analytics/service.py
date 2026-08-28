@@ -32,6 +32,37 @@ log = logging.getLogger("moneyfast.analytics")
 MIN_RELIABLE_OBSERVATIONS = 60
 
 
+#: The index the trend chart is drawn against. Same default the risk module
+#: measures beta and correlation with, so the picture and the numbers beside
+#: it describe the same comparison.
+BENCHMARK_SYMBOL = "XU100"
+
+
+def _benchmark_series(
+    dates: list[Any], closes_for: Callable[[str], list[tuple[datetime, float]]]
+) -> Optional[dict[str, Any]]:
+    """The index's closes on `dates`, or None when there is no real overlap.
+
+    Raw closes, not rescaled: the chart decides how to put two series with
+    different units on one axis, and handing it an already-normalised number
+    would leave the page unable to say what the index itself did.
+    """
+    by_day = {
+        stamp.date(): float(close) for stamp, close in closes_for(BENCHMARK_SYMBOL)
+    }
+    points = [
+        {
+            "date": datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
+            "value": round(by_day[day], 4),
+        }
+        for day in dates
+        if day in by_day
+    ]
+    if len(points) < 2:
+        return None
+    return {"symbol": BENCHMARK_SYMBOL, "points": points}
+
+
 def window_limit(lookback: str = "1Y") -> int:
     """Bars to read per symbol for `lookback`, including the one the first
     return needs.
@@ -189,6 +220,12 @@ def build(
             "değerlenmesidir; hesabın geçmişteki gerçek değeri değildir."
         )
 
+    # The index on the portfolio's OWN dates. Days the index did not trade are
+    # dropped rather than carried forward, so the two lines only ever meet on
+    # days both actually have -- a forward-filled index shows the market flat
+    # on a day it was simply closed.
+    benchmark = _benchmark_series(dates, closes_for)
+
     values = trend_values
     series = risk_returns.simple_returns(values)
     drawdown = risk_returns.max_drawdown(values, dates) if values else None
@@ -231,6 +268,7 @@ def build(
             for label, value in sorted(sectors.items(), key=lambda kv: kv[1], reverse=True)
         ]),
         "trend": trend,
+        "benchmark": benchmark,
         "performance": performance,
         "activity": _activity(proposals),
         "excluded_symbols": excluded,

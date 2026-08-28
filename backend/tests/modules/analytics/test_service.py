@@ -384,3 +384,56 @@ class TestCurrencyConversion:
             sector_map={"AAPL": "Technology"},
         )
         assert result["sectors"][0]["value"] == pytest.approx(3000 * 47.9479, rel=1e-6)
+
+
+class TestBenchmarkSeries:
+    """The index the trend chart is drawn against.
+
+    Same default the risk module measures beta with, so the picture and the
+    numbers beside it describe one comparison rather than two.
+    """
+
+    def test_the_index_rides_on_the_portfolio_dates(self):
+        result = build(closes_for=closes({"THYAO": 300.0, "XU100": 9000.0}, days=5))
+        benchmark = result["benchmark"]
+        assert benchmark["symbol"] == "XU100"
+        assert len(benchmark["points"]) == len(result["trend"])
+
+    def test_closes_are_raw_not_rescaled(self):
+        """The chart decides how to put two units on one axis. An already
+        normalised number would leave the page unable to say what the index
+        itself did."""
+        result = build(closes_for=closes({"THYAO": 300.0, "XU100": 9000.0}, days=5))
+        assert result["benchmark"]["points"][0]["value"] == pytest.approx(9000.0)
+
+    def test_days_the_index_did_not_trade_are_dropped_not_filled(self):
+        """A forward-filled index shows the market flat on a day it was
+        simply closed."""
+        def reader(symbol):
+            if symbol == "XU100":
+                # Missing the middle day the holding has.
+                return [
+                    (NOW - timedelta(days=4), 9000.0),
+                    (NOW - timedelta(days=2), 9100.0),
+                    (NOW - timedelta(days=1), 9200.0),
+                ]
+            return [(NOW - timedelta(days=n), 300.0) for n in range(4, -1, -1)]
+
+        result = build(closes_for=reader)
+        days = [p["date"].day for p in result["benchmark"]["points"]]
+        assert len(days) == 3
+        assert len(result["trend"]) == 5
+
+    def test_no_index_history_means_no_comparison_line(self):
+        """None rather than an empty list: a line drawn from nothing would
+        still be a line."""
+        result = build(closes_for=closes({"THYAO": 300.0}, days=5))
+        assert result["benchmark"] is None
+
+    def test_a_single_overlapping_day_is_not_a_series(self):
+        def reader(symbol):
+            if symbol == "XU100":
+                return [(NOW - timedelta(days=1), 9000.0)]
+            return [(NOW - timedelta(days=n), 300.0) for n in range(4, -1, -1)]
+
+        assert build(closes_for=reader)["benchmark"] is None

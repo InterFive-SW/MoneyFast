@@ -390,3 +390,60 @@ export function describeContribution(row: ContributionRow): string {
         ? 'Riskteki payı ağırlığından büyük: portföyün geri kalanıyla birlikte hareket ediyor.'
         : 'Riskteki payı ağırlığından küçük: portföyün geri kalanından bağımsız hareket etmiş.'
 }
+
+export interface ComparisonPoint {
+    date: string
+    value: number
+    /** Endeksin portföyün başlangıç değerine ölçeklenmiş hâli; ortak olmayan
+     *  günlerde `null` — grafik orada çizgiyi kesintiye uğratır. */
+    benchmark: number | null
+}
+
+/**
+ * Portföy ile endeksi tek eksende karşılaştırılabilir kılar.
+ *
+ * Endeks, portföyün İLK değerine ölçekleniyor: ikisi aynı noktadan başlıyor
+ * ve sonrasındaki ayrışma tamamen göreli performans. Her ikisini 100'e
+ * normalize etmek de aynı bilgiyi verirdi ama portföyün TL büyüklüğünü
+ * ekrandan silerdi — bu yol ikisini birden korur.
+ *
+ * Ortak olmayan gün `null` bırakılır, önceki değere sabitlenmez: endeksi
+ * işlem görmediği bir günde yatay çizmek, olmayan bir hareketsizliği
+ * göstermek olur.
+ */
+export function toComparisonSeries(
+    trend: unknown,
+    benchmark: unknown,
+): ComparisonPoint[] {
+    const points = Array.isArray(trend) ? trend : []
+    if (points.length === 0) return []
+
+    const rawBenchmark = Array.isArray((benchmark as { points?: unknown })?.points)
+        ? ((benchmark as { points: { date: string; value: number }[] }).points)
+        : []
+    const byDay = new Map(rawBenchmark.map((p) => [String(p.date).slice(0, 10), p.value]))
+
+    // Ölçeklemenin dayanağı endeksin ilk ORTAK günü; portföyün ilk günü
+    // endekste yoksa oradan ölçeklemek iki seriyi farklı noktadan başlatırdı.
+    const firstShared = points
+        .map((p) => byDay.get(String((p as { date: string }).date).slice(0, 10)))
+        .find((value) => typeof value === 'number')
+    const first = points[0] as { value?: number }
+    // Ölçek yoksa çizgi de yok. Sayı olmayan bir başlangıç değerini 0 saymak
+    // düz bir sıfır çizgisi üretirdi — endeksin yaptığı hakkında bir iddia,
+    // üstelik yanlış olanı.
+    const base = typeof first?.value === 'number' && firstShared ? first.value : null
+
+    return points.map((point) => {
+        const day = String((point as { date: string }).date).slice(0, 10)
+        const raw = byDay.get(day)
+        return {
+            date: day,
+            value: (point as { value: number }).value,
+            benchmark:
+                typeof raw === 'number' && base !== null && firstShared
+                    ? Math.round((base * (raw / firstShared)) * 100) / 100
+                    : null,
+        }
+    })
+}

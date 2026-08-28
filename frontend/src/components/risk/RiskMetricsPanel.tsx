@@ -1,6 +1,7 @@
 import {
     METRIC_COPY,
     NOT_MEASURED,
+    benchmarkName,
     describeDrawdown,
     describeLossEstimate,
     formatMetric,
@@ -21,6 +22,8 @@ import Term from '../common/Term'
  * sayıyor, JSX'i saymıyor.
  */
 interface RiskMetricsPanelProps {
+    /** Ölçülen betanın hangi endekse göre olduğu. */
+    assumptions?: unknown
     metrics: Record<string, unknown>
     currency?: string
 }
@@ -34,11 +37,18 @@ const CARD_ORDER: { name: string; term: string }[] = [
     { name: 'correlation_to_benchmark', term: 'correlation' },
 ]
 
-export default function RiskMetricsPanel({ metrics, currency }: RiskMetricsPanelProps) {
+export default function RiskMetricsPanel({ metrics, currency, assumptions }: RiskMetricsPanelProps) {
     const drawdown = describeDrawdown(metrics.max_drawdown)
     const varView = describeLossEstimate(metrics.var, 'var')
     const cvarView = describeLossEstimate(metrics.cvar, 'cvar')
     const notice = reliabilityNotice(metrics.data_quality)
+    // Beta ve korelasyon her zaman BİR ŞEYE göredir ve o şeyin adı
+    // ekranda hiç geçmiyordu: XU100 varsayılan olarak kullanılıyor ve
+    // kullanıcı neyle kıyaslandığını bilmiyordu.
+    const indexName = benchmarkName(
+        (assumptions as { benchmark_symbol?: unknown } | undefined)?.benchmark_symbol,
+    )
+    const RELATIVE = new Set(['beta', 'correlation_to_benchmark'])
 
     return (
         <div className="flex flex-col rounded-2xl border border-white/10 bg-slate-900/50 p-6 shadow-2xl backdrop-blur-xl">
@@ -74,6 +84,9 @@ export default function RiskMetricsPanel({ metrics, currency }: RiskMetricsPanel
                             </p>
                             <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
                                 {copy.hint}
+                                {indexName && RELATIVE.has(name) && (
+                                    <span className="text-slate-400"> {indexName}’e göre ölçüldü.</span>
+                                )}
                             </p>
                         </div>
                     )

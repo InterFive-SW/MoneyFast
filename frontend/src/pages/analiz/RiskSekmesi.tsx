@@ -100,6 +100,7 @@ export default function RiskSekmesi() {
                             <RiskMetricsPanel
                                 metrics={metrics}
                                 currency={cashflow?.currency_code ?? 'TRY'}
+                                assumptions={risk.assumptions}
                             />
                             <RiskConcentrationPanel concentration={concentration} />
                             {/* Yoğunlaşmanın hemen ardından: ağırlıkları

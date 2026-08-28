@@ -12,6 +12,7 @@ import {
     benchmarkName,
     describeContribution,
     measurementCaption,
+    toComparisonSeries,
     toContributions,
     NOT_MEASURED,
     describeDrawdown,
@@ -511,5 +512,85 @@ describe('describeContribution', () => {
 
     it('eksi pay dalgalanmayı azaltmak diye okunur', () => {
         expect(describeContribution(row(0.2, -0.1))).toContain('azaltan')
+    })
+})
+
+
+describe('toComparisonSeries', () => {
+    /* Endeks, portföyün İLK değerine ölçekleniyor: ikisi aynı noktadan
+       başlar ve sonraki ayrışma tamamen göreli performanstır. */
+    const TREND = [
+        { date: '2026-08-05T00:00:00Z', value: 1000 },
+        { date: '2026-08-06T00:00:00Z', value: 1100 },
+        { date: '2026-08-07T00:00:00Z', value: 900 },
+    ]
+    const BENCH = {
+        symbol: 'XU100',
+        points: [
+            { date: '2026-08-05T00:00:00Z', value: 9000 },
+            { date: '2026-08-06T00:00:00Z', value: 9450 },
+            { date: '2026-08-07T00:00:00Z', value: 8100 },
+        ],
+    }
+
+    it('endeksi portföyün başlangıç değerine ölçekler', () => {
+        const series = toComparisonSeries(TREND, BENCH)
+        expect(series[0].benchmark).toBe(1000)
+        // Endeks %5 yükseldi: 1000 -> 1050.
+        expect(series[1].benchmark).toBe(1050)
+        // %10 düştü: 1000 -> 900.
+        expect(series[2].benchmark).toBe(900)
+    })
+
+    it('portföy değerlerini olduğu gibi bırakır', () => {
+        expect(toComparisonSeries(TREND, BENCH).map((p) => p.value)).toEqual([
+            1000, 1100, 900,
+        ])
+    })
+
+    it('endeksin işlem görmediği günü boş bırakır, önceki değere sabitlemez', () => {
+        /* Yatay çizmek, olmayan bir hareketsizliği göstermek olur. */
+        const series = toComparisonSeries(TREND, {
+            symbol: 'XU100',
+            points: [BENCH.points[0], BENCH.points[2]],
+        })
+        expect(series[1].benchmark).toBeNull()
+        expect(series[2].benchmark).toBe(900)
+    })
+
+    it('ölçekleme ilk ORTAK günden yapılır', () => {
+        /* Portföyün ilk günü endekste yoksa oradan ölçeklemek iki seriyi
+           farklı noktadan başlatırdı. */
+        const series = toComparisonSeries(TREND, {
+            symbol: 'XU100',
+            points: [BENCH.points[1], BENCH.points[2]],
+        })
+        expect(series[0].benchmark).toBeNull()
+        expect(series[1].benchmark).toBe(1000)
+    })
+
+    it('endeks yoksa yalnızca portföy kalır', () => {
+        const series = toComparisonSeries(TREND, null)
+        expect(series).toHaveLength(3)
+        expect(series.every((p) => p.benchmark === null)).toBe(true)
+    })
+
+    it('trend yoksa seri de yok', () => {
+        expect(toComparisonSeries(null, BENCH)).toEqual([])
+        expect(toComparisonSeries([], BENCH)).toEqual([])
+    })
+
+    it('ölçeklenecek bir başlangıç değeri yoksa çizgi çizilmez', () => {
+        /* Sayı olmayan bir başlangıcı 0 saymak düz bir sıfır çizgisi
+           üretirdi — endeksin yaptığı hakkında yanlış bir iddia. */
+        const series = toComparisonSeries(
+            [{ date: '2026-08-05T00:00:00Z', value: null }, TREND[1]],
+            BENCH,
+        )
+        expect(series.every((p) => p.benchmark === null)).toBe(true)
+    })
+
+    it('tarihleri güne indirger', () => {
+        expect(toComparisonSeries(TREND, BENCH)[0].date).toBe('2026-08-05')
     })
 })

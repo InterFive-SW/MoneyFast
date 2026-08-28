@@ -29,7 +29,22 @@ export type MarketTicker = GetResponseType<paths['/api/market/tickers']>[0];
 // tipini almak için önce boş olmayan hâline daraltılır.
 export type CandleSeries = GetResponseType<paths['/api/market/candles']>;
 export type Candle = NonNullable<CandleSeries['candles']>[0];
-export type PortfolioAnalysis = GetResponseType<paths['/api/analytics/portfolio']>;
+/**
+ * `benchmark` burada elle yazılı: `generated/schema.d.ts` bu alan eklenmeden
+ * önce üretilmişti. Yeniden üretimi ayrı ve opsiyonel bir adım
+ * (CONTRACT_WORKFLOW.md).
+ */
+export interface BenchmarkSeries {
+    symbol: string;
+    points: { date: string; value: number }[];
+}
+
+export type PortfolioAnalysis = GetResponseType<paths['/api/analytics/portfolio']> & {
+    /** Endeksin, portföyün kendi günlerindeki ham kapanışları. Örtüşen geçmiş
+     *  yoksa `null` — kısmi örtüşmeden çizilen bir karşılaştırma çizgisi,
+     *  birinin barı olmayan günlerde ayrışma gösterir. */
+    benchmark?: BenchmarkSeries | null;
+};
 export type BankAccount = GetResponseType<paths['/api/banking/accounts']>[0];
 export type Statement = GetResponseType<paths['/api/banking/accounts/{account_number}/statement']>;
 export type Movement = NonNullable<Statement['movements']>[0];

@@ -1,8 +1,9 @@
 import {
-    Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
-    Tooltip, XAxis, YAxis,
+    Area, CartesianGrid, Cell, ComposedChart, Legend, Line, Pie, PieChart,
+    ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { toNumber, seriesName } from '../../lib/chartFormat'
+import { benchmarkName, toComparisonSeries } from '../../lib/riskFormat'
 import { formatMoney } from '../../lib/money'
 import { useAnalysis } from '../Analiz'
 
@@ -39,6 +40,8 @@ export default function GenelBakis() {
 
     const currency = analysis.base_currency ?? 'TRY'
     const tl = (value: number | null | undefined) => formatMoney(value ?? 0, currency)
+    const series = toComparisonSeries(analysis.trend, analysis.benchmark)
+    const indexName = benchmarkName(analysis.benchmark?.symbol)
 
     return (
         <>
@@ -140,7 +143,7 @@ export default function GenelBakis() {
 
                 <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={(analysis.trend ?? []).map((p) => ({ date: p.date.slice(0, 10), value: p.value }))}>
+                        <ComposedChart data={series}>
                             <defs>
                                 <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
                                     <stop offset="0%" stopColor="#10b981" stopOpacity={0.35} />
@@ -152,11 +155,41 @@ export default function GenelBakis() {
                             <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={70}
                                 tickFormatter={(v) => `${Math.round(Number(v) / 1000)}k`} />
                             <Tooltip
-                                formatter={(value) => [tl(toNumber(value)), 'Portföy değeri']}
+                                formatter={(value, name) => [
+                                    tl(toNumber(value)),
+                                    name === 'benchmark' ? indexName : 'Portföy değeri',
+                                ]}
                                 contentStyle={{ borderRadius: '12px', border: 'none', fontSize: '12px' }}
                             />
-                            <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2} fill="url(#trendFill)" />
-                        </AreaChart>
+                            <Area type="monotone" dataKey="value" name="Portföy" stroke="#10b981" strokeWidth={2} fill="url(#trendFill)" />
+                            {/* Endeks, portföyün İLK değerine ölçekli: ikisi aynı
+                                noktadan başlar ve sonraki ayrışma tamamen göreli
+                                performanstır. İkisini 100'e normalize etmek aynı
+                                bilgiyi verirdi ama portföyün TL büyüklüğünü
+                                ekrandan silerdi. `connectNulls` KAPALI: endeksin
+                                işlem görmediği günü yatay çizmek, olmayan bir
+                                hareketsizliği göstermek olur. */}
+                            {indexName && (
+                                <Line
+                                    type="monotone"
+                                    dataKey="benchmark"
+                                    name={indexName}
+                                    stroke="#94a3b8"
+                                    strokeWidth={1.5}
+                                    strokeDasharray="4 3"
+                                    dot={false}
+                                    connectNulls={false}
+                                />
+                            )}
+                            {indexName && (
+                                <Legend
+                                    verticalAlign="top"
+                                    height={28}
+                                    iconType="plainline"
+                                    wrapperStyle={{ fontSize: 11, color: '#94a3b8' }}
+                                />
+                            )}
+                        </ComposedChart>
                     </ResponsiveContainer>
                 </div>
 

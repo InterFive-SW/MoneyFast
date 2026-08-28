@@ -25,6 +25,18 @@ class TrendPoint(BaseModel):
     value: float
 
 
+class BenchmarkSeries(BaseModel):
+    """The index the portfolio is shown against, on the portfolio's own dates.
+
+    Raw closes, not rescaled: the chart decides how to put two series with
+    different units on one axis, and an already-normalised number would leave
+    the page unable to say what the index actually did.
+    """
+
+    symbol: str
+    points: List[TrendPoint] = Field(default_factory=list)
+
+
 class PerformanceSummary(BaseModel):
     """Portfolio-level return over the window actually covered by the data."""
 
@@ -68,6 +80,10 @@ class PortfolioAnalysis(BaseModel):
     allocation: List[AllocationSlice] = Field(default_factory=list)
     sectors: List[AllocationSlice] = Field(default_factory=list)
     trend: List[TrendPoint] = Field(default_factory=list)
+    #: None when the index has no overlapping history. A comparison line drawn
+    #: from a partial overlap would show the portfolio and the index diverging
+    #: on days one of them simply had no bar.
+    benchmark: Optional[BenchmarkSeries] = None
     performance: PerformanceSummary
     activity: ActivitySummary
 

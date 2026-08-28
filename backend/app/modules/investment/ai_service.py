@@ -398,6 +398,7 @@ def stage_transaction(
     reference_price: Optional[float] = None,
     held_quantity: Optional[float] = None,
     resolved_symbol: Optional[str] = None,
+    symbol_suggestions: Optional[list[str]] = None,
     currency: str = "TRY",
     available_cash: Optional[float] = None,
     cash_currency: str = "TRY",
@@ -440,7 +441,25 @@ def stage_transaction(
     if resolved_symbol:
         symbol = resolved_symbol
     if is_securities_order and symbol and reference_price is None:
-        blockers.append(f"Fiyat bilgisi bulunamayan enstrüman: {symbol}")
+        if resolved_symbol is None:
+            # The NAME failed, not the price. Reporting a missing price for
+            # "aple" told the user their data was unavailable when in fact
+            # nothing by that name exists.
+            if symbol_suggestions:
+                # "A, B veya C" -- not "A veya B veya C", which reads like a
+                # machine listing rather than a question a person would ask.
+                names = symbol_suggestions[:3]
+                listed = names[0] if len(names) == 1 else (
+                    ", ".join(names[:-1]) + " veya " + names[-1]
+                )
+                blockers.append(
+                    f"«{symbol}» diye bir enstrüman bulunamadı. "
+                    f"{listed} mı demek istediniz?"
+                )
+            else:
+                blockers.append(f"«{symbol}» diye bir enstrüman bulunamadı.")
+        else:
+            blockers.append(f"Fiyat bilgisi bulunamayan enstrüman: {symbol}")
 
     # A sell is checked against what is actually sellable. Staging a sell for
     # more than the user holds would present an impossible order as pending.

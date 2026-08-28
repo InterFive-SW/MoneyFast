@@ -19,7 +19,10 @@ export default function MoneyTransferWizard() {
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
   
   // Step 1: Receiver State
-  const [receiverTab, setReceiverTab] = useState<'saved' | 'new'>('saved')
+  // 'own' is how money reaches the investment account: its cash lives in a
+  // different table and has no IBAN, so it can only be chosen from a list.
+  const [receiverTab, setReceiverTab] = useState<'saved' | 'new' | 'own'>('saved')
+  const [ownDestinationId, setOwnDestinationId] = useState<string | null>(null)
   const [newReceiverType, setNewReceiverType] = useState<'iban' | 'accountNo' | 'easyAddress'>('iban')
   
   const [selectedRecipientId, setSelectedRecipientId] = useState<string | null>(null)
@@ -50,9 +53,15 @@ export default function MoneyTransferWizard() {
    * Alıcının IBAN'ı — kayıtlı alıcı seçildiyse ondan, yoksa elle girilenden.
    * Backend boşluklu IBAN'ı da çözüyor.
    */
-  const destinationIban = receiverTab === 'saved'
-    ? (DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.iban || '')
-    : receiverIban
+  const ownDestination = accounts.find(a => a.id === ownDestinationId)
+  const destinationIban = receiverTab === 'own'
+    // The investment account has no IBAN -- it is not a banking row -- so it
+    // is addressed by its own account number. This is the path money takes to
+    // become tradable.
+    ? (ownDestination?.accountNumber ?? '')
+    : receiverTab === 'saved'
+      ? (DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.iban || '')
+      : receiverIban
 
   /**
    * Transfer ücreti, backend'deki kuralın aynısı: kendi hesapları arasında
@@ -100,7 +109,12 @@ export default function MoneyTransferWizard() {
     }
   }
 
-  const isStep1Valid = receiverTab === 'saved' ? !!selectedRecipientId : (receiverIban.length > 10 && receiverName.length > 2)
+  const isStep1Valid =
+    receiverTab === 'own'
+      ? !!ownDestinationId
+      : receiverTab === 'saved'
+        ? !!selectedRecipientId
+        : (receiverIban.length > 10 && receiverName.length > 2)
   const isStep2Valid = !!senderAccountId
   // Ücret de bakiyeden çıkacağı için eşiğe dahil; backend aynı kontrolü
   // yapıyor ve yalnız tutarı karşılaştırmak, ücretle birlikte aşan bir
@@ -195,9 +209,40 @@ export default function MoneyTransferWizard() {
               >
                 Yeni Bir Alıcı
               </button>
+              <button
+                onClick={() => setReceiverTab('own')}
+                className={`flex-1 py-4 text-center font-bold transition-colors ${receiverTab === 'own' ? 'bg-blue-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'}`}
+              >
+                Kendi Hesaplarım
+              </button>
             </div>
 
-            {receiverTab === 'saved' ? (
+            {receiverTab === 'own' ? (
+              /* Kendi hesapları arası. Yatırım hesabı yalnızca buradan
+                 seçilebilir: IBAN'ı yok, çünkü bankacılık tarafında bir satır
+                 değil -- parayı yatırıma taşıyan yol bu. */
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {accounts
+                  .filter(acc => acc.id !== senderAccountId)
+                  .map(acc => (
+                    <div
+                      key={acc.id}
+                      onClick={() => setOwnDestinationId(acc.id)}
+                      className={`p-5 rounded-2xl border cursor-pointer transition-all ${
+                        ownDestinationId === acc.id
+                          ? 'border-blue-500 bg-blue-500/10'
+                          : 'border-white/10 bg-slate-800/40 hover:border-white/20'
+                      }`}
+                    >
+                      <p className="font-bold text-white">{acc.name}</p>
+                      <p className="mt-1 font-mono text-xs text-slate-400">{acc.accountNumber}</p>
+                      <p className="mt-2 text-sm text-slate-300">
+                        {acc.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} {acc.currency}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+            ) : receiverTab === 'saved' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {DUMMY_RECIPIENTS.map(rec => (
                   <div 

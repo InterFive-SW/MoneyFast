@@ -526,6 +526,18 @@ async def stage_transaction(
     product = (
         market_service.resolve_symbol(db, raw_symbol, strict=True) if raw_symbol else None
     )
+    # When the name does not resolve, say THAT -- and offer what it might have
+    # been. Without this the raw text flowed on as the symbol, no price was
+    # found for it, and the blocker read "Fiyat bilgisi bulunamayan enstrüman:
+    # aple" -- blaming the price for a name that was never recognised.
+    # Suggestions only: strict mode still refuses to pick one, because a
+    # misread ticker on the money path buys the wrong company.
+    symbol_suggestions: list[str] = []
+    if raw_symbol and product is None:
+        symbol_suggestions = [
+            candidate.symbol
+            for candidate in market_service.resolve_candidates(db, raw_symbol)
+        ]
 
     # Whose portfolio and cash this proposal is measured against. The
     # authenticated identity wins; `mcp` calls with a service identity and
@@ -588,6 +600,7 @@ async def stage_transaction(
         reference_price=reference_price,
         held_quantity=held_quantity,
         resolved_symbol=product.symbol if product else None,
+        symbol_suggestions=symbol_suggestions,
         currency=currency,
         available_cash=float(owner.cash_balance) if owner is not None else None,
         cash_currency=(owner.currency_code if owner is not None else "TRY") or "TRY",

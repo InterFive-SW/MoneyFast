@@ -36,13 +36,14 @@ import market_research_tools
 import orchestrator_tools
 import portfolio_tools
 import risk_strategy_tools
+import banking_tools
 import transaction_tools
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("moneyfast.mcp")
 
 SERVER_NAME = "moneyfast"
-CONTRACT_VERSION = "v2.2"
+CONTRACT_VERSION = "v2.8"
 
 SERVER_INSTRUCTIONS = """\
 MoneyFast tool server. Seven tools across seven domains.
@@ -74,6 +75,7 @@ DOMAIN_MODULES = (
     ("risk_strategy", risk_strategy_tools),
     ("compliance", compliance_tools),
     ("transaction", transaction_tools),
+    ("banking", banking_tools),
 )
 
 

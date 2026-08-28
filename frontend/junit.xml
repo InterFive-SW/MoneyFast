@@ -1,740 +1,766 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<testsuites name="vitest tests" tests="356" failures="0" errors="0" time="7.512271429">
-    <testsuite name="src/api/client.test.ts" timestamp="2026-08-26T13:56:54.845Z" hostname="BurakCan" tests="88" failures="0" errors="0" skipped="0" time="0.038462603">
-        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; sends `limit`, which is the parameter the backend actually reads" time="0.003346462">
+<testsuites name="vitest tests" tests="369" failures="0" errors="0" time="7.58869244">
+    <testsuite name="src/api/client.test.ts" timestamp="2026-08-27T21:42:29.408Z" hostname="BurakCan" tests="99" failures="0" errors="0" skipped="0" time="0.039148848">
+        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; sends `limit`, which is the parameter the backend actually reads" time="0.002505891">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; repeats the key for each symbol, which is how FastAPI reads a list" time="0.000460956">
+        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; repeats the key for each symbol, which is how FastAPI reads a list" time="0.000347627">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; passes the screening filters through" time="0.000344144">
+        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; passes the screening filters through" time="0.000395975">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; omits the query string entirely when nothing was asked for" time="0.000126644">
+        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; omits the query string entirely when nothing was asked for" time="0.000129376">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; does not send a filter that was not set" time="0.000096786">
+        <testcase classname="src/api/client.test.ts" name="getInstruments &gt; does not send a filter that was not set" time="0.000117318">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="authentication &gt; attaches the bearer token when there is a session" time="0.000359348">
+        <testcase classname="src/api/client.test.ts" name="authentication &gt; attaches the bearer token when there is a session" time="0.000404302">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="authentication &gt; sends no Authorization header when signed out" time="0.000236987">
+        <testcase classname="src/api/client.test.ts" name="authentication &gt; sends no Authorization header when signed out" time="0.000136079">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPositions calls /api/investment/positions" time="0.000122792">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPositions calls /api/investment/positions" time="0.000116249">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPortfolioSummary calls /api/investment/portfolio/summary" time="0.000084877">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPortfolioSummary calls /api/investment/portfolio/summary" time="0.000087046">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getOrders calls /api/investment/orders" time="0.00007328">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getOrders calls /api/investment/orders" time="0.000113374">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getWatchlist calls /api/investment/watchlist" time="0.000069105">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getWatchlist calls /api/investment/watchlist" time="0.000080663">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getTopMovers calls /api/investment/top-movers" time="0.000169038">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getTopMovers calls /api/investment/top-movers" time="0.000075982">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getDividends calls /api/investment/dividends" time="0.000123546">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getDividends calls /api/investment/dividends" time="0.000075158">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getAssetAllocation calls /api/investment/asset-allocation" time="0.000083093">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getAssetAllocation calls /api/investment/asset-allocation" time="0.000074058">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getSectorAllocation calls /api/investment/sector-allocation" time="0.000143239">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getSectorAllocation calls /api/investment/sector-allocation" time="0.000143059">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getHeatmap calls /api/investment/heatmap" time="0.000080456">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getHeatmap calls /api/investment/heatmap" time="0.000084875">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPortfolioChart calls /api/investment/portfolio/chart" time="0.000071772">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPortfolioChart calls /api/investment/portfolio/chart" time="0.000076313">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getMarketTickers calls /api/market/tickers" time="0.000130624">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getMarketTickers calls /api/market/tickers" time="0.000074047">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getMarketNews calls /api/market/news" time="0.000179595">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getMarketNews calls /api/market/news" time="0.000073962">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPortfolioAnalysis calls /api/analytics/portfolio" time="0.000090043">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getPortfolioAnalysis calls /api/analytics/portfolio" time="0.000073021">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getCurrentUser calls /api/auth/me" time="0.000075692">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getCurrentUser calls /api/auth/me" time="0.000072305">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getConversations calls /api/ai_orchestrator/conversations" time="0.000109137">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; getConversations calls /api/ai_orchestrator/conversations" time="0.000105849">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; encodes a symbol into the candles path" time="0.000114871">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; encodes a symbol into the candles path" time="0.000186555">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; encodes a proposal id rather than interpolating it raw" time="0.00016152">
+        <testcase classname="src/api/client.test.ts" name="endpoint paths &gt; encodes a proposal id rather than interpolating it raw" time="0.000228683">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="failures &gt; rejects on a non-ok response instead of returning an empty body" time="0.005950968">
+        <testcase classname="src/api/client.test.ts" name="failures &gt; rejects on a non-ok response instead of returning an empty body" time="0.006947767">
             <system-err>
 [API Ağ Hatası] GET /investment/positions isteği başarısız oldu (Olası CORS veya Sunucu Hatası): Error: API Hatası: 500 undefined
-    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:242:23)
+    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:332:23)
     at processTicksAndRejections (node:internal/process/task_queues:103:5)
     at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:140:5
     at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
 
             </system-err>
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; strips a duplicate /api prefix rather than requesting /api/api/..." time="0.000287321">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; strips a duplicate /api prefix rather than requesting /api/api/..." time="0.000414618">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; leaves a relative path alone" time="0.000121184">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; leaves a relative path alone" time="0.000199361">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; passes an absolute URL through untouched" time="0.000090229">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; passes an absolute URL through untouched" time="0.000109119">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; sends a bearer token on a generic GET" time="0.000169725">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; sends a bearer token on a generic GET" time="0.000128339">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; omits the token on a generic GET when signed out" time="0.000090768">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; omits the token on a generic GET when signed out" time="0.000094357">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; rejects a failed generic GET" time="0.000949153">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; rejects a failed generic GET" time="0.00109281">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; serialises a POST body" time="0.000167823">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; serialises a POST body" time="0.000181114">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; sends no body when there is nothing to send" time="0.000097395">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; sends no body when there is nothing to send" time="0.000102128">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; sends a bearer token on a generic POST" time="0.00009612">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; sends a bearer token on a generic POST" time="0.000107602">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; omits the token on a generic POST when signed out" time="0.000140563">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; omits the token on a generic POST when signed out" time="0.00008866">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; rejects a failed POST rather than resolving with nothing" time="0.000296711">
+        <testcase classname="src/api/client.test.ts" name="the generic get/post escape hatches &gt; rejects a failed POST rather than resolving with nothing" time="0.000247924">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the trading endpoints &gt; stages a transaction against the real staging path" time="0.000167147">
+        <testcase classname="src/api/client.test.ts" name="the trading endpoints &gt; stages a transaction against the real staging path" time="0.000151825">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="remaining query and URL branches &gt; passes the market filter through" time="0.000562425">
+        <testcase classname="src/api/client.test.ts" name="remaining query and URL branches &gt; passes the market filter through" time="0.000133054">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="remaining query and URL branches &gt; strips a duplicate /api prefix on a POST too" time="0.000188809">
+        <testcase classname="src/api/client.test.ts" name="remaining query and URL branches &gt; strips a duplicate /api prefix on a POST too" time="0.00009455">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="remaining query and URL branches &gt; passes an absolute POST URL through untouched" time="0.000228057">
+        <testcase classname="src/api/client.test.ts" name="remaining query and URL branches &gt; passes an absolute POST URL through untouched" time="0.000111375">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; getBankAccounts calls /api/banking/accounts" time="0.000439679">
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; getBankAccounts calls /api/banking/accounts" time="0.000233483">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; getSavingsGoals calls /api/banking/savings-goals" time="0.000150424">
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; getSavingsGoals calls /api/banking/savings-goals" time="0.000093096">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; encodes the account number into the statement path" time="0.000158109">
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; encodes the account number into the statement path" time="0.000134197">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; passes the spending window" time="0.000092856">
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; passes the spending window" time="0.000109451">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; defaults the spending window to a month" time="0.000075379">
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; defaults the spending window to a month" time="0.000089803">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; passes the balance-history limit" time="0.000079427">
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; passes the balance-history limit" time="0.000087633">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; defaults the statement limit" time="0.000075339">
+        <testcase classname="src/api/client.test.ts" name="the banking endpoints &gt; defaults the statement limit" time="0.000078526">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="watchlist &gt; adds by symbol" time="0.000147493">
+        <testcase classname="src/api/client.test.ts" name="watchlist &gt; adds by symbol" time="0.000262013">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="watchlist &gt; removes by symbol with DELETE" time="0.000085769">
+        <testcase classname="src/api/client.test.ts" name="watchlist &gt; removes by symbol with DELETE" time="0.00012756">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="watchlist &gt; encodes the symbol into the path" time="0.000075369">
+        <testcase classname="src/api/client.test.ts" name="watchlist &gt; encodes the symbol into the path" time="0.000097628">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="getRiskProfile &gt; reads the user-scoped profile endpoint" time="0.000095463">
+        <testcase classname="src/api/client.test.ts" name="getRiskProfile &gt; reads the user-scoped profile endpoint" time="0.000203979">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="401 handling &gt; refreshes once and retries the original request" time="0.001479547">
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; refreshes once and retries the original request" time="0.001516739">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="401 handling &gt; sends the renewed token on the retry, not the stale one" time="0.00020412">
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; sends the renewed token on the retry, not the stale one" time="0.000208832">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="401 handling &gt; clears the session when there is nothing to refresh with" time="0.001140305">
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; clears the session when there is nothing to refresh with" time="0.000984706">
             <system-err>
 [API Ağ Hatası] GET /investment/positions isteği başarısız oldu (Olası CORS veya Sunucu Hatası): Error: API Hatası: 401 undefined
-    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:242:23)
+    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:332:23)
     at processTicksAndRejections (node:internal/process/task_queues:103:5)
     at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:399:5
     at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
 
             </system-err>
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="401 handling &gt; does not try to refresh a failed login" time="0.000683554">
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; does not try to refresh a failed login" time="0.000742832">
             <system-err>
 [API Ağ Hatası] POST /api/auth/login isteği başarısız oldu: Error: API Hatası: 401 undefined
-    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:542:23)
+    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:697:23)
     at processTicksAndRejections (node:internal/process/task_queues:103:5)
     at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:408:5
     at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
 
             </system-err>
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="401 handling &gt; a dead refresh token ends the session rather than looping" time="0.000626515">
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; a dead refresh token ends the session rather than looping" time="0.0006546">
             <system-err>
 [API Ağ Hatası] GET /investment/positions isteği başarısız oldu (Olası CORS veya Sunucu Hatası): Error: API Hatası: 401 undefined
-    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:242:23)
+    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:332:23)
     at processTicksAndRejections (node:internal/process/task_queues:103:5)
     at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:425:5
     at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
 
             </system-err>
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="401 handling &gt; does not redirect when the user is already on the login page" time="0.000799209">
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; does not redirect when the user is already on the login page" time="0.000767856">
             <system-err>
 [API Ağ Hatası] GET /investment/positions isteği başarısız oldu (Olası CORS veya Sunucu Hatası): Error: API Hatası: 401 undefined
-    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:242:23)
+    at ApiClient.request (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:332:23)
     at processTicksAndRejections (node:internal/process/task_queues:103:5)
     at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:435:5
     at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
 
             </system-err>
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="401 handling &gt; concurrent 401s share one refresh" time="0.000338155">
+        <testcase classname="src/api/client.test.ts" name="401 handling &gt; concurrent 401s share one refresh" time="0.000368642">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat &gt; reports each stage and then the finished answer" time="0.00064559">
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; reports each stage and then the finished answer" time="0.000490257">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat &gt; reassembles an event split across two reads" time="0.000193554">
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; reassembles an event split across two reads" time="0.000272585">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat &gt; returns false when the stream cannot be opened, so the caller falls back" time="0.000227596">
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; returns false when the stream cannot be opened, so the caller falls back" time="0.000144951">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat &gt; returns false when fetch itself throws" time="0.000198582">
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; returns false when fetch itself throws" time="0.000192926">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat &gt; stops on an in-band error event" time="0.000151384">
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; stops on an in-band error event" time="0.000147314">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat &gt; ignores a null payload" time="0.000119214">
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; ignores a null payload" time="0.000133994">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat &gt; works with no handlers supplied" time="0.000100198">
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; works with no handlers supplied" time="0.00018632">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat &gt; ignores malformed frames rather than aborting the turn" time="0.000126527">
+        <testcase classname="src/api/client.test.ts" name="streamChat &gt; ignores malformed frames rather than aborting the turn" time="0.000231376">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="conversations &gt; lists conversations with the requested page window" time="0.000172498">
+        <testcase classname="src/api/client.test.ts" name="conversations &gt; lists conversations with the requested page window" time="0.000205294">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="conversations &gt; omits the query string when no window was asked for" time="0.000163215">
+        <testcase classname="src/api/client.test.ts" name="conversations &gt; omits the query string when no window was asked for" time="0.000183231">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="conversations &gt; reads one conversation by thread id" time="0.000123684">
+        <testcase classname="src/api/client.test.ts" name="conversations &gt; reads one conversation by thread id" time="0.000137564">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="conversations &gt; passes a message window through when one is given" time="0.000087102">
+        <testcase classname="src/api/client.test.ts" name="conversations &gt; passes a message window through when one is given" time="0.000099264">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="conversations &gt; escapes a thread id so it cannot alter the path" time="0.000078064">
+        <testcase classname="src/api/client.test.ts" name="conversations &gt; escapes a thread id so it cannot alter the path" time="0.00009502">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="conversations &gt; renames a conversation with PATCH" time="0.000182762">
+        <testcase classname="src/api/client.test.ts" name="conversations &gt; renames a conversation with PATCH" time="0.000195791">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="conversations &gt; surfaces a failed rename rather than pretending it worked" time="0.000168852">
+        <testcase classname="src/api/client.test.ts" name="conversations &gt; surfaces a failed rename rather than pretending it worked" time="0.002736103">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="conversations &gt; deletes a conversation and reads the confirmation body" time="0.000212344">
+        <testcase classname="src/api/client.test.ts" name="conversations &gt; deletes a conversation and reads the confirmation body" time="0.000403501">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="ensureFreshSession &gt; is anonymous when there is no token at all" time="0.003564167">
+        <testcase classname="src/api/client.test.ts" name="ensureFreshSession &gt; is anonymous when there is no token at all" time="0.000221147">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="ensureFreshSession &gt; leaves a healthy token alone and makes no request" time="0.000659747">
+        <testcase classname="src/api/client.test.ts" name="ensureFreshSession &gt; leaves a healthy token alone and makes no request" time="0.000327465">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="ensureFreshSession &gt; refreshes a token that is about to expire" time="0.000370217">
+        <testcase classname="src/api/client.test.ts" name="ensureFreshSession &gt; refreshes a token that is about to expire" time="0.000212371">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="ensureFreshSession &gt; falls back to anonymous when the refresh fails" time="0.000195484">
+        <testcase classname="src/api/client.test.ts" name="ensureFreshSession &gt; falls back to anonymous when the refresh fails" time="0.000254755">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="ensureFreshSession &gt; does not redirect on failure" time="0.000328392">
+        <testcase classname="src/api/client.test.ts" name="ensureFreshSession &gt; does not redirect on failure" time="0.00016493">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat persistence frame &gt; reports the saved frame the backend appends after the answer" time="0.000570987">
+        <testcase classname="src/api/client.test.ts" name="streamChat persistence frame &gt; reports the saved frame the backend appends after the answer" time="0.000363276">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat persistence frame &gt; carries the reason a turn was not stored" time="0.000359661">
+        <testcase classname="src/api/client.test.ts" name="streamChat persistence frame &gt; carries the reason a turn was not stored" time="0.000165668">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="streamChat persistence frame &gt; survives a saved frame with no handler attached" time="0.000334881">
+        <testcase classname="src/api/client.test.ts" name="streamChat persistence frame &gt; survives a saved frame with no handler attached" time="0.000314306">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="onSessionExpired &gt; clears the chat store along with the tokens" time="0.000293114">
+        <testcase classname="src/api/client.test.ts" name="onSessionExpired &gt; clears the chat store along with the tokens" time="0.000281179">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="transfers and error messages &gt; posts a transfer to the banking endpoint" time="0.000646403">
+        <testcase classname="src/api/client.test.ts" name="transfers and error messages &gt; posts a transfer to the banking endpoint" time="0.000709373">
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="transfers and error messages &gt; surfaces the backend&apos;s reason instead of a bare status code" time="0.000862619">
+        <testcase classname="src/api/client.test.ts" name="transfers and error messages &gt; surfaces the backend&apos;s reason instead of a bare status code" time="0.000755638">
             <system-err>
 [API Ağ Hatası] POST /api/banking/transfers isteği başarısız oldu: Error: Bakiye yetersiz: transfer ücretle birlikte 120 TL.
-    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:542:23)
+    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:697:23)
     at processTicksAndRejections (node:internal/process/task_queues:103:5)
     at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:785:5
     at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
 
             </system-err>
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="transfers and error messages &gt; joins FastAPI validation messages, which arrive as an array" time="0.000528787">
+        <testcase classname="src/api/client.test.ts" name="transfers and error messages &gt; joins FastAPI validation messages, which arrive as an array" time="0.000556939">
             <system-err>
 [API Ağ Hatası] POST /api/banking/transfers isteği başarısız oldu: Error: amount pozitif olmalı • hesap gerekli
-    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:542:23)
+    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:697:23)
     at processTicksAndRejections (node:internal/process/task_queues:103:5)
     at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:792:5
     at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
 
             </system-err>
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="transfers and error messages &gt; falls back to the status line when the array carries no usable text" time="0.000539765">
+        <testcase classname="src/api/client.test.ts" name="transfers and error messages &gt; falls back to the status line when the array carries no usable text" time="0.000652836">
             <system-err>
 [API Ağ Hatası] POST /api/banking/transfers isteği başarısız oldu: Error: API Hatası: 500 undefined
-    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:542:23)
+    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:697:23)
     at processTicksAndRejections (node:internal/process/task_queues:103:5)
     at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:799:5
     at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
 
             </system-err>
         </testcase>
-        <testcase classname="src/api/client.test.ts" name="transfers and error messages &gt; falls back when the body is not JSON at all" time="0.000510967">
+        <testcase classname="src/api/client.test.ts" name="transfers and error messages &gt; falls back when the body is not JSON at all" time="0.000704146">
             <system-err>
 [API Ağ Hatası] POST /api/banking/transfers isteği başarısız oldu: Error: API Hatası: 502 Bad Gateway
-    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:542:23)
+    at ApiClient.post (/home/burakcan/InterFive/MoneyFast/frontend/src/api/client.ts:697:23)
     at processTicksAndRejections (node:internal/process/task_queues:103:5)
     at /home/burakcan/InterFive/MoneyFast/frontend/src/api/client.test.ts:808:5
     at file:///home/burakcan/InterFive/MoneyFast/frontend/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20
 
             </system-err>
         </testcase>
-    </testsuite>
-    <testsuite name="src/hooks/useChatSessions.test.tsx" timestamp="2026-08-26T13:56:54.879Z" hostname="BurakCan" tests="52" failures="0" errors="0" skipped="0" time="0.306298909">
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; loads a signed-in user’s sessions from the server" time="0.017917823">
+        <testcase classname="src/api/client.test.ts" name="banking payments &gt; looks a bill up by institution and subscriber number" time="0.000481332">
         </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; opens the most recent conversation and loads its messages" time="0.005910976">
+        <testcase classname="src/api/client.test.ts" name="banking payments &gt; stages a payment without moving money" time="0.000322281">
         </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; deletes the legacy key without ever reading it" time="0.004656407">
+        <testcase classname="src/api/client.test.ts" name="banking payments &gt; confirms by proposal id" time="0.00014107">
         </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; purges the legacy key for an anonymous visitor too" time="0.002834529">
+        <testcase classname="src/api/client.test.ts" name="banking payments &gt; escapes a proposal id rather than pasting it into the path" time="0.000095971">
         </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; reads local sessions for an anonymous visitor" time="0.003210015">
+        <testcase classname="src/api/client.test.ts" name="banking payments &gt; reads saved payees" time="0.000221318">
         </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; shows a notice instead of falling back to localStorage when the list fails" time="0.004720062">
+        <testcase classname="src/api/client.test.ts" name="banking payments &gt; adds a saved payee" time="0.00018926">
         </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; keeps the session listed when its messages fail to load" time="0.004972187">
+        <testcase classname="src/api/client.test.ts" name="banking payments &gt; deletes a saved payee" time="0.000138826">
         </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; does not open anything when there are no conversations" time="0.005341857">
+        <testcase classname="src/api/client.test.ts" name="accounts &gt; asks for every account money can move between" time="0.000261511">
         </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; never writes a signed-in user’s conversations to localStorage" time="0.004618086">
+        <testcase classname="src/api/client.test.ts" name="cards and loans &gt; reads the cards" time="0.000123283">
         </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; starts a new empty session" time="0.004381943">
+        <testcase classname="src/api/client.test.ts" name="cards and loans &gt; reads the loans" time="0.000127377">
         </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; fetches messages the first time a session is opened" time="0.005626027">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; does not refetch a session whose messages are already loaded" time="0.003879306">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; deletes on the server, not just in the array" time="0.003815156">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; restores the row when the delete fails" time="0.004299933">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; restores it to its place in the list, not to the end" time="0.003957886">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; does not call the server for a session that was never sent" time="0.004946676">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; ignores a delete for an id that is not there" time="0.004142477">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; renames on the server" time="0.003708265">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; puts the old title back when the rename fails" time="0.00361188">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; renames a local session without calling the server" time="0.002945759">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; ignores a rename for an id that is not there" time="0.004941243">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; dismisses the context panel" time="0.004182296">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; dismisses a notice" time="0.003731318">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; appends the question and the answer" time="0.003797644">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; opens a session and titles it from the first message" time="0.006366341">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; truncates a long first message into the title" time="0.004513868">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; sends the prior turns and the thread id" time="0.004565252">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; refreshes the session before every turn" time="0.003280218">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; reports the stage labels while the graph runs" time="0.002469595">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; falls back to the buffered endpoint when the stream cannot be established" time="0.002413605">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; falls back when the stream reports done but delivers nothing" time="0.002633888">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; sets the context topic from the answer" time="0.002572532">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; marks the answer for the typewriter" time="0.002467081">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; shows an error bubble when the request fails outright" time="0.003186793">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; starts a fresh session when the active id no longer exists" time="0.00452109">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; says nothing when the turn was stored" time="0.002694907">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; says nothing to a genuinely anonymous visitor" time="0.003656302">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; warns when the session expired mid-conversation" time="0.002251556">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; warns, in different words, when the write failed" time="0.002564553">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; reads the status from the buffered response too" time="0.001219408">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; tolerates a buffered response with no status at all" time="0.002617049">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; promotes a local session to a server one once it is stored" time="0.003590625">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; leaves an unsaved session local" time="0.004484157">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; falls back to a timestamp id where crypto.randomUUID is unavailable" time="0.003661233">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; titles an untitled conversation rather than showing a blank row" time="0.003733436">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; tolerates a stored message with no disclosures field" time="0.003722042">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; uses `text` when the answer has no `final_output`" time="0.002701831">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; says so rather than rendering an empty bubble when neither is present" time="0.002806175">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; keeps a server-supplied message id when there is one" time="0.002470905">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="unmounting mid-hydration &gt; does not touch state after the session check resolves late" time="0.000922932">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="unmounting mid-hydration &gt; does not apply a conversation list that arrives after unmount" time="0.052809829">
-        </testcase>
-        <testcase classname="src/hooks/useChatSessions.test.tsx" name="unmounting mid-hydration &gt; does not raise a notice for a failure that arrives after unmount" time="0.052197243">
+        <testcase classname="src/api/client.test.ts" name="cards and loans &gt; merges card settings rather than replacing them" time="0.000159585">
         </testcase>
     </testsuite>
-    <testsuite name="src/hooks/useComparisonSeries.test.ts" timestamp="2026-08-26T13:56:54.897Z" hostname="BurakCan" tests="11" failures="0" errors="0" skipped="0" time="0.444200532">
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; rebases each series to percent change from its first close" time="0.063869157">
+    <testsuite name="src/hooks/useChatSessions.test.tsx" timestamp="2026-08-27T21:42:29.449Z" hostname="BurakCan" tests="52" failures="0" errors="0" skipped="0" time="0.36755477">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; loads a signed-in user’s sessions from the server" time="0.021357249">
         </testcase>
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; aligns two instruments on the same dates" time="0.052769934">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; opens the most recent conversation and loads its messages" time="0.005484383">
         </testcase>
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; keeps a date on which only one instrument traded" time="0.052394726">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; deletes the legacy key without ever reading it" time="0.007815971">
         </testcase>
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; sorts the rows chronologically" time="0.052138174">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; purges the legacy key for an anonymous visitor too" time="0.005083371">
         </testcase>
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; skips a series whose first close is zero rather than dividing by it" time="0.053608058">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; reads local sessions for an anonymous visitor" time="0.00514083">
         </testcase>
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; requests nothing when no symbols are selected" time="0.002600287">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; shows a notice instead of falling back to localStorage when the list fails" time="0.007498169">
         </testcase>
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; yields an empty chart when the request fails" time="0.053077829">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; keeps the session listed when its messages fail to load" time="0.005153807">
         </testcase>
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; tolerates a response with no candles" time="0.053146727">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; does not open anything when there are no conversations" time="0.003582684">
         </testcase>
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; does not refetch when given an equal array of symbols" time="0.053572237">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="hydration &gt; never writes a signed-in user’s conversations to localStorage" time="0.004821364">
         </testcase>
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="unmounting mid-flight &gt; does not set state after the component is gone" time="0.002419074">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; starts a new empty session" time="0.003586306">
         </testcase>
-        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="unmounting mid-flight &gt; swallows a rejection that arrives after unmount" time="0.002081527">
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; fetches messages the first time a session is opened" time="0.006697581">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; does not refetch a session whose messages are already loaded" time="0.004350103">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; deletes on the server, not just in the array" time="0.004756922">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; restores the row when the delete fails" time="0.004801384">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; restores it to its place in the list, not to the end" time="0.005678183">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; does not call the server for a session that was never sent" time="0.005244068">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; ignores a delete for an id that is not there" time="0.004429812">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; renames on the server" time="0.004449522">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; puts the old title back when the rename fails" time="0.004913609">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; renames a local session without calling the server" time="0.005038117">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; ignores a rename for an id that is not there" time="0.006689447">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; dismisses the context panel" time="0.004732703">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="session management &gt; dismisses a notice" time="0.005117184">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; appends the question and the answer" time="0.013960946">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; opens a session and titles it from the first message" time="0.006307314">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; truncates a long first message into the title" time="0.00483647">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; sends the prior turns and the thread id" time="0.010017522">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; refreshes the session before every turn" time="0.003216626">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; reports the stage labels while the graph runs" time="0.001715491">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; falls back to the buffered endpoint when the stream cannot be established" time="0.003359643">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; falls back when the stream reports done but delivers nothing" time="0.003065784">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; sets the context topic from the answer" time="0.002935649">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; marks the answer for the typewriter" time="0.00143918">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; shows an error bubble when the request fails outright" time="0.006005947">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="sending a message &gt; starts a fresh session when the active id no longer exists" time="0.004753934">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; says nothing when the turn was stored" time="0.002997214">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; says nothing to a genuinely anonymous visitor" time="0.003809863">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; warns when the session expired mid-conversation" time="0.003148837">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; warns, in different words, when the write failed" time="0.002973806">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; reads the status from the buffered response too" time="0.003343391">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; tolerates a buffered response with no status at all" time="0.003146606">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; promotes a local session to a server one once it is stored" time="0.00436402">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="persistence notices &gt; leaves an unsaved session local" time="0.004503114">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; falls back to a timestamp id where crypto.randomUUID is unavailable" time="0.006574349">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; titles an untitled conversation rather than showing a blank row" time="0.00474643">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; tolerates a stored message with no disclosures field" time="0.006586398">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; uses `text` when the answer has no `final_output`" time="0.003579346">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; says so rather than rendering an empty bubble when neither is present" time="0.003647546">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="edge cases &gt; keeps a server-supplied message id when there is one" time="0.003387387">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="unmounting mid-hydration &gt; does not touch state after the session check resolves late" time="0.001311441">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="unmounting mid-hydration &gt; does not apply a conversation list that arrives after unmount" time="0.052533961">
+        </testcase>
+        <testcase classname="src/hooks/useChatSessions.test.tsx" name="unmounting mid-hydration &gt; does not raise a notice for a failure that arrives after unmount" time="0.054495743">
         </testcase>
     </testsuite>
-    <testsuite name="src/hooks/useInstrument.test.tsx" timestamp="2026-08-26T13:56:54.901Z" hostname="BurakCan" tests="9" failures="0" errors="0" skipped="0" time="0.350053043">
-        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; fetches the named instrument" time="0.070851393">
+    <testsuite name="src/hooks/useComparisonSeries.test.ts" timestamp="2026-08-27T21:42:29.467Z" hostname="BurakCan" tests="11" failures="0" errors="0" skipped="0" time="0.448272679">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; rebases each series to percent change from its first close" time="0.064130222">
         </testcase>
-        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; keeps the price on the live stream" time="0.053754051">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; aligns two instruments on the same dates" time="0.053775475">
         </testcase>
-        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; reports nothing for a symbol the API does not know" time="0.053499961">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; keeps a date on which only one instrument traded" time="0.053960314">
         </testcase>
-        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; does not call the API for an empty symbol" time="0.00254683">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; sorts the rows chronologically" time="0.053384549">
         </testcase>
-        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; stops loading and shows nothing when the request fails" time="0.052785">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; skips a series whose first close is zero rather than dividing by it" time="0.053286888">
         </testcase>
-        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; tolerates a response with no instruments key" time="0.052387688">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; requests nothing when no symbols are selected" time="0.002806767">
         </testcase>
-        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; refetches when the symbol changes" time="0.055492257">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; yields an empty chart when the request fails" time="0.052866963">
         </testcase>
-        <testcase classname="src/hooks/useInstrument.test.tsx" name="unmounting mid-flight &gt; does not set state after the component is gone" time="0.002494952">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; tolerates a response with no candles" time="0.05346907">
         </testcase>
-        <testcase classname="src/hooks/useInstrument.test.tsx" name="unmounting mid-flight &gt; swallows a rejection that arrives after unmount" time="0.003565186">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="useComparisonSeries &gt; does not refetch when given an equal array of symbols" time="0.05307829">
         </testcase>
-    </testsuite>
-    <testsuite name="src/hooks/useInstruments.test.tsx" timestamp="2026-08-26T13:56:54.904Z" hostname="BurakCan" tests="17" failures="0" errors="0" skipped="0" time="0.86615818">
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; renames the API fields to the shape the tables read" time="0.0628206">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="unmounting mid-flight &gt; does not set state after the component is gone" time="0.002363883">
         </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the NASDAQ exchange onto the ABD tab" time="0.053775689">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the NYSE exchange onto the ABD tab" time="0.053576955">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the BIST exchange onto the BIST tab" time="0.052544356">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the currency onto a display unit" time="0.053190367">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; leaves an unpublished ratio undefined rather than zero" time="0.052460078">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; labels a missing sector rather than leaving it blank" time="0.05310082">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; treats a missing change as flat so sorting does not produce NaN" time="0.052703544">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; derives the sector list from what is actually present" time="0.053770926">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; requests the limit it was given" time="0.003224744">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; stops loading and shows nothing when the request fails" time="0.053755844">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; tolerates a response with no instruments key" time="0.052139662">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; falls back to BIST for an exchange nobody mapped" time="0.052800017">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; falls back to BIST when the exchange is null" time="0.051869826">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; shows an unmapped currency code rather than an empty unit" time="0.053536579">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; defaults absent market cap and 52-week bounds to zero" time="0.054526617">
-        </testcase>
-        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; falls back to the symbol when the instrument has no name" time="0.053594875">
+        <testcase classname="src/hooks/useComparisonSeries.test.ts" name="unmounting mid-flight &gt; swallows a rejection that arrives after unmount" time="0.002126113">
         </testcase>
     </testsuite>
-    <testsuite name="src/hooks/useLiveRows.test.ts" timestamp="2026-08-26T13:56:54.910Z" hostname="BurakCan" tests="8" failures="0" errors="0" skipped="0" time="0.020137484">
-        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; replaces the price with the live one" time="0.010369672">
+    <testsuite name="src/hooks/useInstrument.test.tsx" timestamp="2026-08-27T21:42:29.472Z" hostname="BurakCan" tests="9" failures="0" errors="0" skipped="0" time="0.343282933">
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; fetches the named instrument" time="0.064666704">
         </testcase>
-        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; refreshes the change alongside the price" time="0.001252392">
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; keeps the price on the live stream" time="0.052989793">
         </testcase>
-        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; leaves a row alone when no quote arrived for it" time="0.001300757">
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; reports nothing for a symbol the API does not know" time="0.054798102">
         </testcase>
-        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; ignores a quote whose price is not a number" time="0.000937763">
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; does not call the API for an empty symbol" time="0.003441815">
         </testcase>
-        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; keeps the fetched change when the frame carries none" time="0.000927166">
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; stops loading and shows nothing when the request fails" time="0.053284234">
         </testcase>
-        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; recomputes derived columns through the derive callback" time="0.000934793">
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; tolerates a response with no instruments key" time="0.052469675">
         </testcase>
-        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; passes the quote to derive so the previous close can be recovered" time="0.001082786">
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="useInstrument &gt; refetches when the symbol changes" time="0.054265818">
         </testcase>
-        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; handles an empty list" time="0.000828713">
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="unmounting mid-flight &gt; does not set state after the component is gone" time="0.002447944">
         </testcase>
-    </testsuite>
-    <testsuite name="src/hooks/useMarketStream.test.ts" timestamp="2026-08-26T13:56:54.913Z" hostname="BurakCan" tests="20" failures="0" errors="0" skipped="0" time="0.139296459">
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; opens exactly one connection for many subscribers" time="0.020876252">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; delivers a frame to every subscriber" time="0.004535214">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; carries the delay, so a price is never presented as live" time="0.001858469">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; skips a malformed frame instead of clearing the snapshot" time="0.001677609">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; closes the connection when the last subscriber unmounts" time="0.00136297">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; keeps the connection while any subscriber remains" time="0.002006071">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; reconnects after a dropped connection" time="0.00194165">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; falls back to polling after repeated failures" time="0.02203924">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="useQuote &gt; returns one instrument’s quote" time="0.002323591">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="useQuote &gt; returns undefined before a frame arrives, not a zeroed placeholder" time="0.001960471">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; polls the whole universe, not the four-symbol ticker strip" time="0.020833871">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; normalises a polled row that omits its change fields" time="0.020279992">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; recovers the FX rates while polling, so conversions keep working" time="0.021363204">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; keeps the last snapshot when a poll fails" time="0.003591502">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; ignores a non-ok poll response" time="0.002067256">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; tolerates a frame with no fields rather than throwing" time="0.001896521">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="polling is started once &gt; a further error does not start a second poll timer" time="0.002012854">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="conversion rates &gt; reads the lira rates out of the frame itself" time="0.001283995">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="conversion rates &gt; reports no rate when the FX instrument is absent" time="0.001261224">
-        </testcase>
-        <testcase classname="src/hooks/useMarketStream.test.ts" name="conversion rates &gt; carries each quote’s own currency" time="0.001341346">
+        <testcase classname="src/hooks/useInstrument.test.tsx" name="unmounting mid-flight &gt; swallows a rejection that arrives after unmount" time="0.002365537">
         </testcase>
     </testsuite>
-    <testsuite name="src/hooks/useTypewriter.test.ts" timestamp="2026-08-26T13:56:54.921Z" hostname="BurakCan" tests="7" failures="0" errors="0" skipped="0" time="0.084837299">
-        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; starts empty and ends with the whole text" time="0.076338251">
+    <testsuite name="src/hooks/useInstruments.test.tsx" timestamp="2026-08-27T21:42:29.475Z" hostname="BurakCan" tests="17" failures="0" errors="0" skipped="0" time="0.870619668">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; renames the API fields to the shape the tables read" time="0.063578833">
         </testcase>
-        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; reveals the text progressively rather than in one jump" time="0.001620247">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the NASDAQ exchange onto the ABD tab" time="0.052938582">
         </testcase>
-        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; shows everything at once when disabled" time="0.001051448">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the NYSE exchange onto the ABD tab" time="0.053636844">
         </testcase>
-        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; respects prefers-reduced-motion" time="0.000889203">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the BIST exchange onto the BIST tab" time="0.052826691">
         </testcase>
-        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; does not animate a very long answer" time="0.000901681">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; maps the currency onto a display unit" time="0.055031612">
         </testcase>
-        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; survives a missing matchMedia" time="0.000642502">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; leaves an unpublished ratio undefined rather than zero" time="0.053316312">
         </testcase>
-        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; cancels its frame on unmount" time="0.000832909">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; labels a missing sector rather than leaving it blank" time="0.053804483">
         </testcase>
-    </testsuite>
-    <testsuite name="src/hooks/useWatchlist.test.ts" timestamp="2026-08-26T13:56:54.924Z" hostname="BurakCan" tests="8" failures="0" errors="0" skipped="0" time="0.448606399">
-        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; loads the followed symbols" time="0.064202438">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; treats a missing change as flat so sorting does not produce NaN" time="0.053113165">
         </testcase>
-        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; adds a symbol that is not followed yet" time="0.054126682">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; derives the sector list from what is actually present" time="0.052504474">
         </testcase>
-        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; removes one that is" time="0.053670653">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; requests the limit it was given" time="0.001695185">
         </testcase>
-        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; reverts an add that the server rejected" time="0.055357797">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; stops loading and shows nothing when the request fails" time="0.052574375">
         </testcase>
-        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; reverts a removal that the server rejected" time="0.055471217">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="useInstruments &gt; tolerates a response with no instruments key" time="0.053779076">
         </testcase>
-        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; leaves the stars dark when the list cannot be read" time="0.054858008">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; falls back to BIST for an exchange nobody mapped" time="0.053335853">
         </testcase>
-        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; survives a response with no `all` group" time="0.054117931">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; falls back to BIST when the exchange is null" time="0.052344073">
         </testcase>
-        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; refresh re-reads the server" time="0.054430551">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; shows an unmapped currency code rather than an empty unit" time="0.053597897">
         </testcase>
-    </testsuite>
-    <testsuite name="src/lib/chartFormat.test.ts" timestamp="2026-08-26T13:56:54.927Z" hostname="BurakCan" tests="17" failures="0" errors="0" skipped="0" time="0.003884439">
-        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; passes a real number through" time="0.001340063">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; defaults absent market cap and 52-week bounds to zero" time="0.055443071">
         </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; parses a numeric string, because recharts sometimes hands one over" time="0.0001278">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000076466">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000042443">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000044453">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000035572">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000033925">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000033122">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000035317">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; keeps a genuine zero" time="0.000045266">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; marks a gain with a plus so the direction is readable without colour" time="0.000111343">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; leaves a loss with its own minus" time="0.000047139">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; does not sign a flat reading" time="0.000118469">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; shows a dash when there is no value, not 0%" time="0.000060313">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="seriesName &gt; passes a string through" time="0.000117646">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="seriesName &gt; stringifies a non-string label" time="0.000075222">
-        </testcase>
-        <testcase classname="src/lib/chartFormat.test.ts" name="seriesName &gt; renders an absent label as empty rather than &quot;undefined&quot;" time="0.000059058">
+        <testcase classname="src/hooks/useInstruments.test.tsx" name="adapter fallbacks &gt; falls back to the symbol when the instrument has no name" time="0.05430577">
         </testcase>
     </testsuite>
-    <testsuite name="src/lib/chatStorage.test.ts" timestamp="2026-08-26T13:56:54.933Z" hostname="BurakCan" tests="16" failures="0" errors="0" skipped="0" time="0.008762698">
-        <testcase classname="src/lib/chatStorage.test.ts" name="purgeLegacyChatSessions &gt; deletes the legacy key" time="0.001951434">
+    <testsuite name="src/hooks/useLiveRows.test.ts" timestamp="2026-08-27T21:42:29.481Z" hostname="BurakCan" tests="8" failures="0" errors="0" skipped="0" time="0.022250953">
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; replaces the price with the live one" time="0.011328157">
         </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="purgeLegacyChatSessions &gt; is safe when the key was never there" time="0.000712871">
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; refreshes the change alongside the price" time="0.001283801">
         </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="purgeLegacyChatSessions &gt; leaves the anonymous store alone" time="0.000960229">
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; leaves a row alone when no quote arrived for it" time="0.001465973">
         </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; is empty when nothing was stored" time="0.000816167">
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; ignores a quote whose price is not a number" time="0.001005026">
         </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; revives Date fields, which JSON round-tripping flattens to strings" time="0.000392959">
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; keeps the fetched change when the frame carries none" time="0.001281139">
         </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; returns an empty list rather than throwing on corrupt JSON" time="0.000239261">
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; recomputes derived columns through the derive callback" time="0.000942738">
         </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; returns an empty list when the stored value is not an array" time="0.000181036">
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; passes the quote to derive so the previous close can be recovered" time="0.001400446">
         </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; tolerates a session with no messages array" time="0.000188692">
-        </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; never reads the legacy key" time="0.000116254">
-        </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="writeAnonSessions &gt; stores what readAnonSessions can restore" time="0.00024577">
-        </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="writeAnonSessions &gt; removes the key entirely when the last session is deleted" time="0.000099619">
-        </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="clearChatStorage &gt; removes both the anonymous store and the legacy key" time="0.000191936">
-        </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="trimForRequest &gt; maps the UI sender onto the wire role" time="0.000170508">
-        </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="trimForRequest &gt; keeps only the newest messages" time="0.000168127">
-        </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="trimForRequest &gt; caps a single oversized message" time="0.000181673">
-        </testcase>
-        <testcase classname="src/lib/chatStorage.test.ts" name="trimForRequest &gt; is empty for an empty conversation" time="0.00012386">
+        <testcase classname="src/hooks/useLiveRows.test.ts" name="useLiveRows &gt; handles an empty list" time="0.000825057">
         </testcase>
     </testsuite>
-    <testsuite name="src/lib/jwt.test.ts" timestamp="2026-08-26T13:56:54.938Z" hostname="BurakCan" tests="17" failures="0" errors="0" skipped="0" time="0.004847568">
-        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; reads the claims out of a well-formed token" time="0.001552181">
+    <testsuite name="src/hooks/useMarketStream.test.ts" timestamp="2026-08-27T21:42:29.485Z" hostname="BurakCan" tests="20" failures="0" errors="0" skipped="0" time="0.135358682">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; opens exactly one connection for many subscribers" time="0.018455985">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; returns null for a null token" time="0.00013572">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; delivers a frame to every subscriber" time="0.003927753">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; returns null when there is no payload segment" time="0.000062018">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; carries the delay, so a price is never presented as live" time="0.001572411">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; returns null rather than throwing on undecodable base64" time="0.000195328">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; skips a malformed frame instead of clearing the snapshot" time="0.001596581">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; returns null when the payload is not JSON" time="0.000102403">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; closes the connection when the last subscriber unmounts" time="0.001302409">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; decodes base64url, which is what JWT actually uses" time="0.000099247">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; keeps the connection while any subscriber remains" time="0.001477125">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpired &gt; is false while the token is still good" time="0.000152453">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; reconnects after a dropped connection" time="0.001927212">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpired &gt; is true once exp has passed" time="0.000126017">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useMarketStream &gt; falls back to polling after repeated failures" time="0.02062648">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpired &gt; treats a token with no exp as expired" time="0.000065262">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useQuote &gt; returns one instrument’s quote" time="0.001913289">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpired &gt; treats a non-numeric exp as expired" time="0.000048374">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="useQuote &gt; returns undefined before a frame arrives, not a zeroed placeholder" time="0.001408442">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpired &gt; treats a missing token as expired" time="0.000039817">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; polls the whole universe, not the four-symbol ticker strip" time="0.020823096">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpiringSoon &gt; is false for a token with plenty of life left" time="0.000392508">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; normalises a polled row that omits its change fields" time="0.021850931">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpiringSoon &gt; is true inside the window, before the token is actually dead" time="0.000105815">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; recovers the FX rates while polling, so conversions keep working" time="0.021144547">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpiringSoon &gt; honours a custom window" time="0.000076525">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; keeps the last snapshot when a poll fails" time="0.003227462">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpiringSoon &gt; is true when there is no readable exp" time="0.00006739">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; ignores a non-ok poll response" time="0.002122422">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="tokenSubject &gt; returns the sub claim" time="0.000066331">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="the polling fallback &gt; tolerates a frame with no fields rather than throwing" time="0.001756507">
         </testcase>
-        <testcase classname="src/lib/jwt.test.ts" name="tokenSubject &gt; returns an empty string when sub is absent or not a string" time="0.000084534">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="polling is started once &gt; a further error does not start a second poll timer" time="0.002368893">
         </testcase>
-    </testsuite>
-    <testsuite name="src/lib/money.test.ts" timestamp="2026-08-26T13:56:54.944Z" hostname="BurakCan" tests="32" failures="0" errors="0" skipped="0" time="0.021754096">
-        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; maps TRY to ₺" time="0.001934877">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="conversion rates &gt; reads the lira rates out of the frame itself" time="0.001559497">
         </testcase>
-        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; maps USD to $" time="0.000213305">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="conversion rates &gt; reports no rate when the FX instrument is absent" time="0.0015059">
         </testcase>
-        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; maps EUR to €" time="0.000113342">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; is case-insensitive" time="0.000111578">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; falls back to the code rather than guessing a symbol" time="0.00016153">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; leads with the lira sign" time="0.011222535">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; trails other symbols after the number" time="0.000273235">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; groups thousands the Turkish way" time="0.000127987">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; always shows two decimals" time="0.000091944">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; defaults to the base currency when none is given" time="0.0000654">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; renders %p as a dash, not as zero" time="0.000057901">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; renders %p as a dash, not as zero" time="0.000036582">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; renders %p as a dash, not as zero" time="0.000033866">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; keeps a genuine zero" time="0.000058745">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; formats a negative amount" time="0.000058763">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="convert &gt; converts a foreign amount into lira" time="0.000159167">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="convert &gt; leaves the base currency untouched without needing a rate" time="0.000056941">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="convert &gt; converts between two foreign currencies through the base" time="0.000046472">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="convert &gt; returns null when the rate is missing rather than assuming 1.0" time="0.000077084">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="convert &gt; returns null for a currency it has never heard of" time="0.000047276">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; shows a foreign price with its lira equivalent" time="0.000130104">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; does not restate a lira price as itself" time="0.000141768">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; falls back to the native price when no rate is available" time="0.000088426">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; renders a missing amount as a dash" time="0.000051755">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; gives just the converted half, for a second line" time="0.000106579">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; is empty for a base-currency amount" time="0.00004608">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; is empty when the rate is unavailable" time="0.000127281">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; is empty for a missing amount" time="0.000058264">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatAmount &gt; formats without any currency marker" time="0.000106256">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="formatAmount &gt; accepts a wider precision for prices that need it" time="0.000068057">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="missing currency defaults &gt; treats an absent currency as the base rather than crashing" time="0.000074712">
-        </testcase>
-        <testcase classname="src/lib/money.test.ts" name="missing currency defaults &gt; renders an empty symbol for an absent currency code" time="0.000041512">
+        <testcase classname="src/hooks/useMarketStream.test.ts" name="conversion rates &gt; carries each quote’s own currency" time="0.001339921">
         </testcase>
     </testsuite>
-    <testsuite name="src/components/banking/__tests__/banking.render.test.tsx" timestamp="2026-08-26T13:56:54.955Z" hostname="BurakCan" tests="11" failures="0" errors="0" skipped="0" time="0.411949734">
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; renders the dashboard" time="0.065117501">
+    <testsuite name="src/hooks/useTypewriter.test.ts" timestamp="2026-08-27T21:42:29.492Z" hostname="BurakCan" tests="7" failures="0" errors="0" skipped="0" time="0.088427166">
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; starts empty and ends with the whole text" time="0.077680545">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; reveals the text progressively rather than in one jump" time="0.001809195">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; shows everything at once when disabled" time="0.001194906">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; respects prefers-reduced-motion" time="0.001424786">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; does not animate a very long answer" time="0.001182785">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; survives a missing matchMedia" time="0.000892647">
+        </testcase>
+        <testcase classname="src/hooks/useTypewriter.test.ts" name="useTypewriter &gt; cancels its frame on unmount" time="0.001124986">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/hooks/useWatchlist.test.ts" timestamp="2026-08-27T21:42:29.495Z" hostname="BurakCan" tests="8" failures="0" errors="0" skipped="0" time="0.442331971">
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; loads the followed symbols" time="0.063633044">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; adds a symbol that is not followed yet" time="0.054449364">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; removes one that is" time="0.054278669">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; reverts an add that the server rejected" time="0.053636981">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; reverts a removal that the server rejected" time="0.054049141">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; leaves the stars dark when the list cannot be read" time="0.053211693">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; survives a response with no `all` group" time="0.053813256">
+        </testcase>
+        <testcase classname="src/hooks/useWatchlist.test.ts" name="useWatchlist &gt; refresh re-reads the server" time="0.052915665">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/chartFormat.test.ts" timestamp="2026-08-27T21:42:29.498Z" hostname="BurakCan" tests="17" failures="0" errors="0" skipped="0" time="0.003908123">
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; passes a real number through" time="0.001325202">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; parses a numeric string, because recharts sometimes hands one over" time="0.000148736">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000085517">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000045089">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000046895">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000039156">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.00003596">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.000035906">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; returns null rather than 0 for %p" time="0.00003675">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="toNumber &gt; keeps a genuine zero" time="0.000158954">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; marks a gain with a plus so the direction is readable without colour" time="0.000110659">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; leaves a loss with its own minus" time="0.000053683">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; does not sign a flat reading" time="0.00004557">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="signedPercent &gt; shows a dash when there is no value, not 0%" time="0.000043806">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="seriesName &gt; passes a string through" time="0.000057189">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="seriesName &gt; stringifies a non-string label" time="0.000045687">
+        </testcase>
+        <testcase classname="src/lib/chartFormat.test.ts" name="seriesName &gt; renders an absent label as empty rather than &quot;undefined&quot;" time="0.00011053">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/chatStorage.test.ts" timestamp="2026-08-27T21:42:29.504Z" hostname="BurakCan" tests="16" failures="0" errors="0" skipped="0" time="0.007004038">
+        <testcase classname="src/lib/chatStorage.test.ts" name="purgeLegacyChatSessions &gt; deletes the legacy key" time="0.001846225">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="purgeLegacyChatSessions &gt; is safe when the key was never there" time="0.000573573">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="purgeLegacyChatSessions &gt; leaves the anonymous store alone" time="0.000735392">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; is empty when nothing was stored" time="0.000568677">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; revives Date fields, which JSON round-tripping flattens to strings" time="0.000232039">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; returns an empty list rather than throwing on corrupt JSON" time="0.00019003">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; returns an empty list when the stored value is not an array" time="0.00013486">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; tolerates a session with no messages array" time="0.000116549">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="readAnonSessions &gt; never reads the legacy key" time="0.000097532">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="writeAnonSessions &gt; stores what readAnonSessions can restore" time="0.000213942">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="writeAnonSessions &gt; removes the key entirely when the last session is deleted" time="0.000138558">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="clearChatStorage &gt; removes both the anonymous store and the legacy key" time="0.000206715">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="trimForRequest &gt; maps the UI sender onto the wire role" time="0.000173813">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="trimForRequest &gt; keeps only the newest messages" time="0.00016788">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="trimForRequest &gt; caps a single oversized message" time="0.000119318">
+        </testcase>
+        <testcase classname="src/lib/chatStorage.test.ts" name="trimForRequest &gt; is empty for an empty conversation" time="0.000068061">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/jwt.test.ts" timestamp="2026-08-27T21:42:29.509Z" hostname="BurakCan" tests="17" failures="0" errors="0" skipped="0" time="0.005076241">
+        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; reads the claims out of a well-formed token" time="0.001658707">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; returns null for a null token" time="0.000143872">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; returns null when there is no payload segment" time="0.000065325">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; returns null rather than throwing on undecodable base64" time="0.000120739">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; returns null when the payload is not JSON" time="0.000085933">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="decodeJwtPayload &gt; decodes base64url, which is what JWT actually uses" time="0.000098911">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpired &gt; is false while the token is still good" time="0.000155705">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpired &gt; is true once exp has passed" time="0.000175181">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpired &gt; treats a token with no exp as expired" time="0.000092059">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpired &gt; treats a non-numeric exp as expired" time="0.000056719">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpired &gt; treats a missing token as expired" time="0.000045206">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpiringSoon &gt; is false for a token with plenty of life left" time="0.000417152">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpiringSoon &gt; is true inside the window, before the token is actually dead" time="0.000118879">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpiringSoon &gt; honours a custom window" time="0.000091589">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="isTokenExpiringSoon &gt; is true when there is no readable exp" time="0.000074303">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="tokenSubject &gt; returns the sub claim" time="0.00006821">
+        </testcase>
+        <testcase classname="src/lib/jwt.test.ts" name="tokenSubject &gt; returns an empty string when sub is absent or not a string" time="0.000077093">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/lib/money.test.ts" timestamp="2026-08-27T21:42:29.516Z" hostname="BurakCan" tests="32" failures="0" errors="0" skipped="0" time="0.013028789">
+        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; maps TRY to ₺" time="0.001339505">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; maps USD to $" time="0.00010571">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; maps EUR to €" time="0.0000496">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; is case-insensitive" time="0.000054902">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="currencySymbol &gt; falls back to the code rather than guessing a symbol" time="0.000058611">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; leads with the lira sign" time="0.007676853">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; trails other symbols after the number" time="0.000194187">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; groups thousands the Turkish way" time="0.000085731">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; always shows two decimals" time="0.000074945">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; defaults to the base currency when none is given" time="0.000061968">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; renders %p as a dash, not as zero" time="0.000055415">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; renders %p as a dash, not as zero" time="0.000035532">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; renders %p as a dash, not as zero" time="0.000034313">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; keeps a genuine zero" time="0.000062438">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatMoney &gt; formats a negative amount" time="0.00005968">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="convert &gt; converts a foreign amount into lira" time="0.000173204">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="convert &gt; leaves the base currency untouched without needing a rate" time="0.000059605">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="convert &gt; converts between two foreign currencies through the base" time="0.000047964">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="convert &gt; returns null when the rate is missing rather than assuming 1.0" time="0.000070893">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="convert &gt; returns null for a currency it has never heard of" time="0.000044416">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; shows a foreign price with its lira equivalent" time="0.000126929">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; does not restate a lira price as itself" time="0.000149494">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; falls back to the native price when no rate is available" time="0.000150253">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatWithBase &gt; renders a missing amount as a dash" time="0.000086351">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; gives just the converted half, for a second line" time="0.00014866">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; is empty for a base-currency amount" time="0.000052592">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; is empty when the rate is unavailable" time="0.000045784">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="baseEquivalent &gt; is empty for a missing amount" time="0.000041561">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatAmount &gt; formats without any currency marker" time="0.000073384">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="formatAmount &gt; accepts a wider precision for prices that need it" time="0.000061444">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="missing currency defaults &gt; treats an absent currency as the base rather than crashing" time="0.000075939">
+        </testcase>
+        <testcase classname="src/lib/money.test.ts" name="missing currency defaults &gt; renders an empty symbol for an absent currency code" time="0.000043731">
+        </testcase>
+    </testsuite>
+    <testsuite name="src/components/banking/__tests__/banking.render.test.tsx" timestamp="2026-08-27T21:42:29.528Z" hostname="BurakCan" tests="13" failures="0" errors="0" skipped="0" time="0.437834629">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; renders the dashboard" time="0.083238034">
             <system-err>
 ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
 ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
 
             </system-err>
         </testcase>
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; renders the accounts view" time="0.016426439">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; renders the accounts view" time="0.017373012">
         </testcase>
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; renders the cards view" time="0.022924909">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; renders the cards view" time="0.01020997">
         </testcase>
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; renders the transfer wizard" time="0.016819532">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; renders the transfer wizard" time="0.014072602">
         </testcase>
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; reads accounts and their movements from the API" time="0.016523164">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; reads accounts and their movements from the API" time="0.01733653">
         </testcase>
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; shows the balance the API reported, not the mock one" time="0.017040988">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; shows the balance the API reported, not the mock one" time="0.013968665">
         </testcase>
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; groups the IBAN for display" time="0.012929138">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; groups the IBAN for display" time="0.014174756">
         </testcase>
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; lists only the selected account movements" time="0.008242246">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; lists only the selected account movements" time="0.007989645">
         </testcase>
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; does not pretend to open or close accounts" time="0.0438231">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; does not pretend to open or close accounts" time="0.041016378">
         </testcase>
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; sends the IBAN as the destination, not the recipient name" time="0.062654092">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; sends the IBAN as the destination, not the recipient name" time="0.065265443">
         </testcase>
-        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; surfaces a rejected transfer instead of reporting success" time="0.126611883">
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking &gt; surfaces a rejected transfer instead of reporting success" time="0.13542174">
+        </testcase>
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="banking regressions &gt; never asks for a statement for the investment account" time="0.009112569">
+        </testcase>
+        <testcase classname="src/components/banking/__tests__/banking.render.test.tsx" name="writes a card setting to the server instead of only to state" time="0.005408728">
         </testcase>
     </testsuite>
-    <testsuite name="src/components/portfolio/__tests__/performanceChart.render.test.tsx" timestamp="2026-08-26T13:56:54.959Z" hostname="BurakCan" tests="2" failures="0" errors="0" skipped="0" time="0.152255591">
-        <testcase classname="src/components/portfolio/__tests__/performanceChart.render.test.tsx" name="PortfolioPerformanceChart &gt; draws the fetched bars without the user touching the range" time="0.026696362">
+    <testsuite name="src/components/portfolio/__tests__/performanceChart.render.test.tsx" timestamp="2026-08-27T21:42:29.533Z" hostname="BurakCan" tests="2" failures="0" errors="0" skipped="0" time="0.154493217">
+        <testcase classname="src/components/portfolio/__tests__/performanceChart.render.test.tsx" name="PortfolioPerformanceChart &gt; draws the fetched bars without the user touching the range" time="0.027614415">
         </testcase>
-        <testcase classname="src/components/portfolio/__tests__/performanceChart.render.test.tsx" name="PortfolioPerformanceChart &gt; says so honestly when the series really is empty" time="0.123271053">
+        <testcase classname="src/components/portfolio/__tests__/performanceChart.render.test.tsx" name="PortfolioPerformanceChart &gt; says so honestly when the series really is empty" time="0.124300249">
             <system-err>
 Warning: An update to PortfolioPerformanceChart inside a test was not wrapped in act(...).
 
@@ -751,8 +777,8 @@ This ensures that you&apos;re testing the behavior the user would see in the bro
             </system-err>
         </testcase>
     </testsuite>
-    <testsuite name="src/components/risk/__tests__/risk.render.test.tsx" timestamp="2026-08-26T13:56:54.961Z" hostname="BurakCan" tests="5" failures="0" errors="0" skipped="0" time="0.482378576">
-        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; renders a scored profile" time="0.125863817">
+    <testsuite name="src/components/risk/__tests__/risk.render.test.tsx" timestamp="2026-08-27T21:42:29.537Z" hostname="BurakCan" tests="5" failures="0" errors="0" skipped="0" time="0.485036197">
+        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; renders a scored profile" time="0.127868264">
             <system-err>
 ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
 ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
@@ -764,7 +790,7 @@ The width(0) and height(0) of chart should be greater than 0,
 
             </system-err>
         </testcase>
-        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; survives a brand-new account with nothing to measure" time="0.088596975">
+        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; survives a brand-new account with nothing to measure" time="0.088394018">
             <system-err>
 The width(0) and height(0) of chart should be greater than 0,
        please check the style of container, or the props width(100%) and height(100%),
@@ -773,7 +799,7 @@ The width(0) and height(0) of chart should be greater than 0,
 
             </system-err>
         </testcase>
-        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; names what was left out instead of hiding it" time="0.091088395">
+        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; names what was left out instead of hiding it" time="0.091511572">
             <system-err>
 The width(0) and height(0) of chart should be greater than 0,
        please check the style of container, or the props width(100%) and height(100%),
@@ -782,9 +808,9 @@ The width(0) and height(0) of chart should be greater than 0,
 
             </system-err>
         </testcase>
-        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; shows a failure message rather than a blank page" time="0.083674048">
+        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; shows a failure message rather than a blank page" time="0.084365777">
         </testcase>
-        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; reports an unknown savings rate rather than 0%" time="0.090764232">
+        <testcase classname="src/components/risk/__tests__/risk.render.test.tsx" name="Risk page &gt; reports an unknown savings rate rather than 0%" time="0.09034294">
             <system-err>
 The width(0) and height(0) of chart should be greater than 0,
        please check the style of container, or the props width(100%) and height(100%),
@@ -794,8 +820,8 @@ The width(0) and height(0) of chart should be greater than 0,
             </system-err>
         </testcase>
     </testsuite>
-    <testsuite name="src/components/widgets/__tests__/widgets.render.test.tsx" timestamp="2026-08-26T13:56:54.965Z" hostname="BurakCan" tests="36" failures="0" errors="0" skipped="0" time="3.728387819">
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; AssetAllocationWidget" time="0.347022429">
+    <testsuite name="src/components/widgets/__tests__/widgets.render.test.tsx" timestamp="2026-08-27T21:42:29.541Z" hostname="BurakCan" tests="36" failures="0" errors="0" skipped="0" time="3.725063536">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; AssetAllocationWidget" time="0.275033266">
             <system-err>
 ⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition.
 ⚠️ React Router Future Flag Warning: Relative route resolution within Splat routes is changing in v7. You can use the `v7_relativeSplatPath` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_relativesplatpath.
@@ -807,31 +833,31 @@ The width(0) and height(0) of chart should be greater than 0,
 
             </system-err>
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; DividendCalendarWidget" time="0.093455322">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; DividendCalendarWidget" time="0.099326137">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; InvestmentBalanceWidget" time="0.093005333">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; InvestmentBalanceWidget" time="0.093541629">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; MarketTickerWidget" time="0.091466082">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; MarketTickerWidget" time="0.092082727">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; MiniTickerWidget" time="0.091308629">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; MiniTickerWidget" time="0.091142402">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; NewsWidget" time="0.100851369">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; NewsWidget" time="0.101085508">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; OrderHistoryWidget" time="0.114858082">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; OrderHistoryWidget" time="0.10580233">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; PortfolioChartWidget" time="0.234714783">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; PortfolioChartWidget" time="0.27377463">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; PositionsWidget" time="0.103050607">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; PositionsWidget" time="0.107279487">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; ProfitLossHeatmapWidget" time="0.096186372">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; ProfitLossHeatmapWidget" time="0.124453289">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; QuickActionsWidget" time="0.100421333">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; QuickActionsWidget" time="0.093133947">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; RecentTransactionsWidget" time="0.098719944">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; RecentTransactionsWidget" time="0.09325374">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SavingsGoalWidget" time="0.088564572">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SavingsGoalWidget" time="0.095576253">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SectorAllocationWidget" time="0.095895045">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SectorAllocationWidget" time="0.103258129">
             <system-err>
 The width(0) and height(0) of chart should be greater than 0,
        please check the style of container, or the props width(100%) and height(100%),
@@ -840,15 +866,15 @@ The width(0) and height(0) of chart should be greater than 0,
 
             </system-err>
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SpendingOverviewWidget" time="0.103407918">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; SpendingOverviewWidget" time="0.099661815">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; TopMoversWidget" time="0.107458508">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; TopMoversWidget" time="0.097408871">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; TotalBalanceWidget" time="0.098159735">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; TotalBalanceWidget" time="0.102470801">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; WatchlistWidget" time="0.107817744">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against populated payloads &gt; WatchlistWidget" time="0.097535569">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; AssetAllocationWidget" time="0.093086379">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; AssetAllocationWidget" time="0.08887306">
             <system-err>
 The width(0) and height(0) of chart should be greater than 0,
        please check the style of container, or the props width(100%) and height(100%),
@@ -857,31 +883,31 @@ The width(0) and height(0) of chart should be greater than 0,
 
             </system-err>
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; DividendCalendarWidget" time="0.08421647">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; DividendCalendarWidget" time="0.084926692">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; InvestmentBalanceWidget" time="0.084149676">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; InvestmentBalanceWidget" time="0.089255599">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; MarketTickerWidget" time="0.085469816">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; MarketTickerWidget" time="0.084330723">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; MiniTickerWidget" time="0.086345178">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; MiniTickerWidget" time="0.084967723">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; NewsWidget" time="0.091668733">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; NewsWidget" time="0.088469024">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; OrderHistoryWidget" time="0.085330934">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; OrderHistoryWidget" time="0.084613256">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; PortfolioChartWidget" time="0.104450663">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; PortfolioChartWidget" time="0.09938334">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; PositionsWidget" time="0.090907094">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; PositionsWidget" time="0.092597995">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; ProfitLossHeatmapWidget" time="0.083105562">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; ProfitLossHeatmapWidget" time="0.090063429">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; QuickActionsWidget" time="0.084146198">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; QuickActionsWidget" time="0.085398363">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; RecentTransactionsWidget" time="0.084325705">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; RecentTransactionsWidget" time="0.085759706">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SavingsGoalWidget" time="0.08370521">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SavingsGoalWidget" time="0.084720512">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SectorAllocationWidget" time="0.084143197">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SectorAllocationWidget" time="0.085396055">
             <system-err>
 The width(0) and height(0) of chart should be greater than 0,
        please check the style of container, or the props width(100%) and height(100%),
@@ -890,13 +916,13 @@ The width(0) and height(0) of chart should be greater than 0,
 
             </system-err>
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SpendingOverviewWidget" time="0.083681979">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; SpendingOverviewWidget" time="0.086607514">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; TopMoversWidget" time="0.083010078">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; TopMoversWidget" time="0.088791944">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; TotalBalanceWidget" time="0.082986348">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; TotalBalanceWidget" time="0.084935001">
         </testcase>
-        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; WatchlistWidget" time="0.08417336">
+        <testcase classname="src/components/widgets/__tests__/widgets.render.test.tsx" name="widgets render against empty (new account) payloads &gt; WatchlistWidget" time="0.086735139">
         </testcase>
     </testsuite>
 </testsuites>

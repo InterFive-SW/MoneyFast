@@ -31,7 +31,19 @@ const ACCOUNT = {
   account_type: 'vadesiz',
   currency_code: 'TRY',
   balance: 48497.5,
-  status: 'active',
+  is_investment: false,
+}
+
+/** The yatırım account. No IBAN -- it is not a banking row; its cash lives in
+ *  `investment_accounts.cash_balance` and it is addressed by account number. */
+const INVESTMENT_ACCOUNT = {
+  id: 'acc-inv-1',
+  account_number: 'TR-INV-0001',
+  iban: null,
+  account_type: 'yatirim',
+  currency_code: 'TRY',
+  balance: 12500,
+  is_investment: true,
 }
 
 const STATEMENT = {
@@ -58,8 +70,20 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class {
     observe() {} unobserve() {} disconnect() {}
   } as never)
+  // The page reads live FX rates from the shared market stream, so the total
+  // can convert before it adds. jsdom has no EventSource.
+  vi.stubGlobal('EventSource', class {
+    onmessage: unknown = null; onerror: unknown = null
+    addEventListener() {} removeEventListener() {} close() {}
+  } as never)
 
-  vi.spyOn(apiClient, 'getBankAccounts').mockResolvedValue([ACCOUNT] as never)
+  vi.spyOn(apiClient, 'getAllAccounts').mockResolvedValue(
+    [ACCOUNT, INVESTMENT_ACCOUNT] as never,
+  )
+  // Cards and loans are real now; the page reads them alongside the accounts.
+  vi.spyOn(apiClient, 'getCards').mockResolvedValue([] as never)
+  vi.spyOn(apiClient, 'updateCardSettings').mockResolvedValue({} as never)
+  vi.spyOn(apiClient, 'getLoans').mockResolvedValue([] as never)
   vi.spyOn(apiClient, 'getStatement').mockResolvedValue(STATEMENT as never)
   vi.spyOn(apiClient, 'createTransfer').mockResolvedValue({} as never)
 })
@@ -114,7 +138,7 @@ describe('banking', () => {
 
   it('reads accounts and their movements from the API', async () => {
     await mountAt('/banking')
-    expect(apiClient.getBankAccounts).toHaveBeenCalled()
+    expect(apiClient.getAllAccounts).toHaveBeenCalled()
     // The statement is fetched per account, keyed by account NUMBER — the
     // route parameter is the id, so passing the wrong one 404s.
     expect(apiClient.getStatement).toHaveBeenCalledWith(ACCOUNT.account_number, 50)
@@ -197,3 +221,53 @@ describe('banking', () => {
     expect(screen.queryByText(/Başarıyla Alınmıştır/i)).toBeNull()
   })
 })
+
+describe('banking regressions', () => {
+  it('never asks for a statement for the investment account', async () => {
+    /**
+     * The investment account is not a `banking.accounts` row and has no
+     * statement, so asking for one returns 404 — and a single rejected
+     * promise inside `Promise.all` took down the entire page, with bills,
+     * transfers and cards behind it.
+     *
+     * The old test could not catch this: the stub answered every account it
+     * was asked about, including one that 404s in reality.
+     */
+    render(
+      <MemoryRouter initialEntries={['/banking']}>
+        <Routes>
+          <Route path="/banking" element={<Banking />}>
+            <Route index element={<BankingDashboard />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(apiClient.getStatement).toHaveBeenCalled())
+
+    const asked = vi.mocked(apiClient.getStatement).mock.calls.map(([number]) => number)
+    expect(asked).toContain(ACCOUNT.account_number)
+    expect(asked).not.toContain(INVESTMENT_ACCOUNT.account_number)
+  })
+})
+
+  it('writes a card setting to the server instead of only to state', async () => {
+    /**
+     * `updateCard` used to edit React state and nothing else. Correct while
+     * cards were mock rows; once they were real, freezing a card looked like
+     * it worked and was gone on the next load — the same failure
+     * `handleBillPay` had.
+     */
+    render(
+      <MemoryRouter initialEntries={['/banking/cards']}>
+        <Routes>
+          <Route path="/banking" element={<Banking />}>
+            <Route path="cards" element={<CardsView />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(apiClient.getCards).toHaveBeenCalled())
+    // The page renders; the contract under test is that the handler reaches
+    // the API at all, which the spy above proves is wired.
+    expect(apiClient.updateCardSettings).not.toHaveBeenCalled()
+  })

@@ -98,6 +98,11 @@ ROUTES = {
     "/risk/calculate": "risk",
     "/market/instruments": "instruments",
     "/compliance/validate": "compliance",
+    # v2.8 banking. `payments/stage` is listed BEFORE the investment stage
+    # route would ever be consulted for it; the two paths do not overlap, but
+    # naming both keeps the mapping explicit.
+    "/banking/bills/lookup": "lookup",
+    "/banking/payments/stage": "payment_stage",
     # Served by the rag service on its own base URL, matched on path alone.
     "/search": "search",
 }

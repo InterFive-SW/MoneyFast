@@ -808,3 +808,99 @@ describe('transfers and error messages', () => {
     await expect(apiClient.createTransfer({} as never)).rejects.toThrow(/502/)
   })
 })
+
+describe('banking payments', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('looks a bill up by institution and subscriber number', () => {
+    // Found by number rather than owned by a user: the number on the paper is
+    // the key, and that is what makes a saved payee worth keeping.
+    const fetchMock = mockFetch({ found: false })
+    apiClient.lookupBill('BEDAŞ', 'TEST-900112')
+    const url = calledUrl(fetchMock)
+    expect(url).toContain('/api/banking/bills/lookup')
+    expect(url).toContain('institution=BEDA')
+    expect(url).toContain('subscriber_no=TEST-900112')
+  })
+
+  it('stages a payment without moving money', () => {
+    // Staging and confirming are two calls on purpose. That split is the only
+    // reason the assistant can prepare a payment it cannot make.
+    const fetchMock = mockFetch({ proposal_id: 'PAY-1' })
+    apiClient.stagePayment({ payment_type: 'BILL_PAYMENT', institution: 'İSKİ', subscriber_no: '1' })
+    expect(calledUrl(fetchMock)).toBe('/api/banking/payments/stage')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+  })
+
+  it('confirms by proposal id', () => {
+    const fetchMock = mockFetch({ status: 'CONFIRMED' })
+    apiClient.confirmPayment('PAY-1')
+    expect(calledUrl(fetchMock)).toBe('/api/banking/payments/PAY-1/confirm')
+  })
+
+  it('escapes a proposal id rather than pasting it into the path', () => {
+    const fetchMock = mockFetch({})
+    apiClient.confirmPayment('a/b')
+    expect(calledUrl(fetchMock)).toBe('/api/banking/payments/a%2Fb/confirm')
+  })
+
+  it('reads saved payees', () => {
+    const fetchMock = mockFetch({ payees: [] })
+    apiClient.getSavedPayees()
+    expect(calledUrl(fetchMock)).toBe('/api/banking/saved-payees')
+  })
+
+  it('adds a saved payee', () => {
+    const fetchMock = mockFetch({ id: 'p-1' })
+    apiClient.addSavedPayee({ label: 'BEDAŞ', institution: 'BEDAŞ', subscriber_no: '1' })
+    expect(calledUrl(fetchMock)).toBe('/api/banking/saved-payees')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+  })
+
+  it('deletes a saved payee', () => {
+    const fetchMock = mockFetch({})
+    apiClient.deleteSavedPayee('p-1')
+    expect(calledUrl(fetchMock)).toBe('/api/banking/saved-payees/p-1')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+  })
+})
+
+describe('accounts', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('asks for every account money can move between', () => {
+    // Including the investment account, whose cash lives in another table —
+    // the screen should not have to know that.
+    const fetchMock = mockFetch([])
+    apiClient.getAllAccounts()
+    expect(calledUrl(fetchMock)).toBe('/api/banking/accounts/all')
+  })
+})
+
+describe('cards and loans', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reads the cards', () => {
+    const fetchMock = mockFetch([])
+    apiClient.getCards()
+    expect(calledUrl(fetchMock)).toBe('/api/banking/cards')
+  })
+
+  it('reads the loans', () => {
+    const fetchMock = mockFetch([])
+    apiClient.getLoans()
+    expect(calledUrl(fetchMock)).toBe('/api/banking/loans')
+  })
+
+  it('merges card settings rather than replacing them', () => {
+    // A screen that toggles one switch must not clear the others; the
+    // backend merges, and the client sends only what changed.
+    const fetchMock = mockFetch({})
+    apiClient.updateCardSettings('card-1', { frozen: true })
+    expect(calledUrl(fetchMock)).toBe('/api/banking/cards/card-1/settings')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PATCH' })
+  })
+})

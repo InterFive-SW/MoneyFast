@@ -1,7 +1,10 @@
 export interface BankAccount {
   id: string
   name: string
-  type: 'checking' | 'savings' | 'foreign_currency'
+  /** `investment` is the yatırım account. Its balance lives in
+   *  `investment_accounts.cash_balance`, not in banking — but it spends and
+   *  receives like an account, so it is one here. */
+  type: 'checking' | 'savings' | 'foreign_currency' | 'investment'
   balance: number
   currency: string
   accountNumber: string

@@ -116,7 +116,7 @@ def test_create_user_raises_409_when_email_already_registered(mock_db):
 
 def test_create_user_persists_and_returns_user_response_on_success(mock_db):
     # Dört sorgu: TC, e-posta, yatırım hesabı ve mevduat hesabı.
-    mock_db.query.return_value.filter.return_value.first.side_effect = [None] * 4
+    mock_db.query.return_value.filter.return_value.first.side_effect = [None] * 5
 
     def _simulate_flush():
         """Gerçek bir flush, Python tarafındaki `default` ile üretilen id'yi
@@ -152,7 +152,7 @@ def test_create_user_persists_and_returns_user_response_on_success(mock_db):
 def test_registration_opens_an_investment_account(mock_db):
     """Bir kullanıcı hesapsız kalırsa işlem yapamaz; ikisi tek transaction'da
     yazılır, aksi halde yarım kalmış bir kayıt erişilebilir olurdu."""
-    mock_db.query.return_value.filter.return_value.first.side_effect = [None] * 4
+    mock_db.query.return_value.filter.return_value.first.side_effect = [None] * 5
 
     def _simulate_flush():
         for obj in (call.args[0] for call in mock_db.add.call_args_list):
@@ -180,7 +180,7 @@ def test_registration_opens_an_investment_account(mock_db):
 def test_registration_opens_a_deposit_account(mock_db):
     """Bir kullanıcı mevduat hesabı olmadan para gönderemez; kayıt anında
     açılır ki "para gönder" isteğinin bir kaynağı olsun."""
-    mock_db.query.return_value.filter.return_value.first.side_effect = [None] * 4
+    mock_db.query.return_value.filter.return_value.first.side_effect = [None] * 5
 
     def _simulate_flush():
         for obj in (call.args[0] for call in mock_db.add.call_args_list):
@@ -289,3 +289,36 @@ def test_login_now_returns_both_tokens(mock_db, password_hash_factory):
 
     assert decode_access_token(result.access_token)["typ"] == ACCESS_TOKEN_TYPE
     assert decode_access_token(result.refresh_token)["typ"] == REFRESH_TOKEN_TYPE
+
+
+def test_registration_opens_a_savings_account_too(mock_db):
+    """With one account the transfer screen could only ever send money AWAY.
+
+    A `vadeli` account gives "para gönder" somewhere to send to, which is what
+    makes moving money between your own accounts -- and into investing --
+    possible at all. It opens empty: an account that arrives with money in it
+    is a gift, not savings.
+    """
+    mock_db.query.return_value.filter.return_value.first.side_effect = [None] * 5
+
+    def _simulate_flush():
+        for obj in (call.args[0] for call in mock_db.add.call_args_list):
+            if getattr(obj, "id", None) is None:
+                obj.id = str(uuid.uuid4())
+
+    mock_db.flush.side_effect = _simulate_flush
+    mock_db.refresh.side_effect = lambda user: (
+        setattr(user, "is_active", True),
+        setattr(user, "created_at", datetime.now(timezone.utc)),
+    )
+
+    create_user(RegisterRequest(**VALID_REGISTER_PAYLOAD), mock_db)
+
+    opened = [
+        obj for obj in (call.args[0] for call in mock_db.add.call_args_list)
+        if type(obj).__name__ == "BankAccount"
+    ]
+    types = {obj.account_type for obj in opened}
+    assert types == {"vadesiz", "vadeli"}
+    savings = next(o for o in opened if o.account_type == "vadeli")
+    assert float(savings.balance) == 0

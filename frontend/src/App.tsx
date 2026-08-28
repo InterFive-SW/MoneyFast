@@ -12,7 +12,14 @@ import { UserProvider }     from './contexts/UserContext'
 import ProtectedRoute       from './components/auth/ProtectedRoute'
 import DashboardLayout      from './components/layout/DashboardLayout'
 import Landing              from './pages/Landing'
+import Home                 from './pages/Home'
 import Login                from './pages/Login'
+import SavedPayeesView     from './components/banking/SavedPayeesView'
+import AdminRoute          from './components/admin/AdminRoute'
+import AdminLayout         from './components/admin/AdminLayout'
+import AdminLogin          from './pages/admin/AdminLogin'
+import AdminUsers          from './pages/admin/AdminUsers'
+import AdminBills          from './pages/admin/AdminBills'
 import ForgotPassword       from './pages/ForgotPassword'
 import Register             from './pages/Register'
 import RegisterPassword     from './pages/RegisterPassword'
@@ -53,6 +60,17 @@ export default function App() {
           {/* ── Genel / Auth Rotaları ──────────────────────────────────── */}
           <Route path="/"                 element={<Landing />}          />
           <Route path="login"             element={<Login />}            />
+          {/* Operator area. Outside ProtectedRoute and DashboardLayout on
+              purpose: an administrator holds no customer session and none
+              of the customer navigation. */}
+          <Route path="admin/login"       element={<AdminLogin />}       />
+          <Route path="admin" element={<AdminRoute />}>
+            <Route element={<AdminLayout />}>
+              <Route index element={<Navigate to="/admin/users" replace />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="bills" element={<AdminBills />} />
+            </Route>
+          </Route>
           <Route path="forgot-password"   element={<ForgotPassword />}   />
           <Route path="register"          element={<Register />}         />
           <Route path="register/password" element={<RegisterPassword />} />
@@ -65,7 +83,11 @@ export default function App() {
           */}
           <Route element={<ProtectedRoute />}>
             <Route element={<DashboardLayout />}>
-              <Route path="dashboard"  element={<Dashboard />}  />
+              {/* Ana sayfa bakiyelerle açılır, tıpkı bir bankacılık
+                  uygulaması gibi. Uygulamayı ayıran yatırım sohbeti bir tık
+                  uzakta; ilk görülen şey olarak değil. */}
+              <Route path="dashboard"     element={<Home />}       />
+              <Route path="hizli-finans"  element={<Dashboard />}  />
               <Route path="chat"       element={<Chat />}       />
               <Route path="portfolio"  element={<Portfolio />}  />
               <Route path="banking" element={<Banking />}>
@@ -73,6 +95,7 @@ export default function App() {
                 <Route path="accounts" element={<AccountsView />} />
                 <Route path="accounts/:accountId/transactions" element={<AccountTransactionsView />} />
                 <Route path="cards" element={<CardsView />} />
+                <Route path="saved" element={<SavedPayeesView />} />
                 <Route path="transfer" element={<MoneyTransferWizard />} />
                 <Route path="new-card" element={<NewCardWizard />} />
               </Route>

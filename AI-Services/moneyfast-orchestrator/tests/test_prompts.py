@@ -369,3 +369,27 @@ def test_a_single_lookup_omits_the_methodology_block():
     """"Sıralama: fiyat yüksekten düşüğe, en fazla 10" under a one-stock price
     describes a screen that never happened."""
     assert "belongs to a SCREEN" in prompts.ORCHESTRATOR_SYSTEM_PROMPT
+
+
+class TestInstrumentIsVerifiedBeforeAsking:
+    """Measured failure: the assistant asked how many NVVVDI shares the user
+    wanted, took "3 lot" as an answer, and only then discovered no such
+    instrument exists. The same turn silently turned "aple" into AAPL and
+    "thoya" into THYAO -- right both times, and indistinguishable from the
+    time it was wrong."""
+
+    def test_the_rule_is_stated(self):
+        assert "ENSTRÜMANI ÖNCE DOĞRULA" in prompts.ORCHESTRATOR_SYSTEM_PROMPT
+
+    def test_it_names_the_tool_that_must_confirm(self):
+        """A rule that says "check first" without saying how is advice."""
+        section = prompts.ORCHESTRATOR_SYSTEM_PROMPT
+        assert "get_market_data" in section
+
+    def test_it_forbids_asking_for_a_quantity_first(self):
+        assert "Adet sorma" in prompts.ORCHESTRATOR_SYSTEM_PROMPT
+
+    def test_it_requires_naming_a_correction(self):
+        """Silently trading "aple" for AAPL is how the user could not tell a
+        good guess from a bad one."""
+        assert "DÜZELTMEYİ SÖYLE" in prompts.ORCHESTRATOR_SYSTEM_PROMPT

@@ -25,6 +25,96 @@ export type StageTransactionRequest = components['schemas']['StageTransactionReq
 export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
 export type MarketTicker = GetResponseType<paths['/api/market/tickers']>[0];
+
+// --- Banking: bills, staged payments, saved payees -------------------------
+
+/** Vadesiz, vadeli veya yatırım — tek biçimde. */
+export interface PortfolioAccount {
+    id: string
+    account_number: string
+    iban?: string | null
+    account_type: string
+    currency_code: string
+    balance: number
+    is_investment: boolean
+}
+
+export interface ApiCard {
+    id: string
+    name: string
+    brand: string
+    card_number: string
+    limit: number
+    current_debt: number
+    available_limit: number
+    due_day: number
+    color?: string | null
+    is_digital: boolean
+    settings: Record<string, unknown>
+    linked_account_id?: string | null
+}
+
+export interface ApiLoan {
+    id: string
+    title: string
+    total_amount: number
+    remaining_amount: number
+    installment_amount: number
+    installment_count: number
+    paid_installments: number
+    remaining_months: number
+    next_due?: string | null
+    progress_percentage: number
+}
+
+export interface BillLookup {
+    found: boolean
+    id?: string | null
+    institution?: string | null
+    bill_type?: string | null
+    subscriber_no?: string | null
+    amount?: number | null
+    due_day?: number | null
+}
+
+export interface StagePaymentRequest {
+    payment_type: 'TRANSFER' | 'BILL_PAYMENT' | 'CARD_PAYMENT'
+    amount?: number | null
+    destination?: string | null
+    institution?: string | null
+    subscriber_no?: string | null
+    description?: string | null
+    idempotency_key?: string | null
+}
+
+/** Hazırlanmış ama uygulanmamış bir ödeme. Onaylanana kadar para durur. */
+export interface PaymentProposal {
+    proposal_id: string
+    status: string
+    payment_type: string
+    amount: number
+    currency: string
+    destination?: string | null
+    description?: string | null
+    expires_at: string
+    balance_before?: number | null
+}
+
+export interface PaymentConfirmation {
+    proposal_id: string
+    status: string
+    reference_number: string
+    amount: number
+    currency: string
+    balance_after?: number | null
+}
+
+export interface SavedPayee {
+    id: string
+    label: string
+    institution: string
+    subscriber_no: string
+}
 // `instruments` şemada opsiyonel görünür (varsayılanı olan bir alan); satır
 // tipini almak için önce boş olmayan hâline daraltılır.
 export type CandleSeries = GetResponseType<paths['/api/market/candles']>;
@@ -425,6 +515,71 @@ class ApiClient {
     }
 
     /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */
+    /**
+     * Para gönderilebilecek TÜM hesaplar: vadesiz, vadeli ve yatırım.
+     *
+     * Yatırım hesabının nakiti başka bir tabloda durur; bu uç onu da aynı
+     * şekle getirir, `is_investment` ile işaretleyerek. Ekranın nerede
+     * durduğunu bilmesi gerekmiyor.
+     */
+    getAllAccounts() {
+        return this.request<PortfolioAccount[]>('/banking/accounts/all')
+    }
+
+    /** Kullanıcının kartları. `available_limit` türetilir, saklanmaz. */
+    getCards() {
+        return this.request<ApiCard[]>('/banking/cards')
+    }
+
+    /** Kart ayarları saklananın üzerine yazılır; tek anahtar gönderen bir
+     *  ekran diğerlerini sıfırlamaz. */
+    updateCardSettings(cardId: string, settings: Record<string, unknown>) {
+        return this.patch<ApiCard>(
+            `/banking/cards/${encodeURIComponent(cardId)}/settings`, { settings },
+        )
+    }
+
+    getLoans() {
+        return this.request<ApiLoan[]>('/banking/loans')
+    }
+
+    /** Abone numarasıyla açık fatura sorgular. Bulunamaması hata değildir. */
+    lookupBill(institution: string, subscriberNo: string) {
+        const q = new URLSearchParams({ institution, subscriber_no: subscriberNo })
+        return this.request<BillLookup>(`/banking/bills/lookup?${q}`)
+    }
+
+    /**
+     * Ödeme önerisi hazırlar. **Para hareket etmez.**
+     *
+     * Hisse alım-satımıyla aynı sözleşme: hazırlama ile onay ayrı iki adım.
+     * Sohbetin kendi başına para göndermesini engelleyen şey bu ayrım.
+     */
+    stagePayment(request: StagePaymentRequest) {
+        return this.post<PaymentProposal>('/api/banking/payments/stage', request)
+    }
+
+    /** Öneriyi uygular. Para yalnızca burada hareket eder. */
+    confirmPayment(proposalId: string) {
+        return this.post<PaymentConfirmation>(
+            `/api/banking/payments/${encodeURIComponent(proposalId)}/confirm`, {},
+        )
+    }
+
+    getSavedPayees() {
+        return this.request<{ payees: SavedPayee[] }>('/banking/saved-payees')
+    }
+
+    addSavedPayee(request: { label: string; institution: string; subscriber_no: string }) {
+        return this.post<SavedPayee>('/api/banking/saved-payees', request)
+    }
+
+    deleteSavedPayee(payeeId: string) {
+        return this.request<void>(
+            `/banking/saved-payees/${encodeURIComponent(payeeId)}`, 'DELETE',
+        )
+    }
+
     getCurrentUser() {
         return this.request<{ id: string; first_name: string; last_name: string }>('/auth/me');
     }

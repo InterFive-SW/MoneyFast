@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import (
     ACCESS_TOKEN_TYPE,
+    ADMIN_TOKEN_TYPE,
     decode_access_token,
     oauth2_scheme,
 )
@@ -98,6 +99,16 @@ def get_optional_user_id(
     """
     if not token:
         return None
+
+    # An ADMIN token is not a lapsed customer session -- it is a valid
+    # credential for the other identity, and falling through to "anonymous"
+    # let it read the demo portfolio and drive the chat. Measured: an admin
+    # token answered 200 on /investment/positions and on /chat. Refused here,
+    # so the graceful path below stays for the case it was written for.
+    payload = decode_access_token(token)
+    if payload and payload.get("typ") == ADMIN_TOKEN_TYPE:
+        raise CREDENTIALS_ERROR
+
     try:
         return str(get_current_user(token=token, db=db).id)
     except HTTPException:

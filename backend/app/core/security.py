@@ -56,6 +56,28 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 ACCESS_TOKEN_TYPE = "access"
 REFRESH_TOKEN_TYPE = "refresh"
 
+#: Administrators authenticate against banking.admin_users, not public.users,
+#: and hold none of a customer's capabilities. The distinct type is what stops
+#: a token minted for one side being replayed against the other: an admin
+#: token fails the customer check on `typ` as well as on `sub`, which resolves
+#: to no User row.
+ADMIN_TOKEN_TYPE = "admin_access"
+
+
+def create_admin_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    """An access token for an administrator.
+
+    Same signing key and lifetime policy as a customer token -- one place
+    decides how long a session lives -- but carrying `typ=admin_access`, so
+    `require_admin` accepts it and `get_current_user` does not.
+    """
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    to_encode.update({"exp": expire, "typ": ADMIN_TOKEN_TYPE})
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """

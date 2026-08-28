@@ -36,6 +36,21 @@ def bank_account(
     )
 
 
+@pytest.fixture(autouse=True)
+def no_investment_account(mocker):
+    """These tests are about BANKING transfers.
+
+    `transfer()` now checks whether either side is the investment account,
+    because investment cash lives in a different table and reaching it was the
+    whole point of the bridge. A mocked Session answers that lookup with a
+    MagicMock, which then compares equal to nothing sensible -- so the tests
+    say plainly that there is no investment account here.
+    """
+    import app.modules.investment.market_service as ms
+
+    mocker.patch.object(ms, "account", return_value=None)
+
+
 class Ledger:
     """A Session double that resolves two accounts by reference and records
     everything added."""
@@ -424,3 +439,304 @@ class TestIncomeTotal:
         )
         mock_db.execute.return_value.scalar.return_value = None
         assert banking_service.income_total(mock_db, "user-1", SINCE) == 0.0
+
+
+class TestPostAdjustment:
+    """One-legged postings: an admin crediting the demo, a bill being paid.
+
+    Still through the ledger. `UPDATE accounts SET balance` would move a number
+    with nothing in the statement explaining it, and this module's own comment
+    says the accounts are not the source of truth, the transactions are.
+    """
+
+    def _account(self, balance=1000.0):
+        return SimpleNamespace(
+            id="acc-1", account_number="TR-TEST-0001", iban="TR00", balance=balance,
+            currency_code="TRY", status="active", user_id="u-1",
+            updated_at=None,
+        )
+
+    def test_a_credit_raises_the_balance_and_writes_a_leg(self):
+        db = MagicMock(spec=Session)
+        account = self._account(1000.0)
+        result = service.post_adjustment(db, account, 500.0, description="Yükleme")
+        assert result["balance_after"] == 1500.0
+        assert account.balance == 1500.0
+        assert db.add.call_count == 2  # the transaction and its single leg
+
+    def test_a_debit_lowers_it(self):
+        db = MagicMock(spec=Session)
+        account = self._account(1000.0)
+        assert service.post_adjustment(db, account, -250.0, description="Fatura")["balance_after"] == 750.0
+
+    def test_the_balance_may_not_go_negative(self):
+        """An operator should be told they are over-withdrawing, not discover
+        it as a negative balance on the customer's screen."""
+        with pytest.raises(service.TransferError, match="eksiye"):
+            service.post_adjustment(
+                MagicMock(spec=Session), self._account(100.0), -500.0, description="x",
+            )
+
+    def test_zero_is_not_an_adjustment(self):
+        with pytest.raises(service.TransferError):
+            service.post_adjustment(
+                MagicMock(spec=Session), self._account(), 0, description="x",
+            )
+
+    def test_the_transaction_type_is_the_caller_s(self):
+        """Every non-transfer used to land as "duzeltme"."""
+        db = MagicMock(spec=Session)
+        service.post_adjustment(
+            db, self._account(), -10.0, description="x", transaction_type="fatura",
+        )
+        written = [c.args[0] for c in db.add.call_args_list]
+        assert any(getattr(o, "transaction_type", None) == "fatura" for o in written)
+
+    def test_the_leg_records_the_balance_on_both_sides(self):
+        """That is what makes a balance explainable after the fact."""
+        db = MagicMock(spec=Session)
+        service.post_adjustment(db, self._account(1000.0), 200.0, description="x")
+        legs = [o for o in (c.args[0] for c in db.add.call_args_list)
+                if hasattr(o, "balance_before")]
+        assert legs[0].balance_before == 1000.0 and legs[0].balance_after == 1200.0
+
+
+class TestAccountLookups:
+    """Which account a caller means.
+
+    `accounts_for(...)[0]` used to mean "the deposit account" and worked only
+    while everyone had exactly one. With a vadeli account it is a coincidence,
+    and a payment staged against the wrong pot is not a bug anyone would spot
+    from the outside.
+    """
+
+    def _db(self, *accounts):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.order_by.return_value.first.return_value = (
+            accounts[0] if accounts else None
+        )
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = list(accounts)
+        return db
+
+    def test_the_deposit_account_is_found_by_type_not_by_position(self):
+        vadesiz = SimpleNamespace(id="a-1", account_type="vadesiz")
+        assert service.deposit_account(self._db(vadesiz), "u-1") is vadesiz
+
+    def test_a_user_with_no_deposit_account_gets_none(self):
+        assert service.deposit_account(self._db(), "u-1") is None
+
+    def test_a_savings_account_is_opened_empty(self, mocker):
+        """An account that arrives with money in it is a gift, not savings."""
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = None
+        account = service.ensure_savings_account(db, "u-1")
+        assert account.account_type == "vadeli" and float(account.balance) == 0
+
+    def test_an_existing_savings_account_is_reused(self):
+        existing = SimpleNamespace(id="a-2", account_type="vadeli")
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = existing
+        assert service.ensure_savings_account(db, "u-1") is existing
+
+
+class TestPortfolioAccounts:
+    """The unified list: banking rows plus the investment account."""
+
+    def test_the_investment_account_is_included_and_flagged(self, mocker):
+        import app.modules.investment.market_service as ms
+
+        bank = SimpleNamespace(
+            id="a-1", account_number="1", iban="TR1", account_type="vadesiz",
+            currency_code="TRY", balance=100.0,
+        )
+        mocker.patch.object(service, "accounts_for", return_value=[bank])
+        mocker.patch.object(ms, "account", return_value=SimpleNamespace(
+            id="ia-1", account_number="TR-INV", currency_code="TRY", cash_balance=250.0,
+        ))
+        rows = service.portfolio_accounts(MagicMock(spec=Session), "u-1")
+        investment = [r for r in rows if r["is_investment"]]
+        assert len(investment) == 1
+        assert investment[0]["balance"] == 250.0
+        assert investment[0]["account_type"] == service.INVESTMENT_ACCOUNT_TYPE
+
+    def test_a_user_with_no_investment_account_gets_only_banking_rows(self, mocker):
+        import app.modules.investment.market_service as ms
+
+        mocker.patch.object(service, "accounts_for", return_value=[])
+        mocker.patch.object(ms, "account", return_value=None)
+        assert service.portfolio_accounts(MagicMock(spec=Session), "u-1") == []
+
+
+class TestInvestmentBridge:
+    """Money crossing between banking and investment.
+
+    Investment cash lives in `investment_accounts.cash_balance`, a different
+    table, which is why no banking transfer could ever fund a trade. Both
+    sides move in ONE transaction: a commit between them would leave money
+    that has left the deposit account and not arrived at the other.
+    """
+
+    def _wire(self, mocker, *, bank_balance=1000.0, cash=500.0, currency="TRY"):
+        import app.modules.investment.market_service as ms
+
+        owner = SimpleNamespace(
+            id="ia-1", account_number="TR-INV", currency_code=currency,
+            cash_balance=cash,
+        )
+        mocker.patch.object(ms, "account", return_value=owner)
+        bank = SimpleNamespace(
+            id="a-1", user_id="u-1", account_number="1", iban="TR1",
+            account_type="vadesiz", currency_code="TRY", balance=bank_balance,
+            status="active", updated_at=None,
+        )
+        db = MagicMock(spec=Session)
+        return db, bank, owner
+
+    def test_money_leaves_banking_and_arrives_at_investing(self, mocker):
+        db, bank, owner = self._wire(mocker)
+        service.transfer_with_investment(
+            db, user_id="u-1", bank_account=bank, amount=300, to_investment=True,
+        )
+        assert bank.balance == 700.0 and owner.cash_balance == 800.0
+
+    def test_and_back_again(self, mocker):
+        db, bank, owner = self._wire(mocker)
+        service.transfer_with_investment(
+            db, user_id="u-1", bank_account=bank, amount=200, to_investment=False,
+        )
+        assert bank.balance == 1200.0 and owner.cash_balance == 300.0
+
+    def test_one_transaction_covers_both_sides(self, mocker):
+        db, bank, _ = self._wire(mocker)
+        service.transfer_with_investment(
+            db, user_id="u-1", bank_account=bank, amount=100, to_investment=True,
+        )
+        assert db.commit.call_count == 1
+
+    def test_the_banking_leg_records_before_and_after(self, mocker):
+        db, bank, _ = self._wire(mocker)
+        service.transfer_with_investment(
+            db, user_id="u-1", bank_account=bank, amount=100, to_investment=True,
+        )
+        legs = [c.args[0] for c in db.add.call_args_list
+                if type(c.args[0]).__name__ == "AccountTransaction"]
+        assert legs[0].balance_before == 1000.0 and legs[0].balance_after == 900.0
+
+    def test_an_overdraw_towards_investing_is_refused(self, mocker):
+        db, bank, _ = self._wire(mocker, bank_balance=50.0)
+        with pytest.raises(service.TransferError, match="yetersiz"):
+            service.transfer_with_investment(
+                db, user_id="u-1", bank_account=bank, amount=100, to_investment=True,
+            )
+
+    def test_an_overdraw_out_of_investing_is_refused(self, mocker):
+        db, bank, _ = self._wire(mocker, cash=20.0)
+        with pytest.raises(service.TransferError, match="Yatırım"):
+            service.transfer_with_investment(
+                db, user_id="u-1", bank_account=bank, amount=100, to_investment=False,
+            )
+
+    def test_crossing_currencies_is_refused_rather_than_applied_one_to_one(self, mocker):
+        db, bank, _ = self._wire(mocker, currency="USD")
+        with pytest.raises(service.TransferError, match="para birim"):
+            service.transfer_with_investment(
+                db, user_id="u-1", bank_account=bank, amount=10, to_investment=True,
+            )
+
+    def test_a_user_without_an_investment_account_is_refused(self, mocker):
+        import app.modules.investment.market_service as ms
+
+        mocker.patch.object(ms, "account", return_value=None)
+        bank = SimpleNamespace(user_id="u-1", status="active", currency_code="TRY")
+        with pytest.raises(service.TransferError, match="Yatırım hesabınız"):
+            service.transfer_with_investment(
+                MagicMock(spec=Session), user_id="u-1", bank_account=bank,
+                amount=10, to_investment=True,
+            )
+
+    def test_someone_elses_account_is_refused(self, mocker):
+        db, bank, _ = self._wire(mocker)
+        bank.user_id = "someone-else"
+        with pytest.raises(service.TransferError):
+            service.transfer_with_investment(
+                db, user_id="u-1", bank_account=bank, amount=10, to_investment=True,
+            )
+
+    def test_an_inactive_account_is_refused(self, mocker):
+        db, bank, _ = self._wire(mocker)
+        bank.status = "closed"
+        with pytest.raises(service.TransferError, match="aktif"):
+            service.transfer_with_investment(
+                db, user_id="u-1", bank_account=bank, amount=10, to_investment=True,
+            )
+
+    def test_a_non_positive_amount_is_refused(self, mocker):
+        db, bank, _ = self._wire(mocker)
+        with pytest.raises(service.TransferError):
+            service.transfer_with_investment(
+                db, user_id="u-1", bank_account=bank, amount=0, to_investment=True,
+            )
+
+
+class TestTransferRoutesToTheBridge:
+    """`transfer()` sends either side to the investment path when it should.
+
+    Routed in the service rather than the router so every caller -- the panel,
+    the chat's confirm, the admin -- behaves the same way.
+    """
+
+    def _wire(self, mocker, bank=None):
+        import app.modules.investment.market_service as ms
+
+        mocker.patch.object(ms, "account", return_value=SimpleNamespace(
+            id="ia-1", account_number="TR-INV", currency_code="TRY", cash_balance=500.0,
+        ))
+        mocker.patch.object(service, "find_account", return_value=bank)
+        return MagicMock(spec=Session)
+
+    def test_a_transfer_to_the_investment_account_uses_the_bridge(self, mocker):
+        bank = SimpleNamespace(
+            id="a-1", user_id="u-1", account_number="1", iban="TR1",
+            account_type="vadesiz", currency_code="TRY", balance=1000.0,
+            status="active", updated_at=None,
+        )
+        db = self._wire(mocker, bank)
+        bridged = mocker.patch.object(
+            service, "transfer_with_investment", return_value={"reference_number": "T"},
+        )
+        service.transfer(
+            db, user_id="u-1", source_reference="1",
+            destination_reference="TR-INV", amount=100,
+        )
+        assert bridged.call_args.kwargs["to_investment"] is True
+
+    def test_a_transfer_out_of_it_uses_the_bridge_the_other_way(self, mocker):
+        bank = SimpleNamespace(
+            id="a-1", user_id="u-1", account_number="1", currency_code="TRY",
+            balance=0.0, status="active",
+        )
+        db = self._wire(mocker, bank)
+        bridged = mocker.patch.object(
+            service, "transfer_with_investment", return_value={"reference_number": "T"},
+        )
+        service.transfer(
+            db, user_id="u-1", source_reference="TR-INV",
+            destination_reference="1", amount=100,
+        )
+        assert bridged.call_args.kwargs["to_investment"] is False
+
+    def test_an_unknown_other_side_is_refused(self, mocker):
+        db = self._wire(mocker, None)
+        with pytest.raises(service.TransferError, match="Hesap bulunamadı"):
+            service.transfer(
+                db, user_id="u-1", source_reference="nope",
+                destination_reference="TR-INV", amount=100,
+            )
+
+    def test_investment_to_itself_is_refused(self, mocker):
+        db = self._wire(mocker, SimpleNamespace(user_id="u-1", status="active"))
+        with pytest.raises(service.TransferError, match="aynı olamaz"):
+            service.transfer(
+                db, user_id="u-1", source_reference="TR-INV",
+                destination_reference="TR-INV", amount=100,
+            )

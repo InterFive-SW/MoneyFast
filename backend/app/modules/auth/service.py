@@ -91,12 +91,18 @@ def create_user(payload: RegisterRequest, db: Session) -> UserResponse:
 
     # Modules call each other directly in this monolith; what stays inside the
     # owning module is the MODEL, not the behaviour (see CLAUDE.md).
-    from app.modules.banking.service import ensure_account as ensure_bank_account
+    from app.modules.banking.service import (
+        ensure_account as ensure_bank_account,
+        ensure_savings_account,
+    )
     from app.modules.investment.service import ensure_account
 
     ensure_account(db, str(user.id))
-    # A deposit account too, so "para gönder" has somewhere to send from.
+    # A deposit account too, so "para gönder" has somewhere to send from, and
+    # a savings account so it has somewhere to send TO. With one account the
+    # transfer screen could only ever send money away from the customer.
     ensure_bank_account(db, str(user.id))
+    ensure_savings_account(db, str(user.id))
 
     db.commit()
     db.refresh(user)

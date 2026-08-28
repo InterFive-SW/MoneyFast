@@ -13,9 +13,13 @@ of truth, the transactions are.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Numeric, String
+from sqlalchemy import (
+    Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -119,3 +123,144 @@ class AccountTransaction(Base):
     counterparty_iban: Mapped[str | None] = mapped_column(String(34), nullable=True)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class Bill(Base):
+    """An issued bill, found by subscriber number rather than owned by a user.
+
+    That is how the paper works: the number on it is the key, and whoever holds
+    the paper can pay it. It is also what makes a saved payee worth having --
+    the number is the tedious part.
+    """
+
+    __tablename__ = "bills"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    #: The name printed on the bill, as a real one carries. A bill still
+    #: belongs to nobody until it is paid; this is only what is written on it.
+    holder_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    institution: Mapped[str] = mapped_column(String(80), nullable=False)
+    bill_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    subscriber_no: Mapped[str] = mapped_column(String(40), nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    due_day: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    issued_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    #: Null while open. A bill belongs to whoever settles it, which is not
+    #: known when it is issued.
+    paid_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class SavedPayee(Base):
+    """A subscriber number the user chose to keep -- "Kayıtlı İşlemler"."""
+
+    __tablename__ = "saved_payees"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "institution", "subscriber_no", name="uq_saved_payee_per_user",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    institution: Mapped[str] = mapped_column(String(80), nullable=False)
+    subscriber_no: Mapped[str] = mapped_column(String(40), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class PaymentProposal(Base):
+    """A staged payment. Nothing has moved until it is confirmed.
+
+    The investment module has the same contract for orders; money movement gets
+    its own because a bill payment answering `symbol`/`quantity` with NULL
+    would be a row shaped like an order that is not one.
+    """
+
+    __tablename__ = "payment_proposals"
+    __table_args__ = (
+        Index("ix_payment_proposals_user", "user_id", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    #: Derived from the idempotency key, so a retried staging call resolves to
+    #: this row rather than stacking proposals against one balance.
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    payment_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    destination_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="TRY")
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    audit_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class Card(Base):
+    """A credit card. Shape follows the `CreditCard` the UI already renders.
+
+    `available_limit` is NOT stored: it is the limit minus the debt, and a
+    stored copy can disagree with its own arithmetic the moment either moves.
+    Same rule `portfolio_positions` follows for market value.
+    """
+
+    __tablename__ = "cards"
+    __table_args__ = (
+        Index("ix_cards_user", "user_id"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    brand: Mapped[str] = mapped_column(String(20), nullable=False, default="visa")
+    card_number: Mapped[str] = mapped_column(String(25), nullable=False)
+    credit_limit: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    current_debt: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False, default=0)
+    due_day: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    color: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    is_digital: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    settings: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    linked_account_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
+class Loan(Base):
+    """A loan and its instalment plan.
+
+    `progress` is derived from paid instalments, not stored, for the same
+    reason a card's available limit is not.
+    """
+
+    __tablename__ = "loans"
+    __table_args__ = (
+        Index("ix_loans_user", "user_id"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String(80), nullable=False)
+    principal: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    remaining_amount: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    installment_amount: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    installment_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    paid_installments: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_due: Mapped[date | None] = mapped_column(Date, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )

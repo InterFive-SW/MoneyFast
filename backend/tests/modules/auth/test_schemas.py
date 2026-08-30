@@ -62,7 +62,7 @@ def test_token_response_defaults_to_bearer_type():
 
 
 def test_user_response_builds_from_orm_style_attributes():
-    fake_user = SimpleNamespace(
+    fake_user = user_stub(
         id="u1",
         first_name="Ada",
         last_name="Lovelace",
@@ -76,3 +76,36 @@ def test_user_response_builds_from_orm_style_attributes():
     response = UserResponse.model_validate(fake_user)
 
     assert response.tc_no == "12345678901"
+
+
+def user_stub(**overrides):
+    """Bir kullanıcı satırı taklidi, ŞU ANKİ şemanın gerektirdiği alanlarla.
+
+    Testler bunları tek tek `SimpleNamespace(tc_no=..., hashed_password=...)`
+    diye kuruyordu. Şema büyüdükçe -- main `is_verified` ekledi, #42
+    `notification_preferences` ve `transaction_limit` ekledi -- her ekleme aynı
+    anda on iki testi düşürdü, hepsi aynı sebeple ve hepsi ayrı ayrı
+    düzeltilmek zorunda kaldı.
+
+    Tek yerde toplandı: bir sonraki sütun buraya eklenir, testlere değil.
+    """
+    from datetime import datetime, timezone
+    import uuid as _uuid
+
+    base = dict(
+        id=str(_uuid.uuid4()),
+        tc_no="12345678901",
+        email="test@dummy.moneyfast.local",
+        phone_number="+905550000000",
+        first_name="Test",
+        last_name="Kullanici",
+        is_active=True,
+        is_verified=True,
+        notification_preferences={},
+        transaction_limit=50000,
+        user_preferences={},
+        created_at=datetime.now(timezone.utc),
+        hashed_password="",
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)

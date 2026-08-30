@@ -14,6 +14,9 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from fastapi import BackgroundTasks
+
+from tests.conftest import simulate_refresh
 from fastapi import HTTPException
 
 from app.core.security import (
@@ -25,6 +28,8 @@ from app.core.security import (
 )
 from app.modules.auth.schemas import LoginRequest, RegisterRequest
 from app.modules.auth.service import (
+
+
     authenticate_user,
     create_user,
     refresh_access_token,
@@ -57,7 +62,7 @@ def test_authenticate_user_raises_401_when_user_not_found(mock_db):
 def test_authenticate_user_raises_401_when_password_is_wrong(
     mock_db, password_hash_factory
 ):
-    fake_user = SimpleNamespace(
+    fake_user = user_stub(
         tc_no="12345678901", hashed_password=password_hash_factory("Password123")
     )
     mock_db.query.return_value.filter.return_value.first.return_value = fake_user
@@ -70,7 +75,7 @@ def test_authenticate_user_raises_401_when_password_is_wrong(
 
 
 def test_authenticate_user_returns_token_on_success(mock_db, password_hash_factory):
-    fake_user = SimpleNamespace(
+    fake_user = user_stub(
         tc_no="12345678901", hashed_password=password_hash_factory("Password123")
     )
     mock_db.query.return_value.filter.return_value.first.return_value = fake_user
@@ -92,7 +97,7 @@ def test_create_user_raises_409_when_tc_no_already_registered(mock_db):
     payload = RegisterRequest(**VALID_REGISTER_PAYLOAD)
 
     with pytest.raises(HTTPException) as exc_info:
-        create_user(payload, mock_db)
+        create_user(payload, mock_db, BackgroundTasks())
 
     assert exc_info.value.status_code == 409
     assert "TC Kimlik No" in exc_info.value.detail
@@ -108,7 +113,7 @@ def test_create_user_raises_409_when_email_already_registered(mock_db):
     payload = RegisterRequest(**VALID_REGISTER_PAYLOAD)
 
     with pytest.raises(HTTPException) as exc_info:
-        create_user(payload, mock_db)
+        create_user(payload, mock_db, BackgroundTasks())
 
     assert exc_info.value.status_code == 409
     assert "E-posta" in exc_info.value.detail
@@ -130,18 +135,20 @@ def test_create_user_persists_and_returns_user_response_on_success(mock_db):
 
     def _simulate_refresh(user):
         """Gerçek bir `Session.refresh()`, sunucu tarafında (INSERT sırasında)
-        üretilen default'ları (id, created_at, is_active) nesneye geri
-        yükler. `mock_db` gerçek bir bağlantıya sahip olmadığı için o INSERT
-        hiç çalışmaz; bu davranışı burada elle simüle ediyoruz — aksi halde
-        `user.id` None kalır ve UserResponse doğrulaması başarısız olur."""
+        üretilen default'ları nesneye geri yükler. `mock_db` gerçek bir
+        bağlantıya sahip olmadığı için o INSERT hiç çalışmaz.
+
+        Sütun varsayılanları `simulate_refresh`'ten geliyor: her testin kendi
+        eksik listesini tutması, yeni bir sütun eklendiğinde hepsinin aynı
+        anda düşmesi demekti. `id` burada, çünkü onu üreten INSERT'in
+        kendisi."""
         user.id = str(uuid.uuid4())
-        user.is_active = True
-        user.created_at = datetime.now(timezone.utc)
+        simulate_refresh(user)
 
     mock_db.refresh.side_effect = _simulate_refresh
     payload = RegisterRequest(**VALID_REGISTER_PAYLOAD)
 
-    result = create_user(payload, mock_db)
+    result = create_user(payload, mock_db, BackgroundTasks())
 
     assert result.tc_no == "12345678901"
     assert result.email == "ada@example.com"
@@ -160,12 +167,9 @@ def test_registration_opens_an_investment_account(mock_db):
                 obj.id = str(uuid.uuid4())
 
     mock_db.flush.side_effect = _simulate_flush
-    mock_db.refresh.side_effect = lambda user: (
-        setattr(user, "is_active", True),
-        setattr(user, "created_at", datetime.now(timezone.utc)),
-    )
+    mock_db.refresh.side_effect = simulate_refresh
 
-    create_user(RegisterRequest(**VALID_REGISTER_PAYLOAD), mock_db)
+    create_user(RegisterRequest(**VALID_REGISTER_PAYLOAD), mock_db, BackgroundTasks())
 
     added = [call.args[0] for call in mock_db.add.call_args_list]
     account = next(a for a in added if type(a).__name__ == "InvestmentAccount")
@@ -188,12 +192,9 @@ def test_registration_opens_a_deposit_account(mock_db):
                 obj.id = str(uuid.uuid4())
 
     mock_db.flush.side_effect = _simulate_flush
-    mock_db.refresh.side_effect = lambda user: (
-        setattr(user, "is_active", True),
-        setattr(user, "created_at", datetime.now(timezone.utc)),
-    )
+    mock_db.refresh.side_effect = simulate_refresh
 
-    create_user(RegisterRequest(**VALID_REGISTER_PAYLOAD), mock_db)
+    create_user(RegisterRequest(**VALID_REGISTER_PAYLOAD), mock_db, BackgroundTasks())
 
     added = [call.args[0] for call in mock_db.add.call_args_list]
     bank = next(a for a in added if type(a).__name__ == "BankAccount")
@@ -214,7 +215,7 @@ def test_registration_opens_a_deposit_account(mock_db):
 # step rejected them forever.
 # --------------------------------------------------------------------------
 def _active_user(tc_no: str = "12345678901"):
-    return SimpleNamespace(id=uuid.uuid4(), tc_no=tc_no, is_active=True)
+    return user_stub(id=str(uuid.uuid4()), tc_no=tc_no, is_active=True)
 
 
 def test_refresh_issues_a_new_access_token(mock_db):
@@ -307,12 +308,9 @@ def test_registration_opens_a_savings_account_too(mock_db):
                 obj.id = str(uuid.uuid4())
 
     mock_db.flush.side_effect = _simulate_flush
-    mock_db.refresh.side_effect = lambda user: (
-        setattr(user, "is_active", True),
-        setattr(user, "created_at", datetime.now(timezone.utc)),
-    )
+    mock_db.refresh.side_effect = simulate_refresh
 
-    create_user(RegisterRequest(**VALID_REGISTER_PAYLOAD), mock_db)
+    create_user(RegisterRequest(**VALID_REGISTER_PAYLOAD), mock_db, BackgroundTasks())
 
     opened = [
         obj for obj in (call.args[0] for call in mock_db.add.call_args_list)
@@ -322,3 +320,36 @@ def test_registration_opens_a_savings_account_too(mock_db):
     assert types == {"vadesiz", "vadeli"}
     savings = next(o for o in opened if o.account_type == "vadeli")
     assert float(savings.balance) == 0
+
+
+def user_stub(**overrides):
+    """Bir kullanıcı satırı taklidi, ŞU ANKİ şemanın gerektirdiği alanlarla.
+
+    Testler bunları tek tek `SimpleNamespace(tc_no=..., hashed_password=...)`
+    diye kuruyordu. Şema büyüdükçe -- main `is_verified` ekledi, #42
+    `notification_preferences` ve `transaction_limit` ekledi -- her ekleme aynı
+    anda on iki testi düşürdü, hepsi aynı sebeple ve hepsi ayrı ayrı
+    düzeltilmek zorunda kaldı.
+
+    Tek yerde toplandı: bir sonraki sütun buraya eklenir, testlere değil.
+    """
+    from datetime import datetime, timezone
+    import uuid as _uuid
+
+    base = dict(
+        id=str(_uuid.uuid4()),
+        tc_no="12345678901",
+        email="test@dummy.moneyfast.local",
+        phone_number="+905550000000",
+        first_name="Test",
+        last_name="Kullanici",
+        is_active=True,
+        is_verified=True,
+        notification_preferences={},
+        transaction_limit=50000,
+        user_preferences={},
+        created_at=datetime.now(timezone.utc),
+        hashed_password="",
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)

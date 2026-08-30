@@ -963,6 +963,68 @@ class ApiClient {
             throw error;
         }
     }
+
+    /**
+     * Oturum açmış kullanıcının profil bilgilerini günceller.
+     * 
+     * @param data - Güncellenecek profil bilgileri
+     * @param data.email - Opsiyonel yeni e-posta adresi
+     * @param data.phone_number - Opsiyonel yeni telefon numarası
+     * @param data.notification_preferences - Backend'de PostgreSQL JSONB kolonunda saklanan, esnek bildirim tercihleri matrisi (Kategori -> Kanal -> Durum).
+     * @param data.transaction_limit - Güvenlik Merkezi → İşlem Onay Limiti slider'ından ayarlanan eşik değeri (₺).
+     * @param data.user_preferences - Görünüm & Format sekmesinden ayarlanan kullanıcı tercihleri (dil, para birimi, dashboard şablonu).
+     */
+    async updateProfile(data: {
+        email?: string;
+        phone_number?: string;
+        notification_preferences?: Record<string, Record<string, boolean>>;
+        transaction_limit?: number;
+        user_preferences?: Record<string, string>;
+    }) {
+        return this.put<{ id: string; first_name: string; last_name: string }>('/auth/me', data);
+    }
+
+    /**
+     * Oturum açmış kullanıcının şifresini güvenli bir şekilde değiştirir.
+     * Mevcut şifrenin doğrulanmasını gerektirir.
+     */
+    async changePassword(data: { current_password: string; new_password: string }) {
+        return this.post<void>('/auth/change-password', data);
+    }
+
+    /**
+     * KVKK/GDPR kapsamında kullanıcının tüm kişisel verilerinin dışa
+     * aktarılması talebini backend'e iletir. İstek başarılı olduğunda
+     * backend bir arka plan görevi başlatır ve dosya hazırlandığında
+     * kullanıcının kayıtlı e-posta adresine gönderir.
+     */
+    async requestDataExport() {
+        return this.post<{ message: string }>('/auth/export-data', {});
+    }
+
+    /**
+     * Kullanıcı hesabını kalıcı olarak kapatır (soft delete).
+     *
+     * GÜVENLİK & YASAL UYUM:
+     * Bu metod backend'de `is_active=False` yaparak hesabı devre dışı bırakır;
+     * MASAK ve finansal düzenleme gereklilikleri gereği kullanıcı kaydı
+     * veritabanından fiziksel olarak silinmez. Frontend'deki çok adımlı onay
+     * modalı (kullanıcının bilinçli olarak "KAPAT" yazması) bu çağrıyı korur.
+     *
+     * Başarılı dönüşte çağıran taraf localStorage'ı temizleyerek
+     * kullanıcıyı /login sayfasına yönlendirmelidir.
+     */
+    async deleteAccount(data: { reason?: string }) {
+        const normalizedUrl = `${this.baseUrl}/auth/me`;
+        const response = await this.authedFetch(normalizedUrl, {
+            method: 'DELETE',
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+            throw new Error(await describeError(response));
+        }
+        return await response.json();
+    }
 }
 
 /**

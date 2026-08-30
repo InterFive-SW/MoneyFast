@@ -72,8 +72,58 @@ def mock_db() -> MagicMock:
     `db.query(User).filter(...).first()` zincirini desteklemesi için
     `query` metodunun döndürdüğü mock'u ayrıca yapılandırmak testin kendi
     işi (bkz. tests/modules/auth/test_service.py).
+
+    `refresh` gerçek bir yenileme gibi davranıyor: SQLAlchemy'nin `default=`
+    değerleri nesne kurulurken DEĞİL, veritabanına yazılırken uygulanıyor.
+    Üretimde `create_user` commit edip `refresh` çağırdığı için sütunlar
+    dolu dönüyor; hiçbir şey yapmayan bir mock ise nesneyi None'larla
+    bırakıyor ve `UserResponse` doğrulaması düşüyordu -- üretimde olmayan bir
+    hata.
     """
-    return MagicMock(spec=Session)
+    db = MagicMock(spec=Session)
+
+    def _refresh(instance, *_args, **_kwargs):
+        for column in getattr(type(instance), "__table__", None).columns \
+                if hasattr(type(instance), "__table__") else []:
+            if getattr(instance, column.name, None) is not None:
+                continue
+            default = column.default
+            if default is None:
+                continue
+            value = default.arg
+            setattr(instance, column.name,
+                    value(None) if callable(value) else value)
+
+    db.refresh.side_effect = _refresh
+    return db
+
+
+def simulate_refresh(instance):
+    """`db.refresh` gibi davranır: sunucu tarafı varsayılanlarını uygular.
+
+    SQLAlchemy'nin `default=` değerleri nesne kurulurken değil, yazılırken
+    işleniyor. Üretimde `create_user` commit edip refresh çağırdığı için
+    dönen nesne dolu; testte hiçbir şey yapmayan bir mock ise None bırakıyor
+    ve `UserResponse` doğrulaması üretimde olmayan bir hatayla düşüyor.
+
+    Testler bunu tek tek, eksik biçimde taklit ediyordu (yalnızca `is_active`
+    ve `created_at`). Yeni bir sütun eklendiğinde hepsi aynı anda düşüyordu.
+    """
+    from datetime import datetime, timezone
+
+    table = getattr(type(instance), "__table__", None)
+    if table is not None:
+        for column in table.columns:
+            if getattr(instance, column.name, None) is not None:
+                continue
+            if column.default is None:
+                continue
+            value = column.default.arg
+            setattr(instance, column.name,
+                    value(None) if callable(value) else value)
+    if getattr(instance, "created_at", None) is None:
+        instance.created_at = datetime.now(timezone.utc)
+    return instance
 
 
 @pytest.fixture

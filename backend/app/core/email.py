@@ -143,3 +143,57 @@ async def send_password_reset_email(email: str, token: str) -> None:
         logger.info(f"Password reset email sent to {email}")
     except Exception as e:
         logger.error(f"E-posta gönderilirken (Password Reset) beklenmeyen bir hata oluştu: {str(e)}")
+
+async def send_data_export_email(email: str, user_data: dict, portfolio_summary: dict) -> None:
+    """
+    Kullanıcıya veri dışa aktarma (export) dosyasını PDF formatında e-posta ile asenkron olarak gönderir.
+    
+    Tasarım ve Güvenlik:
+    - Hassas KVKK/GDPR verileri geçici bir PDF dosyasına (.pdf) yazılarak gönderilir.
+    - Olası I/O hatalarına karşı Exception Handling (try-except-finally) uygulanmıştır.
+    - E-posta iletimi sonrasında disk alanında güvenlik riski oluşmaması adına 
+      oluşturulan temp dosya `finally` bloğu içerisinde mutlak suretle silinir (Cleanup).
+    """
+    import tempfile
+    import os
+    from app.core.pdf_generator import generate_user_data_pdf
+    
+    html_content = _get_email_html_template(
+        title="Kişisel Verileriniz Hazır",
+        content="KVKK/GDPR kapsamında talep ettiğiniz kişisel verileriniz ve hesap dökümünüz ekteki PDF dosyasında yer almaktadır.",
+        action_url="https://moneyfast.com/security",
+        action_text="Güvenlik Merkezine Git"
+    )
+    
+    # PDF verisini geçici bir dosyaya yaz
+    temp_dir = tempfile.gettempdir()
+    file_path = os.path.join(temp_dir, f"moneyfast_export_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf")
+    
+    try:
+        # PDF oluşturma servisini çağır (Bloklanmayan yapıda background task olarak çalışıyor)
+        generate_user_data_pdf(user_data, portfolio_summary, file_path)
+        
+        message = MessageSchema(
+            subject="MoneyFast - Kişisel Verileriniz (Data Export)",
+            recipients=[email],
+            body=html_content,
+            subtype=MessageType.html,
+            attachments=[file_path]
+        )
+        
+        if 'fm' in globals():
+            await fm.send_message(message)
+            logger.info(f"PDF data export email sent to {email}")
+        else:
+            logger.warning(f"SMTP yapılandırması eksik, PDF e-posta gönderilemedi. Dosya yolu: {file_path}")
+            
+    except Exception as e:
+        logger.error(f"E-posta gönderilirken (PDF Data Export) beklenmeyen bir hata oluştu: {str(e)}")
+    finally:
+        # Güvenlik ve Temizlik: Temp PDF dosyasını işlem sonunda mutlaka sil (Cleanup)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Geçici PDF dosyası başarıyla silindi: {file_path}")
+            except OSError as cleanup_error:
+                logger.error(f"Geçici PDF silinirken hata oluştu: {str(cleanup_error)}")

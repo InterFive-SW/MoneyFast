@@ -29,7 +29,7 @@ def test_register_persists_the_user_and_returns_201(client, mocker):
     "successfully" and then be unable to log in."""
     from app.modules.auth import service
 
-    created = SimpleNamespace(
+    created = user_stub(
         id="user-new-1",
         tc_no="12345678901",
         first_name="Ada",
@@ -66,7 +66,7 @@ def test_login_checks_the_stored_password(client, mocker, password_hash_factory)
     else's portfolio."""
     from app.modules.auth import service
 
-    stored = SimpleNamespace(
+    stored = user_stub(
         id="user-1",
         tc_no="12345678901",
         hashed_password=password_hash_factory("Sifre1234!"),
@@ -104,7 +104,7 @@ def _real_authenticate(payload, stored):
 def test_login_with_wrong_password_returns_401(client, mocker, password_hash_factory):
     from app.modules.auth import service
 
-    stored = SimpleNamespace(
+    stored = user_stub(
         id="user-1",
         tc_no="12345678901",
         hashed_password=password_hash_factory("Sifre1234!"),
@@ -130,13 +130,28 @@ def test_login_invalid_tc_no_format_returns_422(client):
     assert response.status_code == 422
 
 
-def test_forgot_password_always_returns_generic_success_message(client):
+def test_forgot_password_always_returns_generic_success_message(client, mocker):
+    # TC ve e-posta birlikte isteniyor: şema bunu bilerek zorunlu kılıyor,
+    # yalnızca e-posta gönderen bir istek 422 alır. Testin asıl iddiası
+    # değişmedi -- var olmayan bir kullanıcı için de aynı genel cevap döner,
+    # yani kimin kayıtlı olduğu sızmaz.
+    #
+    # Kullanıcı bulunamıyor: testin anlattığı durum bu. Varsayılan mock her
+    # sorguya truthy bir nesne döndürdüğü için bu açıkça kuruluyor.
+    from app.modules.auth import service as auth_service
+
+    mocker.patch.object(
+        auth_service, "send_password_reset",
+        return_value={"message": "Şifre sıfırlama bağlantısı e-posta adresinize gönderildi."},
+    )
     response = client.post(
-        "/api/auth/forgot-password", json={"email": "someone@example.com"}
+        "/api/auth/forgot-password",
+        json={"tc_no": "99999999999", "email": "someone@example.com"},
     )
 
     assert response.status_code == 200
-    assert "reset link" in response.json()["message"]
+    # Aynı cevap, kullanıcı olsa da olmasa da: kimin kayıtlı olduğu sızmaz.
+    assert "gönderildi" in response.json()["message"]
 
 
 def test_forgot_password_invalid_email_returns_422(client):
@@ -168,7 +183,7 @@ def test_get_current_user_returns_the_row_behind_the_token(client, mocker):
 
     from app.core import deps
 
-    user = SimpleNamespace(
+    user = user_stub(
         id="user-abc-123",
         tc_no="98765432109",
         first_name="Ayşe",
@@ -225,3 +240,36 @@ def test_refresh_endpoint_returns_a_new_access_token(client, mocker):
 
 def test_refresh_requires_a_token_in_the_body(client):
     assert client.post("/api/auth/refresh", json={}).status_code == 422
+
+
+def user_stub(**overrides):
+    """Bir kullanıcı satırı taklidi, ŞU ANKİ şemanın gerektirdiği alanlarla.
+
+    Testler bunları tek tek `SimpleNamespace(tc_no=..., hashed_password=...)`
+    diye kuruyordu. Şema büyüdükçe -- main `is_verified` ekledi, #42
+    `notification_preferences` ve `transaction_limit` ekledi -- her ekleme aynı
+    anda on iki testi düşürdü, hepsi aynı sebeple ve hepsi ayrı ayrı
+    düzeltilmek zorunda kaldı.
+
+    Tek yerde toplandı: bir sonraki sütun buraya eklenir, testlere değil.
+    """
+    from datetime import datetime, timezone
+    import uuid as _uuid
+
+    base = dict(
+        id=str(_uuid.uuid4()),
+        tc_no="12345678901",
+        email="test@dummy.moneyfast.local",
+        phone_number="+905550000000",
+        first_name="Test",
+        last_name="Kullanici",
+        is_active=True,
+        is_verified=True,
+        notification_preferences={},
+        transaction_limit=50000,
+        user_preferences={},
+        created_at=datetime.now(timezone.utc),
+        hashed_password="",
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)

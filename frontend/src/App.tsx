@@ -46,12 +46,16 @@ import FundDetail           from './pages/markets/FundDetail'
 import IndicesScreen        from './pages/markets/IndicesScreen'
 import SectorsScreen        from './pages/markets/SectorsScreen'
 import AnalysesScreen       from './pages/markets/AnalysesScreen'
-import Analiz from './pages/Analiz'
 import GenelBakis from './pages/analiz/GenelBakis'
 import RiskSekmesi from './pages/analiz/RiskSekmesi'
 import Senaryo from './pages/analiz/Senaryo'
-import Settings from './pages/Settings'
 
+import SettingsLayout from './pages/settings/SettingsLayout'
+import ProfileSettings from './pages/settings/ProfileSettings'
+import SecuritySettings from './pages/settings/SecuritySettings'
+import NotificationSettings from './pages/settings/NotificationSettings'
+import AppearanceSettings from './pages/settings/AppearanceSettings'
+import PrivacySettings from './pages/settings/PrivacySettings'
 export default function App() {
   return (
     /*
@@ -106,7 +110,9 @@ export default function App() {
                 <Route path="transfer" element={<MoneyTransferWizard />} />
                 <Route path="new-card" element={<NewCardWizard />} />
               </Route>
-              <Route path="analiz" element={<Analiz />}>
+              {/* main'in sekme kabuğu yok: çocukları bizim Portföy Analizi
+                  menümüzün altında duruyor. */}
+              <Route path="analiz">
                 <Route index             element={<Navigate to="genel" replace />} />
                 <Route path="genel"      element={<GenelBakis />} />
                 <Route path="risk"       element={<RiskSekmesi />} />
@@ -115,7 +121,8 @@ export default function App() {
               {/* Portföy Analizi ve Risk Analizi tek çatı altında
                   birleşti. Eski adresler yer imlerinde ve paylaşılan
                   bağlantılarda duruyor, o yüzden 404 değil yönlendirme. */}
-              <Route path="analytics"  element={<Navigate to="/analiz/genel" replace />} />
+              <Route path="analytics"  element={<GenelBakis />} />
+              <Route path="senaryo"    element={<Senaryo />} />
               <Route path="investment" element={<Investment />}>
                 <Route index                element={<Navigate to="hisseler" replace />} />
                 <Route path="hisseler"       element={<StocksScreen />}  />
@@ -126,8 +133,23 @@ export default function App() {
                 <Route path="sektorler"      element={<SectorsScreen />} />
                 <Route path="analizler"      element={<AnalysesScreen />} />
               </Route>
-              <Route path="risk"       element={<Navigate to="/analiz/risk" replace />} />
-              <Route path="settings"   element={<Settings />}   />
+              {/* Risk KENDİ menüsünde kalıyor.
+
+                  main bunu "Analiz" sekmelerinin altına almıştı; bizim
+                  düzenimizde Portföy Analizi ve Risk Analizi ayrı iki menü.
+                  İçerik main'in (`RiskSekmesi`), yeri bizim. */}
+              <Route path="risk"       element={<RiskSekmesi />} />
+
+              {/* Ayarlar #42'den: tek bir sayfa değil, kendi alt sekmeleri
+                  olan bir bölüm. */}
+              <Route path="settings" element={<SettingsLayout />}>
+                <Route index element={<Navigate to="profile" replace />} />
+                <Route path="profile" element={<ProfileSettings />} />
+                <Route path="security" element={<SecuritySettings />} />
+                <Route path="notifications" element={<NotificationSettings />} />
+                <Route path="appearance" element={<AppearanceSettings />} />
+                <Route path="privacy" element={<PrivacySettings />} />
+              </Route>
             </Route>
           </Route>
         </Routes>

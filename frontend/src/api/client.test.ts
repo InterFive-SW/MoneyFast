@@ -1002,6 +1002,9 @@ describe('cards and loans', () => {
     apiClient.updateCardSettings('card-1', { frozen: true })
     expect(calledUrl(fetchMock)).toBe('/api/banking/cards/card-1/settings')
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PATCH' })
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Risk tolerans anketi
 // ---------------------------------------------------------------------------

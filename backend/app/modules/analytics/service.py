@@ -231,7 +231,11 @@ def build(
         closes_for,
         base_currency,
     )
-    trend = [
+    # NOT `trend`: bu seri ÖLÇÜM için. Grafikte çizilen `trend` yukarıda,
+    # `_trend`'den geliyor. İlk birleşmede bu atama `trend`'i eziyordu ve
+    # grafik sessizce ölçüm serisine düşüyordu -- yani "dün alınan hisse
+    # geçen yılda da görünmesin" kuralı kaybolmuştu.
+    measured = [
         {
             "date": datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
             "value": round(value, 2),
@@ -260,6 +264,10 @@ def build(
             "Oynaklık ve düşüş, sabit ağırlıklı bir seri üzerinden ölçülür; "
             "grafikteki değer ise pozisyonların o günkü miktarını yansıtır."
         )
+
+    # Ölçüm serisi boş kalabilir (ortak gün yok) ama grafik yine de
+    # çizilebilir; `measured` yalnızca metrikleri besliyor.
+    _ = measured
 
     # The index on the portfolio's OWN dates. Days the index did not trade are
     # dropped rather than carried forward, so the two lines only ever meet on

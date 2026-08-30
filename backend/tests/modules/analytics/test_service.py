@@ -120,14 +120,20 @@ class TestTrend:
         def reader(symbol):
             if symbol == "THYAO":
                 return [(NOW - timedelta(days=n), 300.0) for n in range(4, -1, -1)]
-            # ASELS has the three most recent days; the intersection is those.
+            # ASELS has only the three most recent days.
             return [(NOW - timedelta(days=n), 50.0) for n in range(2, -1, -1)]
 
         result = build(
             holdings=[holding("THYAO", 10, 300), holding("ASELS", 10, 50)],
             closes_for=reader,
         )
-        assert len(result["trend"]) == 3
+        # GRAFİK serisi birleşim: THYAO'nun beş günü de var. Ölçüm serisi
+        # (oynaklık, beta) ayrıca kesişimden hesaplanıyor ve orada üç gün var
+        # -- ikisi farklı sorulara cevap verdiği için farklı uzunlukta.
+        assert len(result["trend"]) == 5
+        assert result["trend"][0]["value"] == pytest.approx(3000.0)
+        assert result["trend"][-1]["value"] == pytest.approx(3500.0)
+        assert result["performance"]["observations"] == 3
 
     def test_a_symbol_too_thin_to_measure_is_dropped_and_the_gap_disclosed(self):
         """Two bars is a price ratio, not a series.
@@ -174,10 +180,9 @@ class TestTrend:
         # Açılışından önceki günler yalnızca THYAO; sonrakiler ikisi birden.
         assert result["trend"][0]["value"] == pytest.approx(3000.0)
         assert result["trend"][-1]["value"] == pytest.approx(3500.0)
-        assert result["excluded_symbols"] == ["ASELS"]
-        assert any("ASELS" in w and "toplamın altında" in w for w in result["warnings"])
-        # THYAO alone: the value carries only what could be measured.
-        assert result["trend"][-1]["value"] == pytest.approx(3000.0)
+        # Hiçbiri dışarıda kalmıyor: ikisinin de beş günlük fiyatı var.
+        # ASELS yalnızca AÇILMADAN ÖNCE katkı vermiyor, bu bir eksiklik değil.
+        assert result["excluded_symbols"] == []
 
     def test_a_symbol_without_history_is_excluded_and_named(self):
         result = build(
@@ -187,12 +192,18 @@ class TestTrend:
         assert result["excluded_symbols"] == ["IPEKE"]
         assert any("IPEKE" in w for w in result["warnings"])
 
-    def test_the_trend_is_disclosed_as_a_reconstruction(self):
-        """It reprices today's basket over past closes. The account's real
-        historical value is not recorded anywhere, and presenting this as if
-        it were would be the more comfortable lie."""
+    def test_the_two_series_are_disclosed_as_different_things(self):
+        """Grafik ile metrikler farklı serilerden geliyor ve bu söyleniyor.
+
+        Eski uyarı "trend, bugünkü pozisyonların geçmiş fiyatlarla yeniden
+        değerlenmesidir" diyordu. Çizilen seri için bu ARTIK DOĞRU DEĞİL:
+        miktar zamanın fonksiyonu ve pozisyon açılmadan önceki güne katkı
+        vermiyor. Doğru olmayan bir uyarı, okuyanı grafiğe olduğundan az
+        güvenmeye iter.
+        """
         result = build()
-        assert any("bugünkü pozisyonların" in w for w in result["warnings"])
+        assert any("sabit ağırlıklı" in w for w in result["warnings"])
+        assert not any("bugünkü pozisyonların" in w for w in result["warnings"])
 
     def test_no_priced_holdings_yields_an_empty_trend_not_a_crash(self):
         result = build(holdings=[], closes_for=closes({}))
@@ -235,8 +246,11 @@ class TestPerformance:
             return [(NOW, 100.0), (NOW, 100.0)]
 
         result = build(closes_for=one_bar)
-        assert result["trend"] == []
+        # Ölçüm yapılamıyor: tek gün, getiri yok.
         assert result["performance"]["total_return_percent"] is None
+        # Grafik yine de gözlenen noktayı taşıyor -- ölçülemeyen bir gün,
+        # portföyün o gün değeri olmadığı anlamına gelmiyor.
+        assert len(result["trend"]) == 1
 
 
 class TestActivity:

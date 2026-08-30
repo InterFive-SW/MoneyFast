@@ -87,6 +87,19 @@ const BAND_BASE = ['USDTRY', 'EURTRY', 'EURUSD', 'XAUUSD']
  */
 const BAND_FALLBACK = ['NVDA', 'THYAO', 'ASELS', 'CCOLA']
 
+/**
+ * Asistanın gerçekten yapabildiği şeyler.
+ *
+ * Genel bir "sorularınızı sorun" cümlesi, ne sorabileceğini söylemiyor.
+ * Buradakilerin üçü de bugün çalışan yollar: fiyat sorgusu, portföy okuma ve
+ * işlem hazırlama.
+ */
+const ASSISTANT_EXAMPLES = [
+  '"THYAO kaç lira?" — anlık fiyat, sorulduğu anda tazelenir',
+  '"Portföyüm nasıl gidiyor?" — kendi pozisyonlarınız üzerinden',
+  '"5 lot ASELS al" — öneri hazırlar, onayı siz verirsiniz',
+]
+
 function shortDate(value: string | null | undefined): string {
   if (!value) return 'veri yok'
   const parsed = new Date(value)
@@ -513,30 +526,64 @@ export default function Home() {
         </section>
 
         <section className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-950 p-5">
-          <h2 className="text-sm font-semibold text-white">Finansal Yapay Zeka</h2>
-          <p className="mt-1 text-xs leading-snug text-slate-400">
-            Piyasayı sorun, portföyünüzü konuşun, işlem hazırlatın — onay her
-            zaman sizde.
-          </p>
+          {/* Yanındaki panellerle aynı ağırlıkta olsun diye: bir işaret, ne
+              yapabildiğini söyleyen üç somut satır ve tek bir belirgin eylem.
+              Önceki hali bir başlık, bir cümle ve üç düğmeden ibaretti ve
+              komşularının yanında düz duruyordu. */}
+          <div className="flex items-start gap-3">
+            <span
+              aria-hidden
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brandBlue/15 ring-1 ring-brandBlue/30"
+            >
+              <svg className="h-5 w-5 text-brandBlue" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-white">Finansal Yapay Zeka</h2>
+              <p className="mt-0.5 text-xs leading-snug text-slate-400">
+                Onay her zaman sizde — hiçbir emir sormadan iletilmez.
+              </p>
+            </div>
+          </div>
+
+          <ul className="mt-4 space-y-2">
+            {ASSISTANT_EXAMPLES.map((example) => (
+              <li key={example} className="flex items-start gap-2">
+                <span
+                  aria-hidden
+                  className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brandBlue"
+                />
+                <span className="text-xs leading-snug text-slate-300">{example}</span>
+              </li>
+            ))}
+          </ul>
+
           <div className="mt-4 flex flex-col gap-2">
             <Link
               to="/chat"
-              className="rounded-lg bg-brandBlue px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-brandBlue/90"
+              className="flex items-center justify-center gap-2 rounded-lg bg-brandBlue px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brandBlue/20 transition hover:bg-brandBlue/90"
             >
               Bana sor
+              <span aria-hidden>→</span>
             </Link>
             <div className="grid grid-cols-2 gap-2">
               <Link
                 to="/analytics"
-                className="rounded-lg border border-slate-700 px-3 py-2 text-center text-xs font-semibold text-slate-200 transition hover:border-brandBlue/60"
+                className="rounded-lg border border-slate-700 px-3 py-2 text-center text-xs font-semibold text-slate-300 transition hover:border-brandBlue/60 hover:text-white"
               >
                 Analiz
               </Link>
               <Link
                 to="/risk"
-                className="rounded-lg border border-slate-700 px-3 py-2 text-center text-xs font-semibold text-slate-200 transition hover:border-brandBlue/60"
+                className="rounded-lg border border-slate-700 px-3 py-2 text-center text-xs font-semibold text-slate-300 transition hover:border-brandBlue/60 hover:text-white"
               >
-                Rapor
+                Risk
               </Link>
             </div>
           </div>

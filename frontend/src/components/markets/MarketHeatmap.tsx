@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { ResponsiveContainer, Treemap } from 'recharts'
 
 import { apiClient } from '../../api/client'
+import { useMarketStream } from '../../hooks/useMarketStream'
+import { formatWithBase } from '../../lib/money'
 import type { HeatmapTile } from '../../api/client'
 
 interface MarketHeatmapProps {
@@ -54,17 +56,45 @@ interface TileProps {
   height?: number
   symbol?: string
   changePercent?: number
+  tile?: HeatmapTile
+  onHover?: (tile: HeatmapTile | null, x: number, y: number) => void
 }
 
-/** Bir kutu. Sembol ve yüzde ancak sığdığında yazılıyor. */
-function Tile({ x = 0, y = 0, width = 0, height = 0, symbol, changePercent }: TileProps) {
+/**
+ * Bir kutu. Sembol ve yüzde ancak SIĞDIĞINDA yazılıyor.
+ *
+ * Sığmadığında kutu adsız kalıyor -- S&P 500 boyutunda çoğu kutu bu durumda.
+ * Bu yüzden üzerine gelince (ve klavyeyle odaklanınca) ad, fiyat ve değişim
+ * bir kartta gösteriliyor: yalnızca fareyle ulaşılabilen bir etiket, etiket
+ * sayılmaz.
+ */
+function Tile({
+  x = 0, y = 0, width = 0, height = 0, symbol, changePercent, tile, onHover,
+}: TileProps) {
   if (width <= 0 || height <= 0) return null
   const change = changePercent ?? 0
   const showSymbol = width > 42 && height > 24
   const showChange = width > 54 && height > 38
 
+  const reveal = () => tile && onHover?.(tile, x + width / 2, y)
+  const clear = () => onHover?.(null, 0, 0)
+
   return (
-    <g>
+    <g
+      tabIndex={0}
+      role="img"
+      aria-label={
+        tile
+          ? `${tile.symbol}, ${tile.name ?? ''}, %${change.toFixed(2)}`
+          : undefined
+      }
+      onMouseEnter={reveal}
+      onMouseMove={reveal}
+      onMouseLeave={clear}
+      onFocus={reveal}
+      onBlur={clear}
+      style={{ cursor: 'pointer', outline: 'none' }}
+    >
       <rect
         x={x}
         y={y}
@@ -120,6 +150,8 @@ export default function MarketHeatmap({ h = 5 }: MarketHeatmapProps) {
   const [missing, setMissing] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [hovered, setHovered] = useState<{ tile: HeatmapTile; x: number; y: number } | null>(null)
+  const { rates } = useMarketStream()
 
   useEffect(() => {
     let cancelled = false
@@ -151,6 +183,8 @@ export default function MarketHeatmap({ h = 5 }: MarketHeatmapProps) {
         // Recharts alanı `size`'dan hesaplıyor.
         size: tile.marketCap,
         changePercent: tile.changePercent,
+        // Satırın kendisi taşınıyor: kartta ad ve fiyat da gösteriliyor.
+        tile,
       })),
     [tiles],
   )
@@ -195,13 +229,47 @@ export default function MarketHeatmap({ h = 5 }: MarketHeatmapProps) {
           Bu piyasada gösterilecek enstrüman yok.
         </p>
       ) : (
-        <div style={{ height }}>
+        <div className="relative" style={{ height }}>
+          {hovered && (
+            <div
+              role="tooltip"
+              className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full rounded-lg border border-white/10 bg-slate-950/95 px-3 py-2 shadow-2xl"
+              style={{
+                left: Math.min(Math.max(hovered.x, 90), 640),
+                top: Math.max(hovered.y - 6, 46),
+              }}
+            >
+              <p className="text-xs font-semibold text-white">{hovered.tile.symbol}</p>
+              {hovered.tile.name && hovered.tile.name !== hovered.tile.symbol && (
+                <p className="max-w-[220px] truncate text-[11px] text-slate-400">
+                  {hovered.tile.name}
+                </p>
+              )}
+              <p className="mt-1 text-[11px] tabular-nums text-slate-300">
+                {formatWithBase(hovered.tile.price, hovered.tile.currency, rates)}
+              </p>
+              <p
+                className={`text-[11px] font-semibold tabular-nums ${
+                  hovered.tile.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                {hovered.tile.changePercent > 0 ? '+' : ''}
+                {hovered.tile.changePercent.toFixed(2)}%
+              </p>
+            </div>
+          )}
           <ResponsiveContainer width="100%" height="100%">
             <Treemap
               data={data}
               dataKey="size"
               isAnimationActive={false}
-              content={<Tile />}
+              content={
+                <Tile
+                  onHover={(tile, x, y) =>
+                    setHovered(tile ? { tile, x, y } : null)
+                  }
+                />
+              }
             />
           </ResponsiveContainer>
         </div>

@@ -240,3 +240,120 @@ class TestIngestWrites:
 
 def test_market_health_reports_module_name(client):
     assert client.get("/api/market/health").json() == {"status": "ok", "module": "market"}
+
+
+class TestInstrumentSearch:
+    """Yazdıkça öneri: evren binin üzerinde enstrüman, açılır liste taşımaz."""
+
+    URL = "/api/market/search"
+
+    def test_it_returns_the_service_rows(self, market_client, mocker):
+        mocker.patch.object(
+            market_service, "search_instruments",
+            return_value=[{"symbol": "THYAO", "name": "Türk Hava Yolları",
+                           "market": "BIST", "currency": "TRY"}],
+        )
+        body = market_client.get(f"{self.URL}?q=thy").json()
+        assert body[0]["symbol"] == "THYAO"
+
+    def test_an_empty_query_is_rejected(self, market_client):
+        """Boş arama bütün evreni dökmemeli."""
+        assert market_client.get(f"{self.URL}?q=").status_code == 422
+
+    def test_the_limit_is_capped(self, market_client):
+        assert market_client.get(f"{self.URL}?q=a&limit=999").status_code == 422
+
+
+class TestIntradaySymbols:
+    """Gün içi bar gereken küme; evrenin tamamı değil."""
+
+    URL = "/api/market/candles/intraday-symbols"
+
+    def test_it_needs_the_service_key(self, market_client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        assert market_client.get(self.URL).status_code == 401
+
+    def test_it_reports_the_symbols(self, market_client, mocker, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        mocker.patch.object(
+            market_service, "intraday_symbols", return_value=["THYAO", "USDTRY"],
+        )
+        body = market_client.get(
+            self.URL, headers={"Authorization": "Bearer s3cret"},
+        ).json()
+        assert body == {"symbols": ["THYAO", "USDTRY"]}
+
+
+class TestNamedLookupRefreshesFirst:
+    """Adı verilen bir enstrüman sorulduğunda fiyat önce tazelenir.
+
+    Toplu tur on beş dakikada bir dönüyor; "THYAO kaç TL" sorusuna on beş
+    dakika önceki fiyatla cevap vermek, kullanıcının karar verdiği anda yanlış
+    sayı göstermek olurdu.
+    """
+
+    def test_a_named_symbol_triggers_a_refresh(self, market_client, mocker):
+        refresh = mocker.patch.object(market_module_service, "refresh_quotes")
+        mocker.patch.object(market_service, "list_instruments", return_value=[])
+        market_client.get("/api/market/instruments?symbols=THYAO")
+        refresh.assert_called_once()
+
+    def test_a_screen_does_not(self, market_client, mocker):
+        """Tarama yüzlerce satır okur ve hiçbiri tek bir anlık fiyata bağlı
+        karar değildir."""
+        refresh = mocker.patch.object(market_module_service, "refresh_quotes")
+        mocker.patch.object(market_service, "list_instruments", return_value=[])
+        market_client.get("/api/market/instruments?market=BIST")
+        refresh.assert_not_called()
+
+
+class TestMarketHeatmapEndpoint:
+    """Piyasanın ısı haritası; portföyünkiyle karıştırılmamalı."""
+
+    URL = "/api/market/heatmap"
+
+    def test_it_returns_tiles_and_the_missing_count(self, market_client, mocker):
+        mocker.patch.object(
+            market_service, "market_heatmap",
+            return_value={
+                "items": [{
+                    "symbol": "THYAO", "name": "Türk Hava Yolları",
+                    "marketCap": 1_000_000.0, "changePercent": 1.5,
+                    "sector": "Taşımacılık", "price": 300.0, "currency": "TRY",
+                }],
+                "missing": 4,
+            },
+        )
+        body = market_client.get(f"{self.URL}?market=BIST").json()
+        assert body["items"][0]["symbol"] == "THYAO"
+        # Kaç enstrümanın çizilemediği söylenir: sessizce düşen kutular,
+        # haritayı olduğundan küçük gösterir.
+        assert body["missing"] == 4
+
+    def test_the_limit_is_capped(self, market_client):
+        assert market_client.get(f"{self.URL}?limit=5000").status_code == 422
+
+    def test_no_market_means_every_market(self, market_client, mocker):
+        heatmap = mocker.patch.object(
+            market_service, "market_heatmap", return_value={"items": [], "missing": 0},
+        )
+        market_client.get(self.URL)
+        assert heatmap.call_args.kwargs["market"] is None
+
+
+class TestMissingFundamentalsEndpoint:
+    URL = "/api/market/fundamentals/missing"
+
+    def test_it_needs_the_service_key(self, market_client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        assert market_client.get(self.URL).status_code == 401
+
+    def test_it_reports_what_is_missing(self, market_client, mocker, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        mocker.patch.object(
+            market_service, "symbols_without_fundamentals", return_value=["AAPL"],
+        )
+        body = market_client.get(
+            self.URL, headers={"Authorization": "Bearer s3cret"},
+        ).json()
+        assert body == {"symbols": ["AAPL"]}

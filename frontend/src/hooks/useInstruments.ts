@@ -63,17 +63,25 @@ export interface InstrumentsState {
  * `changePercent` is refreshed alongside `price` by `useLiveRows`, so a row
  * cannot show a new price beside yesterday's change.
  */
-export function useInstruments(limit = 200): InstrumentsState {
+export function useInstruments(limit = 200, market?: string): InstrumentsState {
   const [fetched, setFetched] = useState<MarketInstrument[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Piyasa süzgeci SUNUCUDA uygulanır, listede değil. Evren binin üzerinde
+    // enstrüman; burada `limit` kadarını çekip istemcide süzmek, seçilen
+    // piyasanın yalnızca ilk sayfaya düşen kısmını göstermek olurdu.
+    //
+    // `market` bir borsa (BIST, NASDAQ) ya da bir ENDEKS (SP500, NASDAQ100)
+    // olabilir; ikisini de aynı alan taşıyor, çünkü AAPL hem Nasdaq'ta işlem
+    // görür hem de S&P 500 üyesidir.
+    setLoading(true);
     apiClient
-      .getInstruments({ limit })
+      .getInstruments(market ? { limit, market } : { limit })
       .then((response) => setFetched((response.instruments ?? []).map(adaptInstrument)))
       .catch((error) => console.error('Failed to load instruments', error))
       .finally(() => setLoading(false));
-  }, [limit]);
+  }, [limit, market]);
 
   const instruments = useLiveRows(fetched);
   const sectors = useMemo(

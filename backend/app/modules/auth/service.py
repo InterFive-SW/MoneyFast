@@ -1,3 +1,5 @@
+import hashlib
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -107,3 +109,17 @@ def create_user(payload: RegisterRequest, db: Session) -> UserResponse:
     db.commit()
     db.refresh(user)
     return UserResponse.model_validate(user)
+
+
+def customer_no_for(user_id: str) -> str:
+    """Kullanıcı kimliğinden türetilen, sabit sekiz haneli müşteri numarası.
+
+    Saklanmıyor: yeni bir sütun, hiçbir zaman değişmeyecek ve tamamen
+    kimlikten çıkarılabilen bir değer için gereksiz bir kayıt olurdu.
+
+    Dilimlenerek değil, özetlenerek üretiliyor -- `banking/service._digits_for`
+    ile aynı gerekçe: kullanıcı kimlikleri onaltılık, yalnızca rakamlarını
+    almak harfleriyle ayrışan iki kullanıcıya aynı numarayı verirdi.
+    """
+    digest = hashlib.sha256(str(user_id).encode("utf-8")).hexdigest()
+    return str(int(digest[:12], 16)).zfill(8)[:8]

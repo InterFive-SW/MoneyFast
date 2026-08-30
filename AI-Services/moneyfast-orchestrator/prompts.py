@@ -316,6 +316,15 @@ ROUTING RULES
   for; the user then had to say "ben bunun bistteki hissesinden bahsediyorum".
   MARKET_RESEARCH_AGENT is for questions explicitly about news, commentary or
   a reason ("neden düştü", "hakkında ne yazılıyor").
+- A word you do not RECOGNISE is not proof it is out of scope. You do not hold
+  the instrument universe; the resolver does. "ndivia nasıl", "xyzabc hissesi",
+  "bunun fiyatı ne" -- an unfamiliar token in a market-shaped question goes to
+  MARKET_DATA_AGENT so the lookup can answer, and the lookup will say plainly
+  if there is no such instrument. Measured failure: "ndivia nasıl" was
+  classified OUT_OF_SCOPE and sent to EDUCATION_AGENT, no tool ran, and the
+  user was told data "could not be retrieved" -- while ndivia resolves to NVDA.
+  Reserve OUT_OF_SCOPE for messages that are plainly not about money at all
+  (recipes, the weather), not for words you have not seen before.
 - A definition question with no personal reference is EDUCATION_AGENT even if
   it names an instrument.
 - When the message is not self-contained ("peki ya o?"), resolve it against

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
 
@@ -74,6 +74,19 @@ export default function MoneyTransferWizard() {
   )
   const transferFee = isOwnAccountTransfer ? 0 : 2.5
 
+  /**
+   * Bir hata, onu doğuran girdiler değiştiği anda silinir.
+   *
+   * `submitError` yalnızca gönderim içinde temizleniyordu; geri dönüp IBAN'ı
+   * düzelten kullanıcı özet adımına döndüğünde artık var olmayan bir IBAN'ı
+   * anlatan eski hatayı görüyordu. Her navigasyon eline ayrı ayrı yazmak
+   * yerine girdilere bağlandı: sonradan eklenen bir "geri" yolu hatayı
+   * yeniden diriltemesin.
+   */
+  useEffect(() => {
+    setSubmitError(null)
+  }, [step, receiverTab, destinationIban, ownDestinationId, amount, senderAccountId])
+
   const handleNext = () => {
     if (step < 4) setStep((prev) => (prev + 1) as 1 | 2 | 3 | 4)
   }
@@ -127,7 +140,7 @@ export default function MoneyTransferWizard() {
       <div className="bg-slate-900/40 backdrop-blur-xl border border-white/5 rounded-3xl p-6 shadow-xl">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
-            <button onClick={handleBack} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+            <button onClick={handleBack} aria-label="Geri" className="p-2 hover:bg-white/10 rounded-full transition-colors">
               <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
@@ -139,7 +152,7 @@ export default function MoneyTransferWizard() {
           </button>
         </div>
 
-        <div className="flex w-full items-center justify-between gap-2 overflow-x-auto pb-4">
+        <div className="flex w-full flex-wrap items-center justify-between gap-2 pb-4">
           {[
             { num: 1, title: 'ALICI HESAP' },
             { num: 2, title: 'GÖNDEREN HESAP' },

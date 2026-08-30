@@ -29,6 +29,30 @@ export type MarketTicker = GetResponseType<paths['/api/market/tickers']>[0];
 // --- Banking: bills, staged payments, saved payees -------------------------
 
 /** Vadesiz, vadeli veya yatırım — tek biçimde. */
+export interface HeatmapTile {
+    symbol: string
+    name?: string | null
+    /** Kutunun ALANI bundan geliyor. */
+    marketCap: number
+    changePercent: number
+    sector: string
+    price: number
+    currency: string
+}
+
+export interface MarketHeatmap {
+    items: HeatmapTile[]
+    /** Piyasa değeri bilinmediği için çizilemeyen enstrüman sayısı. */
+    missing: number
+}
+
+export interface InstrumentSuggestion {
+    symbol: string
+    name?: string | null
+    market?: string | null
+    currency?: string | null
+}
+
 export interface PortfolioAccount {
     id: string
     account_number: string
@@ -36,6 +60,9 @@ export interface PortfolioAccount {
     account_type: string
     currency_code: string
     balance: number
+    /** Vadeli hesabın saklanan yıllık oranı ve vadesi; vadesizde null. */
+    interest_rate?: number | null
+    term_days?: number | null
     is_investment: boolean
 }
 
@@ -138,7 +165,6 @@ export type RiskSuggestion = NonNullable<RiskProfile['suggestions']>[0];
 
 export type WatchlistItem = GetResponseType<paths['/api/investment/watchlist']>['bist'][0];
 export type TopMoverItem = GetResponseType<paths['/api/investment/top-movers']>['gainers'][0];
-export type DividendItem = GetResponseType<paths['/api/investment/dividends']>[0];
 export type SectorAllocationItem = GetResponseType<paths['/api/investment/sector-allocation']>[0];
 export type HeatmapItem = GetResponseType<paths['/api/investment/heatmap']>[0];
 
@@ -343,8 +369,16 @@ class ApiClient {
         return this.request<InvestmentBalance>('/investment/portfolio/summary');
     }
 
-    getPortfolioChart() {
-        return this.request<PortfolioChartData>('/investment/portfolio/chart');
+    /**
+     * Portföyün mum serisi, TEK aralık.
+     *
+     * Beş aralığın hepsi tek istekte üretiliyordu: çağrı başına ~130 sorgu ve
+     * ölçülen 5,9 saniye. Ekran aynı anda bir aralık gösteriyor.
+     */
+    getPortfolioChart(range = 'yil') {
+        return this.request<PortfolioChartData>(
+            `/investment/portfolio/chart?range=${encodeURIComponent(range)}`,
+        );
     }
 
     getPositions() {
@@ -387,9 +421,6 @@ class ApiClient {
         return this.request<RiskProfile>('/risk/profile');
     }
 
-    getDividends() {
-        return this.request<DividendItem[]>('/investment/dividends');
-    }
 
     getSectorAllocation() {
         return this.request<SectorAllocationItem[]>('/investment/sector-allocation');
@@ -479,6 +510,45 @@ class ApiClient {
         );
     }
 
+    /**
+     * Yatırım hesabının nakit hareketleri.
+     *
+     * Ayrı bir uç, çünkü nakit `banking.accounts` değil
+     * `investment.investment_accounts` üzerinde duruyor. Yanıt bankacılık
+     * dökümüyle aynı biçimde, böylece arayüz iki listeyi de aynı satır
+     * bileşeniyle basabiliyor.
+     */
+    getInvestmentStatement(identifier: string, limit = 20) {
+        return this.request<Statement>(
+            `/investment/accounts/${encodeURIComponent(identifier)}/statement?limit=${limit}`,
+        );
+    }
+
+    /**
+     * Sembol ya da şirket adına göre enstrüman önerisi.
+     *
+     * Evren binin üzerinde enstrüman: bir açılır liste bunu taşıyamaz.
+     * Türkçe katlama sunucu tarafında (`market_service._fold`), dolayısıyla
+     * `sise` yazan `ŞİŞE`yi buluyor.
+     */
+    searchInstruments(query: string, limit = 10) {
+        return this.request<InstrumentSuggestion[]>(
+            `/market/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+        );
+    }
+
+    /**
+     * Piyasa ısı haritası: piyasa değeri ve günlük değişim.
+     *
+     * `getHeatmap` ile karıştırılmamalı -- o, kullanıcının portföyünü pozisyon
+     * ağırlığına göre gösteriyor. Bu, piyasanın kendisini gösteriyor.
+     */
+    getMarketHeatmap(market?: string, limit = 300) {
+        const query = new URLSearchParams({ limit: String(limit) })
+        if (market) query.set('market', market)
+        return this.request<MarketHeatmap>(`/market/heatmap?${query}`)
+    }
+
     /** Kategorilere göre harcama özeti. */
     getSpending(days = 30) {
         return this.request<SpendingSummary>(`/banking/spending?days=${days}`);
@@ -510,8 +580,14 @@ class ApiClient {
     }
 
     /** Portföy analizi — dağılım, trend, performans ve işlem geçmişi tek çağrıda. */
-    getPortfolioAnalysis() {
-        return this.request<PortfolioAnalysis>('/analytics/portfolio');
+    /**
+     * Portföy analizi. `range='day'` gün içi seriyi (15 dakikalık gerçek
+     * barlar) döndürür; varsayılan günlük barlardır.
+     */
+    getPortfolioAnalysis(range?: 'all' | 'day') {
+        return this.request<PortfolioAnalysis>(
+            range ? `/analytics/portfolio?range=${range}` : '/analytics/portfolio',
+        );
     }
 
     /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */
@@ -581,7 +657,13 @@ class ApiClient {
     }
 
     getCurrentUser() {
-        return this.request<{ id: string; first_name: string; last_name: string }>('/auth/me');
+        return this.request<{
+            id: string
+            first_name: string
+            last_name: string
+            /** Kimlikten türetilen, kullanıcıya özel müşteri numarası. */
+            customer_no?: string | null
+        }>('/auth/me');
     }
 
     getMarketTickers() {

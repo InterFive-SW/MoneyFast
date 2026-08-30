@@ -432,9 +432,91 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     return out
 
 
+async def _verify_named_instrument(
+    state: MoneyFastState, plan: dict[str, Any]
+) -> Optional[dict[str, Any]]:
+    """Look the named instrument up BEFORE anything is asked about it.
+
+    Measured, from three consecutive turns: "nvvvvdi hissesi almak", "aple
+    alcam" and "ndivia nasıl" all reached an answer with `get_market_data`
+    NEVER CALLED. The model recognised "aple" as Apple from its own knowledge,
+    invented that NVVVVDI does not exist, and told the user data for "ndivia"
+    could not be retrieved -- while the backend resolves ndivia to NVDA
+    perfectly well.
+
+    The prompt already tells the specialist to check first. A prompt is
+    advisory: this module already learned that with `_keep_crisis`, where a
+    mandatory instruction was followed about half the time. So the check runs
+    in code, on the one path where being wrong costs money.
+
+    Returns a NEEDS_INPUT specialist output when the name does not resolve,
+    or None to let the turn continue.
+    """
+    named = _named_symbol(plan, state)
+    if not named:
+        return None
+
+    try:
+        payload = await get_mcp_client().call("get_market_data", {"symbols": [named]})
+    except (MCPUnavailable, MCPToolError):
+        # A lookup failure is not proof the instrument is missing. Let the turn
+        # continue; staging resolves strictly and refuses on its own.
+        return None
+
+    if payload.get("instruments"):
+        return None
+
+    # Not found. The tool's warning already carries the candidates the resolver
+    # produced, phrased for a person -- pass that through rather than writing a
+    # second, differently worded version of the same sentence.
+    suggestion = next(
+        (w for w in (payload.get("warnings") or []) if "biri mi" in w), None
+    )
+    return {
+        "specialist_output": {
+            "agent": "TRANSACTION_AGENT",
+            "status": "NEEDS_INPUT",
+            "missing_fields": ["instrument"],
+            "clarification_request": suggestion or (
+                f"«{named}» diye bir enstrüman bulamadım. "
+                f"Sembolü ya da tam adını yazar mısınız?"
+            ),
+        }
+    }
+
+
+def _named_symbol(plan: dict[str, Any], state: MoneyFastState) -> Optional[str]:
+    """Whatever instrument this turn is about, however the model expressed it."""
+    args = plan.get("arguments") or {}
+    instrument = args.get("instrument") or {}
+    candidates = [
+        instrument.get("symbol") if isinstance(instrument, dict) else None,
+        args.get("symbol"),
+    ]
+    tickers = (state.get("entities") or {}).get("tickers") or []
+    candidates.extend(tickers[:1])
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 async def transaction_node(state: MoneyFastState) -> dict[str, Any]:
     plan = await _llm_json(SPECIALIST_PROMPTS["TRANSACTION_AGENT"], _specialist_task(state))
+
     if plan.get("status") == "NEEDS_INPUT" or not plan.get("arguments"):
+        # About to ask for something more -- usually a quantity. Confirm the
+        # instrument EXISTS first. Asking "how many NVVVVDI?" and finding out
+        # only at staging that there is no such thing is a question that
+        # should never have been put.
+        #
+        # Only on this path: a complete request goes to staging, which already
+        # resolves strictly and refuses with suggestions. The measured failures
+        # were all of the "asked for a quantity" kind.
+        unknown = await _verify_named_instrument(state, plan)
+        if unknown is not None:
+            return unknown
+
         return {
             "specialist_output": {
                 "agent": "TRANSACTION_AGENT",

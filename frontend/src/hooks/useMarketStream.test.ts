@@ -353,4 +353,55 @@ describe('conversion rates', () => {
     }))
     expect(result.current.quotes.AAPL.currency).toBe('USD')
   })
+
+  it('merges a partial frame onto what it already has', async () => {
+    /**
+     * Evren 1010 enstrümana çıkınca her tam kare 88 KB oldu ve fiyat her
+     * değiştiğinde açık olan her sekmeye gidiyordu. Sunucu artık yalnızca
+     * DEĞİŞENLERİ yolluyor; istemci onları elindekinin üstüne biniyor.
+     *
+     * Kısmi kareyi tam kare gibi uygulamak, o karede geçmeyen her sembolü
+     * ekrandan silerdi.
+     */
+    const { useMarketStream } = await loadHook()
+    const view = renderHook(() => useMarketStream())
+
+    act(() => instances[0].emit('quotes', {
+      ...FRAME,
+      partial: false,
+      quotes: {
+        THYAO: { price: 304, change: 3, changePercent: 1 },
+        ASELS: { price: 90, change: 1, changePercent: 1.1 },
+      },
+    }))
+
+    act(() => instances[0].emit('quotes', {
+      ...FRAME,
+      partial: true,
+      quotes: { THYAO: { price: 310, change: 9, changePercent: 3 } },
+    }))
+
+    expect(view.result.current.quotes.THYAO.price).toBe(310)
+    // Kısmi karede geçmeyen sembol yerinde duruyor.
+    expect(view.result.current.quotes.ASELS.price).toBe(90)
+  })
+
+  it('a full frame replaces the snapshot rather than merging', async () => {
+    /* Listeden çıkan bir enstrüman, tam kare geldiğinde gitmeli. */
+    const { useMarketStream } = await loadHook()
+    const view = renderHook(() => useMarketStream())
+
+    act(() => instances[0].emit('quotes', {
+      ...FRAME,
+      quotes: { THYAO: { price: 304, change: 3, changePercent: 1 },
+                GONE: { price: 5, change: 0, changePercent: 0 } },
+    }))
+    act(() => instances[0].emit('quotes', {
+      ...FRAME,
+      partial: false,
+      quotes: { THYAO: { price: 305, change: 4, changePercent: 1.2 } },
+    }))
+
+    expect(view.result.current.quotes.GONE).toBeUndefined()
+  })
 })

@@ -17,6 +17,8 @@ from .schemas import (
     FundamentalsIngestRequest,
     CandleSeriesOut,
     InstrumentListOut,
+    InstrumentSuggestion,
+    MarketHeatmapOut,
     MarketTicker,
     NewsIngestRequest,
     NewsItem,
@@ -113,6 +115,48 @@ async def get_market_news(
     ]
 
 
+
+@router.get(
+    "/heatmap",
+    response_model=MarketHeatmapOut,
+    summary="Piyasa ısı haritası (piyasa değeri ve günlük değişim)",
+)
+async def market_heatmap(
+    market: Optional[str] = Query(default=None),
+    limit: int = Query(default=300, ge=1, le=600),
+    db: Session = Depends(get_db),
+):
+    """Bir endeksin ısı haritası.
+
+    `GET /api/investment/heatmap` ile karıştırılmamalı: o, kullanıcının
+    portföyünü pozisyon ağırlığına göre gösteriyor. Bu, piyasanın kendisini
+    gösteriyor -- her hisse piyasa değeri kadar yer kaplıyor.
+
+    `market` bir borsa (BIST, NASDAQ) ya da bir endeks (SP500) olabilir; aynı
+    alan ikisini de taşıyor çünkü AAPL Nasdaq'ta işlem görür VE S&P 500
+    üyesidir.
+    """
+    return market_service.market_heatmap(db, market=market, limit=limit)
+
+
+@router.get(
+    "/search",
+    response_model=List[InstrumentSuggestion],
+    summary="Enstrüman arama (yazdıkça öneri)",
+)
+async def search_instruments(
+    q: str = Query(..., min_length=1, max_length=64),
+    limit: int = Query(default=10, ge=1, le=25),
+    db: Session = Depends(get_db),
+):
+    """Sembol ya da şirket adına göre öneri listesi.
+
+    Evren binin üzerinde enstrüman; bir açılır liste bunu taşıyamaz. Türkçe
+    katlama `market_service._fold` ile yapılıyor, dolayısıyla `sise` yazan
+    `ŞİŞE`yi buluyor.
+    """
+    return market_service.search_instruments(db, q, limit=limit)
+
 @router.get(
     "/instruments",
     response_model=InstrumentListOut,
@@ -139,6 +183,17 @@ async def list_instruments(
     altında" sorgusu sessizce "F/K'sı 10'un altında ya da bilinmiyor" anlamına
     gelmemeli; verisi olmayan bir hisse ucuz görünmemeli.
     """
+    # Adı verilen bir enstrüman sorulduğunda fiyat ÖNCE tazelenir.
+    #
+    # Toplu tur on beş dakikada bir dönüyor; ekranlar için yeterli, "THYAO kaç
+    # TL" sorusu için değil. Tarama sorgularında yapılmaz: bir tarama yüzlerce
+    # satır okur ve hiçbiri tek bir anlık fiyata bağlı karar değildir.
+    #
+    # Başarısız olursa sessizce devam edilir -- elde olan fiyat, cevapsız
+    # kalmaktan iyidir.
+    if symbols:
+        service.refresh_quotes(symbols)
+
     filters = {
         "sector": sector, "market": market,
         "max_pe": max_pe, "min_pe": min_pe, "max_pb": max_pb,
@@ -273,6 +328,36 @@ async def candle_coverage(db: Session = Depends(get_db)):
     tamamını sağlayıcıdan tekrar istemek demekti.
     """
     return market_service.candle_coverage(db)
+
+
+@router.get(
+    "/candles/intraday-symbols",
+    summary="Gün içi bar gereken semboller (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+async def intraday_symbols(db: Session = Depends(get_db)):
+    """`ingestor`'ın gün içi bar çekeceği kümeyi sorduğu uç nokta.
+
+    Evrenin tamamı değil: gün içi seriye ihtiyaç duyan tek ekran portföy
+    performansı, dolayısıyla yalnızca tutulan, izlenen ve kur/endeks
+    enstrümanları. Bin enstrümanın 15 dakikalık barlarını sürekli çekmek,
+    gereğinden kat kat fazla istek olurdu.
+    """
+    return {"symbols": market_service.intraday_symbols(db)}
+
+
+@router.get(
+    "/fundamentals/missing",
+    summary="Temel verisi eksik enstrümanlar (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+async def fundamentals_missing(db: Session = Depends(get_db)):
+    """`ingestor`'ın açılışta neyi dolduracağını sorduğu uç nokta.
+
+    Yalnızca eksik olanlar: hepsini her açılışta yeniden çekmek, çeyreklik
+    raporlarla değişen oranları durmadan yeniden yazmak olurdu.
+    """
+    return {"symbols": market_service.symbols_without_fundamentals(db)}
 
 
 @router.post(

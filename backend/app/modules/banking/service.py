@@ -170,6 +170,7 @@ def portfolio_accounts(db: Session, user_id: str) -> list[dict[str, Any]]:
     lives somewhere else. `is_investment` marks the one that does.
     """
     from app.modules.investment import market_service
+    from app.modules.investment import service as investment_service
 
     rows: list[dict[str, Any]] = [
         {
@@ -179,6 +180,10 @@ def portfolio_accounts(db: Session, user_id: str) -> list[dict[str, Any]]:
             "account_type": account.account_type,
             "currency_code": account.currency_code,
             "balance": float(account.balance),
+            "interest_rate": (
+                float(account.interest_rate) if account.interest_rate is not None else None
+            ),
+            "term_days": account.term_days,
             "is_investment": False,
         }
         for account in accounts_for(db, user_id)
@@ -189,7 +194,9 @@ def portfolio_accounts(db: Session, user_id: str) -> list[dict[str, Any]]:
         rows.append({
             "id": owner.id,
             "account_number": owner.account_number,
-            "iban": None,
+            # Artık gerçek: hesap "para gönder" ekranında adreslenebilsin ve
+            # bankacılık arayüzü dökümünü isteyebilsin diye (migration 0017).
+            "iban": owner.iban or investment_service.iban_for(owner.account_number),
             "account_type": INVESTMENT_ACCOUNT_TYPE,
             "currency_code": owner.currency_code or "TRY",
             "balance": float(owner.cash_balance),
@@ -393,6 +400,7 @@ def transfer_with_investment(
     explains where the money went.
     """
     from app.modules.investment import market_service
+    from app.modules.investment import service as investment_service
 
     if amount is None or amount <= 0:
         raise TransferError("Transfer tutarı sıfırdan büyük olmalı.")
@@ -449,8 +457,23 @@ def transfer_with_investment(
     bank_after = round(bank_before - moved, 2) if to_investment else round(bank_before + moved, 2)
     bank_account.balance = bank_after
     bank_account.updated_at = now
-    owner.cash_balance = (
+    cash_after = (
         round(cash_before + moved, 2) if to_investment else round(cash_before - moved, 2)
+    )
+    owner.cash_balance = cash_after
+
+    # Yatırım tarafı da artık iz bırakıyor. Önceden yalnızca bankacılık bacağı
+    # yazılıyordu; para yatırım hesabına varıyor ama o hesabın dökümünde hiçbir
+    # şey görünmüyordu.
+    investment_service.record_cash_movement(
+        db,
+        owner,
+        amount=moved if to_investment else -moved,
+        balance_before=cash_before,
+        balance_after=cash_after,
+        description=label,
+        reference=record.reference_number,
+        when=now,
     )
 
     db.add(
@@ -482,6 +505,95 @@ def transfer_with_investment(
         "destination_account": owner.account_number if to_investment else bank_account.account_number,
     }
 
+
+
+#: Faizin gün sayısına bölündüğü taban. 365, ticari 360 değil: müşteri lehine
+#: olan ve açıklaması daha kolay olan.
+DAYS_IN_YEAR = 365
+
+#: Tek bir işletmede ödenecek azami gün. Uzun süre kapalı kalmış bir kurulum
+#: açıldığında aylarca birikmiş faizi tek kalemde ödemesin: vaat edilen günlük
+#: bir vadeydi, geriye dönük bir ikramiye değil.
+MAX_ACCRUAL_DAYS = 31
+
+
+def accrue_interest(
+    db: Session, user_id: Optional[str] = None, now: Optional[datetime] = None
+) -> list[dict]:
+    """Vadeli hesaplara hak edilen faizi işler.
+
+    Bakiyeyi doğrudan büyütmüyor: faiz, `post_adjustment` üzerinden
+    `transaction_type='faiz'` ile gerçek bir hareket olarak yazılıyor.
+    Dökümde açıklaması olmayan bir bakiye artışı, kimsenin hesabını
+    veremeyeceği bir para demek -- bu modülün kendi kuralı.
+
+    Aynı gün ikinci kez çalışmaz. `last_accrued_at` gün bazında karşılaştırılır,
+    dolayısıyla bir yeniden başlatma faizi ikinci kez ödemez.
+
+    Sıfır ya da eksi bakiyeye faiz işlemez ve oranı olmayan hesabı atlar:
+    varsayılan bir oran uydurmak, hesabın vaat etmediği bir getiriyi ödemek
+    olurdu.
+    """
+    moment = now or datetime.now(timezone.utc)
+    today = moment.date()
+
+    query = db.query(BankAccount).filter(
+        BankAccount.status == "active",
+        BankAccount.interest_rate.isnot(None),
+    )
+    if user_id is not None:
+        query = query.filter(BankAccount.user_id == user_id)
+
+    posted: list[dict] = []
+    for account in query.all():
+        rate = float(account.interest_rate or 0)
+        balance = float(account.balance)
+        if rate <= 0 or balance <= 0:
+            continue
+
+        last = account.last_accrued_at
+        if last is not None:
+            # Naive bir damga UTC sayılır; karşılaştırmanın kendisi patlamamalı.
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            if last.date() >= today:
+                continue
+            days = min((today - last.date()).days, MAX_ACCRUAL_DAYS)
+        else:
+            # İlk işletme tek gün öder. Hesabın açılışından bugüne kadar
+            # geriye dönük ödemek, hiç vaat edilmemiş bir parayı vermek olurdu.
+            days = 1
+
+        interest = round(balance * (rate / 100.0) * (days / DAYS_IN_YEAR), 2)
+        if interest <= 0:
+            # Küçük bakiyede bir günün faizi kuruşun altında kalabilir. Sıfır
+            # tutarlı bir hareket yazmak dökümü kirletir; damga yine de
+            # ilerletilir ki her gün yeniden denenmesin.
+            account.last_accrued_at = moment
+            continue
+
+        label = f"Vadeli hesap faizi ({days} gün, yıllık %{rate:.2f})"
+        # Damga ÖNCE atılıyor. `post_adjustment` commit ediyor; damgayı ondan
+        # sonra yazmak, ödemenin kalıcı olduğu ama "ödendi" kaydının olmadığı
+        # bir aralık bırakırdı ve o aralıkta düşen bir servis, açıldığında
+        # faizi ikinci kez öderdi. Aynı commit'e girsin diye önce yazılıyor.
+        account.last_accrued_at = moment
+        result = post_adjustment(
+            db, account, interest, label, transaction_type="faiz",
+        )
+        posted.append({
+            "account_number": account.account_number,
+            "amount": interest,
+            "days": days,
+            "reference_number": result["reference_number"],
+            "balance_after": result["balance_after"],
+        })
+        log.info(
+            "accrued %.2f %s interest on %s for %d day(s)",
+            interest, account.currency_code, account.account_number, days,
+        )
+
+    return posted
 
 def post_adjustment(
     db: Session,

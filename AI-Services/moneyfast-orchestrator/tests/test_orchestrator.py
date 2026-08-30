@@ -2404,3 +2404,104 @@ class TestDirectionGuard:
         state = {**base_state, "user_message": "ASELS satsana"}
         out = await orchestrator.transaction_node(state)
         assert out["specialist_output"]["status"] == "OK"
+
+
+class TestInstrumentIsVerifiedBeforeAsking:
+    """The measured bug: `get_market_data` was never called.
+
+    Three consecutive turns -- "nvvvvdi hissesi almak", "aple alcam" and
+    "ndivia nasıl" -- all reached an answer with no market lookup in the
+    trace. The model recognised "aple" as Apple from its own knowledge,
+    declared NVVVVDI non-existent from the same place, and told the user data
+    for "ndivia" could not be retrieved while the backend resolves it to NVDA.
+
+    The prompt already said to check first. This module has been here before:
+    `_keep_crisis` exists because a mandatory instruction was followed about
+    half the time. So on the one path where being wrong costs money, the check
+    runs in code.
+    """
+
+    NEEDS_QUANTITY = json.dumps({
+        "status": "NEEDS_INPUT",
+        "missing_fields": ["quantity"],
+        "clarification_request": "Kaç adet almak istersiniz?",
+        "arguments": {"instrument": {"symbol": "NVVVVDI"}},
+    })
+
+    @pytest.mark.asyncio
+    async def test_a_missing_instrument_is_reported_instead_of_a_quantity_question(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(self.NEEDS_QUANTITY)
+        fake_mcp.responses["get_market_data"] = {
+            "instruments": [],
+            "warnings": ["Şu semboller bulunamadı veya fiyatı yok: NVVVVDI"],
+        }
+        out = await orchestrator.transaction_node(base_state)
+        assert out["specialist_output"]["missing_fields"] == ["instrument"]
+        assert "Kaç adet" not in out["specialist_output"]["clarification_request"]
+
+    @pytest.mark.asyncio
+    async def test_the_lookup_actually_happens(self, fake_mcp, patched_llm, base_state):
+        """The whole point: a tool call, not the model's recollection."""
+        patched_llm.set_response(self.NEEDS_QUANTITY)
+        fake_mcp.responses["get_market_data"] = {"instruments": []}
+        await orchestrator.transaction_node(base_state)
+        assert any(name == "get_market_data" for name, _ in fake_mcp.calls)
+
+    @pytest.mark.asyncio
+    async def test_the_resolvers_own_suggestion_is_passed_through(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Rather than writing a second, differently worded version of the
+        same sentence."""
+        patched_llm.set_response(self.NEEDS_QUANTITY)
+        fake_mcp.responses["get_market_data"] = {
+            "instruments": [],
+            "warnings": ["«ndivia» için tam eşleşme yok. Bunlardan biri mi: NVDA?"],
+        }
+        out = await orchestrator.transaction_node(base_state)
+        assert "NVDA" in out["specialist_output"]["clarification_request"]
+
+    @pytest.mark.asyncio
+    async def test_an_instrument_that_exists_lets_the_question_through(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Verification must not turn every clarification into a refusal."""
+        patched_llm.set_response(self.NEEDS_QUANTITY)
+        fake_mcp.responses["get_market_data"] = {"instruments": [{"symbol": "NVDA"}]}
+        out = await orchestrator.transaction_node(base_state)
+        assert out["specialist_output"]["missing_fields"] == ["quantity"]
+
+    @pytest.mark.asyncio
+    async def test_a_lookup_failure_does_not_become_a_denial(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """An unreachable tool is not proof the instrument is missing. The
+        turn continues; staging resolves strictly and refuses on its own."""
+        patched_llm.set_response(self.NEEDS_QUANTITY)
+        fake_mcp.responses["get_market_data"] = MCPUnavailable("mcp down")
+        out = await orchestrator.transaction_node(base_state)
+        assert out["specialist_output"]["missing_fields"] == ["quantity"]
+
+    @pytest.mark.asyncio
+    async def test_a_turn_naming_no_instrument_is_left_alone(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(json.dumps({
+            "status": "NEEDS_INPUT",
+            "missing_fields": ["instrument"],
+            "clarification_request": "Hangi hisseyi almak istersiniz?",
+            "arguments": {},
+        }))
+        out = await orchestrator.transaction_node(base_state)
+        assert not any(name == "get_market_data" for name, _ in fake_mcp.calls)
+
+    def test_the_symbol_is_found_however_the_model_expressed_it(self):
+        state = {"entities": {"tickers": ["THYAO"]}}
+        assert orchestrator._named_symbol(
+            {"arguments": {"instrument": {"symbol": "ASELS"}}}, state) == "ASELS"
+        assert orchestrator._named_symbol({"arguments": {"symbol": "GARAN"}}, state) == "GARAN"
+        # Falls back to whatever the router extracted.
+        assert orchestrator._named_symbol({"arguments": {}}, state) == "THYAO"
+        assert orchestrator._named_symbol({"arguments": {}}, {"entities": {}}) is None

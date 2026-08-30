@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.banking import service
 from app.modules.banking import service as banking_service
+from app.modules.investment import service as investment_service
 
 NOW = datetime(2026, 8, 21, tzinfo=timezone.utc)
 
@@ -547,17 +548,38 @@ class TestPortfolioAccounts:
 
         bank = SimpleNamespace(
             id="a-1", account_number="1", iban="TR1", account_type="vadesiz",
-            currency_code="TRY", balance=100.0,
+            currency_code="TRY", balance=100.0, interest_rate=None, term_days=None,
         )
         mocker.patch.object(service, "accounts_for", return_value=[bank])
         mocker.patch.object(ms, "account", return_value=SimpleNamespace(
-            id="ia-1", account_number="TR-INV", currency_code="TRY", cash_balance=250.0,
+            id="ia-1", account_number="TR-INV", iban="TR00INV", currency_code="TRY",
+            cash_balance=250.0,
         ))
         rows = service.portfolio_accounts(MagicMock(spec=Session), "u-1")
         investment = [r for r in rows if r["is_investment"]]
         assert len(investment) == 1
         assert investment[0]["balance"] == 250.0
         assert investment[0]["account_type"] == service.INVESTMENT_ACCOUNT_TYPE
+        # IBAN'ı artık var. None döndüğü sürece hesap "para gönder" ekranında
+        # adreslenemiyor ve bankacılık arayüzü dökümünü isteyemiyordu.
+        assert investment[0]["iban"] == "TR00INV"
+
+    def test_an_investment_account_without_a_stored_iban_still_gets_one(self, mocker):
+        """Migration öncesi açılmış bir hesap da adreslenebilir kalmalı.
+
+        `iban` boşsa hesap numarasından aynı kuralla türetilir; ekranın
+        elinde None ile hiçbir şey yapamayacağı bir satır kalmaz.
+        """
+        import app.modules.investment.market_service as ms
+
+        mocker.patch.object(service, "accounts_for", return_value=[])
+        mocker.patch.object(ms, "account", return_value=SimpleNamespace(
+            id="ia-1", account_number="TR-INV", iban=None, currency_code="TRY",
+            cash_balance=250.0,
+        ))
+        rows = service.portfolio_accounts(MagicMock(spec=Session), "u-1")
+        assert rows[0]["iban"] == investment_service.iban_for("TR-INV")
+        assert rows[0]["iban"].startswith("TR00")
 
     def test_a_user_with_no_investment_account_gets_only_banking_rows(self, mocker):
         import app.modules.investment.market_service as ms
@@ -740,3 +762,91 @@ class TestTransferRoutesToTheBridge:
                 db, user_id="u-1", source_reference="TR-INV",
                 destination_reference="TR-INV", amount=100,
             )
+
+
+class TestAccrueInterest:
+    """Vadeli hesabın faizi.
+
+    Ekranda `%42.50` ve `32 Gün` yazıyordu; ikisi de sabit metindi ve arkalarında
+    ne bir sütun ne de bir işletme vardı. Vadenin sonunda bakiyeye hiçbir şey
+    olmuyordu, çünkü faizi işleyen bir şey yoktu.
+    """
+
+    def _account(self, **kwargs):
+        base = dict(
+            id="acc-1", account_number="2000000000001", iban="TR00",
+            balance=5000.0, currency_code="TRY", status="active", user_id="u-1",
+            account_type="vadeli", interest_rate=38.0, term_days=1,
+            last_accrued_at=None, updated_at=None,
+        )
+        base.update(kwargs)
+        return SimpleNamespace(**base)
+
+    def _db(self, accounts):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.filter.return_value.all.return_value = accounts
+        db.query.return_value.filter.return_value.all.return_value = accounts
+        return db
+
+    def test_one_day_of_simple_interest_is_credited(self):
+        """5.000 x %38 / 365 = 5,21."""
+        account = self._account()
+        posted = service.accrue_interest(self._db([account]))
+        assert len(posted) == 1
+        assert posted[0]["amount"] == pytest.approx(5.21)
+        assert posted[0]["days"] == 1
+        assert float(account.balance) == pytest.approx(5005.21)
+
+    def test_it_is_written_as_a_movement_not_a_silent_balance_bump(self):
+        """Dökümde açıklaması olmayan bir bakiye artışı, kimsenin hesabını
+        veremeyeceği bir para demek."""
+        db = self._db([self._account()])
+        service.accrue_interest(db)
+        # İşlem kaydı ve tek bacağı.
+        assert db.add.call_count == 2
+        written = [call.args[0] for call in db.add.call_args_list]
+        assert any(getattr(row, "transaction_type", None) == "faiz" for row in written)
+
+    def test_the_same_day_pays_only_once(self):
+        """Yeniden başlatma faizi ikinci kez ödememeli."""
+        now = datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc)
+        account = self._account(last_accrued_at=now.replace(hour=1))
+        assert service.accrue_interest(self._db([account]), now=now) == []
+        assert float(account.balance) == pytest.approx(5000.0)
+
+    def test_a_naive_timestamp_does_not_crash_the_comparison(self):
+        """Saat dilimsiz bir damga UTC sayılır; karşılaştırma patlamamalı."""
+        now = datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc)
+        account = self._account(last_accrued_at=datetime(2026, 8, 28, 1, 0))
+        assert service.accrue_interest(self._db([account]), now=now) == []
+
+    def test_missed_days_are_paid_but_capped(self):
+        """Uzun süre kapalı kalmış bir kurulum, açıldığında aylarca birikmiş
+        faizi tek kalemde ödememeli: vaat edilen günlük bir vadeydi."""
+        now = datetime(2026, 8, 28, tzinfo=timezone.utc)
+        account = self._account(last_accrued_at=datetime(2025, 1, 1, tzinfo=timezone.utc))
+        posted = service.accrue_interest(self._db([account]), now=now)
+        assert posted[0]["days"] == service.MAX_ACCRUAL_DAYS
+
+    def test_an_empty_account_earns_nothing(self):
+        assert service.accrue_interest(self._db([self._account(balance=0.0)])) == []
+
+    def test_an_account_without_a_rate_is_skipped(self):
+        """Varsayılan bir oran uydurmak, hesabın vaat etmediği bir getiriyi
+        ödemek olurdu."""
+        assert service.accrue_interest(self._db([self._account(interest_rate=0)])) == []
+
+    def test_a_sub_kurus_accrual_still_advances_the_stamp(self):
+        """Küçük bakiyede bir günün faizi kuruşun altında kalır. Sıfır tutarlı
+        bir hareket dökümü kirletir; damga yine de ilerlemeli ki her gün
+        yeniden denenmesin."""
+        now = datetime(2026, 8, 28, tzinfo=timezone.utc)
+        account = self._account(balance=0.01)
+        assert service.accrue_interest(self._db([account]), now=now) == []
+        assert account.last_accrued_at == now
+
+    def test_it_can_be_narrowed_to_one_user(self):
+        db = self._db([self._account()])
+        service.accrue_interest(db, user_id="u-1")
+        # user_id verildiğinde sorguya fazladan bir filtre ekleniyor.
+        assert db.query.return_value.filter.return_value.filter.called

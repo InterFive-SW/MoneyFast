@@ -100,11 +100,9 @@ describe('endpoint paths', () => {
     ['getOrders', '/api/investment/orders'],
     ['getWatchlist', '/api/investment/watchlist'],
     ['getTopMovers', '/api/investment/top-movers'],
-    ['getDividends', '/api/investment/dividends'],
     ['getAssetAllocation', '/api/investment/asset-allocation'],
     ['getSectorAllocation', '/api/investment/sector-allocation'],
     ['getHeatmap', '/api/investment/heatmap'],
-    ['getPortfolioChart', '/api/investment/portfolio/chart'],
     ['getMarketTickers', '/api/market/tickers'],
     ['getMarketNews', '/api/market/news'],
     ['getPortfolioAnalysis', '/api/analytics/portfolio'],
@@ -270,6 +268,78 @@ describe('the banking endpoints', () => {
     apiClient.getStatement('TR 001', 5)
     expect(calledUrl(fetchMock)).toContain('TR%20001')
     expect(calledUrl(fetchMock)).toContain('limit=5')
+  })
+
+  it('asks the investment endpoint for the investment statement', () => {
+    /**
+     * Ayrı bir uç, çünkü yatırım nakdi `banking.accounts` değil
+     * `investment.investment_accounts` üzerinde duruyor. Bankacılık ucuna
+     * sorulduğunda 404 dönüyor ve tek bir reddedilen istek bütün sayfayı
+     * düşürüyordu.
+     */
+    const fetchMock = mockFetch({})
+    apiClient.getInvestmentStatement('TR00 123', 5)
+    expect(calledUrl(fetchMock)).toContain('/investment/accounts/TR00%20123/statement')
+    expect(calledUrl(fetchMock)).toContain('limit=5')
+  })
+
+  it('defaults the investment statement limit', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getInvestmentStatement('TR00123')
+    expect(calledUrl(fetchMock)).toContain('limit=20')
+  })
+
+  it('asks for one chart range, not all five', () => {
+    /* Beş aralığın hepsi tek istekte üretiliyordu: çağrı başına ~130 sorgu ve
+       ölçülen 5,9 saniye. Ekran aynı anda bir aralık gösteriyor. */
+    const fetchMock = mockFetch({})
+    apiClient.getPortfolioChart('hafta')
+    expect(calledUrl(fetchMock)).toBe('/api/investment/portfolio/chart?range=hafta')
+  })
+
+  it('defaults the chart range to the year', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getPortfolioChart()
+    expect(calledUrl(fetchMock)).toContain('range=yil')
+  })
+
+  it('sends the market filter to the heatmap', () => {
+    const fetchMock = mockFetch({ items: [], missing: 0 })
+    apiClient.getMarketHeatmap('SP500', 50)
+    expect(calledUrl(fetchMock)).toContain('market=SP500')
+    expect(calledUrl(fetchMock)).toContain('limit=50')
+  })
+
+  it('omits the market when none is chosen', () => {
+    const fetchMock = mockFetch({ items: [], missing: 0 })
+    apiClient.getMarketHeatmap()
+    expect(calledUrl(fetchMock)).not.toContain('market=')
+  })
+
+  it('encodes the search term and the limit', () => {
+    /* Evren binin üzerinde enstrüman: bir açılır liste taşımaz, arama
+       sunucuda. */
+    const fetchMock = mockFetch([])
+    apiClient.searchInstruments('şişe cam', 5)
+    expect(calledUrl(fetchMock)).toContain('/market/search?q=%C5%9Fi%C5%9Fe%20cam')
+    expect(calledUrl(fetchMock)).toContain('limit=5')
+  })
+
+  it('defaults the search limit', () => {
+    const fetchMock = mockFetch([])
+    apiClient.searchInstruments('thy')
+    expect(calledUrl(fetchMock)).toContain('limit=10')
+  })
+
+  it('asks for the intraday series only when a range is given', () => {
+    /* "Gün" görünümü 15 dakikalık gerçek barları okur; diğerleri günlük. */
+    const withRange = mockFetch({})
+    apiClient.getPortfolioAnalysis('day')
+    expect(calledUrl(withRange)).toContain('/analytics/portfolio?range=day')
+
+    const without = mockFetch({})
+    apiClient.getPortfolioAnalysis()
+    expect(calledUrl(without)).toBe('/api/analytics/portfolio')
   })
 
   it('passes the spending window', () => {

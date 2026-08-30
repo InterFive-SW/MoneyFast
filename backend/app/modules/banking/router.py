@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user_id, get_optional_user_id
+from app.modules.market.router import require_service_token
 
 from . import payments, products, service
 from .models import AccountTransaction, BankTransaction
@@ -57,6 +58,28 @@ async def list_accounts(
         accounts = service.accounts_for(db, user_id)
     return accounts
 
+
+
+@router.post(
+    "/interest/accrue",
+    summary="Vadeli hesap faizlerini işle (servis işi)",
+)
+async def accrue_interest(
+    db: Session = Depends(get_db),
+    _: None = Depends(require_service_token),
+):
+    """Hak edilmiş günlük faizi işler.
+
+    Servis işi: müşteri token'ıyla çağrılamaz. Faiz ödemek bir kullanıcı
+    eylemi değil, bankanın işi -- ve müşteriye kendi faizini tetikleme yetkisi
+    vermek, aynı günü tekrar tekrar denemesine davetiye olurdu (işlem
+    `last_accrued_at` sayesinde günde bir kez yazsa bile).
+
+    Aynı gün ikinci kez çalıştırmak hiçbir şey ödemez; iş güvenle
+    tekrarlanabilir.
+    """
+    posted = service.accrue_interest(db)
+    return {"accrued": len(posted), "movements": posted}
 
 @router.get(
     "/accounts/all",

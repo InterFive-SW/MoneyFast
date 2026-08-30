@@ -25,9 +25,8 @@ import QuickActionsWidget from '../components/widgets/QuickActionsWidget'
 import SavingsGoalWidget from '../components/widgets/SavingsGoalWidget'
 import WatchlistWidget from '../components/widgets/WatchlistWidget'
 import TopMoversWidget from '../components/widgets/TopMoversWidget'
-import DividendCalendarWidget from '../components/widgets/DividendCalendarWidget'
 import SectorAllocationWidget from '../components/widgets/SectorAllocationWidget'
-import ProfitLossHeatmapWidget from '../components/widgets/ProfitLossHeatmapWidget'
+import MarketHeatmap from '../components/markets/MarketHeatmap'
 
 import { useContainerWidth } from 'react-grid-layout'
 
@@ -56,7 +55,6 @@ const ALL_AVAILABLE_WIDGETS: { type: WidgetType; label: string; defaultW: number
   { type: 'savings-goal', label: 'Tasarruf Hedefi', defaultW: 5, defaultH: 5, minW: 2, minH: 2 },
   { type: 'watchlist', label: 'İzleme Listesi', defaultW: 4, defaultH: 6, minW: 2, minH: 3 },
   { type: 'top-movers', label: 'Hareketliler', defaultW: 4, defaultH: 6, minW: 2, minH: 3 },
-  { type: 'dividend-calendar', label: 'Temettü Takvimi', defaultW: 4, defaultH: 6, minW: 2, minH: 3 },
   { type: 'sector-allocation-pie', label: 'Sektörel Dağılım', defaultW: 4, defaultH: 4, minW: 2, minH: 2 },
   { type: 'heatmap', label: 'Isı Haritası', defaultW: 8, defaultH: 5, minW: 4, minH: 3 },
 ]
@@ -120,9 +118,8 @@ function renderWidget(type: WidgetType, w?: number, h?: number): JSX.Element | n
     case 'savings-goal': return <SavingsGoalWidget />
     case 'watchlist': return <WatchlistWidget />
     case 'top-movers': return <TopMoversWidget />
-    case 'dividend-calendar': return <DividendCalendarWidget />
     case 'sector-allocation-pie': return <SectorAllocationWidget />
-    case 'heatmap': return <ProfitLossHeatmapWidget w={w} h={h} />
+    case 'heatmap': return <MarketHeatmap h={h} />
     default: return null
   }
 }

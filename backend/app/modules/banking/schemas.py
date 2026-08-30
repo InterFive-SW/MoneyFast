@@ -202,6 +202,11 @@ class PortfolioAccountOut(BaseModel):
     account_type: str
     currency_code: str
     balance: float
+    #: Vadeli hesabın saklanan yıllık oranı ve vadesi. Arayüz bunları bir
+    #: dönem `%42.50` / `32 Gün` diye sabit yazıyordu; hiçbir kayda dayanmayan
+    #: ve hiçbir zaman ödenmeyen bir vaatti. Vadesiz hesapta boş kalır.
+    interest_rate: Optional[float] = None
+    term_days: Optional[int] = None
     is_investment: bool = False
 
 

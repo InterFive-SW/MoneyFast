@@ -9,7 +9,7 @@ için analiz ekranı ile gösterge paneli portföyün değeri konusunda birbiriy
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -29,6 +29,7 @@ router = APIRouter(tags=["analytics"])
     summary="Portföy analizi (dağılım, trend, performans, işlem geçmişi)",
 )
 async def portfolio_analysis(
+    range: str = Query(default="all", pattern="^(all|day)$"),
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -55,6 +56,8 @@ async def portfolio_analysis(
         else []
     )
 
+    intraday = range == "day"
+
     return service.build(
         db,
         user_id=user_id,
@@ -63,8 +66,14 @@ async def portfolio_analysis(
         sector_map=market_service.sector_by_symbol(db),
         # Injected so the service stays pure and testable without a session,
         # matching how risk/service.py takes its price reader.
+        # "Gün" görünümü 15 dakikalık gerçek barlardan okunuyor; diğerleri
+        # günlük barlardan. İkisi de aynı okuyucudan geçiyor, dolayısıyla iki
+        # görünüm portföyün değeri konusunda ayrışamaz.
         closes_for=lambda symbol: market_service.candle_closes(
-            db, symbol, limit=service.TREND_WINDOW
+            db,
+            symbol,
+            limit=service.INTRADAY_WINDOW if intraday else service.TREND_WINDOW,
+            interval="15m" if intraday else "1d",
         ),
         proposals=proposals,
         as_of=as_of,
@@ -73,6 +82,16 @@ async def portfolio_analysis(
         # disagree about what a dollar is worth.
         rates=ai_service.fx_rates(quotes),
         base_currency=(account.currency_code if account else "TRY") or "TRY",
+        intraday=intraday,
+        # Geçmiş kur, o günün kendi mumundan: USDTRY'nin serisi zaten
+        # elimizde. Bütün geçmişi bugünün kuruyla çevirmek, portföyün
+        # geçmişini bugünün kurunun hikâyesiyle karıştırırdı.
+        fx_closes_for=lambda code: market_service.candle_closes(
+            db,
+            f"{code}{(account.currency_code if account else 'TRY') or 'TRY'}",
+            limit=service.INTRADAY_WINDOW if intraday else service.TREND_WINDOW,
+            interval="5m" if intraday else "1d",
+        ),
     )
 
 

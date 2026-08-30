@@ -98,6 +98,7 @@ def adjust_cash(
     settlement code owns.
     """
     from app.modules.investment import market_service
+    from app.modules.investment import service as investment_service
 
     label = description or ("Yönetici para yatırma" if amount > 0 else "Yönetici para çekme")
 
@@ -111,6 +112,17 @@ def adjust_cash(
                 f"{abs(float(amount)):,.2f} düşülemez."
             )
         investment.cash_balance = after
+        # Yöneticinin eklediği para da deftere yazılır. Yazılmadığı sürece
+        # bakiye, dökümündeki hareketlerin toplamıyla uyuşmuyordu -- ve
+        # uyuşmayan bir döküm, dökümün kendisini işe yaramaz kılar.
+        investment_service.record_cash_movement(
+            db,
+            investment,
+            amount=float(amount),
+            balance_before=before,
+            balance_after=after,
+            description=label,
+        )
         db.commit()
         log.info("investment cash adjustment %+.2f for %s by %s", amount, user_id, actor)
         return {

@@ -240,6 +240,11 @@ class TestFundamentals:
     """Per-symbol because the provider has no batch form — which is why this
     runs daily rather than every cycle."""
 
+    def test_products_without_a_data_symbol_are_skipped(self):
+        """Sağlayıcıda karşılığı olmayan bir enstrüman için istek atılmaz."""
+        assert yfinance_source.fetch_fundamentals([{"symbol": "X"}]) == []
+        assert yfinance_source.fetch_fundamentals([]) == []
+
     def _install(self, monkeypatch, info_by_symbol):
         import sys
         from types import SimpleNamespace
@@ -325,6 +330,19 @@ class TestCandles:
         install_tickers(monkeypatch, {"THYAO.IS": ticker(history=frame)})
         rows = yfinance_source.fetch_candles([PRODUCTS[0]])
         assert rows[0]["timestamp"].tzinfo is timezone.utc
+
+    def test_a_nan_bar_is_left_out_of_the_batch(self, monkeypatch):
+        """Gün içi seride işlem olmayan aralıklar NaN geliyor ve tek bir NaN
+        JSON'u geçersiz kılarak bütün partiyi düşürüyordu."""
+        stamp = datetime(2026, 8, 19, tzinfo=timezone.utc)
+        gap = {"Open": float("nan"), "High": float("nan"),
+               "Low": float("nan"), "Close": float("nan"), "Volume": 0}
+        frame = FakeFrame([(stamp, gap), (stamp, self._bar())])
+        install_tickers(monkeypatch, {"THYAO.IS": ticker(history=frame)})
+        rows = yfinance_source.fetch_candles([PRODUCTS[0]], interval="5m")
+        assert len(rows) == 1
+        assert rows[0]["close"] == 300.0
+        assert rows[0]["interval"] == "5m"
 
     def test_empty_history_is_skipped(self, monkeypatch):
         install_tickers(monkeypatch, {"THYAO.IS": ticker(history=FakeFrame([]))})
@@ -460,3 +478,33 @@ class TestFundamentalsSelection:
             {"symbol": "THYAO", "data_symbol": "THYAO.IS"},
         ])
         assert asked == ["THYAO.IS"], "only the quoted symbol should be requested"
+
+
+class TestNaNBarsAreSkipped:
+    """Gün içi serilerde işlem olmayan aralıklar NaN geliyor.
+
+    NaN bir bar değil, boşluktur -- ve JSON'a girmez: bir tanesi otuz günlük
+    94.055 barlık partinin tamamını düşürüyordu
+    (`Out of range float values are not JSON compliant: nan`).
+    """
+
+    def test_a_nan_bar_is_dropped(self):
+        assert yfinance_source._finite_ohlc(
+            {"Open": float("nan"), "High": 1.0, "Low": 1.0, "Close": 1.0}
+        ) is None
+
+    def test_an_infinite_bar_is_dropped(self):
+        assert yfinance_source._finite_ohlc(
+            {"Open": 1.0, "High": float("inf"), "Low": 1.0, "Close": 1.0}
+        ) is None
+
+    def test_a_missing_field_is_dropped_rather_than_raising(self):
+        assert yfinance_source._finite_ohlc({"Open": 1.0}) is None
+        assert yfinance_source._finite_ohlc({
+            "Open": "x", "High": 1.0, "Low": 1.0, "Close": 1.0,
+        }) is None
+
+    def test_a_finite_bar_comes_through(self):
+        assert yfinance_source._finite_ohlc(
+            {"Open": 1.0, "High": 2.0, "Low": 0.5, "Close": 1.5}
+        ) == (1.0, 2.0, 0.5, 1.5)

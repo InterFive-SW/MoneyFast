@@ -26,7 +26,6 @@ export type WidgetType =
   | 'mini-ticker-bist100'
   | 'watchlist'
   | 'top-movers'
-  | 'dividend-calendar'
   | 'sector-allocation-pie'
   | 'heatmap'
   // Bireysel/Banka Widget'ları

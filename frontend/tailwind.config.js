@@ -35,6 +35,18 @@ export default {
       fontFamily: {
         sans: ['Poppins', 'sans-serif'],
       },
+      keyframes: {
+        // Şerit, listenin İKİ kopyasını yan yana basıp tam yarısı kadar
+        // kaydırıyor: ikinci kopya birincinin bittiği yerde başladığı için
+        // döngü başa sardığında bir sıçrama görünmüyor.
+        marquee: {
+          '0%': { transform: 'translateX(0)' },
+          '100%': { transform: 'translateX(-50%)' },
+        },
+      },
+      animation: {
+        marquee: 'marquee 40s linear infinite',
+      },
     },
   },
   plugins: [],

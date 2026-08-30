@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from .models import (
+    IndexMembership,
     InstrumentFundamentals,
     InvestmentAccount,
     InvestmentProduct,
@@ -28,6 +29,14 @@ from .models import (
 )
 
 log = logging.getLogger("moneyfast.market_data")
+
+#: `market` süzgecinin borsa yerine ENDEKS üyeliği olarak okuduğu değerler.
+#:
+#: `BIST`, `NASDAQ` ve `NYSE` burada YOK: onlar kotasyon borsası ve zaten
+#: `investment_products.market` sütununda duruyorlar. Ekrandaki sekmelerden
+#: BIST ve Nasdaq borsayı, S&P ise endeks üyeliğini soruyor -- AAPL Nasdaq'ta
+#: işlem görür VE S&P 500 üyesidir, ikisi birden doğru.
+INDEX_CODES = {"SP500", "NASDAQ100"}
 
 #: Beyond this, a quote is not "delayed", it is stale — the market moved on
 #: and nobody ingested. Both are disclosed, but only one is normal.
@@ -117,11 +126,44 @@ _FUZZY_MARGIN = 0.08
 #: Measured: "THAYO" scores 0.80 against THYAO with the runner-up 0.13 behind
 #: -- one obvious winner. "koz" scores 0.75 against KOZAL and KOZAA with a
 #: margin of 0.00, and must ask. The margin is what separates them.
-_FUZZY_ACCEPT_CLEAR = 0.78
+#: Raised from 0.78 after measuring what else sits at that score. "THAYO"
+#: matches THYAO at 0.80 -- but so do the Turkish verb "almak" against ALARK
+#: and "kış" against ISRG, on the same margin. No score separates them, so the
+#: bar moves and a 0.80 match becomes a QUESTION rather than an answer.
+#: Nothing is lost: "THYAO mı demek istediniz?" is a fine reply to "THAYO",
+#: and it is the reply a user who typed a real word by accident needs.
+_FUZZY_ACCEPT_CLEAR = 0.82
 _FUZZY_MARGIN_CLEAR = 0.12
+
+#: An acronym shorter than this is not evidence. "kış" scoring 0.80 against
+#: ISRG came from the two-letter acronym of "Intuitive Surgical" -- three
+#: characters against two will always look similar, and it means nothing.
+_MIN_ACRONYM_MATCH = 3
 
 #: Below this a suggestion is noise rather than help.
 _FUZZY_SUGGEST = 0.6
+
+#: Attribute marking a match the neighbour search offered but is NOT sure of.
+#: Set on the instance rather than returned alongside it so the two public
+#: functions keep their signatures; SQLAlchemy objects carry it happily and it
+#: is never persisted.
+_UNCERTAIN = "_moneyfast_uncertain_match"
+
+
+def _mark_uncertain(product: Any) -> None:
+    try:
+        setattr(product, _UNCERTAIN, True)
+    except (AttributeError, TypeError):  # pragma: no cover - defensive
+        pass
+
+
+def _is_uncertain(product: Any) -> bool:
+    """True when the neighbour search offered this without being sure.
+
+    A single weak candidate is a question, not an answer. Treating one as
+    settled is how "pastırma" became ASTOR.
+    """
+    return bool(getattr(product, _UNCERTAIN, False))
 
 
 def _acronym(name: str) -> str:
@@ -231,7 +273,7 @@ def resolve_candidates(
     for product in products:
         keys = [_fold(product.symbol), _fold(product.name or "")]
         acronym = _acronym(product.name or "")
-        if acronym:
+        if acronym and len(acronym) >= _MIN_ACRONYM_MATCH:
             keys.append(acronym)
         best = max(difflib.SequenceMatcher(None, folded, key).ratio() for key in keys)
         if best >= _FUZZY_SUGGEST:
@@ -244,13 +286,23 @@ def resolve_candidates(
     top = scored[0][0]
     runner_up = scored[1][0] if len(scored) > 1 else 0.0
     margin = top - runner_up
-    if (top >= _FUZZY_ACCEPT and margin >= _FUZZY_MARGIN) or (
+    confident = (top >= _FUZZY_ACCEPT and margin >= _FUZZY_MARGIN) or (
         top >= _FUZZY_ACCEPT_CLEAR and margin >= _FUZZY_MARGIN_CLEAR
-    ):
+    )
+    if confident:
         return [scored[0][1]]
 
-    # Not confident enough to answer, but close enough to ask.
-    return [product for _, product in scored[:3]]
+    # Close enough to ASK about, not to answer with. Marked so `resolve_symbol`
+    # cannot mistake a lone weak match for a settled one -- which is exactly
+    # what happened: "pastırma" scored 0.62 against ASTOR, cleared nothing but
+    # the suggestion floor, was the only thing that did, and was returned as a
+    # one-element list that read as an answer. "bana" became BRSAN and
+    # "tarifi" became TXN the same way, so "bana pastırma tarifi ver" matched
+    # three instruments.
+    suggestions = [product for _, product in scored[:3]]
+    for product in suggestions:
+        _mark_uncertain(product)
+    return suggestions
 
 
 def resolve_symbol(
@@ -268,7 +320,7 @@ def resolve_symbol(
     `resolve_candidates` and offer them.
     """
     found = resolve_candidates(db, text, strict=strict)
-    if len(found) == 1:
+    if len(found) == 1 and not _is_uncertain(found[0]):
         return found[0]
     if len(found) > 1:
         log.info(
@@ -504,6 +556,137 @@ def upsert_candles(db: Session, rows: list[dict[str, Any]]) -> int:
     return result.rowcount or 0
 
 
+
+
+
+def market_heatmap(
+    db: Session, market: Optional[str] = None, limit: int = 300
+) -> dict[str, Any]:
+    """Bir endeksin ısı haritası: piyasa değeri ve günlük değişim.
+
+    `investment.get_heatmap`'ten AYRI. O, kullanıcının portföyünü pozisyon
+    ağırlığına göre gösteriyor -- meşru bir görünüm ama piyasa haritası değil.
+    Bu, endeksteki her hisseyi piyasa değeri kadar yer kaplayacak şekilde
+    veriyor.
+
+    **Piyasa değeri olmayan enstrüman DÖNMEZ ve sayısı bildirilir.** Kutu
+    boyutu bu alandan geliyor; değeri bilinmeyen bir hisseyi varsayılan bir
+    boyutla çizmek, ona sahip olmadığı bir ağırlığı vermek olurdu. Aynı kural
+    0010'un fiyatlanamayan sembolleri tohumlamayı reddetmesiyle aynı.
+    """
+    statement = (
+        select(
+            InvestmentProduct.symbol,
+            InvestmentProduct.name,
+            InstrumentFundamentals.market_cap,
+            InstrumentFundamentals.sector,
+            MarketQuote.change_percent,
+            MarketQuote.price,
+            InvestmentProduct.currency_code,
+        )
+        .join(MarketQuote, MarketQuote.product_id == InvestmentProduct.id)
+        # DIŞ birleşim: temel veri satırı hiç olmayan enstrümanlar da sayıma
+        # girsin. İç birleşimle, verisi olmayanlar sorgudan önce eleniyordu ve
+        # "kaç tanesi çizilemedi" her zaman sıfır çıkıyordu -- eksikliği
+        # bildiren sayının kendisi eksikliği gizliyordu.
+        .outerjoin(
+            InstrumentFundamentals,
+            InstrumentFundamentals.product_id == InvestmentProduct.id,
+        )
+        .where(
+            InvestmentProduct.status == "active",
+            InvestmentProduct.product_type == "stock",
+        )
+    )
+
+    if market:
+        wanted = str(market).upper()
+        if wanted in INDEX_CODES:
+            statement = statement.where(
+                InvestmentProduct.id.in_(
+                    select(IndexMembership.product_id).where(
+                        IndexMembership.index_code == wanted
+                    )
+                )
+            )
+        else:
+            statement = statement.where(InvestmentProduct.market == wanted)
+
+    rows = db.execute(statement).all()
+
+    priced = [row for row in rows if row.market_cap and row.change_percent is not None]
+    missing = len(rows) - len(priced)
+    priced.sort(key=lambda row: float(row.market_cap), reverse=True)
+
+    return {
+        "items": [
+            {
+                "symbol": row.symbol,
+                "name": row.name,
+                "marketCap": float(row.market_cap),
+                "changePercent": round(float(row.change_percent), 2),
+                "sector": row.sector or "Bilinmiyor",
+                "price": float(row.price),
+                "currency": row.currency_code or "TRY",
+            }
+            for row in priced[:limit]
+        ],
+        # Kaç enstrümanın çizilemediği söylenir. Sessizce düşen kutular,
+        # haritayı olduğundan küçük gösterir ve kimse sebebini bilmez.
+        "missing": missing,
+    }
+
+def symbols_without_fundamentals(db: Session) -> list[str]:
+    """Temel verisi hiç olmayan enstrümanlar.
+
+    Isı haritası tayfını PİYASA DEĞERİNDEN alıyor ve o değer burada duruyor.
+    Migration 0019 evreni 190'dan 1009'a çıkardı ama günlük temel veri işi
+    henüz üzerlerinden geçmedi: 1009 hissenin yalnızca 183'ünde piyasa değeri
+    var ve NYSE'de hiç yok, yani S&P sekmesi bugün boş çizilirdi.
+
+    Açılışta yalnızca EKSİK olanlar isteniyor; hepsini her açılışta yeniden
+    çekmek, değişmeyen çeyreklik oranları durmadan yeniden yazmak olurdu.
+    """
+    rows = db.execute(
+        select(InvestmentProduct.symbol)
+        .outerjoin(
+            InstrumentFundamentals,
+            InstrumentFundamentals.product_id == InvestmentProduct.id,
+        )
+        .where(
+            InvestmentProduct.status == "active",
+            InvestmentProduct.data_symbol.isnot(None),
+            InstrumentFundamentals.market_cap.is_(None),
+        )
+        .order_by(InvestmentProduct.symbol)
+    ).all()
+    return [row[0] for row in rows]
+
+def intraday_symbols(db: Session) -> list[str]:
+    """Gün içi bar tutulması gereken enstrümanlar.
+
+    Evrenin tamamı DEĞİL: bin enstrümanın gün içi barlarını on beş dakikada bir
+    çekmek, sağlayıcıya bu sistemin gerektirdiğinden kat kat fazla istek demek.
+    Gün içi seriye ihtiyaç duyan tek ekran portföy performansı, dolayısıyla
+    ihtiyaç duyulan tek küme birinin TUTTUĞU ya da İZLEDİĞİ enstrümanlar.
+
+    Kur ve endeks de ekleniyor: üst şerit ve portföyün para birimi çevrimi
+    onlara bağlı.
+    """
+    held = select(PortfolioPosition.product_id).where(PortfolioPosition.quantity > 0)
+    watched = select(WatchlistItem.product_id)
+    rows = db.execute(
+        select(InvestmentProduct.symbol)
+        .where(
+            (InvestmentProduct.id.in_(held))
+            | (InvestmentProduct.id.in_(watched))
+            | (InvestmentProduct.product_type.in_(("fx", "index")))
+        )
+        .where(InvestmentProduct.status == "active")
+        .order_by(InvestmentProduct.symbol)
+    ).all()
+    return [row[0] for row in rows]
+
 def candle_coverage(db: Session) -> dict[str, dict[str, Any]]:
     """How many daily bars each instrument holds, and the newest one.
 
@@ -540,20 +723,115 @@ def candle_coverage(db: Session) -> dict[str, dict[str, Any]]:
     return coverage
 
 
-def candle_closes(db: Session, symbol: str, limit: int = 260) -> list[tuple[datetime, float]]:
-    """Closing prices oldest-first, for return-series calculations."""
+def candle_closes(
+    db: Session, symbol: str, limit: int = 260, interval: str = "1d"
+) -> list[tuple[datetime, float]]:
+    """Closing prices oldest-first, for return-series calculations.
+
+    `interval` gün içi seriyi de aynı yoldan okunabilir kılıyor (`15m`):
+    "Gün" görünümü 15 dakikalık noktalardan oluşuyor ve o barlar sağlayıcıdan
+    gerçek OHLC olarak geliyor.
+    """
     product = get_product(db, symbol)
     if product is None:
         return []
-    rows = (
-        db.query(MarketCandle)
-        .filter(MarketCandle.product_id == product.id, MarketCandle.interval == "1d")
+    # Core select: bkz. `candle_bars`. ORM nesnesi kurmak, okunan üç sütun için
+    # sorgunun kendisinden yüz kat pahalıydı.
+    rows = db.execute(
+        select(MarketCandle.timestamp, MarketCandle.close_price)
+        .where(
+            MarketCandle.product_id == product.id,
+            MarketCandle.interval == interval,
+        )
         .order_by(MarketCandle.timestamp.desc())
         .limit(limit)
+    ).all()
+    return [(stamp, float(close)) for stamp, close in reversed(rows)]
+
+
+
+
+def candle_bars(
+    db: Session, symbol: str, limit: int = 260, interval: str = "1d"
+) -> list[tuple[datetime, float, float]]:
+    """Açılış ve kapanış, eskiden yeniye.
+
+    `candle_closes` yalnızca kapanışı veriyor; portföyün mum grafiği açılışı da
+    istiyor. Açılış olmadan bir günün mumu gövdesiz kalır -- tek bir gözlenen
+    değerden mum çizmek, o günün nereden nereye gittiğini söylememektir.
+    """
+    product = get_product(db, symbol)
+    if product is None:
+        return []
+    # Core select, ORM sorgusu DEĞİL: aylık grafik sembol başına ~2340 bar
+    # okuyor ve 41.405 `MarketCandle` nesnesi kurmak, sorgunun kendisi 1,6 ms
+    # sürerken 1,3 saniye tutuyordu. Buradan çıkan şey üç sayı; nesneye
+    # ihtiyaç yok.
+    rows = db.execute(
+        select(MarketCandle.timestamp, MarketCandle.open_price, MarketCandle.close_price)
+        .where(
+            MarketCandle.product_id == product.id,
+            MarketCandle.interval == interval,
+        )
+        .order_by(MarketCandle.timestamp.desc())
+        .limit(limit)
+    ).all()
+    return [
+        (stamp, float(open_price), float(close_price))
+        for stamp, open_price, close_price in reversed(rows)
+    ]
+
+def search_instruments(
+    db: Session, query: str, limit: int = 10
+) -> list[dict[str, Any]]:
+    """Yazdıkça öneri: sembol ve şirket adı üzerinde arama.
+
+    `resolve_candidates` değil: o, "kullanıcı hangi TEK enstrümanı kastetti"
+    sorusunu cevaplıyor ve bulanık eşleştirme yapıyor -- para yolunda doğru
+    davranış, bir öneri kutusunda değil. Burada istenen, yazılanla başlayan
+    adların listesi.
+
+    Eşleştirme Python'da ve `_fold` ile: Postgres ı/İ'yi kurulumun
+    collation'ına göre katlıyor, dolayısıyla SQL'e itilen bir ad araması
+    başka bir veritabanında sessizce eşleşmeyi bırakabilir. Türkçe kuralları
+    burada bizim ve test edilebilir -- `sise` yazan `ŞİŞE`yi bulur.
+
+    Sıralama: önce sembolü tam eşleşenler, sonra sembolü öyle başlayanlar,
+    sonra adı içerenler. Kullanıcı `THY` yazdığında THYAO en üstte olmalı.
+    """
+    folded = _fold((query or "").strip())
+    if not folded:
+        return []
+
+    products = (
+        db.query(InvestmentProduct)
+        .filter(InvestmentProduct.status == "active")
         .all()
     )
-    return [(row.timestamp, float(row.close_price)) for row in reversed(rows)]
 
+    exact, prefix, contains = [], [], []
+    for product in products:
+        symbol = _fold(product.symbol)
+        name = _fold(product.name or "")
+        if symbol == folded:
+            exact.append(product)
+        elif symbol.startswith(folded):
+            prefix.append(product)
+        elif folded in name or folded in symbol:
+            contains.append(product)
+
+    ordered = exact + sorted(prefix, key=lambda p: p.symbol) + sorted(
+        contains, key=lambda p: p.symbol
+    )
+    return [
+        {
+            "symbol": product.symbol,
+            "name": product.name,
+            "market": product.market,
+            "currency": product.currency_code,
+        }
+        for product in ordered[:limit]
+    ]
 
 def symbol_suggestions(db: Session, symbols: Optional[list[str]]) -> list[dict[str, Any]]:
     """For each query that did not settle, what the user might have meant.
@@ -620,7 +898,24 @@ def list_instruments(
             if resolved else statement.where(false())
         )
     if filters.get("market"):
-        statement = statement.where(InvestmentProduct.market == filters["market"])
+        # `market` hem kotasyon borsasını hem de bir ENDEKSİ kabul eder.
+        #
+        # AAPL, NASDAQ'ta işlem görür ve aynı zamanda S&P 500 üyesidir; bir
+        # hissenin tek bir borsası vardır ama birden çok endeksi olabilir.
+        # Yalnızca borsaya bakılsaydı "S&P 500 hisseleri" sorgusu Apple'ı,
+        # Microsoft'u ve Nvidia'yı hiç görmezdi -- endeksin en büyük üyelerini
+        # atlayan bir cevap, eksik değil yanlış olurdu.
+        wanted = str(filters["market"]).upper()
+        if wanted in INDEX_CODES:
+            statement = statement.where(
+                InvestmentProduct.id.in_(
+                    select(IndexMembership.product_id).where(
+                        IndexMembership.index_code == wanted
+                    )
+                )
+            )
+        else:
+            statement = statement.where(InvestmentProduct.market == wanted)
     if filters.get("product_type"):
         statement = statement.where(InvestmentProduct.product_type == filters["product_type"])
     if filters.get("sector"):
@@ -843,41 +1138,6 @@ def sector_by_symbol(db: Session) -> dict[str, str]:
         .where(InstrumentFundamentals.sector.isnot(None))
     )
     return {symbol: sector for symbol, sector in db.execute(statement).all()}
-
-
-def dividend_rows(db: Session, limit: int = 20) -> list[dict[str, Any]]:
-    """Dividend yields for held instruments.
-
-    Dates are left empty rather than invented: this provider does not publish
-    ex-dates, and a wrong one could have someone trade against it.
-    """
-    held = {row["symbol"] for row in holdings(db)}
-    statement = (
-        select(
-            InvestmentProduct.symbol,
-            InstrumentFundamentals.dividend_yield,
-            MarketQuote.price,
-            InvestmentProduct.currency_code,
-        )
-        .join(InstrumentFundamentals,
-              InstrumentFundamentals.product_id == InvestmentProduct.id)
-        .join(MarketQuote, MarketQuote.product_id == InvestmentProduct.id, isouter=True)
-        .where(InstrumentFundamentals.dividend_yield.isnot(None))
-        .order_by(InstrumentFundamentals.dividend_yield.desc())
-        .limit(limit)
-    )
-    return [
-        {
-            "symbol": symbol,
-            "currency": currency or "TRY",
-            "exDate": "",
-            "paymentDate": "",
-            "amount": round(float(price) * float(yield_) / 100, 4) if price else 0.0,
-            "yieldPercent": round(float(yield_), 2),
-        }
-        for symbol, yield_, price, currency in db.execute(statement).all()
-        if symbol in held or not held
-    ]
 
 
 def recent_orders(db: Session, limit: int = 20) -> list[dict[str, Any]]:

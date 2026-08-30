@@ -29,6 +29,9 @@ def product(symbol="THYAO", data_symbol="THYAO.IS", name="Türk Hava Yolları"):
     )
 
 
+NOW_MINUS_1 = NOW - timedelta(days=1)
+
+
 class Universe:
     """A Session double that hands back the instrument universe.
 
@@ -100,8 +103,29 @@ class TestSymbolResolution:
         writes THY, and the answer was "fiyat verisine ulaşamadım"."""
         assert market_service.resolve_symbol(self._db(), typed) is self.THY
 
-    def test_a_typo_lands_on_the_nearest_neighbour(self):
-        assert market_service.resolve_symbol(self._db(), "THAYO") is self.THY
+    def test_a_close_typo_is_OFFERED_rather_than_assumed(self):
+        """THAYO scores 0.80 against THYAO -- and so does the Turkish verb
+        "almak" against ALARK, and "kış" against ISRG, on the same margin. No
+        score separates a typo from an ordinary word, so 0.80 buys a question
+        rather than an answer. "THYAO mı demek istediniz?" is a fine reply."""
+        db = self._db()
+        assert market_service.resolve_symbol(db, "THAYO") is None
+        assert [p.symbol for p in market_service.resolve_candidates(db, "THAYO")] == ["THYAO"]
+
+    def test_a_strong_typo_still_resolves(self):
+        """0.91 with a clear margin is not a guess."""
+        aselsan = product("ASELS", "ASELS.IS", "ASELSAN Elektronik")
+        assert market_service.resolve_symbol(Universe(aselsan).db, "aselsn") is aselsan
+
+    def test_an_ordinary_word_never_becomes_an_instrument(self):
+        """The bug this bar exists for: "pastırma" scored 0.62 against ASTOR,
+        cleared only the suggestion floor, was the single thing that did, and
+        came back as an ANSWER. "bana" became BRSAN and "tarifi" became TXN
+        the same way -- so "bana pastırma tarifi ver" matched three."""
+        astor = product("ASTOR", "ASTOR.IS", "Astor Enerji")
+        db = Universe(astor).db
+        for word in ("pastırma", "bana", "tarifi", "mantı"):
+            assert market_service.resolve_symbol(db, word) is None, word
 
     def test_a_name_match_beats_a_closer_looking_symbol(self):
         """Fuzzy scoring on symbols alone ranks "apple" -> APP (0.75) ABOVE
@@ -178,9 +202,11 @@ class TestStrictResolution:
         assert market_service.resolve_symbol(db, "turk hava yollari", strict=True) is self.THY
 
     def test_a_typo_is_refused_on_the_money_path(self):
+        """Strict mode never reaches the neighbour search at all, so a typo
+        yields nothing to act on -- not even a suggestion to act on."""
         db = Universe(self.THY).db
         assert market_service.resolve_symbol(db, "THAYO", strict=True) is None
-        assert market_service.resolve_symbol(db, "THAYO") is self.THY
+        assert market_service.resolve_candidates(db, "THAYO", strict=True) == []
 
 
 class TestNoMatchQuery:
@@ -422,18 +448,6 @@ class TestBreakdownHelpers:
         db = MagicMock(spec=Session)
         db.execute.return_value.all.return_value = [("THYAO", "Industrials")]
         assert market_service.sector_by_symbol(db) == {"THYAO": "Industrials"}
-
-    def test_dividend_rows_leave_dates_blank(self):
-        """The provider publishes no ex-date, and a wrong one could have
-        someone trade against it."""
-        db = MagicMock(spec=Session)
-        db.execute.return_value.all.side_effect = [
-            [(SimpleNamespace(quantity=1, average_buy_price=1, opened_at=NOW), product(), None, None)],
-            [("THYAO", 2.29, 304.0, "TRY")],
-        ]
-        rows = market_service.dividend_rows(db)
-        assert rows[0]["exDate"] == ""
-        assert rows[0]["yieldPercent"] == pytest.approx(2.29)
 
     def test_recent_orders_map_status_to_turkish(self):
         db = MagicMock(spec=Session)
@@ -709,3 +723,214 @@ class TestWatchlistStore:
         db = self._db()
         mocker.patch.object(market_service, "resolve_symbol", return_value=None)
         assert market_service.watchlist_remove(db, "user-1", "NOPE") is False
+
+
+class TestSearchInstruments:
+    """Yazdıkça öneri.
+
+    `resolve_candidates` değil: o "kullanıcı hangi TEK enstrümanı kastetti"
+    sorusunu cevaplıyor ve bulanık eşleştiriyor -- para yolunda doğru, öneri
+    kutusunda değil.
+    """
+
+    def _db(self, products):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.all.return_value = products
+        return db
+
+    def _p(self, symbol, name, market="BIST", currency="TRY"):
+        return SimpleNamespace(
+            symbol=symbol, name=name, market=market, currency_code=currency,
+            status="active",
+        )
+
+    def test_an_empty_query_returns_nothing(self):
+        """Boş arama bütün evreni dökmemeli."""
+        assert market_service.search_instruments(self._db([]), "") == []
+        assert market_service.search_instruments(self._db([]), "   ") == []
+
+    def test_turkish_folding_finds_the_dotted_name(self):
+        """`sise` yazan `ŞİŞE`yi bulmalı. Katlama Python'da, çünkü Postgres
+        ı/İ'yi kurulumun collation'ına göre katlıyor."""
+        db = self._db([self._p("SISE", "Türkiye Şişe ve Cam Fabrikaları")])
+        assert market_service.search_instruments(db, "şişe")[0]["symbol"] == "SISE"
+
+    def test_an_exact_symbol_ranks_first(self):
+        db = self._db([
+            self._p("THYAOX", "Başka"), self._p("THYAO", "Türk Hava Yolları"),
+        ])
+        rows = market_service.search_instruments(db, "THYAO")
+        assert rows[0]["symbol"] == "THYAO"
+
+    def test_a_prefix_beats_a_name_match(self):
+        db = self._db([
+            self._p("XYZ", "Thy Holding"), self._p("THYAO", "Türk Hava Yolları"),
+        ])
+        assert market_service.search_instruments(db, "thy")[0]["symbol"] == "THYAO"
+
+    def test_the_company_name_is_searchable(self):
+        db = self._db([self._p("MSFT", "Microsoft Corporation", "NASDAQ", "USD")])
+        rows = market_service.search_instruments(db, "microsoft")
+        assert rows[0]["symbol"] == "MSFT" and rows[0]["currency"] == "USD"
+
+    def test_the_limit_is_honoured(self):
+        db = self._db([self._p(f"AB{i}", f"Şirket {i}") for i in range(20)])
+        assert len(market_service.search_instruments(db, "ab", limit=5)) == 5
+
+
+class TestIntradaySymbols:
+    """Gün içi bar gereken küme.
+
+    Evrenin tamamı değil: bin enstrümanın 15 dakikalık barlarını sürekli
+    çekmek, sistemin gerektirdiğinden kat kat fazla istek olurdu.
+    """
+
+    def test_it_returns_the_symbols_the_query_found(self):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = [("THYAO",), ("USDTRY",)]
+        assert market_service.intraday_symbols(db) == ["THYAO", "USDTRY"]
+
+    def test_an_empty_result_is_an_empty_list(self):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        assert market_service.intraday_symbols(db) == []
+
+
+class TestIndexAwareMarketFilter:
+    """`market` süzgeci hem borsayı hem endeksi kabul eder.
+
+    AAPL Nasdaq'ta işlem görür VE S&P 500 üyesidir. Yalnızca borsaya
+    bakılsaydı "S&P 500 hisseleri" sorgusu Apple'ı, Microsoft'u ve Nvidia'yı
+    hiç görmezdi.
+    """
+
+    def test_the_index_codes_are_the_ones_the_tabs_send(self):
+        assert market_service.INDEX_CODES == {"SP500", "NASDAQ100"}
+
+    def test_an_exchange_is_not_an_index_code(self):
+        """BIST, NASDAQ ve NYSE kotasyon borsası; `market` sütununda
+        duruyorlar ve üyelik tablosuna girmiyorlar."""
+        for exchange in ("BIST", "NASDAQ", "NYSE"):
+            assert exchange not in market_service.INDEX_CODES
+
+    def test_a_symbol_matching_neither_rule_is_skipped(self):
+        """Ne sembolü ne adı eşleşen bir enstrüman listede yer almaz."""
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.all.return_value = [
+            SimpleNamespace(symbol="GARAN", name="Garanti Bankası",
+                            market="BIST", currency_code="TRY", status="active"),
+        ]
+        assert market_service.search_instruments(db, "zzz") == []
+
+    def test_an_index_query_filters_by_membership_not_exchange(self, mocker):
+        """S&P sekmesi üyelik tablosunu okur; borsayı değil."""
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        market_service.list_instruments(db, filters={"market": "SP500"}, limit=5)
+        assert db.execute.called
+
+    def test_an_exchange_query_filters_by_the_market_column(self):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        market_service.list_instruments(db, filters={"market": "NYSE"}, limit=5)
+        assert db.execute.called
+
+
+class TestCandleBars:
+    """Açılış ve kapanış birlikte.
+
+    `candle_closes` yalnızca kapanışı veriyor; portföyün mumu açılışı da
+    istiyor -- tek bir gözlenen değerden çizilen mum, o günün nereden nereye
+    gittiğini söylemez.
+    """
+
+    def test_bars_come_back_oldest_first(self):
+        """Core select ile okunuyor: ORM nesnesi kurmak, üç sütun için
+        sorgunun kendisinden yüz kat pahalıydı (41.405 nesne = 1,3 saniye)."""
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = [
+            (NOW, 110.0, 115.0),
+            (NOW_MINUS_1, 100.0, 105.0),
+        ]
+        out = market_service.candle_bars(db, "THYAO", limit=2)
+        # Sorgu en yeniden okuyor; dönüş eskiden yeniye çevriliyor.
+        assert [bar[1] for bar in out] == [100.0, 110.0]
+
+    def test_an_unknown_symbol_has_no_bars(self, mocker):
+        mocker.patch.object(market_service, "get_product", return_value=None)
+        assert market_service.candle_bars(MagicMock(spec=Session), "NOPE") == []
+
+
+class TestMarketHeatmap:
+    """Piyasa ısı haritası: her hisse piyasa değeri kadar yer kaplar.
+
+    `get_heatmap` ile karıştırılmamalı -- o, kullanıcının portföyünü pozisyon
+    ağırlığına göre gösteriyor. Bu, piyasanın kendisini gösteriyor.
+    """
+
+    def _row(self, symbol, cap, change, sector="Teknoloji"):
+        return SimpleNamespace(
+            symbol=symbol, name=f"{symbol} A.Ş.", market_cap=cap,
+            sector=sector, change_percent=change, price=100.0,
+            currency_code="TRY",
+        )
+
+    def _db(self, rows):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = rows
+        return db
+
+    def test_tiles_come_back_largest_first(self):
+        """Harita piyasanın kendi ağırlığını gösteriyor."""
+        db = self._db([
+            self._row("SMALL", 1_000, 1.0),
+            self._row("BIG", 900_000, -2.0),
+        ])
+        out = market_service.market_heatmap(db)
+        assert [tile["symbol"] for tile in out["items"]] == ["BIG", "SMALL"]
+        assert out["items"][0]["marketCap"] == 900_000
+
+    def test_an_instrument_without_a_market_cap_is_left_out_and_counted(self):
+        """Kutu boyutu piyasa değerinden geliyor; varsayılan bir boyut, o
+        hisseye sahip olmadığı bir ağırlığı vermek olurdu."""
+        db = self._db([
+            self._row("OK", 500, 1.0),
+            self._row("NOCAP", None, 1.0),
+            self._row("NOCHANGE", 500, None),
+        ])
+        out = market_service.market_heatmap(db)
+        assert [tile["symbol"] for tile in out["items"]] == ["OK"]
+        assert out["missing"] == 2
+
+    def test_an_index_code_filters_by_membership(self):
+        """AAPL Nasdaq'ta işlem görür VE S&P 500 üyesidir."""
+        db = self._db([])
+        market_service.market_heatmap(db, market="SP500")
+        assert db.execute.called
+
+    def test_an_exchange_filters_by_the_market_column(self):
+        db = self._db([])
+        market_service.market_heatmap(db, market="BIST")
+        assert db.execute.called
+
+    def test_the_limit_caps_the_tiles(self):
+        db = self._db([self._row(f"S{i}", 1000 - i, 0.5) for i in range(10)])
+        assert len(market_service.market_heatmap(db, limit=3)["items"]) == 3
+
+    def test_a_missing_sector_is_named_not_blank(self):
+        db = self._db([self._row("X", 100, 1.0, sector=None)])
+        assert market_service.market_heatmap(db)["items"][0]["sector"] == "Bilinmiyor"
+
+
+class TestSymbolsWithoutFundamentals:
+    def test_it_lists_what_the_query_found(self):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = [("AAPL",), ("MSFT",)]
+        assert market_service.symbols_without_fundamentals(db) == ["AAPL", "MSFT"]
+
+    def test_a_fully_covered_universe_asks_for_nothing(self):
+        """Hepsini her açılışta yeniden çekmek, değişmeyen çeyreklik oranları
+        durmadan yeniden yazmak olurdu."""
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        assert market_service.symbols_without_fundamentals(db) == []

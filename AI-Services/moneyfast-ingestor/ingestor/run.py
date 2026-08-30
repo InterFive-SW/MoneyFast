@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from . import config, sinks
+from . import config, refresh_server, sinks
 from .sources import rss_source, yfinance_source
 
 logging.basicConfig(
@@ -32,6 +32,15 @@ logging.basicConfig(
 log = logging.getLogger("moneyfast.ingestor")
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
+
+#: Tek bir ingest isteğinde taşınacak azami bar. Geri doldurma on binlerce bar
+#: üretiyor ve hepsini tek gövdede göndermek zaman aşımına açık tek bir adım
+#: olurdu.
+CANDLE_PUSH_CHUNK = 5_000
+
+#: Aynı gerekçe temel veri için. Tek gövdede giden bir partide tek bir geçersiz
+#: değer, 828 enstrümanın tamamını kaybettiriyordu.
+FUNDAMENTALS_PUSH_CHUNK = 200
 
 
 def open_markets(moment: datetime | None = None) -> set[str]:
@@ -94,9 +103,32 @@ def _note_success() -> None:
     _backoff_step = 0
 
 
-def run_quotes(client: httpx.Client, force: bool = False) -> dict:
+def run_quotes(
+    client: httpx.Client, force: bool = False, tier: str = "all"
+) -> dict:
+    """Fiyat turu.
+
+    `tier` katmanı seçer: `band` kur/altın/endeks (30 saniyede bir),
+    `bulk` hisseler (15 dakikada bir), `all` ikisi birden -- tek seferlik
+    çalıştırmalar ve testler için.
+
+    Ayrım şu yüzden var: ekranın tepesindeki kur bandının sürekli oynaması
+    isteniyor, ama aynı sıklıkta bin hisse çekmek sağlayıcıya dakikada
+    binlerce istek demek.
+    """
     started = time.monotonic()
     products = sinks.fetch_products(client)
+
+    if tier in ("band", "bulk"):
+        want_band = tier == "band"
+        products = [p for p in products if config.is_band_product(p) is want_band]
+        # Yalnızca katman süzgeci uygulandığında anlamlı: boş bir katman,
+        # çekilecek bir şey olmadığını söyler. `tier="all"` bu kontrolden
+        # geçmez, çünkü orada boş liste "evren boş" demektir ve o durumda
+        # turun geri kalanı zaten hiçbir şey yapmaz.
+        if not products:
+            log.info("no instruments in tier %s", tier)
+            return {"skipped": True}
 
     if not force:
         trading = open_markets()
@@ -141,8 +173,8 @@ def run_quotes(client: httpx.Client, force: bool = False) -> dict:
         _note_success()
     elapsed = time.monotonic() - started
     log.info(
-        "quote cycle: %d fetched, %s written, %.2fs (budget %ds)",
-        len(quotes), result.get("quotes_written", 0), elapsed, current_interval_seconds(),
+        "quote cycle [%s]: %d fetched, %s written, %.2fs",
+        tier, len(quotes), result.get("quotes_written", 0), elapsed,
     )
     if elapsed > current_interval_seconds():
         # Visible rather than silent: the scheduler will coalesce the overlap,
@@ -159,6 +191,101 @@ def run_fundamentals(client: httpx.Client) -> dict:
     log.info("fundamentals cycle: %d fetched, %s written",
              len(rows), result.get("fundamentals_written", 0))
     return {"fetched": len(rows), **result}
+
+
+def backfill_intraday(client: httpx.Client) -> dict:
+    """Gün içi barların derin penceresi; açılışta bir kez.
+
+    Haftalık ve aylık grafikler 5 dakikalık barların 15 dakikalık ve saatlik
+    kovalarından çiziliyor, dolayısıyla bir günlük veri onlara yetmiyor.
+    Sağlayıcı 5 dakikalık barları ~60 gün geriye veriyor; otuz gün hem ay
+    görünümünü dolduruyor hem de tek seferlik bir maliyet.
+
+    Periyodik iş bunu yapmıyor: otuz günü beş dakikada bir yeniden çekmek,
+    değişmeyen barları durmadan yeniden yazmak olurdu.
+    """
+    return run_intraday_candles(client, days=config.intraday_history_days())
+
+
+def backfill_fundamentals(client: httpx.Client) -> dict:
+    """Temel verisi hiç olmayan enstrümanlar; açılışta bir kez.
+
+    Isı haritası tayfını piyasa değerinden alıyor. Migration 0019 evreni
+    190'dan 1009'a çıkardı ama günlük iş henüz üzerlerinden geçmedi: 1009
+    hissenin 183'ünde piyasa değeri var, NYSE'de hiç yok. Gecelik işi beklemek,
+    S&P sekmesinin bir gün boyunca boş kalması demek.
+
+    Yalnızca EKSİK olanlar isteniyor; günlük iş zaten hepsini tazeliyor.
+    """
+    wanted = sinks.fetch_missing_fundamentals(client)
+    if not wanted:
+        log.info("fundamentals: nothing missing")
+        return {"skipped": True}
+
+    products = [p for p in sinks.fetch_products(client) if p.get("symbol") in wanted]
+    rows = yfinance_source.fetch_fundamentals(products)
+
+    # Parçalayarak itiliyor. Tek gövdede gönderildiğinde bir tek geçersiz değer
+    # 828 satırın tamamını düşürüyordu; parçalar hâlinde en fazla bir parça
+    # kaybedilir ve gerisi yazılır.
+    written = 0
+    for start in range(0, len(rows), FUNDAMENTALS_PUSH_CHUNK):
+        chunk = rows[start:start + FUNDAMENTALS_PUSH_CHUNK]
+        result = sinks.push_fundamentals(client, chunk) or {}
+        written += result.get("fundamentals_written", 0)
+
+    log.info("fundamentals backfill: %d of %d symbols returned data, %d written",
+             len(rows), len(products), written)
+    return {"fetched": len(rows), "fundamentals_written": written}
+
+
+def run_intraday_candles(client: httpx.Client, days: int = 1) -> dict:
+    """5 dakikalık barlar; yalnızca gereken enstrümanlar için.
+
+    Portföy performansının "Gün" görünümü bunu okuyor: bir işlem gününe tam
+    78 bar sığıyor. Daha kaba aralıklar (15 dakika, saat) bu seriden
+    toplanarak üretiliyor, ikinci bir seri saklanmıyor. Barlar sağlayıcıdan
+    GERÇEK OHLC olarak geliyor -- anlık fiyattan bar üretmek açılış, yüksek ve
+    düşük değerlerini uydurmak olurdu.
+
+    Evrenin tamamı çekilmiyor: hangi sembollerin gerektiğini backend söylüyor
+    (tutulan, izlenen, kur ve endeks), çünkü kimin neyi tuttuğu uygulamanın
+    bilgisi ve bu servis onu bilmiyor.
+    """
+    wanted = sinks.fetch_intraday_symbols(client)
+    if not wanted:
+        log.info("intraday: nothing to fetch")
+        return {"skipped": True}
+
+    products = [p for p in sinks.fetch_products(client) if p.get("symbol") in wanted]
+    # Sağlayıcı gün içi barları yalnızca son ~60 gün için veriyor; bir günlük
+    # pencere, gün görünümünün ihtiyacı olan tek şey.
+    rows = yfinance_source.fetch_candles(products, days=days, interval="5m")
+
+    # Parçalayarak itiliyor. Otuz günlük geri doldurma 26 sembol için ~94.000
+    # bar demek; tek bir gövdede göndermek hem yaklaşık 10 MB'lık bir istek
+    # hem de zaman aşımına açık tek bir "ya hep ya hiç" adımı olurdu.
+    written = 0
+    for start in range(0, len(rows), CANDLE_PUSH_CHUNK):
+        chunk = rows[start:start + CANDLE_PUSH_CHUNK]
+        result = sinks.push_market_data(client, [], chunk) or {}
+        written += result.get("candles_written", 0)
+
+    log.info("intraday cycle: %d bars for %d symbols, %d written",
+             len(rows), len(products), written)
+    return {"fetched": len(rows), "candles_written": written}
+
+
+def run_interest(client: httpx.Client) -> dict:
+    """Vadeli hesap faizini işletmesi için backend'i tetikler.
+
+    Bu servisin veritabanı kredensiyeli yok ve olmamalı; yaptığı tek şey günlük
+    tetiği iletmek. Uç nokta aynı gün ikinci kez çağrıldığında hiçbir şey
+    ödemiyor, dolayısıyla tekrar zararsız.
+    """
+    result = sinks.trigger_interest_accrual(client) or {}
+    log.info("interest cycle: %s account(s) accrued", result.get("accrued", 0))
+    return result
 
 
 def run_candles(client: httpx.Client, symbols: set[str] | None = None) -> dict:
@@ -251,6 +378,10 @@ def start_scheduler() -> None:
 
     scheduler = BlockingScheduler(timezone=ISTANBUL)
 
+    # Sohbetin anlık fiyat sorabilmesi için. Arka planda, kendi iş parçacığında;
+    # zamanlayıcı ana iş parçacığında bloklamaya devam ediyor.
+    refresh_server.serve_in_background()
+
     def _job(name, fn):
         def wrapper():
             with httpx.Client() as client:
@@ -258,15 +389,45 @@ def start_scheduler() -> None:
 
         return wrapper
 
+    # İki katman. Şerit küçük ve sık; hisseler kalabalık ve seyrek.
     scheduler.add_job(
-        _job("quotes", run_quotes),
+        _job("quotes_band", lambda client: run_quotes(client, tier="band")),
         "interval",
-        seconds=config.quote_interval_seconds(),
-        id="quotes",
+        seconds=config.band_interval_seconds(),
+        id="quotes_band",
         # An overrunning job must not queue up behind itself; the next tick
         # would fetch the same prices anyway.
         max_instances=1,
         coalesce=True,
+    )
+    scheduler.add_job(
+        _job("quotes_bulk", lambda client: run_quotes(client, tier="bulk")),
+        "interval",
+        seconds=config.quote_interval_seconds(),
+        id="quotes_bulk",
+        max_instances=1,
+        coalesce=True,
+    )
+    # Gün içi barlar, toplu turla aynı ritimde: "Gün" görünümü 15 dakikalık
+    # noktalardan oluşuyor ve o noktaları üreten şey bu.
+    scheduler.add_job(
+        _job("candles_intraday", run_intraday_candles),
+        "interval",
+        seconds=config.quote_interval_seconds(),
+        id="candles_intraday",
+        max_instances=1,
+        coalesce=True,
+    )
+    # Vadeli hesap faizi. Günde bir, gün dönümünden hemen sonra; uç nokta aynı
+    # gün ikinci kez çağrıldığında hiçbir şey ödemiyor, dolayısıyla kaçan bir
+    # çalıştırma ertesi gün telafi edilebiliyor.
+    scheduler.add_job(
+        _job("interest", run_interest),
+        "cron",
+        hour=0,
+        minute=5,
+        id="interest",
+        max_instances=1,
     )
     scheduler.add_job(
         _job("news", run_news),
@@ -296,7 +457,9 @@ def start_scheduler() -> None:
     )
 
     log.info(
-        "scheduler started: quotes every %ds (market hours), news every %dm, candles daily at %d:15",
+        "scheduler started: band every %ds, quotes every %ds (market hours), "
+        "news every %dm, candles daily at %d:15",
+        config.band_interval_seconds(),
         config.quote_interval_seconds(),
         config.news_interval_minutes(),
         config.MARKET_CLOSE_HOUR + 1,
@@ -314,6 +477,20 @@ def start_scheduler() -> None:
     # seconds, and that is a healthy provider. Giving it to the scheduler with
     # a run_date of now means the service is up and pricing while the history
     # fills in behind it.
+    scheduler.add_job(
+        _job("fundamentals-backfill", backfill_fundamentals),
+        "date",
+        run_date=datetime.now(ISTANBUL),
+        id="fundamentals-backfill",
+        misfire_grace_time=None,
+    )
+    scheduler.add_job(
+        _job("intraday-backfill", backfill_intraday),
+        "date",
+        run_date=datetime.now(ISTANBUL),
+        id="intraday-backfill",
+        misfire_grace_time=None,
+    )
     scheduler.add_job(
         _job("candle-backfill", backfill_candles),
         "date",

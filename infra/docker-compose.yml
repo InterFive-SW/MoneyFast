@@ -73,6 +73,10 @@ services:
       SEEDS_DIR: /app/seeds
       DATABASE_URL: ${BASE_DATABASE_URL:?Set a URL-encoded BASE_DATABASE_URL in infra/.env}
       AI_ORCHESTRATOR_URL: http://agents:8080
+      # Sohbette adı geçen bir enstrümanın fiyatını anında tazelemek için.
+      # Fiyatı backend çekmiyor: yfinance'a çıkan tek bileşen ingestor ve
+      # veritabanı kredensiyeli olmayan da o.
+      INGESTOR_REFRESH_URL: http://ingestor:8200
       # Shared secret guarding the service-to-service ingest endpoints. When
       # unset the guard REFUSES rather than opening them, so a missing value
       # fails loudly instead of silently publishing a write endpoint.
@@ -166,9 +170,17 @@ services:
       RAG_API_BASE_URL: http://rag:8100
       BACKEND_API_KEY: ${BACKEND_API_KEY:?Set BACKEND_API_KEY in infra/.env}
       NEWS_FEEDS: ${NEWS_FEEDS:-}
-      INGESTOR_QUOTE_INTERVAL_MINUTES: ${INGESTOR_QUOTE_INTERVAL_MINUTES:-15}
+      # Hisseler beş dakikada bir: gün içi grafiğin bir seansta 78 noktası
+      # olsun diye. Bu değer uzun süre HİÇBİR ŞEY yapmadı:
+      # config.py `INGESTOR_QUOTE_INTERVAL_SECONDS` adına bakıyordu, buradaki
+      # ada değil, dolayısıyla ingestor 30 saniyede bir bütün evreni çekiyordu.
+      INGESTOR_QUOTE_INTERVAL_MINUTES: ${INGESTOR_QUOTE_INTERVAL_MINUTES:-5}
+      # Kur/altın/endeks şeridi ayrı ve hızlı: birkaç sembol, 30 saniye.
+      INGESTOR_BAND_INTERVAL_SECONDS: ${INGESTOR_BAND_INTERVAL_SECONDS:-30}
       INGESTOR_NEWS_INTERVAL_MINUTES: ${INGESTOR_NEWS_INTERVAL_MINUTES:-15}
-      INGESTOR_HISTORY_DAYS: ${INGESTOR_HISTORY_DAYS:-400}
+      # İki yıllık günlük geçmiş; performans grafiği o kadar geriye gidiyor.
+      INGESTOR_HISTORY_DAYS: ${INGESTOR_HISTORY_DAYS:-730}
+      INGESTOR_REFRESH_PORT: ${INGESTOR_REFRESH_PORT:-8200}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       backend:

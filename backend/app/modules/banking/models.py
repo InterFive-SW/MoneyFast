@@ -49,6 +49,18 @@ class BankAccount(Base):
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="TRY")
     balance: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    #: Yıllık brüt faiz oranı, yüzde olarak. Yalnızca vadeli hesaplarda dolu.
+    #: Arayüzde bir dönem `%42.50` diye SABİT yazılıydı ve hiçbir kayda
+    #: dayanmıyordu -- gösterilen oranla ödenen faiz arasında bir bağ yoktu,
+    #: çünkü ödenen faiz de yoktu.
+    interest_rate: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)
+    #: Vade, gün olarak. Ürün günlük hesaba çevrildi: her gün sonunda işler.
+    term_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: En son işletilen faizin tarihi. Aynı gün ikinci kez çalışmayı bu
+    #: engelliyor; yeniden başlatma faizi ikinci kez ödettirmemeli.
+    last_accrued_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 

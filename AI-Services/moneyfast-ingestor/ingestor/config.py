@@ -122,18 +122,61 @@ def per_host_delay() -> float:
     return _float("INGESTOR_HOST_DELAY_SECONDS", 2.0)
 
 
-def quote_interval_seconds() -> int:
-    """How often to refresh prices.
+#: Üst şeritteki enstrümanlar: kur, altın ve endeks. Küçük bir küme olduğu
+#: için sık çekilebiliyor.
+BAND_MARKETS: set[str] = {"FX", "COMEX"}
 
-    Ten seconds is achievable because the whole universe is fetched in ONE
-    batched request (measured 3.3-5.4s for ~95 symbols). The floor of 5s is a
-    guard against a config typo turning this into a request flood.
+#: Şeride endeksler de giriyor; bunlar bir borsada işlem görüyor ama fiyatları
+#: tek tek hisselerden bağımsız okunuyor.
+BAND_PRODUCT_TYPES: set[str] = {"index"}
+
+
+def band_interval_seconds() -> int:
+    """Şerit ne sıklıkta tazelenir.
+
+    Dört-beş sembol, dolayısıyla otuz saniye rahatça yetiyor: ekranın tepesinde
+    sürekli değişen bir kur bandı, bütün evreni aynı sıklıkta çekmeyi
+    gerektirmiyor.
     """
-    # 30s, not 10s. Measured with ~190 symbols across two markets: a clean
-    # cycle is a handful of seconds, but a chunk that has to time out pushes
-    # it past ten, and every overrun was logged as a skipped run. A budget the
-    # cycle can actually meet is worth more than a number that looks live.
-    return max(5, _int("INGESTOR_QUOTE_INTERVAL_SECONDS", 30))
+    return max(5, _int("INGESTOR_BAND_INTERVAL_SECONDS", 30))
+
+
+def quote_interval_seconds() -> int:
+    """Hisse fiyatları ne sıklıkta tazelenir.
+
+    Beş dakika. Gün içi grafiğin bir işlem gününde 78 noktası olsun diye:
+    5 dakikalık barlar bir seansa tam bu kadar sığıyor ve barlar sağlayıcıdan
+    gerçek OHLC olarak geliyor.
+
+    Bütçe dar ama ölçülebilir. Zorlanmış bir ısınma turu 1009 sembolü 272
+    saniyede çekmişti; normal turlar yalnızca O AN AÇIK olan piyasalara
+    süzülüyor (~493 BIST ya da ~517 ABD), yani kabaca yarısı. Tur bütçesini
+    aşarsa `run_quotes` bunu uyarı olarak yazıyor ve mevcut geri çekilme
+    merdiveni devreye giriyor; kalıcı olarak aşıyorsa değer 10 dakikaya
+    çekilmeli.
+
+    Önceden bu değer 30 SANİYEDİ ve bütün evreni kapsıyordu --
+    `docker-compose.yml` `INGESTOR_QUOTE_INTERVAL_MINUTES: 15` diye bir değer
+    veriyordu ama bu ada bakan hiçbir kod yoktu, dolayısıyla ayar hiçbir zaman
+    işlemedi. Evren binlerce enstrümana çıkarken saniyelik bir tur, sağlayıcıya
+    dakikada iki bin istek demek.
+
+    Şerit ayrı ve hızlı (`band_interval_seconds`); sohbetin sorduğu tek bir
+    sembol ise `/refresh` ile anında çekiliyor, dolayısıyla onbeş dakika
+    hiçbir yerde "eski fiyat" anlamına gelmiyor.
+
+    5 saniyelik taban, bir yazım hatasının bunu istek seline çevirmesine karşı.
+    """
+    minutes = _int("INGESTOR_QUOTE_INTERVAL_MINUTES", 5)
+    return max(5, _int("INGESTOR_QUOTE_INTERVAL_SECONDS", minutes * 60))
+
+
+def is_band_product(product: dict) -> bool:
+    """Enstrüman hızlı (şerit) katmanına mı ait."""
+    return (
+        product.get("market") in BAND_MARKETS
+        or product.get("product_type") in BAND_PRODUCT_TYPES
+    )
 
 
 def news_interval_minutes() -> int:
@@ -142,7 +185,7 @@ def news_interval_minutes() -> int:
 
 def history_days() -> int:
     """How much daily history to request on the nightly candle job."""
-    return _int("INGESTOR_HISTORY_DAYS", 400)
+    return _int("INGESTOR_HISTORY_DAYS", 730)
 
 
 #: Below this many daily bars, the start-up backfill treats an instrument as
@@ -168,3 +211,36 @@ def respect_robots() -> bool:
 #: is what "without getting stopped" actually looks like: backing off when
 #: asked, rather than pretending to be a browser.
 BACKOFF_LADDER = (1, 3, 6)
+
+
+def refresh_port() -> int:
+    """Anlık fiyat tazeleme uç noktasının dinlediği port.
+
+    Yalnızca `moneyfast-net` üzerinden erişilebilir; compose'da host'a
+    açılmıyor.
+    """
+    return _int("INGESTOR_REFRESH_PORT", 8200)
+
+
+def intraday_history_days() -> int:
+    """Açılışta çekilecek gün içi geçmiş, gün olarak.
+
+    Aylık grafik 5 dakikalık barların saatlik kovalarından çiziliyor, yani otuz
+    günlük gün içi veriye ihtiyaç duyuyor. Sağlayıcı bu barları ~60 gün geriye
+    veriyor; üstünü istemek boş döner.
+    """
+    return max(1, min(60, _int("INGESTOR_INTRADAY_HISTORY_DAYS", 30)))
+
+
+def fundamentals_workers() -> int:
+    """Temel veri turunda eşzamanlı istek sayısı.
+
+    Sağlayıcı toplu bir uç sunmadığı için sembol başına bir istek gerekiyor;
+    sırayla 1009 sembol saatler sürüyor.
+
+    Altı, on iki değil: on iki iş parçacığıyla 828 sembol denendiğinde sağlayıcı
+    "Too Many Requests" döndürmeye başladı ve tur boş veriyle geri geldi. `.info`
+    uç noktası `download`'dan çok daha pahalı; amaç turu hızlandırmak,
+    sağlayıcıyı zorlamak değil.
+    """
+    return max(1, min(16, _int("INGESTOR_FUNDAMENTALS_WORKERS", 6)))

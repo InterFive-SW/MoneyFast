@@ -65,6 +65,12 @@ class UserResponse(UserBase):
     is_active: bool
     created_at: datetime
 
+    #: Ekranlarda gösterilen müşteri numarası. Saklanmıyor, kullanıcı
+    #: kimliğinden türetiliyor -- hesap numaralarının ve IBAN'ların zaten
+    #: üretildiği yöntemin aynısı. Arayüzde bir dönem HERKES için aynı sabit
+    #: (`84938201`) yazılıydı, yani müşteriyi ayırt etmeyen bir "müşteri no".
+    customer_no: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 

@@ -187,3 +187,33 @@ class CandleSeriesOut(BaseModel):
     currency: str = "TRY"
     interval: str = "1d"
     candles: List[CandleOut] = Field(default_factory=list)
+
+
+class InstrumentSuggestion(BaseModel):
+    """Arama kutusunun gösterdiği tek satır."""
+
+    symbol: str
+    name: Optional[str] = None
+    market: Optional[str] = None
+    currency: Optional[str] = None
+
+
+class HeatmapTile(BaseModel):
+    """Isı haritasında bir kutu."""
+
+    symbol: str
+    name: Optional[str] = None
+    #: Kutunun ALANI bundan geliyor. Değeri bilinmeyen enstrüman haritaya
+    #: girmiyor: varsayılan bir boyut, ona sahip olmadığı bir ağırlık verirdi.
+    marketCap: float
+    changePercent: float
+    sector: str = "Bilinmiyor"
+    price: float
+    currency: str = "TRY"
+
+
+class MarketHeatmapOut(BaseModel):
+    items: List[HeatmapTile] = []
+    #: Piyasa değeri ya da günlük değişimi olmadığı için çizilemeyen sayısı.
+    #: Sessizce düşen kutular haritayı olduğundan küçük gösterir.
+    missing: int = 0

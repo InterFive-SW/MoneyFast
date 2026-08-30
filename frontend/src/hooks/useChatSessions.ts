@@ -169,7 +169,11 @@ export function useChatSessions() {
                 const { items } = await api.getConversations({ limit: SESSION_PAGE_SIZE })
                 if (cancelled) return
                 setSessions(items.map(toStub))
-                if (items.length > 0) await openSession(items[0].thread_id)
+                // Geçmiş listelenir ama AÇILMAZ. En son konuşmayı kendiliğinden
+                // açmak, uygulamayı yeni açan kullanıcıyı saatler önce yarım
+                // kalmış bir konuşmanın ortasında karşılıyordu -- ekranın
+                // tepesinde bir öneri, bağlamı unutulmuş halde. Sohbet boş
+                // başlar; geçmiş bir tık uzakta.
             } catch {
                 if (cancelled) return
                 // localStorage'a DÜŞÜLMEZ. Düşmek, ortak tarayıcıdaki

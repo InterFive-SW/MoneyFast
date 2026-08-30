@@ -78,6 +78,8 @@ function toUiAccount(account: PortfolioAccount): BankAccount {
     id: account.id,
     name: ACCOUNT_TYPE_LABELS[account.account_type] ?? 'Hesap',
     type: toUiAccountType(account.account_type, account.currency_code),
+    interestRate: account.interest_rate,
+    termDays: account.term_days,
     balance: account.balance,
     currency: account.currency_code,
     // The investment account has no IBAN -- it is not a banking row. Its own
@@ -206,15 +208,22 @@ export default function Banking() {
 
     // Hareketler hesap hesap çekiliyor; tek bir "tüm hareketlerim" ucu yok.
     //
-    // Yalnızca BANKACILIK hesapları için. Yatırım hesabı `banking.accounts`
-    // satırı değil, dolayısıyla ekstresi de yok: onu da istemek 404 dönüyor,
-    // tek bir reddedilen istek `Promise.all`'u düşürüyor ve sayfanın tamamı
-    // "Verilere ulaşılamadı" ekranına kalıyordu. Faturalar, transferler,
-    // kartlar — hepsi bu sayfanın arkasında olduğu için hiçbiri açılmıyordu.
-    const statementAccounts = apiAccounts.filter((account) => !account.is_investment)
+    // Yatırım hesabının dökümü ayrı bir uçtan geliyor: nakdi `banking.accounts`
+    // değil `investment.investment_accounts` tutuyor, dolayısıyla hareketleri
+    // de kendi defterinde (migration 0017). Bir dönem bu hesap listeden
+    // tamamen çıkarılıyordu — ekstresi olmadığı için istemek 404 dönüyor, tek
+    // bir reddedilen istek `Promise.all`'u düşürüyor ve sayfanın tamamı
+    // "Verilere ulaşılamadı" ekranına kalıyordu. Artık çıkarmak gerekmiyor:
+    // hesap kendi hareketlerini anlatabiliyor.
+    const statementAccounts = apiAccounts
     const statements = await Promise.all(
       statementAccounts.map((account) =>
-        apiClient.getStatement(account.account_number, STATEMENT_LIMIT),
+        account.is_investment
+          ? apiClient.getInvestmentStatement(
+              account.iban || account.account_number,
+              STATEMENT_LIMIT,
+            )
+          : apiClient.getStatement(account.account_number, STATEMENT_LIMIT),
       ),
     )
 

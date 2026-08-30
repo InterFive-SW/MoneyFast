@@ -39,7 +39,9 @@ const ACCOUNT = {
 const INVESTMENT_ACCOUNT = {
   id: 'acc-inv-1',
   account_number: 'TR-INV-0001',
-  iban: null,
+  // Artık gerçek bir IBAN'ı var (migration 0017); `null` olduğu sürece hesap
+  // "para gönder" ekranında adreslenemiyordu.
+  iban: 'TR0012345678901234567890123',
   account_type: 'yatirim',
   currency_code: 'TRY',
   balance: 12500,
@@ -85,6 +87,11 @@ beforeEach(() => {
   vi.spyOn(apiClient, 'updateCardSettings').mockResolvedValue({} as never)
   vi.spyOn(apiClient, 'getLoans').mockResolvedValue([] as never)
   vi.spyOn(apiClient, 'getStatement').mockResolvedValue(STATEMENT as never)
+  // Yatırım hesabının dökümü ayrı bir uçtan geliyor: nakdi `banking.accounts`
+  // değil `investment.investment_accounts` tutuyor (migration 0017).
+  vi.spyOn(apiClient, 'getInvestmentStatement').mockResolvedValue(
+    { account_number: 'TR-INV-0001', balance: 0, currency_code: 'TRY', movements: [] } as never,
+  )
   vi.spyOn(apiClient, 'createTransfer').mockResolvedValue({} as never)
 })
 
@@ -220,18 +227,47 @@ describe('banking', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(reason)
     expect(screen.queryByText(/Başarıyla Alınmıştır/i)).toBeNull()
   })
+
+  it('clears a rejection once the user goes back and changes the IBAN', async () => {
+    /**
+     * "bi önceki IBAN'dan kalma hata": `submitError` yalnızca gönderim
+     * içinde temizleniyordu. Geri dönüp IBAN'ı düzelten kullanıcı özet
+     * adımına döndüğünde, artık var olmayan bir IBAN'ı anlatan eski hatayı
+     * görüyordu -- ve o hata, düzeltilmiş transferin de reddedileceğini
+     * söylüyormuş gibi duruyordu.
+     */
+    vi.mocked(apiClient.createTransfer).mockRejectedValue(new Error('IBAN bulunamadı.'))
+
+    await mountAt('/banking/transfer')
+    await fillTransferWizard('100')
+    fireEvent.click(screen.getByText('ONAYLA'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('IBAN bulunamadı.')
+
+    // Geri dön, tutarı düzelt ve özete GERİ DÖN. Hatanın yalnızca 4. adımda
+    // basılması, geri gitmenin onu ekrandan kaldırmasına yetiyor -- asıl
+    // sorun geri dönüldüğünde hâlâ orada olması.
+    fireEvent.click(screen.getByLabelText('Geri'))
+    fireEvent.change(await screen.findByPlaceholderText('0,00'), {
+      target: { value: '250' },
+    })
+    fireEvent.click(screen.getByText('DEVAM'))
+    await screen.findByText('ONAYLA')
+
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
 })
 
 describe('banking regressions', () => {
-  it('never asks for a statement for the investment account', async () => {
+  it('asks the investment endpoint, never the banking one, for the investment account', async () => {
     /**
-     * The investment account is not a `banking.accounts` row and has no
-     * statement, so asking for one returns 404 — and a single rejected
+     * The investment account is not a `banking.accounts` row, so asking the
+     * BANKING statement endpoint for it returns 404 — and a single rejected
      * promise inside `Promise.all` took down the entire page, with bills,
      * transfers and cards behind it.
      *
-     * The old test could not catch this: the stub answered every account it
-     * was asked about, including one that 404s in reality.
+     * It was excluded outright for a while, which is why it showed no
+     * movements at all. Now it has its own ledger and its own endpoint
+     * (migration 0017), so it is asked — just not here.
      */
     render(
       <MemoryRouter initialEntries={['/banking']}>
@@ -247,6 +283,16 @@ describe('banking regressions', () => {
     const asked = vi.mocked(apiClient.getStatement).mock.calls.map(([number]) => number)
     expect(asked).toContain(ACCOUNT.account_number)
     expect(asked).not.toContain(INVESTMENT_ACCOUNT.account_number)
+
+    // ...and it is not simply dropped: its movements come from the endpoint
+    // that owns them.
+    await waitFor(() => expect(apiClient.getInvestmentStatement).toHaveBeenCalled())
+    const investmentAsked = vi
+      .mocked(apiClient.getInvestmentStatement)
+      .mock.calls.map(([identifier]) => identifier)
+    expect(investmentAsked).toContain(
+      INVESTMENT_ACCOUNT.iban ?? INVESTMENT_ACCOUNT.account_number,
+    )
   })
 })
 

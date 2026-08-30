@@ -8,11 +8,22 @@ type MarketTab = 'BIST' | 'ABD' | 'Kripto'
 type SortKey = 'symbol' | 'price' | 'changePercent' | 'volume'
 type SortDir = 'asc' | 'desc'
 
+/** Açılışta gösterilen satır sayısı; gerisi "Tümünü Gör" ile gelir. */
+const PAGE_SIZE = 25
+
 interface Props {
   instruments: MarketInstrument[]
   columnSet?: ColumnSetKey
   activeTab?: MarketTab
   onTabChange?: (tab: MarketTab) => void
+  /**
+   * Piyasa seçimini üst ekran yapıyorsa false verilir.
+   *
+   * StocksScreen'in kendi Tümü/BIST/ABD süzgeci varken tablo bir de kendi
+   * sekmesine göre süzüyordu: üstte ABD seçilince tablo hâlâ 'BIST'te
+   * olduğu için tüm satırlar eleniyor, ekran boş kalıyordu.
+   */
+  showMarketTabs?: boolean
 }
 
 function formatCompact(value: number): string {
@@ -49,7 +60,7 @@ function Week52RangeBar({ low, high, price }: { low: number; high: number; price
  * Pazar sekmesi + arama + sütun sıralama + favoriye ekleme + kolon seti — tamamen mock veri üzerinde, client-side.
  * `columnSet` verilmezse 'Getiri' seti (Hacim/Piyasa Değeri/52 Hafta) gösterilir.
  */
-export default function MarketInstrumentsTable({ instruments, columnSet = 'getiri', activeTab: controlledTab, onTabChange }: Props) {
+export default function MarketInstrumentsTable({ instruments, columnSet = 'getiri', activeTab: controlledTab, onTabChange, showMarketTabs = true }: Props) {
   const navigate = useNavigate()
   const [internalTab, setInternalTab] = useState<MarketTab>('BIST')
   const activeTab = controlledTab ?? internalTab
@@ -88,7 +99,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
 
   const rows = useMemo(() => {
     const filtered = instruments.filter((item) => {
-      if (item.market !== activeTab) return false
+      if (showMarketTabs && item.market !== activeTab) return false
       if (!query.trim()) return true
       const q = query.trim().toLowerCase()
       return item.symbol.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)
@@ -101,7 +112,25 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
     })
 
     return sorted
-  }, [instruments, activeTab, query, sortKey, sortDir])
+  }, [instruments, activeTab, query, sortKey, sortDir, showMarketTabs])
+
+  /**
+   * Liste varsayılan olarak ilk sayfayla sınırlı.
+   *
+   * Evren iki borsaya çıkınca tek seferde ~90 satır basılıyordu; ekranın dibi
+   * görünmediği için liste sonsuza gidiyormuş gibi duruyordu. Kaç satır
+   * olduğu her zaman yazılır, böylece liste sonlu okunur.
+   */
+  const [expanded, setExpanded] = useState(false)
+
+  // Süzgeç ya da sekme değişince liste yeniden başa sarılır: bir aramadan
+  // sonra "tümü" açık kalırsa kullanıcı yine dibi olmayan bir liste görür.
+  useEffect(() => {
+    setExpanded(false)
+  }, [activeTab, query, showMarketTabs])
+
+  const visibleRows = expanded ? rows : rows.slice(0, PAGE_SIZE)
+  const hiddenCount = rows.length - visibleRows.length
 
   const columns: { key: SortKey; label: string; align: 'left' | 'right' }[] = [
     { key: 'symbol', label: 'Enstrüman', align: 'left' },
@@ -114,6 +143,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
         <div className="flex items-center gap-3">
           <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Enstrümanlar</h3>
+          {showMarketTabs && (
           <div className="flex bg-slate-800/5 p-1 rounded-lg backdrop-blur-sm">
             {(['BIST', 'ABD', 'Kripto'] as MarketTab[]).map((tab) => (
               <button
@@ -127,6 +157,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
               </button>
             ))}
           </div>
+          )}
         </div>
 
         <div className="relative">
@@ -190,7 +221,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100/50">
-            {rows.map((item) => (
+            {visibleRows.map((item) => (
               <tr
                 key={item.symbol}
                 onClick={() => navigate(`/investment/hisseler/${item.symbol}`)}
@@ -248,6 +279,31 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
           </tbody>
         </table>
       </div>
+
+      {rows.length > 0 && (
+        <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
+          <span className="text-[11px] tabular-nums text-slate-400">
+            {rows.length} sonuçtan {visibleRows.length} tanesi gösteriliyor
+          </span>
+          {hiddenCount > 0 ? (
+            <button
+              onClick={() => setExpanded(true)}
+              className="rounded-lg border border-white/10 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400/40 hover:text-white"
+            >
+              Tümünü Gör ({hiddenCount} daha)
+            </button>
+          ) : (
+            expanded && (
+              <button
+                onClick={() => setExpanded(false)}
+                className="rounded-lg border border-white/10 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400/40 hover:text-white"
+              >
+                Daha Az Göster
+              </button>
+            )
+          )}
+        </div>
+      )}
     </div>
   )
 }

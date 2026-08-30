@@ -117,7 +117,9 @@ async def get_current_user(user=Depends(deps.get_current_user)):
     aynı kullanıcının iki isteğinin farklı kimliklere sahip olması demekti ve
     konuşmaların bir kullanıcıya bağlanmasını imkânsız kılıyordu.
     """
-    return user
+    payload = schemas.UserResponse.model_validate(user)
+    payload.customer_no = service.customer_no_for(user.id)
+    return payload
 
 
 @router.get(

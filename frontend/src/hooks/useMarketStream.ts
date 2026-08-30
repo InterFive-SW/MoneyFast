@@ -81,7 +81,15 @@ function publish(next: MarketSnapshot) {
 }
 
 function applyFrame(raw: any, transport: MarketSnapshot['transport']) {
-  const quotes = raw?.quotes ?? {};
+  const incoming = raw?.quotes ?? {};
+  // Kısmi kare yalnızca DEĞİŞENLERİ taşıyor, elde olanın üstüne biniyor.
+  //
+  // Evren 1010 enstrümana çıkınca her tam kare 88 KB oldu ve fiyat her
+  // değiştiğinde açık olan her sekmeye gidiyordu. Fiyatların çoğu turdan tura
+  // kıpırdamadığı için farkı göndermek kareyi bir avuç sembole indiriyor;
+  // sunucu yine de belirli aralıklarla tam kare yolluyor, böylece akışa
+  // ortadan katılan bir istemcide boşluk kalmıyor.
+  const quotes = raw?.partial ? { ...snapshot.quotes, ...incoming } : incoming;
   publish({
     asOf: raw?.as_of ?? null,
     isDelayed: Boolean(raw?.is_delayed),

@@ -339,17 +339,34 @@ class TestScheduler:
         )
         monkeypatch.setattr(httpx, "Client", lambda **kwargs: client_for(recorder()))
         monkeypatch.setattr(run_module, "run_quotes", lambda *a, **k: warmed.append("q"))
+        # Sohbetin anlık fiyat sorduğu uç nokta; testte gerçek soket açılmasın.
+        monkeypatch.setattr(
+            run_module.refresh_server, "serve_in_background", lambda *a, **k: None
+        )
         monkeypatch.setattr(run_module, "run_news", lambda *a, **k: warmed.append("n"))
 
         run_module.start_scheduler()
 
         assert dict(added) == {
-            "quotes": "interval", "news": "interval",
+            # İki katman: şerit sık (30s), hisseler seyrek (15dk). Tek bir
+            # `quotes` işi vardı ve bütün evreni 30 saniyede bir çekiyordu.
+            "quotes_band": "interval", "quotes_bulk": "interval",
+            "news": "interval",
+            # Gün içi barlar, toplu turla aynı ritimde.
+            "candles_intraday": "interval",
             "candles": "cron", "fundamentals": "cron",
+            # Vadeli hesap faizi, gün dönümünden hemen sonra.
+            "interest": "cron",
             # A one-shot, not part of the warm start: `fetch_candles` is
             # per-symbol, so a cold-start backfill is ~190 sequential provider
             # calls. Handing it to the scheduler keeps boot from blocking on it.
             "candle-backfill": "date",
+            # Aynı gerekçe: haftalık ve aylık grafikler bir günlük gün içi
+            # veriyle çizilemiyor, otuz günlük pencere de tek seferlik.
+            "intraday-backfill": "date",
+            # Isı haritası piyasa değerine göre boyutlanıyor; gecelik işi
+            # beklemek S&P sekmesinin bir gün boş kalması demek.
+            "fundamentals-backfill": "date",
         }
         assert warmed == ["q", "n"]
         assert started == [True]
@@ -373,7 +390,9 @@ class TestRateLimitBackoff:
         run._backoff_step = 0
 
     def test_interval_starts_at_the_configured_value(self):
-        assert run.current_interval_seconds() == 30
+        """Onbeş dakika: geri çekilme merdiveninin tabanı toplu turun kendisi.
+        Şerit ayrı bir işte ve bu merdivenden etkilenmiyor."""
+        assert run.current_interval_seconds() == 300
 
     def test_a_rate_limit_widens_the_interval(self, monkeypatch):
         monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
@@ -385,12 +404,12 @@ class TestRateLimitBackoff:
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", _rate_limited)
         result = run.run_quotes(None, force=True)
         assert result == {"rate_limited": True}
-        assert run.current_interval_seconds() > 30
+        assert run.current_interval_seconds() > 300
 
     def test_backoff_is_bounded(self, monkeypatch):
         for _ in range(10):
             run._note_rate_limit()
-        assert run.current_interval_seconds() == 30 * run.config.BACKOFF_LADDER[-1]
+        assert run.current_interval_seconds() == 300 * run.config.BACKOFF_LADDER[-1]
 
     def test_a_clean_cycle_resets_the_interval(self, monkeypatch):
         run._note_rate_limit()
@@ -399,7 +418,7 @@ class TestRateLimitBackoff:
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda p: [])
         monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": 0})
         run.run_quotes(None, force=True)
-        assert run.current_interval_seconds() == 30
+        assert run.current_interval_seconds() == 300
 
     def test_a_non_rate_limit_error_still_propagates(self, monkeypatch):
         """Only a 429 means "slow down". Everything else is a real fault and
@@ -534,6 +553,9 @@ class TestSchedulerJobs:
 
         monkeypatch.setattr(blocking, "BlockingScheduler", FakeScheduler)
         monkeypatch.setattr(httpx, "Client", lambda **kwargs: client_for(recorder()))
+        monkeypatch.setattr(
+            run.refresh_server, "serve_in_background", lambda *a, **k: None
+        )
         ran = []
         monkeypatch.setattr(
             run, "_guard", lambda name, fn, client, **kwargs: ran.append(name)
@@ -633,10 +655,260 @@ class TestPartialBatches:
 
         run.run_quotes(None)
 
-        assert run.current_interval_seconds() == 30
+        assert run.current_interval_seconds() == 300
 
     def test_no_instruments_in_the_open_markets_is_a_skip(self, monkeypatch):
         monkeypatch.setattr(run, "open_markets", lambda: {"NASDAQ"})
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
             {"symbol": "THYAO", "data_symbol": "THYAO.IS", "market": "BIST"}])
         assert run.run_quotes(None) == {"skipped": True}
+
+
+class TestQuoteTiers:
+    """İki katman: şerit sık, hisseler seyrek.
+
+    Tek bir iş vardı ve bütün evreni 30 saniyede bir çekiyordu. Evren binlerce
+    enstrümana çıkarken bu, sağlayıcıya dakikada binlerce istek demek -- ve
+    ekranın tepesindeki kur bandının sürekli oynaması için gereken şey bu değil.
+    """
+
+    PRODUCTS = [
+        {"symbol": "USDTRY", "data_symbol": "USDTRY=X", "market": "FX",
+         "product_type": "fx"},
+        {"symbol": "XU100", "data_symbol": "XU100.IS", "market": "BIST",
+         "product_type": "index"},
+        {"symbol": "THYAO", "data_symbol": "THYAO.IS", "market": "BIST",
+         "product_type": "stock"},
+    ]
+
+    def _wire(self, monkeypatch):
+        seen = []
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: list(self.PRODUCTS))
+        monkeypatch.setattr(
+            run.yfinance_source, "fetch_quotes",
+            lambda p: seen.append([x["symbol"] for x in p]) or [],
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": 0}
+        )
+        return seen
+
+    def test_the_band_tier_takes_fx_and_the_index_only(self, monkeypatch):
+        seen = self._wire(monkeypatch)
+        run.run_quotes(None, force=True, tier="band")
+        assert seen == [["USDTRY", "XU100"]]
+
+    def test_the_bulk_tier_takes_the_stocks(self, monkeypatch):
+        seen = self._wire(monkeypatch)
+        run.run_quotes(None, force=True, tier="bulk")
+        assert seen == [["THYAO"]]
+
+    def test_all_is_still_everything(self, monkeypatch):
+        """Tek seferlik çalıştırmalar (`--once`) bölmeden çeker."""
+        seen = self._wire(monkeypatch)
+        run.run_quotes(None, force=True, tier="all")
+        assert seen == [["USDTRY", "XU100", "THYAO"]]
+
+    def test_an_empty_tier_is_a_skip(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "THYAO", "data_symbol": "THYAO.IS", "market": "BIST",
+             "product_type": "stock"},
+        ])
+        assert run.run_quotes(None, force=True, tier="band") == {"skipped": True}
+
+
+class TestInterestJob:
+    """Vadeli hesap faizini backend'e işletir.
+
+    Faizi burada HESAPLAMIYOR: para bankacılık modülünün işi ve bu servisin
+    veritabanı kredensiyeli yok.
+    """
+
+    def test_it_forwards_the_trigger_and_reports(self, monkeypatch):
+        monkeypatch.setattr(
+            run.sinks, "trigger_interest_accrual", lambda c: {"accrued": 2},
+        )
+        assert run.run_interest(None) == {"accrued": 2}
+
+    def test_an_empty_reply_is_tolerated(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "trigger_interest_accrual", lambda c: None)
+        assert run.run_interest(None) == {}
+
+    def test_the_sink_posts_to_the_backend(self):
+        handler = recorder(body={"accrued": 1})
+        assert sinks.trigger_interest_accrual(client_for(handler)) == {"accrued": 1}
+        assert handler.calls[0].url.path.endswith("/banking/interest/accrue")
+
+
+class TestIntradayCandles:
+    """5 dakikalık barlar; portföy performansının "Gün" görünümü bunu okuyor.
+
+    Barlar sağlayıcıdan GERÇEK OHLC olarak geliyor -- anlık fiyattan bar
+    üretmek açılış, yüksek ve düşük değerlerini uydurmak olurdu ve mum grafiği
+    o uydurma fitilleri gerçekmiş gibi çizerdi.
+    """
+
+    def test_nothing_wanted_is_a_skip(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_intraday_symbols", lambda c: set())
+        assert run.run_intraday_candles(None) == {"skipped": True}
+
+    def test_only_the_wanted_symbols_are_fetched(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(
+            run.sinks, "fetch_intraday_symbols", lambda c: {"THYAO"},
+        )
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "THYAO", "data_symbol": "THYAO.IS"},
+            {"symbol": "GARAN", "data_symbol": "GARAN.IS"},
+        ])
+
+        def _fetch(products, days=400, interval="1d"):
+            seen["symbols"] = [p["symbol"] for p in products]
+            seen["interval"] = interval
+            seen["days"] = days
+            return [{"symbol": "THYAO"}]
+
+        monkeypatch.setattr(run.yfinance_source, "fetch_candles", _fetch)
+        monkeypatch.setattr(
+            run.sinks, "push_market_data", lambda c, q, k: {"candles_written": len(k)},
+        )
+        result = run.run_intraday_candles(None)
+        assert seen == {"symbols": ["THYAO"], "interval": "5m", "days": 1}
+        assert result == {"fetched": 1, "candles_written": 1}
+
+    def test_the_sink_asks_the_backend_which_symbols(self):
+        """Kimin neyi tuttuğu uygulamanın bilgisi; bu servis onu bilmiyor."""
+        handler = recorder(body={"symbols": ["THYAO", "USDTRY"]})
+        got = sinks.fetch_intraday_symbols(client_for(handler))
+        assert got == {"THYAO", "USDTRY"}
+        assert handler.calls[0].url.path.endswith("/candles/intraday-symbols")
+
+    def test_an_empty_reply_is_an_empty_set(self):
+        handler = recorder(body={})
+        assert sinks.fetch_intraday_symbols(client_for(handler)) == set()
+
+
+class TestIntradayBackfill:
+    """Derin gün içi pencere: açılışta bir kez.
+
+    Haftalık ve aylık grafikler 5 dakikalık barların 15 dakikalık ve saatlik
+    kovalarından çiziliyor; bir günlük veri onlara yetmiyor. Periyodik iş bunu
+    yapmıyor -- otuz günü beş dakikada bir yeniden çekmek, değişmeyen barları
+    durmadan yeniden yazmak olurdu.
+    """
+
+    def test_it_asks_for_the_configured_window(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(run.sinks, "fetch_intraday_symbols", lambda c: {"THYAO"})
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "THYAO", "data_symbol": "THYAO.IS"},
+        ])
+
+        def _fetch(products, days=400, interval="1d"):
+            seen["days"] = days
+            seen["interval"] = interval
+            return []
+
+        monkeypatch.setattr(run.yfinance_source, "fetch_candles", _fetch)
+        monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {})
+        run.backfill_intraday(None)
+        assert seen == {"days": config.intraday_history_days(), "interval": "5m"}
+
+    def test_bars_are_pushed_in_chunks(self, monkeypatch):
+        """Otuz günlük geri doldurma 26 sembol için ~94.000 bar; tek gövdede
+        göndermek zaman aşımına açık tek bir adım olurdu."""
+        pushed = []
+        monkeypatch.setattr(run.sinks, "fetch_intraday_symbols", lambda c: {"THYAO"})
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "THYAO", "data_symbol": "THYAO.IS"},
+        ])
+        rows = [{"symbol": "THYAO", "n": n} for n in range(run.CANDLE_PUSH_CHUNK + 25)]
+        monkeypatch.setattr(
+            run.yfinance_source, "fetch_candles", lambda *a, **k: rows,
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_market_data",
+            lambda c, q, k: pushed.append(len(k)) or {"candles_written": len(k)},
+        )
+        result = run.backfill_intraday(None)
+        assert pushed == [run.CANDLE_PUSH_CHUNK, 25]
+        assert result["candles_written"] == len(rows)
+
+
+class TestIntradayHistoryDays:
+    def test_thirty_days_by_default(self):
+        assert config.intraday_history_days() == 30
+
+    def test_it_is_capped_at_the_providers_window(self, monkeypatch):
+        """Sağlayıcı gün içi barları ~60 gün geriye veriyor; üstünü istemek
+        boş döner."""
+        monkeypatch.setenv("INGESTOR_INTRADAY_HISTORY_DAYS", "900")
+        assert config.intraday_history_days() == 60
+
+    def test_it_has_a_floor(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_INTRADAY_HISTORY_DAYS", "0")
+        assert config.intraday_history_days() == 1
+
+
+class TestFundamentalsBackfill:
+    """Temel verisi hiç olmayan enstrümanlar; açılışta bir kez.
+
+    Isı haritasının kutu boyutu piyasa değerinden geliyor. Migration 0019
+    evreni 190'dan 1009'a çıkardı ama gecelik iş henüz üzerlerinden geçmedi:
+    S&P sekmesi o gün boyunca boş kalırdı.
+    """
+
+    def test_nothing_missing_is_a_skip(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_missing_fundamentals", lambda c: set())
+        assert run.backfill_fundamentals(None) == {"skipped": True}
+
+    def test_only_the_missing_symbols_are_fetched(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(
+            run.sinks, "fetch_missing_fundamentals", lambda c: {"AAPL"},
+        )
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "AAPL", "data_symbol": "AAPL"},
+            {"symbol": "MSFT", "data_symbol": "MSFT"},
+        ])
+        monkeypatch.setattr(
+            run.yfinance_source, "fetch_fundamentals",
+            lambda products: seen.setdefault(
+                "symbols", [p["symbol"] for p in products]
+            ) and [] or [{"symbol": "AAPL"}],
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_fundamentals", lambda c, rows: {"fundamentals_written": len(rows)},
+        )
+        result = run.backfill_fundamentals(None)
+        assert seen["symbols"] == ["AAPL"]
+        assert result == {"fetched": 1, "fundamentals_written": 1}
+
+    def test_rows_are_pushed_in_chunks(self, monkeypatch):
+        """Tek gövdede gönderildiğinde bir tek geçersiz değer 828 satırın
+        tamamını düşürüyordu."""
+        pushed = []
+        monkeypatch.setattr(
+            run.sinks, "fetch_missing_fundamentals", lambda c: {"A"},
+        )
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "A", "data_symbol": "A"},
+        ])
+        rows = [{"symbol": f"S{i}"} for i in range(run.FUNDAMENTALS_PUSH_CHUNK + 7)]
+        monkeypatch.setattr(run.yfinance_source, "fetch_fundamentals", lambda p: rows)
+        monkeypatch.setattr(
+            run.sinks, "push_fundamentals",
+            lambda c, chunk: pushed.append(len(chunk)) or {"fundamentals_written": len(chunk)},
+        )
+        result = run.backfill_fundamentals(None)
+        assert pushed == [run.FUNDAMENTALS_PUSH_CHUNK, 7]
+        assert result["fundamentals_written"] == len(rows)
+
+    def test_the_sink_asks_the_backend_which_are_missing(self):
+        handler = recorder(body={"symbols": ["AAPL", "MSFT"]})
+        got = sinks.fetch_missing_fundamentals(client_for(handler))
+        assert got == {"AAPL", "MSFT"}
+        assert handler.calls[0].url.path.endswith("/market/fundamentals/missing")
+
+    def test_an_empty_reply_is_an_empty_set(self):
+        assert sinks.fetch_missing_fundamentals(client_for(recorder(body={}))) == set()

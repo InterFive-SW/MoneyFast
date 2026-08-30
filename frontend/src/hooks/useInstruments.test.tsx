@@ -96,6 +96,22 @@ describe('useInstruments', () => {
     await waitFor(() => expect(apiClient.getInstruments).toHaveBeenCalledWith({ limit: 50 }))
   })
 
+  it('sends the market filter to the server, not the client', async () => {
+    /**
+     * Evren binin üzerinde enstrüman. `limit` kadarını çekip istemcide
+     * süzmek, seçilen piyasanın yalnızca ilk sayfaya düşen kısmını
+     * göstermek olurdu.
+     *
+     * `market` bir borsa (NASDAQ) ya da bir endeks (SP500) olabilir: AAPL
+     * Nasdaq'ta işlem görür VE S&P 500 üyesidir.
+     */
+    mockApi([])
+    renderHook(() => useInstruments(50, 'SP500'))
+    await waitFor(() =>
+      expect(apiClient.getInstruments).toHaveBeenCalledWith({ limit: 50, market: 'SP500' }),
+    )
+  })
+
   it('stops loading and shows nothing when the request fails', async () => {
     vi.spyOn(apiClient, 'getInstruments').mockRejectedValue(new Error('down'))
     vi.spyOn(console, 'error').mockImplementation(() => {})

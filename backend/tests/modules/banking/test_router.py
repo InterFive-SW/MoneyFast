@@ -527,3 +527,43 @@ class TestCardAndLoanEndpoints:
             side_effect=products.ProductError("Borcu olan kart kapatılamaz."),
         )
         assert bank_client.delete("/api/banking/cards/c-1").status_code == 422
+
+
+class TestAccrueInterestEndpoint:
+    """Faiz işletme uç noktası.
+
+    Servis işi: faiz ödemek bankanın işi, müşterinin eylemi değil.
+    """
+
+    URL = "/api/banking/interest/accrue"
+
+    def test_a_customer_token_cannot_trigger_it(self, bank_client, monkeypatch):
+        """Müşteriye kendi faizini tetikleme yetkisi vermek, aynı günü tekrar
+        tekrar denemesine davetiye olurdu."""
+        monkeypatch.setenv("BACKEND_API_KEY", "service-key")
+        assert bank_client.post(self.URL).status_code == 401
+
+    def test_it_refuses_when_the_key_is_unset(self, bank_client, monkeypatch):
+        """Bir env değişkeni eksik diye sessizce herkese açılan uç nokta,
+        kimsenin fark etmediği türden bir şey."""
+        monkeypatch.delenv("BACKEND_API_KEY", raising=False)
+        assert bank_client.post(self.URL).status_code == 503
+
+    def test_the_service_key_gets_the_posted_movements(
+        self, bank_client, mocker, monkeypatch
+    ):
+        monkeypatch.setenv("BACKEND_API_KEY", "service-key")
+        mocker.patch.object(
+            service, "accrue_interest",
+            return_value=[{
+                "account_number": "2000000000001", "amount": 5.21, "days": 1,
+                "reference_number": "TRF-1", "balance_after": 5005.21,
+            }],
+        )
+        response = bank_client.post(
+            self.URL, headers={"Authorization": "Bearer service-key"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["accrued"] == 1
+        assert body["movements"][0]["amount"] == 5.21

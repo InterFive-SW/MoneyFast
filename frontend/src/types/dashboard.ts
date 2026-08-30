@@ -28,6 +28,7 @@ export type WidgetType =
   | 'top-movers'
   | 'sector-allocation-pie'
   | 'heatmap'
+  | 'risk-summary'
   // Bireysel/Banka Widget'ları
   | 'total-balance'
   | 'recent-transactions'

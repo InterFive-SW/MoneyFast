@@ -95,13 +95,24 @@ RULES: List[Rule] = [
         "Kesinlik iddiasını olasılıksal ve kaynaklı bir ifadeyle değiştirin.",
         replacement="[kesinlik iddiası kaldırıldı]",
     ),
+    # The pattern is unchanged; the REASON is. The system now stores a
+    # declared tolerance (`risk.risk_profiles`), so "we hold no profile" is no
+    # longer why this is blocked. The ban survives its original justification
+    # because the two claims were never the same thing: saying a holding is
+    # "size uygun" is a judgement ABOUT the user, while reporting that a
+    # measured level sits above a tolerance they themselves declared is a
+    # comparison of two stated facts. `profile.suitability` produces the
+    # second and deliberately avoids this wording -- a test pins that it does
+    # not trip this rule.
     Rule(
         "SUI-001",
         "Suitability claim on personal holdings",
         "HIGH",
         r"(size uygun|sizin için (doğru|ideal|uygun)|risk profilinize uygun)",
-        "Sistem kullanıcının risk profilini tutmuyor; uygunluk iddiası dayanaksızdır.",
-        "Uygunluk iddiasını kaldırın; yalnızca ölçülen metrikleri aktarın.",
+        "Uygunluk bir yargıdır; sistem ölçüm ile kullanıcının kendi beyanını "
+        "karşılaştırır, bir ürünün kişiye uygunluğuna karar vermez.",
+        "Uygunluk iddiasını kaldırın; ölçülen seviye ile beyan edilen toleransı "
+        "olgu olarak aktarın.",
         replacement="[uygunluk değerlendirmesi kaldırıldı]",
         requires_personal_data=True,
     ),

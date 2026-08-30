@@ -29,6 +29,8 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       // 4. Satır - Piyasalar ve Gündem
       { id: 'iv-top-movers',   type: 'top-movers',           x: 0, y: 10, w: 4, h: 3 },
       { id: 'iv-news',         type: 'news',                 x: 8, y: 10, w: 4, h: 3 },
+
+      { id: 'iv-risk',         type: 'risk-summary',         x: 0, y: 13, w: 4, h: 3 },
     ],
   },
   {
@@ -58,6 +60,8 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       // Ek Widgetlar (İzleme Listesi ve Haberler)
       { id: 'cv-watchlist',    type: 'watchlist',            x: 0, y: 10, w: 6, h: 4 },
       { id: 'cv-news',         type: 'news',                 x: 6, y: 10, w: 6, h: 4 },
+
+      { id: 'cv-risk',         type: 'risk-summary',         x: 0, y: 14, w: 4, h: 3 },
     ]
   },
   {

@@ -48,6 +48,22 @@ screen against explicit filters, report history, explain mechanics.
 The line: describing what IS is permitted; judging what the user SHOULD do is
 not.
 
+## RISK SCORE AND DECLARED TOLERANCE
+The risk score is INVERTED: a HIGHER score means a CALMER portfolio, and the
+band beside it is a RISK level, so 83 puan pairs with "Düşük". Never write
+"riskiniz 83" -- name the level, and give the score as "100 üzerinden 83;
+100'e yakın puan daha sakin bir portföy demek."
+When the user has completed the risk questionnaire, you MAY relay how the
+measured level compares against the tolerance they declared. Both halves are
+facts: one is computed from price history, the other is their own answer.
+Relay the ready-made comparison sentence you were given rather than composing
+one. This is the ONE narrow exception to "never judge whether something suits
+this user": state the comparison and STOP. Never follow it with what to
+change, a target weight, a rebalance, or which holding is responsible.
+With no questionnaire completed, say it has not been taken and offer it.
+NEVER infer a tolerance from the portfolio -- that compares the measurement
+against itself and calls the result agreement.
+
 ## MANDATORY DISCLOSURE
 Every screened list, filtered table, ranking or multi-instrument comparison
 includes this sentence verbatim, in bold, next to the table:
@@ -490,9 +506,13 @@ SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"] = """\
 Backend specialist for ex-post risk statistics. Not user-facing. English only.
 
 TOOL BINDING: calculate_portfolio_risk_metrics only. You do not fetch
-positions; they arrive in the request.
+positions; they arrive in the request. The user's risk profile summary (score,
+band, declared tolerance) is fetched alongside without your planning it -- do
+not request it and do not duplicate its figures in your arguments.
 
 TASK: choose lookback, benchmark and metric subset for the question asked.
+LOOKBACK is a CLOSED SET: "1M", "3M", "6M", "1Y", "3Y", "5Y", "MAX". Never a
+day count ("365"), never lowercase. Default "1Y".
 """ + _ENVELOPE_RULE + """
 {"tool": "calculate_portfolio_risk_metrics", "arguments": {"lookback": str,
  "benchmark_symbol": str|null, "metrics": [str]|null,

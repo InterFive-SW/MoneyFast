@@ -43,6 +43,52 @@ TREND_WINDOW = 520
 INTRADAY_WINDOW = 200
 
 
+#: The index the trend chart is drawn against. Same default the risk module
+#: measures beta and correlation with, so the picture and the numbers beside
+#: it describe the same comparison.
+BENCHMARK_SYMBOL = "XU100"
+
+
+def _benchmark_series(
+    dates: list[Any], closes_for: Callable[[str], list[tuple[datetime, float]]]
+) -> Optional[dict[str, Any]]:
+    """The index's closes on `dates`, or None when there is no real overlap.
+
+    Raw closes, not rescaled: the chart decides how to put two series with
+    different units on one axis, and handing it an already-normalised number
+    would leave the page unable to say what the index itself did.
+    """
+    by_day = {
+        stamp.date(): float(close) for stamp, close in closes_for(BENCHMARK_SYMBOL)
+    }
+    points = [
+        {
+            "date": datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
+            "value": round(by_day[day], 4),
+        }
+        for day in dates
+        if day in by_day
+    ]
+    if len(points) < 2:
+        return None
+    return {"symbol": BENCHMARK_SYMBOL, "points": points}
+
+
+def window_limit(lookback: str = "1Y") -> int:
+    """Bars to read per symbol for `lookback`, including the one the first
+    return needs.
+
+    The same arithmetic `risk.service.history_limit` does, off the same table,
+    so one period selector can drive both endpoints and mean the same thing.
+    It replaced a fixed 260 -- "about a year" -- while risk asked for 253, and
+    the two then measured the same portfolio over different spans. With one
+    series behind both, a window that is merely close was the last thing that
+    could still make them disagree, and on a single screen showing both that
+    difference has nowhere to hide.
+    """
+    return risk_returns.window_for(lookback) + 1
+
+
 def _percent(part: float, whole: float) -> float:
     return round((part / whole) * 100, 2) if whole else 0.0
 
@@ -149,26 +195,81 @@ def build(
         label = sector_map.get(row["symbol"]) or "Bilinmiyor"
         sectors[label] = sectors.get(label, 0.0) + value
 
+    # İKİ seri, çünkü iki ayrı soru var ve tek bir cevap ikisini birden
+    # doğru yanıtlayamıyor.
+    #
+    # ÖLÇÜM (`value_series`, main'den): oynaklık, düşüş ve beta için. Sabit
+    # ağırlıklarla ve YALNIZCA her enstrümanın işlem gördüğü ortak günlerde
+    # hesaplanıyor. Tarih hizası burada şart -- hizasız karşılaştırma, %94'ü
+    # DOAS olan bir portföyün XU100 betasını 0,0062 gösteriyordu.
+    #
+    # GEÇMİŞ (`_trend`, bu daldan): grafikte çizilen değer. Miktar zamanın
+    # fonksiyonu, kur o günün kuru, ve bir enstrümanın işlem görmediği gün
+    # düşürülmüyor -- portföyün o gün de bir değeri vardı.
+    #
+    # Aynı seriyi ikisine birden vermek, birini bozmak olurdu: ölçüm serisiyle
+    # çizilen grafik dün alınan hisseyi geçen yıla da koyar, geçmiş serisiyle
+    # ölçülen beta ise taşınmış fiyatlar üzerinden çıkar.
     rate_at = _rate_lookup(
         [row for row, _, _ in valued], base_currency, fx_closes_for, rates
     )
-    trend, excluded = _trend(
+    trend, chart_excluded = _trend(
         [row for row, _, _ in valued], closes_for, intraday, proposals, rate_at
     )
+
+    # The same series `risk` measures. Built once, in `risk/returns.py`:
+    # this page and the risk page were computing volatility and max drawdown
+    # from two differently-built series and reporting different numbers for
+    # one portfolio. It also fixes a currency bug this module had on its own --
+    # `_trend` summed `quantity x close` with no conversion, adding dollars to
+    # lira, while the allocation block three lines above converted properly.
+    dates, trend_values, excluded = risk_returns.value_series(
+        [
+            {**row, "market_value": market_value}
+            for row, market_value, _ in valued
+        ],
+        closes_for,
+        base_currency,
+    )
+    trend = [
+        {
+            "date": datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
+            "value": round(value, 2),
+        }
+        for day, value in zip(dates, trend_values)
+    ]
+    excluded = sorted(set(excluded) | set(chart_excluded))
     if excluded:
+        # Names them AND says what their absence costs. The series ends at the
+        # value of what it could measure, so with something left out the last
+        # point sits below the total shown above it -- a gap the reader would
+        # otherwise have to notice and explain to themselves.
         warnings.append(
-            "Fiyat geçmişi olmayan enstrümanlar trend hesabının dışında: "
-            + ", ".join(excluded)
+            "Fiyat geçmişi yetersiz olduğu için trend hesabının dışında kalan "
+            "enstrümanlar: " + ", ".join(excluded)
+            + ". Grafikteki değer bu pozisyonları içermez, dolayısıyla "
+            "yukarıdaki toplamın altında kalır."
         )
+    # Eski uyarı ("bugünkü pozisyonların geçmiş fiyatlarla yeniden
+    # değerlenmesi") artık DOĞRU DEĞİL: çizilen seri pozisyonların o
+    # zamanki miktarını kullanıyor ve pozisyon açılmadan önceki günlere
+    # katkı vermiyor. Doğru olmayan bir uyarıyı bırakmak, okuyanı grafiğe
+    # olduğundan az güvenmeye iter.
     if trend:
         warnings.append(
-            "Trend, bugünkü pozisyonların geçmiş fiyatlarla yeniden "
-            "değerlenmesidir; hesabın geçmişteki gerçek değeri değildir."
+            "Oynaklık ve düşüş, sabit ağırlıklı bir seri üzerinden ölçülür; "
+            "grafikteki değer ise pozisyonların o günkü miktarını yansıtır."
         )
 
-    values = [point["value"] for point in trend]
+    # The index on the portfolio's OWN dates. Days the index did not trade are
+    # dropped rather than carried forward, so the two lines only ever meet on
+    # days both actually have -- a forward-filled index shows the market flat
+    # on a day it was simply closed.
+    benchmark = _benchmark_series(dates, closes_for)
+
+    values = trend_values
     series = risk_returns.simple_returns(values)
-    drawdown = risk_returns.max_drawdown(values) if values else None
+    drawdown = risk_returns.max_drawdown(values, dates) if values else None
 
     performance = {
         "observations": len(values),
@@ -208,6 +309,7 @@ def build(
             for label, value in sorted(sectors.items(), key=lambda kv: kv[1], reverse=True)
         ]),
         "trend": trend,
+        "benchmark": benchmark,
         "performance": performance,
         "activity": _activity(proposals),
         "excluded_symbols": excluded,

@@ -55,6 +55,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 #: `/auth/refresh` rejects anything that is not REFRESH.
 ACCESS_TOKEN_TYPE = "access"
 REFRESH_TOKEN_TYPE = "refresh"
+VERIFICATION_TOKEN_TYPE = "verification"
+RESET_TOKEN_TYPE = "reset"
 
 #: Administrators authenticate against banking.admin_users, not public.users,
 #: and hold none of a customer's capabilities. The distinct type is what stops
@@ -112,6 +114,30 @@ def create_refresh_token(data: dict, expires_delta: timedelta | None = None) -> 
         expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     )
     to_encode.update({"exp": expire, "typ": REFRESH_TOKEN_TYPE})
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def create_verification_token(email: str, expires_delta: timedelta | None = None) -> str:
+    """
+    E-posta doğrulama süreci için geçici bir JWT oluşturur.
+    
+    Bu token'ın 'typ' claim'i 'verification' olarak ayarlanır, böylece
+    access veya refresh token olarak kullanılamaz.
+    """
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(hours=24))
+    to_encode = {"sub": email, "exp": expire, "typ": VERIFICATION_TOKEN_TYPE}
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def create_reset_token(email: str, expires_delta: timedelta | None = None) -> str:
+    """
+    Şifre sıfırlama süreci için geçici bir JWT oluşturur.
+    
+    Bu token'ın 'typ' claim'i 'reset' olarak ayarlanır, böylece
+    diğer yetkilendirme süreçlerine dahil edilemez (GÜVENLİK).
+    """
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(hours=1))
+    to_encode = {"sub": email, "exp": expire, "typ": RESET_TOKEN_TYPE}
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 

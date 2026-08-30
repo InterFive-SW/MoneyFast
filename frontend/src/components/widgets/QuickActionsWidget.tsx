@@ -10,7 +10,7 @@ export default function QuickActionsWidget() {
     { label: 'Para Gönder', icon: '💸', color: 'bg-emerald-50 text-emerald-600 border-emerald-100', route: '/banking/transfer' },
     { label: 'Yatırım',  icon: '📈', color: 'bg-blue-50 text-blue-600 border-blue-100', route: '/investment' },
     { label: 'Portföy', icon: '💱', color: 'bg-violet-50 text-violet-600 border-violet-100', route: '/portfolio' },
-    { label: 'Risk',   icon: '🛡️', color: 'bg-amber-50 text-amber-600 border-amber-100', route: '/risk' },
+    { label: 'Risk',   icon: '🛡️', color: 'bg-amber-50 text-amber-600 border-amber-100', route: '/analiz/risk' },
   ]
 
   return (

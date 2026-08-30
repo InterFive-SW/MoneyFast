@@ -14,7 +14,12 @@ import httpx
 import pytest
 
 import risk_strategy_tools
-from backend_client import ContractViolationError, InvalidInputError, UpstreamUnavailableError
+from backend_client import (
+    AuthorizationError,
+    ContractViolationError,
+    InvalidInputError,
+    UpstreamUnavailableError,
+)
 from conftest import assert_iso8601_utc, without
 
 pytestmark = pytest.mark.asyncio
@@ -374,17 +379,279 @@ class TestFailures:
 # Registration
 # ==========================================================================
 class TestRegistration:
-    async def test_register_attaches_the_tool(self, mocker):
+    async def test_register_attaches_both_tools(self, mocker):
         fake_mcp = mocker.MagicMock()
         risk_strategy_tools.register(fake_mcp)
-        fake_mcp.tool.assert_called_once_with()
-        fake_mcp.tool.return_value.assert_called_once_with(
-            risk_strategy_tools.calculate_portfolio_risk_metrics
-        )
+        assert fake_mcp.tool.call_count == 2
+        registered = [
+            call.args[0] for call in fake_mcp.tool.return_value.call_args_list
+        ]
+        assert registered == [
+            risk_strategy_tools.calculate_portfolio_risk_metrics,
+            risk_strategy_tools.get_risk_profile_summary,
+        ]
 
-    async def test_the_tool_is_a_coroutine_function(self):
+    async def test_the_tools_are_coroutine_functions(self):
         import inspect
 
         assert inspect.iscoroutinefunction(
             risk_strategy_tools.calculate_portfolio_risk_metrics
         )
+        assert inspect.iscoroutinefunction(
+            risk_strategy_tools.get_risk_profile_summary
+        )
+
+
+# ==========================================================================
+# get_risk_profile_summary -- the interpreted layer.
+#
+# calculate_portfolio_risk_metrics returns statistics and no score. The score
+# and the band exist only behind GET /risk/profile/{user_id}, so before this
+# tool the assistant answered "how risky is my portfolio" with a volatility
+# percentage while the risk page answered with a 0-100 score. Whatever this
+# tool passes through is what the user is told, which is why the guards below
+# are strict about nulls and about the alignment enum.
+# ==========================================================================
+SUMMARY = risk_strategy_tools.get_risk_profile_summary
+
+
+class TestSummaryPreflight:
+    async def test_a_missing_user_id_raises_before_any_request(self, fake_backend):
+        with pytest.raises(InvalidInputError, match="user_id is required"):
+            await SUMMARY("")
+        assert fake_backend.attempts == 0
+
+
+class TestSummaryRequest:
+    async def test_gets_the_user_scoped_profile_endpoint(self, fake_backend):
+        await SUMMARY("usr_9001")
+        assert fake_backend.last.method == "GET"
+        assert "/risk/profile/usr_9001" in str(fake_backend.last.url)
+
+    async def test_lookback_defaults_to_the_window_the_page_shows(self, fake_backend):
+        await SUMMARY("usr_9001")
+        assert fake_backend.last.url.params["lookback"] == "1Y"
+
+    async def test_an_explicit_lookback_is_passed_through(self, fake_backend):
+        await SUMMARY("usr_9001", lookback="3M")
+        assert fake_backend.last.url.params["lookback"] == "3M"
+
+    async def test_a_null_lookback_falls_back_rather_than_omitting(self, fake_backend):
+        """None would be dropped by `clean`, and the backend would apply its
+        own default -- which is the same value, but silently. Sending it keeps
+        the window the tool reported and the window used identical."""
+        await SUMMARY("usr_9001", lookback=None)
+        assert fake_backend.last.url.params["lookback"] == "1Y"
+
+
+class TestSummaryPayload:
+    async def test_top_level_shape(self, fake_backend):
+        out = await SUMMARY("usr_9001")
+        assert set(out) == {
+            "as_of", "score", "level", "position_count", "suitability",
+            "declared", "metrics", "findings", "data_quality", "warnings",
+        }
+
+    async def test_the_score_and_band_survive_intact(self, fake_backend):
+        out = await SUMMARY("usr_9001")
+        assert out["score"] == pytest.approx(83.4)
+        assert out["level"] == "Düşük"
+
+    async def test_the_comparison_sentence_is_relayed_verbatim(self, fake_backend):
+        """The wording is built backend-side, on purpose: it is the one place
+        a measurement and a declaration appear in the same sentence, and it
+        stays on the right side of the advisory line by construction rather
+        than by the model's phrasing."""
+        out = await SUMMARY("usr_9001")
+        assert out["suitability"]["statement"].startswith("Ölçülen portföy riskiniz")
+        assert out["suitability"]["alignment"] == "PORTFOLIO_CALMER"
+
+    async def test_an_unmeasurable_score_stays_null(self, fake_backend, risk_summary_payload):
+        """0.0 is the WORST score on a scale where high means calm, so
+        defaulting a missing one inverts the answer."""
+        fake_backend.json("risk_summary", {**risk_summary_payload, "score": None,
+                                           "level": None})
+        out = await SUMMARY("usr_9001")
+        assert out["score"] is None
+        assert out["level"] is None
+
+    async def test_no_questionnaire_yields_a_null_declaration(
+        self, fake_backend, risk_summary_payload
+    ):
+        fake_backend.json("risk_summary", {
+            **risk_summary_payload,
+            "declared": None,
+            "suitability": {**risk_summary_payload["suitability"],
+                            "declared_tolerance": None, "alignment": "UNKNOWN"},
+        })
+        out = await SUMMARY("usr_9001")
+        assert out["declared"] is None
+        assert out["suitability"]["alignment"] == "UNKNOWN"
+
+
+class TestSummaryGuards:
+    @pytest.mark.parametrize("missing", [
+        "as_of", "score", "level", "position_count", "suitability",
+        "declared", "metrics", "findings", "data_quality", "warnings",
+    ])
+    async def test_every_top_level_key_is_load_bearing(
+        self, fake_backend, risk_summary_payload, missing
+    ):
+        fake_backend.json("risk_summary", without(risk_summary_payload, missing))
+        with pytest.raises(ContractViolationError, match=missing):
+            await SUMMARY("usr_9001")
+
+    @pytest.mark.parametrize(
+        "missing", ["measured_level", "declared_tolerance", "alignment", "statement"]
+    )
+    async def test_the_comparison_block_must_be_complete(
+        self, fake_backend, risk_summary_payload, missing
+    ):
+        fake_backend.json("risk_summary", {
+            **risk_summary_payload,
+            "suitability": without(risk_summary_payload["suitability"], missing),
+        })
+        with pytest.raises(ContractViolationError, match=missing):
+            await SUMMARY("usr_9001")
+
+    async def test_a_non_object_comparison_block_raises(
+        self, fake_backend, risk_summary_payload
+    ):
+        fake_backend.json("risk_summary", {**risk_summary_payload, "suitability": "ALIGNED"})
+        with pytest.raises(ContractViolationError, match="must be an object"):
+            await SUMMARY("usr_9001")
+
+    async def test_an_unknown_alignment_raises_rather_than_passing_through(
+        self, fake_backend, risk_summary_payload
+    ):
+        """A label the tool does not recognise is contract drift. Passed
+        through, the model narrates it to the user as though it meant
+        something."""
+        fake_backend.json("risk_summary", {
+            **risk_summary_payload,
+            "suitability": {**risk_summary_payload["suitability"],
+                            "alignment": "MOSTLY_FINE"},
+        })
+        with pytest.raises(ContractViolationError, match="unknown alignment"):
+            await SUMMARY("usr_9001")
+
+    async def test_a_non_object_metric_block_raises(self, fake_backend, risk_summary_payload):
+        fake_backend.json("risk_summary", {**risk_summary_payload, "metrics": []})
+        with pytest.raises(ContractViolationError, match="'metrics' must be an object"):
+            await SUMMARY("usr_9001")
+
+    async def test_a_non_object_quality_block_raises(self, fake_backend, risk_summary_payload):
+        fake_backend.json("risk_summary", {**risk_summary_payload, "data_quality": "fine"})
+        with pytest.raises(ContractViolationError, match="'data_quality' must be an object"):
+            await SUMMARY("usr_9001")
+
+    async def test_a_non_numeric_score_raises(self, fake_backend, risk_summary_payload):
+        fake_backend.json("risk_summary", {**risk_summary_payload, "score": "düşük"})
+        with pytest.raises(ContractViolationError, match="must be a number or null"):
+            await SUMMARY("usr_9001")
+
+    async def test_null_lists_normalise_to_empty(self, fake_backend, risk_summary_payload):
+        """Present-and-null is the backend saying "nothing to report"; absent
+        would be a contract violation, and the test above covers that."""
+        fake_backend.json("risk_summary", {**risk_summary_payload,
+                                           "findings": None, "warnings": None})
+        out = await SUMMARY("usr_9001")
+        assert out["findings"] == []
+        assert out["warnings"] == []
+
+    async def test_as_of_is_a_utc_timestamp(self, fake_backend):
+        out = await SUMMARY("usr_9001")
+        assert_iso8601_utc(out["as_of"])
+
+
+class TestSummaryFailures:
+    async def test_rejected_service_credentials_surface_as_authorization(self, fake_backend):
+        """The endpoint names its subject in the path, so it is guarded. A
+        misconfigured key must not read as "this user has no risk profile"."""
+        fake_backend.status("risk_summary", 401)
+        with pytest.raises(AuthorizationError):
+            await SUMMARY("usr_9001")
+
+    async def test_an_unconfigured_backend_guard_is_an_outage(self, fake_backend):
+        """503 when BACKEND_API_KEY is unset backend-side; retryable."""
+        fake_backend.status("risk_summary", 503)
+        with pytest.raises(UpstreamUnavailableError):
+            await SUMMARY("usr_9001")
+
+    async def test_an_unknown_user_is_invalid_input(self, fake_backend):
+        fake_backend.status("risk_summary", 404)
+        with pytest.raises(InvalidInputError):
+            await SUMMARY("usr_9001")
+
+    async def test_timeout_raises_upstream_unavailable(self, fake_backend):
+        fake_backend.fail("risk_summary", httpx.ReadTimeout("profile slow"))
+        with pytest.raises(UpstreamUnavailableError):
+            await SUMMARY("usr_9001")
+
+
+
+# ==========================================================================
+# Lookback canonicalisation.
+#
+# Not a hypothetical: two consecutive live turns asking "portföyüm ne kadar
+# riskli" produced lookback "1y" and then "365". Both were rejected with a
+# 422 that reached the user as "Verilere şu anda ulaşamadım" -- an outage
+# message for a portfolio whose data was entirely present.
+# ==========================================================================
+class TestLookbackCanonicalisation:
+    @pytest.mark.parametrize("written,canonical", [
+        ("1y", "1Y"), ("3m", "3M"), ("max", "MAX"), (" 1Y ", "1Y"),
+    ])
+    async def test_casing_and_padding_are_normalised(self, written, canonical):
+        assert risk_strategy_tools.canonical_lookback(written, "t") == canonical
+
+    @pytest.mark.parametrize("written,canonical", [
+        ("365", "1Y"), ("252", "1Y"), ("12M", "1Y"), ("YTD", "1Y"),
+        ("90", "3M"), ("30", "1M"), ("180", "6M"), ("ALL", "MAX"),
+    ])
+    async def test_the_shapes_the_model_actually_writes(self, written, canonical):
+        assert risk_strategy_tools.canonical_lookback(written, "t") == canonical
+
+    async def test_nothing_given_means_the_default_window(self):
+        assert risk_strategy_tools.canonical_lookback(None, "t") == "1Y"
+        assert risk_strategy_tools.canonical_lookback("", "t") == "1Y"
+
+    async def test_an_unrecognised_window_still_raises(self):
+        """Rounding an unknown window to 1Y is the behaviour this path exists
+        to prevent: `window_for` would return a year of data under whatever
+        label the caller sent, and never say so."""
+        with pytest.raises(InvalidInputError, match="not one of"):
+            risk_strategy_tools.canonical_lookback("son 3 ay", "t")
+
+    async def test_the_metrics_tool_sends_the_canonical_form(
+        self, fake_backend, sample_positions
+    ):
+        await risk_strategy_tools.calculate_portfolio_risk_metrics(
+            sample_positions, lookback="365"
+        )
+        assert fake_backend.body()["lookback"] == "1Y"
+
+    async def test_the_summary_tool_sends_the_canonical_form(self, fake_backend):
+        await SUMMARY("usr_9001", lookback="1y")
+        assert fake_backend.last.url.params["lookback"] == "1Y"
+
+    async def test_both_tools_resolve_a_window_the_same_way(
+        self, fake_backend, sample_positions
+    ):
+        """A score measured over one window beside statistics measured over
+        another is two answers about two different portfolios-in-time."""
+        await risk_strategy_tools.calculate_portfolio_risk_metrics(
+            sample_positions, lookback="12m"
+        )
+        sent_to_metrics = fake_backend.body()["lookback"]
+        await SUMMARY("usr_9001", lookback="12m")
+        assert fake_backend.last.url.params["lookback"] == sent_to_metrics
+
+    async def test_a_bad_window_fails_before_the_request(
+        self, fake_backend, sample_positions
+    ):
+        with pytest.raises(InvalidInputError):
+            await risk_strategy_tools.calculate_portfolio_risk_metrics(
+                sample_positions, lookback="haftalık"
+            )
+        assert fake_backend.attempts == 0

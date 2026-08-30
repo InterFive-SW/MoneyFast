@@ -27,6 +27,7 @@ import WatchlistWidget from '../components/widgets/WatchlistWidget'
 import TopMoversWidget from '../components/widgets/TopMoversWidget'
 import SectorAllocationWidget from '../components/widgets/SectorAllocationWidget'
 import MarketHeatmap from '../components/markets/MarketHeatmap'
+import RiskSummaryWidget from '../components/widgets/RiskSummaryWidget'
 
 import { useContainerWidth } from 'react-grid-layout'
 
@@ -57,6 +58,7 @@ const ALL_AVAILABLE_WIDGETS: { type: WidgetType; label: string; defaultW: number
   { type: 'top-movers', label: 'Hareketliler', defaultW: 4, defaultH: 6, minW: 2, minH: 3 },
   { type: 'sector-allocation-pie', label: 'Sektörel Dağılım', defaultW: 4, defaultH: 4, minW: 2, minH: 2 },
   { type: 'heatmap', label: 'Isı Haritası', defaultW: 8, defaultH: 5, minW: 4, minH: 3 },
+  { type: 'risk-summary', label: 'Risk Özeti', defaultW: 4, defaultH: 3, minW: 3, minH: 2 },
 ]
 
 // ─── Yardımcı Fonksiyonlar ────────────────────────────────────────────────────
@@ -119,7 +121,11 @@ function renderWidget(type: WidgetType, w?: number, h?: number): JSX.Element | n
     case 'watchlist': return <WatchlistWidget />
     case 'top-movers': return <TopMoversWidget />
     case 'sector-allocation-pie': return <SectorAllocationWidget />
+    // Isı haritası artık PİYASANIN haritası: kutular piyasa değeri kadar yer
+    // kaplıyor. `ProfitLossHeatmapWidget` portföy ağırlığına göre boyuyordu --
+    // meşru bir görünüm ama piyasa haritası değil.
     case 'heatmap': return <MarketHeatmap h={h} />
+    case 'risk-summary': return <RiskSummaryWidget />
     default: return null
   }
 }

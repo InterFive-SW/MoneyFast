@@ -96,6 +96,7 @@ ROUTES = {
     "/investment/portfolio/": "portfolio",
     "/investment/transactions/stage": "stage",
     "/risk/calculate": "risk",
+    "/risk/profile/": "risk_summary",
     "/market/instruments": "instruments",
     "/compliance/validate": "compliance",
     # v2.8 banking. `payments/stage` is listed BEFORE the investment stage
@@ -174,7 +175,8 @@ class FakeBackend:
 
 @pytest.fixture(autouse=True)
 def fake_backend(
-    portfolio_payload, search_payload, risk_payload, compliance_payload, stage_payload
+    portfolio_payload, search_payload, risk_payload, risk_summary_payload,
+    compliance_payload, stage_payload,
 ):
     """Install the transport double, preloaded with valid responses.
 
@@ -185,6 +187,7 @@ def fake_backend(
     backend.json("portfolio", portfolio_payload)
     backend.json("search", search_payload)
     backend.json("risk", risk_payload)
+    backend.json("risk_summary", risk_summary_payload)
     backend.json("compliance", compliance_payload)
     backend.json("stage", stage_payload)
 
@@ -307,6 +310,53 @@ def risk_payload() -> dict[str, Any]:
             "gap_filled_days": 3,
             "is_statistically_reliable": True,
         },
+    }
+
+
+@pytest.fixture()
+def risk_summary_payload() -> dict[str, Any]:
+    """What GET /risk/profile/{user_id} returns for a measured portfolio.
+
+    No source/is_delayed block: this payload is an interpretation computed
+    from a price feed, not a reading of one, and stamping it with a provider
+    name would attribute the score to something that never produced it.
+    """
+    return {
+        "as_of": "2026-08-27T09:15:00Z",
+        "score": 83.4,
+        "level": "Düşük",
+        "position_count": 14,
+        "suitability": {
+            "measured_level": "Düşük",
+            "declared_tolerance": "Orta",
+            "alignment": "PORTFOLIO_CALMER",
+            "statement": "Ölçülen portföy riskiniz \"Düşük\" seviyesinde.",
+        },
+        "declared": {
+            "tolerance_level": "Orta",
+            "investment_horizon": "LONG",
+            "assessed_at": "2026-08-26T11:02:00Z",
+            "questionnaire_version": "v1",
+        },
+        "metrics": {
+            "volatility_annualized": 0.1842,
+            "max_drawdown": -0.1104,
+            "hhi": 0.1601,
+            "effective_n": 6.246,
+            "top_3_weight": 0.4412,
+            "largest_position": {"symbol": "TEST-THYAO", "weight": 0.19},
+        },
+        "findings": [
+            {"label": "Yoğunlaşma", "detail": "Portföy 6 pozisyona denk dağılmış.",
+             "severity": "INFO"},
+        ],
+        "data_quality": {
+            "coverage": 1.0,
+            "excluded_symbols": [],
+            "gap_filled_days": 0,
+            "is_statistically_reliable": True,
+        },
+        "warnings": [],
     }
 
 

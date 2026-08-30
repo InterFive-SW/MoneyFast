@@ -212,7 +212,7 @@ export default function Home() {
     if (!active.intraday || intradayAnalysis) return
     let cancelled = false
     apiClient
-      .getPortfolioAnalysis('day')
+      .getPortfolioAnalysis(undefined, 'day')
       .then((rows) => {
         if (!cancelled) setIntradayAnalysis(rows)
       })

@@ -25,6 +25,7 @@ EXPECTED_TOOLS = {
     "get_market_data",
     "rag_semantic_market_search",
     "calculate_portfolio_risk_metrics",
+    "get_risk_profile_summary",
     "validate_compliance_rules",
     "classify_and_route_intent",
     "prepare_transaction_proposal",
@@ -44,10 +45,11 @@ HTTP_TOOLS = EXPECTED_TOOLS - {"classify_and_route_intent"}
 class TestWiring:
     def test_server_identity_constants(self):
         assert server.SERVER_NAME == "moneyfast"
-        # v2.8 adds the banking domain: lookup_bill and
-        # prepare_payment_proposal. A deliberate contract change, so the
-        # assertion moves with it rather than being loosened.
-        assert server.CONTRACT_VERSION == "v2.8"
+        # v2.9, iki soyun birleşimi: main'in v2.4'teki
+        # `get_risk_profile_summary`'i ile bu dalın v2.8'deki iki bankacılık
+        # aracı. Bilerek yapılan bir sözleşme değişikliği, dolayısıyla iddia
+        # gevşetilmiyor, onunla birlikte taşınıyor.
+        assert server.CONTRACT_VERSION == "v2.9"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it

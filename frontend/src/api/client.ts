@@ -146,7 +146,22 @@ export interface SavedPayee {
 // tipini almak için önce boş olmayan hâline daraltılır.
 export type CandleSeries = GetResponseType<paths['/api/market/candles']>;
 export type Candle = NonNullable<CandleSeries['candles']>[0];
-export type PortfolioAnalysis = GetResponseType<paths['/api/analytics/portfolio']>;
+/**
+ * `benchmark` burada elle yazılı: `generated/schema.d.ts` bu alan eklenmeden
+ * önce üretilmişti. Yeniden üretimi ayrı ve opsiyonel bir adım
+ * (CONTRACT_WORKFLOW.md).
+ */
+export interface BenchmarkSeries {
+    symbol: string;
+    points: { date: string; value: number }[];
+}
+
+export type PortfolioAnalysis = GetResponseType<paths['/api/analytics/portfolio']> & {
+    /** Endeksin, portföyün kendi günlerindeki ham kapanışları. Örtüşen geçmiş
+     *  yoksa `null` — kısmi örtüşmeden çizilen bir karşılaştırma çizgisi,
+     *  birinin barı olmayan günlerde ayrışma gösterir. */
+    benchmark?: BenchmarkSeries | null;
+};
 export type BankAccount = GetResponseType<paths['/api/banking/accounts']>[0];
 export type Statement = GetResponseType<paths['/api/banking/accounts/{account_number}/statement']>;
 export type Movement = NonNullable<Statement['movements']>[0];
@@ -159,7 +174,113 @@ export type MarketInstrument = NonNullable<
     GetResponseType<paths['/api/market/instruments']>['instruments']
 >[0];
 export type NewsItem = GetResponseType<paths['/api/market/news']>[0];
-export type RiskProfile = GetResponseType<paths['/api/risk/profile']>;
+/** Kullanıcının ankette beyan ettiği tolerans. Anket doldurulmadan `null`. */
+export interface DeclaredRiskProfile {
+    tolerance_level: string;
+    investment_horizon: string;
+    assessed_at: string;
+    questionnaire_version: string;
+}
+
+/**
+ * Ölçüm ile beyanın karşılaştırması.
+ *
+ * İki taraf da AYNI üç etiketi taşır (Düşük/Orta/Yüksek), iki sayı değil:
+ * ölçülen puan ters (100 = sakin), anketin ham puanı değil.
+ */
+export interface RiskSuitability {
+    measured_level: string | null;
+    declared_tolerance: string | null;
+    alignment: 'ALIGNED' | 'PORTFOLIO_RISKIER' | 'PORTFOLIO_CALMER' | 'UNKNOWN';
+    statement: string;
+}
+
+/**
+ * `declared` ve `suitability` burada elle yazılı: `generated/schema.d.ts` bu
+ * alanlar eklenmeden önce üretilmişti. Yeniden üretimi ayrı ve opsiyonel bir
+ * adım (CONTRACT_WORKFLOW.md).
+ */
+export type RiskProfile = GetResponseType<paths['/api/risk/profile']> & {
+    declared?: DeclaredRiskProfile | null;
+    suitability?: RiskSuitability | null;
+    /** Ölçümün kapsadığı aralık: başlangıç/bitiş tarihi ve gözlem sayısı. */
+    window?: Record<string, unknown> | null;
+    /** Neye göre ölçüldüğü: karşılaştırma ölçütü, Sharpe'ın netleştirildiği
+     *  faiz, yeniden dengeleme varsayımı. */
+    assumptions?: Record<string, unknown> | null;
+};
+/** Uç noktanın kabul ettiği kapalı küme; sunucu bunun dışını 422 ile reddeder. */
+export type RiskLookback = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX';
+
+/** Anket soruları. Puanlar istemciye HİÇ gelmez: seçeneğin ağırlığını
+ *  görmek anketi bir teste çevirir ve insanlar teste cevap verir. */
+export interface RiskQuestion {
+    key: string;
+    prompt: string;
+    helper: string | null;
+    options: { value: string; label: string }[];
+}
+
+export interface RiskQuestionnaire {
+    version: string;
+    questions: RiskQuestion[];
+}
+
+/** Simülasyonun bir tarafı. Metriklerin tamamı değil, kıyaslanabilir olanlar. */
+export interface RiskSimulationSide {
+    score: number | null;
+    level: string | null;
+    volatility: number | null;
+    hhi: number | null;
+    effective_n: number | null;
+    max_drawdown: number | null;
+    position_count: number;
+}
+
+export interface RiskSimulationChange {
+    symbol: string;
+    quantity_delta: number;
+    applied: boolean;
+    note: string | null;
+}
+
+export interface RiskSimulation {
+    as_of: string;
+    current: RiskSimulationSide;
+    hypothetical: RiskSimulationSide;
+    /** sonra - önce. Ölçülemeyen tarafta `null` — sıfır "değişmedi" demek. */
+    deltas: Record<string, number | null>;
+    changes: RiskSimulationChange[];
+    warnings: string[];
+}
+
+/** Bir günün ölçümü. Her metrik opsiyonel: ölçülemeyen bir gün sıfır
+ *  değil, boşluk olarak çizilir. */
+export interface RiskSnapshot {
+    captured_on: string;
+    score: number | null;
+    level: string | null;
+    volatility: number | null;
+    hhi: number | null;
+    max_drawdown: number | null;
+    position_count: number;
+}
+
+export interface RiskHistory {
+    /** Her noktanın ölçüldüğü pencere. Noktalar farklı pencerelerden gelseydi
+     *  seri anlamsız olurdu. */
+    lookback: string;
+    days: number;
+    points: RiskSnapshot[];
+}
+
+export interface RiskAssessmentResult {
+    tolerance_level: string;
+    investment_horizon: string;
+    assessed_at: string;
+    questionnaire_version: string;
+    raw_score: number;
+}
 export type RiskFinding = NonNullable<RiskProfile['findings']>[0];
 export type RiskSuggestion = NonNullable<RiskProfile['suggestions']>[0];
 
@@ -417,8 +538,35 @@ class ApiClient {
      * Risk sayfasının profili: puan, puanı üreten bileşenler, bulgular ve
      * nakit akışı. Sayfa daha önce sabit bir fixture okuyordu.
      */
-    getRiskProfile() {
-        return this.request<RiskProfile>('/risk/profile');
+    getRiskQuestionnaire() {
+        return this.request<RiskQuestionnaire>('/risk/questionnaire');
+    }
+
+    submitRiskAssessment(answers: Record<string, string>) {
+        return this.post<RiskAssessmentResult>('/api/risk/assessment', { answers });
+    }
+
+    simulateRisk(
+        changes: { symbol: string; quantity_delta: number }[],
+        lookback?: RiskLookback,
+    ) {
+        return this.post<RiskSimulation>('/api/risk/simulate', {
+            changes,
+            ...(lookback ? { lookback } : {}),
+        });
+    }
+
+    getRiskHistory(days?: number) {
+        const suffix = days === undefined ? '' : `?days=${days}`;
+        return this.request<RiskHistory>(`/risk/history${suffix}`);
+    }
+
+    getRiskProfile(lookback?: RiskLookback) {
+        // Uç nokta bu parametreyi baştan beri kabul ediyordu; istemci hiç
+        // geçmiyordu, dolayısıyla sayfa her zaman bir yıllık pencereyi
+        // gösteriyor ve kullanıcı onu değiştiremiyordu.
+        const suffix = lookback ? `?lookback=${lookback}` : '';
+        return this.request<RiskProfile>(`/risk/profile${suffix}`);
     }
 
 
@@ -581,13 +729,25 @@ class ApiClient {
 
     /** Portföy analizi — dağılım, trend, performans ve işlem geçmişi tek çağrıda. */
     /**
-     * Portföy analizi. `range='day'` gün içi seriyi (15 dakikalık gerçek
-     * barlar) döndürür; varsayılan günlük barlardır.
+     * Portföy analizi.
+     *
+     * İki ayrı boyut, iki ayrı soydan geldi ve ikisi de gerçek:
+     *
+     * - `lookback` ÖLÇÜM PENCERESİ (1A, 1Y…). Aynı pencere risk uç noktasına
+     *   da gidiyor; Analiz ekranındaki tek dönem seçici ikisini birden
+     *   sürüyor. Geçilmezse sunucu 1Y kullanır.
+     * - `range='day'` ÇÖZÜNÜRLÜK: gün içi seriyi (5 dakikalık gerçek barlar)
+     *   döndürür, varsayılan günlük barlardır.
+     *
+     * İkisini tek bir parametreye sıkıştırmak, "son bir yıl" ile "bugünü
+     * dakika dakika" arasındaki farkı kaybetmek olurdu.
      */
-    getPortfolioAnalysis(range?: 'all' | 'day') {
-        return this.request<PortfolioAnalysis>(
-            range ? `/analytics/portfolio?range=${range}` : '/analytics/portfolio',
-        );
+    getPortfolioAnalysis(lookback?: RiskLookback, range?: 'all' | 'day') {
+        const query = new URLSearchParams();
+        if (lookback) query.set('lookback', lookback);
+        if (range) query.set('range', range);
+        const suffix = query.toString() ? `?${query}` : '';
+        return this.request<PortfolioAnalysis>(`/analytics/portfolio${suffix}`);
     }
 
     /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */
@@ -781,6 +941,25 @@ class ApiClient {
             return await response.json();
         } catch (error) {
             console.error(`[API Ağ Hatası] POST ${fullUrl} isteği başarısız oldu:`, error);
+            throw error;
+        }
+    }
+
+    // Generic put method
+    async put<T>(url: string, data?: any): Promise<T> {
+        const normalizedUrl = url.startsWith('/api') ? url.substring(4) : url;
+        const fullUrl = url.startsWith('http') ? url : `${this.baseUrl}${normalizedUrl}`;
+        try {
+            const response = await this.authedFetch(fullUrl, {
+                method: 'PUT',
+                body: data ? JSON.stringify(data) : undefined,
+            });
+            if (!response.ok) {
+                throw new Error(await describeError(response));
+            }
+            return await response.json();
+        } catch (error) {
+            console.error(`[API Ağ Hatası] PUT ${fullUrl} isteği başarısız oldu:`, error);
             throw error;
         }
     }

@@ -6,11 +6,25 @@ Each module exposes a `register(mcp)` function; the tool callables stay at
 module level so they can be imported and unit-tested without a running
 server.
 
-Contracts follow "MCP Tools Interface Definitions v2.2": the six v2.1 tools
-are unchanged, and get_market_data is added because v2.1 had no way to reach
-the price of an instrument the user does not own.
+Contracts follow "MCP Tools Interface Definitions v2.9", the union of two
+lineages that developed in parallel: v2.4 on main added
+get_risk_profile_summary, v2.8 on the banking branch added lookup_bill and
+prepare_payment_proposal. Both are kept; the version is bumped past both
+rather than to the higher of the two, because "v2.8" would claim main's risk
+tool was never added.
 
-Six of the seven tools call a real HTTP service: get_portfolio_positions,
+The v2.4 lineage, unchanged: the six v2.1 tools
+are unchanged, get_market_data was added at v2.2 because v2.1 had no way to
+reach the price of an instrument the user does not own, v2.3 put cash on
+get_portfolio_positions, and v2.4 adds get_risk_profile_summary -- the risk
+score and band are produced by the backend's profile layer and no v2.1 tool
+could reach them, so the assistant answered "how risky is my portfolio" with a
+volatility figure while the risk page answered with a 0-100 score.
+
+The constant below sat at v2.2 through the v2.3 change; it is corrected here
+rather than left drifting further.
+
+Seven of the eight tools call a real HTTP service: get_portfolio_positions,
 prepare_transaction_proposal, calculate_portfolio_risk_metrics and
 validate_compliance_rules reach the backend, and rag_semantic_market_search
 reaches the rag service. Only classify_and_route_intent is computed locally,
@@ -43,10 +57,15 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 log = logging.getLogger("moneyfast.mcp")
 
 SERVER_NAME = "moneyfast"
-CONTRACT_VERSION = "v2.8"
+#: v2.9: iki ayrı soydan gelen eklemelerin BİRLEŞİMİ. `main` v2.4'te
+#: `get_risk_profile_summary`'i ekledi, bu dal v2.8'de iki bankacılık aracını.
+#: İkisi de gerçek ve farklı; birleşmiş sözleşme ikisinden de yeni olduğu için
+#: yüksek olanı almak yerine bir üstüne çıkılıyor -- v2.8 demek, main'in risk
+#: aracının hiç eklenmediğini söylemek olurdu.
+CONTRACT_VERSION = "v2.9"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Seven tools across seven domains.
+MoneyFast tool server. Ten tools across eight domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,

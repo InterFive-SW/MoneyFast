@@ -394,12 +394,22 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
 
 
 async def risk_node(state: MoneyFastState) -> dict[str, Any]:
-    """Two calls: the risk tool has no position access by design."""
+    """Three calls: positions, the profile summary, then the raw statistics.
+
+    The risk tool has no position access by design, hence the first call. The
+    second exists because `calculate_portfolio_risk_metrics` returns no score
+    and no band -- those are produced by the backend's profile layer, which
+    the agent could not reach. Asked "how risky is my portfolio", the risk
+    page answered "83 puan, Düşük" and the assistant answered with an
+    annualised volatility percentage: one system, one question, two answers,
+    and no way for the user to tell which one was the answer.
+    """
     mcp = get_mcp_client()
+    user_id = state.get("user_id") or "unknown"
     try:
         holdings = await mcp.call(
             "get_portfolio_positions",
-            {"user_id": state.get("user_id") or "unknown", "base_currency": "TRY"},
+            {"user_id": user_id, "base_currency": "TRY"},
         )
     except (MCPUnavailable, MCPToolError) as exc:
         return _tool_error(state, "get_portfolio_positions", exc)
@@ -424,11 +434,38 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     args.setdefault("lookback", "1Y")
     args.setdefault("confidence_level", 0.95)
     args.setdefault("rebalance_assumption", "BUY_AND_HOLD")
+
+    # Best-effort, and deliberately so. A missing summary costs the turn its
+    # score and its declared-tolerance comparison; the statistics below still
+    # answer the question. Failing the whole turn over it would trade a
+    # partial answer for none.
+    summary = None
+    try:
+        summary = await mcp.call(
+            "get_risk_profile_summary",
+            {"user_id": user_id, "lookback": args["lookback"]},
+        )
+    except (MCPUnavailable, MCPToolError) as exc:
+        log.warning("risk profile summary unavailable: %s", exc)
+
     out = await _run_tool(
         state, "calculate_portfolio_risk_metrics", args,
         assumptions=plan.get("assumptions") or [],
+        # One correction attempt, as the market-data node has. Measured on the
+        # live path: the planner emitted lookback "1y" on one turn and "365"
+        # on the next, and a rejected argument became "Verilere ulaşamadım"
+        # for a portfolio whose data was entirely present.
+        repair_prompt=SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"],
     )
-    out["tools_used"] = ["get_portfolio_positions"] + (out.get("tools_used") or [])
+    tools = ["get_portfolio_positions"] + (out.get("tools_used") or [])
+    data = (out.get("specialist_output") or {}).get("data")
+    if summary and isinstance(data, dict):
+        # Carried inside the metrics payload rather than beside it: the
+        # synthesis step reads `data`, and a sibling key would need every
+        # consumer to learn about it.
+        data["profile_summary"] = summary
+        tools.append("get_risk_profile_summary")
+    out["tools_used"] = tools
     return out
 
 
@@ -1093,7 +1130,12 @@ def _specialist_task(state: MoneyFastState) -> str:
 #: Substrings identifying an error the CALLER can fix by rewriting its
 #: arguments, as opposed to one the caller can do nothing about (backend down,
 #: timeout). Only the former is worth a second attempt.
-_REPAIRABLE_MARKERS = ("unrecognised", "unrecognized", "invalid", "allowed:")
+#: "is not one of" is how the risk tools word a rejected lookback, and like
+#: the others it is followed by the permitted values -- which is the whole
+#: reason a repair attempt is worth making rather than a re-roll.
+_REPAIRABLE_MARKERS = (
+    "unrecognised", "unrecognized", "invalid", "allowed:", "is not one of",
+)
 
 
 def _is_repairable(exc: Exception) -> bool:

@@ -120,7 +120,27 @@ class TestTrend:
         def reader(symbol):
             if symbol == "THYAO":
                 return [(NOW - timedelta(days=n), 300.0) for n in range(4, -1, -1)]
-            # ASELS only has the two most recent days.
+            # ASELS has the three most recent days; the intersection is those.
+            return [(NOW - timedelta(days=n), 50.0) for n in range(2, -1, -1)]
+
+        result = build(
+            holdings=[holding("THYAO", 10, 300), holding("ASELS", 10, 50)],
+            closes_for=reader,
+        )
+        assert len(result["trend"]) == 3
+
+    def test_a_symbol_too_thin_to_measure_is_dropped_and_the_gap_disclosed(self):
+        """Two bars is a price ratio, not a series.
+
+        The threshold used to differ between this module (2) and `risk` (3),
+        which is one of the reasons the two reported different numbers for one
+        portfolio. Now that both read the same builder there is one bar, and
+        it is the stricter one. What matters is that dropping a holding is
+        SAID: the series then ends below the total shown above it.
+        """
+        def reader(symbol):
+            if symbol == "THYAO":
+                return [(NOW - timedelta(days=n), 300.0) for n in range(4, -1, -1)]
             return [(NOW - timedelta(days=n), 50.0) for n in range(1, -1, -1)]
 
         result = build(
@@ -154,6 +174,10 @@ class TestTrend:
         # Açılışından önceki günler yalnızca THYAO; sonrakiler ikisi birden.
         assert result["trend"][0]["value"] == pytest.approx(3000.0)
         assert result["trend"][-1]["value"] == pytest.approx(3500.0)
+        assert result["excluded_symbols"] == ["ASELS"]
+        assert any("ASELS" in w and "toplamın altında" in w for w in result["warnings"])
+        # THYAO alone: the value carries only what could be measured.
+        assert result["trend"][-1]["value"] == pytest.approx(3000.0)
 
     def test_a_symbol_without_history_is_excluded_and_named(self):
         result = build(
@@ -187,20 +211,31 @@ class TestPerformance:
         assert result["performance"]["is_statistically_reliable"] is True
 
     def test_total_return_is_measured_end_over_start(self):
+        # Three bars, because a series needs two returns to be one.
         def rising(symbol):
-            return [(NOW - timedelta(days=2), 100.0), (NOW - timedelta(days=1), 110.0)]
+            return [
+                (NOW - timedelta(days=3), 100.0),
+                (NOW - timedelta(days=2), 105.0),
+                (NOW - timedelta(days=1), 110.0),
+            ]
 
         result = build(holdings=[holding(quantity=1, price=110)], closes_for=rising)
         assert result["performance"]["total_return_percent"] == pytest.approx(10.0)
 
     def test_a_single_point_yields_no_return_rather_than_zero(self):
         """Zero means "it did not move", which is a measurement. One point
-        supports no measurement at all."""
+        supports no measurement at all.
+
+        Both bars fall on the same DAY, so the series has one point and is
+        dropped entirely rather than drawn as a one-point line. That is the
+        change from the old builder, which indexed by position and so counted
+        the same day twice.
+        """
         def one_bar(symbol):
             return [(NOW, 100.0), (NOW, 100.0)]
 
         result = build(closes_for=one_bar)
-        assert len(result["trend"]) == 1
+        assert result["trend"] == []
         assert result["performance"]["total_return_percent"] is None
 
 
@@ -648,3 +683,54 @@ class TestASymbolWithNoBarYet:
         # İlk kovada yalnızca THYAO; sonuncusunda ikisi birden.
         assert candles[0]["close"] == pytest.approx(101.0)
         assert candles[-1]["close"] == pytest.approx(101.0 + 51.0)
+class TestBenchmarkSeries:
+    """The index the trend chart is drawn against.
+
+    Same default the risk module measures beta with, so the picture and the
+    numbers beside it describe one comparison rather than two.
+    """
+
+    def test_the_index_rides_on_the_portfolio_dates(self):
+        result = build(closes_for=closes({"THYAO": 300.0, "XU100": 9000.0}, days=5))
+        benchmark = result["benchmark"]
+        assert benchmark["symbol"] == "XU100"
+        assert len(benchmark["points"]) == len(result["trend"])
+
+    def test_closes_are_raw_not_rescaled(self):
+        """The chart decides how to put two units on one axis. An already
+        normalised number would leave the page unable to say what the index
+        itself did."""
+        result = build(closes_for=closes({"THYAO": 300.0, "XU100": 9000.0}, days=5))
+        assert result["benchmark"]["points"][0]["value"] == pytest.approx(9000.0)
+
+    def test_days_the_index_did_not_trade_are_dropped_not_filled(self):
+        """A forward-filled index shows the market flat on a day it was
+        simply closed."""
+        def reader(symbol):
+            if symbol == "XU100":
+                # Missing the middle day the holding has.
+                return [
+                    (NOW - timedelta(days=4), 9000.0),
+                    (NOW - timedelta(days=2), 9100.0),
+                    (NOW - timedelta(days=1), 9200.0),
+                ]
+            return [(NOW - timedelta(days=n), 300.0) for n in range(4, -1, -1)]
+
+        result = build(closes_for=reader)
+        days = [p["date"].day for p in result["benchmark"]["points"]]
+        assert len(days) == 3
+        assert len(result["trend"]) == 5
+
+    def test_no_index_history_means_no_comparison_line(self):
+        """None rather than an empty list: a line drawn from nothing would
+        still be a line."""
+        result = build(closes_for=closes({"THYAO": 300.0}, days=5))
+        assert result["benchmark"] is None
+
+    def test_a_single_overlapping_day_is_not_a_series(self):
+        def reader(symbol):
+            if symbol == "XU100":
+                return [(NOW - timedelta(days=1), 9000.0)]
+            return [(NOW - timedelta(days=n), 300.0) for n in range(4, -1, -1)]
+
+        assert build(closes_for=reader)["benchmark"] is None

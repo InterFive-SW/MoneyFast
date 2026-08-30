@@ -63,6 +63,7 @@ class UserResponse(UserBase):
     email: EmailStr
     phone_number: str
     is_active: bool
+    wants_email_notifications: bool
     created_at: datetime
 
     #: Ekranlarda gösterilen müşteri numarası. Saklanmıyor, kullanıcı
@@ -89,3 +90,67 @@ class RefreshRequest(BaseModel):
     """`/auth/refresh` gövdesi."""
 
     refresh_token: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Şifre sıfırlama isteği için şema.
+    GÜVENLİK: Hem T.C. Kimlik hem de e-posta adresinin eşleşmesi gerekir.
+    """
+    tc_no: str = Field(..., pattern=r"^\d{11}$")
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Şifreyi sıfırlamak için şema."""
+    token: str = Field(..., description="E-postadaki JWT sıfırlama token'ı")
+    new_password: str = Field(
+        ...,
+        min_length=8,
+        description="Şifre en az 8 karakter olmalı, 1 büyük harf ve 1 rakam içermelidir",
+    )
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if not any(char.isupper() for char in v):
+            raise ValueError("Şifre en az bir büyük harf içermelidir")
+        if not any(char.isdigit() for char in v):
+            raise ValueError("Şifre en az bir rakam içermelidir")
+        return v
+
+
+class VerifyEmailRequest(BaseModel):
+    """E-posta doğrulama için şema."""
+    token: str = Field(..., description="E-postadaki JWT doğrulama token'ı")
+
+
+class UserUpdateRequest(BaseModel):
+    """Kullanıcı profil güncelleme isteği için şema.
+    GÜVENLİK: TC ve Ad-Soyad gibi kritik bilgiler değiştirilemez. 
+    Yalnızca iletişim ve tercih ayarları güncellenebilir.
+    """
+    email: Optional[EmailStr] = None
+    phone_number: Optional[str] = Field(None, pattern=r"^\+?[0-9]{10,15}$")
+    wants_email_notifications: Optional[bool] = None
+
+
+class ChangePasswordRequest(BaseModel):
+    """Aktif oturumda şifre değiştirme isteği için şema.
+    GÜVENLİK: Hesabın ele geçirilmesini önlemek amacıyla mevcut şifrenin doğrulanması zorunludur.
+    """
+    current_password: str = Field(..., description="Kullanıcının mevcut şifresi")
+    new_password: str = Field(
+        ...,
+        min_length=8,
+        description="Yeni şifre en az 8 karakter olmalı, 1 büyük harf ve 1 rakam içermelidir",
+    )
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if not any(char.isupper() for char in v):
+            raise ValueError("Şifre en az bir büyük harf içermelidir")
+        if not any(char.isdigit() for char in v):
+            raise ValueError("Şifre en az bir rakam içermelidir")
+        return v
+

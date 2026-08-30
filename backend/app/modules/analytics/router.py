@@ -18,6 +18,7 @@ from app.modules.investment import ai_service, market_service
 from app.modules.investment.models import TransactionProposal
 
 from . import service
+from .deps import lookback_param
 from .schemas import PortfolioAnalysis
 
 router = APIRouter(tags=["analytics"])
@@ -29,6 +30,11 @@ router = APIRouter(tags=["analytics"])
     summary="Portföy analizi (dağılım, trend, performans, işlem geçmişi)",
 )
 async def portfolio_analysis(
+    # İki ayrı boyut: `lookback` ÖLÇÜM PENCERESİ (risk ile ortak seçici),
+    # `range` ise ÇÖZÜNÜRLÜK (gün içi mi, günlük mü). Tek parametreye
+    # sıkıştırmak "son bir yıl" ile "bugünü dakika dakika" arasındaki farkı
+    # kaybetmek olurdu.
+    lookback: str = Depends(lookback_param),
     range: str = Query(default="all", pattern="^(all|day)$"),
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
@@ -66,14 +72,17 @@ async def portfolio_analysis(
         sector_map=market_service.sector_by_symbol(db),
         # Injected so the service stays pure and testable without a session,
         # matching how risk/service.py takes its price reader.
-        # "Gün" görünümü 15 dakikalık gerçek barlardan okunuyor; diğerleri
-        # günlük barlardan. İkisi de aynı okuyucudan geçiyor, dolayısıyla iki
-        # görünüm portföyün değeri konusunda ayrışamaz.
+        # Pencere çağıranın istediği, `risk` ile aynı şekilde çözülüyor: tek
+        # seçici iki uç noktayı birden sürüyor. Sabit bir pencere, ölçümler üç
+        # aya geçerken grafiğin bir yıl göstermeye devam etmesi demekti.
+        #
+        # Gün içi görünüm 5 dakikalık gerçek barlardan okunuyor; o durumda
+        # pencere bar sayısıyla değil, aralıkla belirleniyor.
         closes_for=lambda symbol: market_service.candle_closes(
             db,
             symbol,
-            limit=service.INTRADAY_WINDOW if intraday else service.TREND_WINDOW,
-            interval="15m" if intraday else "1d",
+            limit=service.INTRADAY_WINDOW if intraday else service.window_limit(lookback),
+            interval="5m" if intraday else "1d",
         ),
         proposals=proposals,
         as_of=as_of,

@@ -21,6 +21,7 @@ import {
   type PortfolioAnalysis,
   type Position,
   type RiskProfile,
+  type RiskSnapshot,
 } from '../api/client'
 import { useMarketStream } from '../hooks/useMarketStream'
 import { useWatchlist } from '../hooks/useWatchlist'
@@ -125,6 +126,7 @@ export default function Home() {
   const [cards, setCards] = useState<ApiCard[]>([])
   const [analysis, setAnalysis] = useState<PortfolioAnalysis | null>(null)
   const [risk, setRisk] = useState<RiskProfile | null>(null)
+  const [riskHistory, setRiskHistory] = useState<RiskSnapshot[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [displayName, setDisplayName] = useState<string | null>(null)
   const [range, setRange] = useState<RangeKey>('month')
@@ -162,6 +164,11 @@ export default function Home() {
       void apiClient.getCards().then(setCards).catch(() => setCards([]))
       void apiClient.getPortfolioAnalysis().then(setAnalysis).catch(() => undefined)
       void apiClient.getRiskProfile().then(setRisk).catch(() => undefined)
+      // Skorun yönü: tek bir sayı yükseliyor mu düşüyor mu söylemiyor.
+      void apiClient
+        .getRiskHistory()
+        .then((history) => setRiskHistory(history.points))
+        .catch(() => undefined)
       void apiClient.getPositions().then(setPositions).catch(() => undefined)
       void apiClient
         .getCurrentUser()
@@ -252,6 +259,36 @@ export default function Home() {
       name: component.name,
       value: Math.round((component.penalty as number) * 100),
     }))
+
+  /** Skoru olan anlık görüntüler, eskiden yeniye. */
+  const riskTrend = useMemo(
+    () =>
+      [...riskHistory]
+        .filter((point) => point.score !== null)
+        .sort((a, b) => a.captured_on.localeCompare(b.captured_on))
+        .map((point) => ({ score: point.score })),
+    [riskHistory],
+  )
+
+  /**
+   * Skorun NEYİN ÜZERİNDEN ölçüldüğü.
+   *
+   * `window` ve `assumptions` şemaya tam bu yüzden eklendi: router'ın kendi
+   * yorumu, bu alanlar düşürüldüğünde sayfanın "neye karşı ve hangi süre
+   * boyunca ölçüldüğünü söylemeyen bir Sharpe ve beta" gösterdiğini yazıyor.
+   *
+   * Alanlar `Record<string, unknown>` olarak geliyor (şema yeniden
+   * üretilmedi), o yüzden tipleri okunurken daraltılıyor: yanlış tipte bir
+   * değeri metne gömmek "[object Object]" yazdırırdı.
+   */
+  const riskBasis = useMemo(() => {
+    const count = risk?.window?.observation_count
+    const benchmark = risk?.assumptions?.benchmark_symbol
+    const parts: string[] = []
+    if (typeof count === 'number' && count > 0) parts.push(`${count} işlem günü`)
+    if (typeof benchmark === 'string' && benchmark) parts.push(`${benchmark} karşısında`)
+    return parts.length ? `${parts.join(', ')} ölçüldü.` : null
+  }, [risk])
 
   const banking = accounts.filter((a) => !a.is_investment)
   const investment = accounts.find((a) => a.is_investment)
@@ -490,17 +527,57 @@ export default function Home() {
           </div>
           {/* Skor yoksa sayı uydurulmaz: ölçülemediğini söylemek, 50 yazıp
               kullanıcının üzerine karar kurmasına izin vermekten dürüst. */}
-          <p className="mt-1 text-2xl font-bold tabular-nums text-white">
-            {risk?.score !== null && risk?.score !== undefined
-              ? risk.score.toFixed(0)
-              : 'Ölçülemedi'}
-          </p>
-          {risk?.level && <p className="text-xs text-slate-400">{risk.level}</p>}
+          <div className="mt-1 flex items-end justify-between gap-3">
+            <div>
+              <p className="text-2xl font-bold tabular-nums text-white">
+                {risk?.score !== null && risk?.score !== undefined
+                  ? risk.score.toFixed(0)
+                  : 'Ölçülemedi'}
+              </p>
+              {risk?.level && <p className="text-xs text-slate-400">{risk.level}</p>}
+            </div>
+
+            {/* Skorun YÖNÜ. Tek bir sayı, yükseliyor mu düşüyor mu
+                söylemiyor; kullanıcının bilmek istediği şey genellikle bu. */}
+            {riskTrend.length > 1 && (
+              <div className="h-10 w-28 shrink-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={riskTrend}>
+                    <Line
+                      type="monotone"
+                      dataKey="score"
+                      stroke="#F59E0B"
+                      strokeWidth={2}
+                      dot={false}
+                      connectNulls
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+
+          {/* Neyin üzerinden ölçüldüğü. Şemanın kendi yorumu, bu alanların
+              düşürülmesinin "yorumlanacak hiçbir şeyi olmayan bir Sharpe ve
+              beta" bıraktığını söylüyor. */}
+          {riskBasis && (
+            <p className="mt-1 text-[11px] leading-snug text-slate-500">{riskBasis}</p>
+          )}
 
           {riskBars.length === 0 ? (
-            <p className="mt-6 text-sm text-slate-400">
-              Risk bileşenleri için yeterli veri yok.
-            </p>
+            <div className="mt-6">
+              <p className="text-sm text-slate-400">
+                Risk bileşenleri için yeterli veri yok.
+              </p>
+              {/* Anket doldurulmadan çıkan skor, varsayılanlar üzerine kurulu
+                  olurdu. Kullanıcıyı ölçümü mümkün kılan yere gönderiyoruz. */}
+              <Link
+                to="/risk"
+                className="mt-2 inline-block text-xs font-semibold text-brandBlue hover:underline"
+              >
+                Risk anketini doldur →
+              </Link>
+            </div>
           ) : (
             <div className="mt-4 h-48">
               <ResponsiveContainer width="100%" height="100%">

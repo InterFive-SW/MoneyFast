@@ -13,6 +13,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
+from app.modules.auth import service as auth_service
+from app.modules.auth.schemas import UserResponse
+
 VALID_REGISTER_PAYLOAD = {
     "first_name": "Ada",
     "last_name": "Lovelace",
@@ -259,7 +264,9 @@ def user_stub(**overrides):
     base = dict(
         id=str(_uuid.uuid4()),
         tc_no="12345678901",
-        email="test@dummy.moneyfast.local",
+        # `.local` ayrılmış bir TLD ve `EmailStr` onu reddediyor;
+        # `example.com` doğrulayıcıların kabul ettiği test alanı.
+        email="test@example.com",
         phone_number="+905550000000",
         first_name="Test",
         last_name="Kullanici",
@@ -273,3 +280,85 @@ def user_stub(**overrides):
     )
     base.update(overrides)
     return SimpleNamespace(**base)
+
+
+# ---------------------------------------------------------------------------
+# Doğrulama, sıfırlama ve ayarlar uç noktaları (main + #42)
+# ---------------------------------------------------------------------------
+def _as_user(mocker, user):
+    """Oturumu açık bir kullanıcı gibi davranan bağımlılık."""
+    from app.core import deps
+    from app.main import app
+
+    app.dependency_overrides[deps.get_current_user] = lambda: user
+    return user
+
+
+class TestVerificationAndResetEndpoints:
+    def test_verify_email_passes_the_token_through(self, client, mocker):
+        verify = mocker.patch.object(
+            auth_service, "verify_email", return_value={"message": "ok"},
+        )
+        response = client.post("/api/auth/verify-email", json={"token": "tok-1"})
+        assert response.status_code == 200
+        assert verify.call_args.args[0] == "tok-1"
+
+    def test_reset_password_reaches_the_service(self, client, mocker):
+        reset = mocker.patch.object(
+            auth_service, "reset_password", return_value={"message": "ok"},
+        )
+        response = client.post(
+            "/api/auth/reset-password",
+            json={"token": "tok-1", "new_password": "Password456!"},
+        )
+        assert response.status_code == 200
+        assert reset.called
+
+
+class TestSettingsEndpoints:
+    @pytest.fixture(autouse=True)
+    def _signed_in(self, mocker):
+        from app.core import deps
+        from app.main import app
+
+        user = user_stub()
+        app.dependency_overrides[deps.get_current_user] = lambda: user
+        yield user
+        app.dependency_overrides.pop(deps.get_current_user, None)
+
+    def test_profile_update_uses_the_token_identity(self, client, mocker, _signed_in):
+        """TC gövdeden DEĞİL token'dan geliyor: aksi hâlde biri başkasının
+        profilini güncelleyebilirdi."""
+        update = mocker.patch.object(
+            auth_service, "update_user_profile",
+            return_value=UserResponse.model_validate(_signed_in),
+        )
+        client.put("/api/auth/me", json={"first_name": "Yeni"})
+        assert update.call_args.args[0] == _signed_in.tc_no
+
+    def test_change_password_uses_the_token_identity(self, client, mocker, _signed_in):
+        change = mocker.patch.object(
+            auth_service, "change_user_password", return_value={"message": "ok"},
+        )
+        client.post(
+            "/api/auth/change-password",
+            json={"current_password": "Password123!", "new_password": "Password456!"},
+        )
+        assert change.call_args.args[0] == _signed_in.tc_no
+
+    def test_data_export_is_requested_for_the_signed_in_user(
+        self, client, mocker, _signed_in,
+    ):
+        export = mocker.patch.object(
+            auth_service, "request_data_export",
+            new_callable=mocker.AsyncMock, return_value={"message": "ok"},
+        )
+        client.post("/api/auth/export-data", json={})
+        assert export.call_args.args[0] == _signed_in.tc_no
+
+    def test_account_deletion_uses_the_token_identity(self, client, mocker, _signed_in):
+        remove = mocker.patch.object(
+            auth_service, "deactivate_account", return_value={"message": "ok"},
+        )
+        client.request("DELETE", "/api/auth/me", json={"reason": "test"})
+        assert remove.call_args.args[0] == _signed_in.tc_no

@@ -14,7 +14,24 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
+
+from app.core.security import (
+    RESET_TOKEN_TYPE,
+    VERIFICATION_TOKEN_TYPE,
+    create_reset_token,
+    create_verification_token,
+    hash_password,
+    verify_password,
+)
+from app.modules.auth import service
+from app.modules.auth.schemas import (
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    UserUpdateRequest,
+)
+
 
 from tests.conftest import simulate_refresh
 from fastapi import HTTPException
@@ -339,7 +356,9 @@ def user_stub(**overrides):
     base = dict(
         id=str(_uuid.uuid4()),
         tc_no="12345678901",
-        email="test@dummy.moneyfast.local",
+        # `.local` ayrılmış bir TLD ve `EmailStr` onu reddediyor;
+        # `example.com` doğrulayıcıların kabul ettiği test alanı.
+        email="test@example.com",
         phone_number="+905550000000",
         first_name="Test",
         last_name="Kullanici",
@@ -353,3 +372,260 @@ def user_stub(**overrides):
     )
     base.update(overrides)
     return SimpleNamespace(**base)
+
+
+# ---------------------------------------------------------------------------
+# E-posta doğrulama, şifre sıfırlama ve ayarlar (main + #42)
+#
+# Bu yollar birleşmeden önce hiç test edilmiyordu: `auth/service.py` %35
+# kapsamayla geldi. Hesap doğrulama, şifre sıfırlama ve hesap kapatma, sessizce
+# bozulduğunda kullanıcıyı sisteme sokmayan ya da içeride bırakmayan yollar.
+# ---------------------------------------------------------------------------
+class TestVerifyEmail:
+    def test_a_valid_token_marks_the_account_verified(self, mock_db):
+        user = user_stub(email="a@b.co", is_verified=False)
+        mock_db.query.return_value.filter.return_value.first.return_value = user
+        token = create_verification_token(email="a@b.co")
+
+        result = service.verify_email(token, mock_db)
+
+        assert user.is_verified is True
+        assert "message" in result
+
+    def test_a_reset_token_is_not_a_verification_token(self, mock_db):
+        """`typ` denetimi olmasa, şifre sıfırlama bağlantısı hesabı doğrulamak
+        için kullanılabilirdi."""
+        token = create_reset_token(email="a@b.co")
+        with pytest.raises(HTTPException) as exc:
+            service.verify_email(token, mock_db)
+        assert exc.value.status_code == 400
+
+    def test_a_garbage_token_is_refused(self, mock_db):
+        with pytest.raises(HTTPException) as exc:
+            service.verify_email("not-a-token", mock_db)
+        assert exc.value.status_code == 400
+
+    def test_a_token_for_nobody_is_refused(self, mock_db):
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        token = create_verification_token(email="ghost@b.co")
+        with pytest.raises(HTTPException):
+            service.verify_email(token, mock_db)
+
+    def test_verifying_twice_is_reported_not_repeated(self, mock_db):
+        user = user_stub(email="a@b.co", is_verified=True)
+        mock_db.query.return_value.filter.return_value.first.return_value = user
+        token = create_verification_token(email="a@b.co")
+        result = service.verify_email(token, mock_db)
+        assert "message" in result
+
+
+class TestPasswordReset:
+    def test_a_matching_user_gets_a_mail_queued(self, mock_db):
+        user = user_stub(email="a@b.co", tc_no="12345678901")
+        mock_db.query.return_value.filter.return_value.first.return_value = user
+        tasks = BackgroundTasks()
+
+        payload = ForgotPasswordRequest(tc_no="12345678901", email="a@b.co")
+        result = service.send_password_reset(payload, mock_db, tasks)
+
+        assert len(tasks.tasks) == 1
+        assert "gönderildi" in result["message"]
+
+    def test_an_unknown_pair_gets_the_same_answer_and_no_mail(self, mock_db):
+        """Kimin kayıtlı olduğu sızmaz: cevap aynı, e-posta gönderilmiyor."""
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        tasks = BackgroundTasks()
+
+        payload = ForgotPasswordRequest(tc_no="99999999999", email="ghost@b.co")
+        result = service.send_password_reset(payload, mock_db, tasks)
+
+        assert tasks.tasks == []
+        assert "gönderildi" in result["message"]
+
+    def test_a_valid_reset_token_changes_the_password(self, mock_db):
+        user = user_stub(email="a@b.co", hashed_password="eski")
+        mock_db.query.return_value.filter.return_value.first.return_value = user
+        token = create_reset_token(email="a@b.co")
+
+        service.reset_password(
+            ResetPasswordRequest(token=token, new_password="Password456!"), mock_db,
+        )
+
+        assert user.hashed_password != "eski"
+        assert verify_password("Password456!", user.hashed_password)
+
+    def test_a_verification_token_cannot_reset_a_password(self, mock_db):
+        token = create_verification_token(email="a@b.co")
+        with pytest.raises(HTTPException) as exc:
+            service.reset_password(
+                ResetPasswordRequest(token=token, new_password="Password456!"), mock_db,
+            )
+        assert exc.value.status_code == 400
+
+    def test_a_reset_token_for_nobody_is_refused(self, mock_db):
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        token = create_reset_token(email="ghost@b.co")
+        with pytest.raises(HTTPException):
+            service.reset_password(
+                ResetPasswordRequest(token=token, new_password="Password456!"), mock_db,
+            )
+
+
+class TestSettingsActions:
+    """Ayarlar ekranının arkasındaki yollar (#42)."""
+
+    def _signed_in(self, mock_db, **overrides):
+        user = user_stub(**overrides)
+        mock_db.query.return_value.filter.return_value.first.return_value = user
+        return user
+
+    def test_only_the_supplied_fields_change(self, mock_db):
+        """Verilmeyen alan DOKUNULMAZ: bir anahtarı gönderen ekran, diğerlerini
+        sıfırlamamalı."""
+        user = self._signed_in(mock_db, email="eski@b.co", transaction_limit=1000)
+        service.update_user_profile(
+            user.tc_no, UserUpdateRequest(transaction_limit=25000), mock_db,
+        )
+        assert user.transaction_limit == 25000
+        assert user.email == "eski@b.co"
+
+    def test_preferences_are_merged_not_replaced(self, mock_db):
+        """Bir tercihi değiştiren istek diğerlerini silmemeli."""
+        user = self._signed_in(mock_db, user_preferences={"dil": "tr", "tema": "koyu"})
+        service.update_user_profile(
+            user.tc_no, UserUpdateRequest(user_preferences={"tema": "acik"}), mock_db,
+        )
+        assert user.user_preferences == {"dil": "tr", "tema": "acik"}
+
+    def test_every_settable_field_can_be_set(self, mock_db):
+        """Her alanın kendi dalı var; biri yazılmazsa ekran onu kaydediyor
+        sanıp kaydetmemiş olur."""
+        user = self._signed_in(mock_db)
+        service.update_user_profile(
+            user.tc_no,
+            UserUpdateRequest(
+                email="yeni@example.com",
+                phone_number="+905559998877",
+                notification_preferences={"email": {"transfer": True}},
+            ),
+            mock_db,
+        )
+        assert user.email == "yeni@example.com"
+        assert user.phone_number == "+905559998877"
+        assert user.notification_preferences == {"email": {"transfer": True}}
+
+    def test_an_unknown_user_is_a_404(self, mock_db):
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        with pytest.raises(HTTPException) as exc:
+            service.update_user_profile("00000000000", UserUpdateRequest(), mock_db)
+        assert exc.value.status_code == 404
+
+    def test_changing_a_password_requires_the_current_one(self, mock_db):
+        """Mevcut şifre doğrulanmadan değiştirilebilseydi, ele geçirilmiş bir
+        oturum hesabı kalıcı olarak devralabilirdi."""
+        self._signed_in(mock_db, hashed_password=hash_password("Password123!"))
+        with pytest.raises(HTTPException) as exc:
+            service.change_user_password(
+                "12345678901",
+                ChangePasswordRequest(
+                    current_password="Yanlis123!", new_password="Password456!",
+                ),
+                mock_db,
+            )
+        assert exc.value.status_code in (400, 401, 403)
+
+    def test_the_right_current_password_changes_it(self, mock_db):
+        user = self._signed_in(mock_db, hashed_password=hash_password("Password123!"))
+        service.change_user_password(
+            "12345678901",
+            ChangePasswordRequest(
+                current_password="Password123!", new_password="Password456!",
+            ),
+            mock_db,
+        )
+        assert verify_password("Password456!", user.hashed_password)
+
+    def test_changing_the_password_of_nobody_is_a_404(self, mock_db):
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        with pytest.raises(HTTPException) as exc:
+            service.change_user_password(
+                "00000000000",
+                ChangePasswordRequest(
+                    current_password="Password123!", new_password="Password456!",
+                ),
+                mock_db,
+            )
+        assert exc.value.status_code == 404
+
+    def test_deactivating_marks_the_account_inactive(self, mock_db):
+        user = self._signed_in(mock_db, is_active=True)
+        service.deactivate_account(user.tc_no, "artık kullanmıyorum", mock_db)
+        assert user.is_active is False
+
+    def test_deactivating_without_a_reason_is_allowed(self, mock_db):
+        user = self._signed_in(mock_db, is_active=True)
+        service.deactivate_account(user.tc_no, None, mock_db)
+        assert user.is_active is False
+
+    def test_deactivating_twice_is_refused(self, mock_db):
+        self._signed_in(mock_db, is_active=False)
+        with pytest.raises(HTTPException):
+            service.deactivate_account("12345678901", None, mock_db)
+
+    def test_deactivating_nobody_is_a_404(self, mock_db):
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        with pytest.raises(HTTPException) as exc:
+            service.deactivate_account("00000000000", None, mock_db)
+        assert exc.value.status_code == 404
+
+
+class TestDataExport:
+    """Veri dışa aktarma (#42): kullanıcının bütün verisi, PDF olarak."""
+
+    @pytest.mark.asyncio
+    async def test_it_gathers_the_profile_and_portfolio_then_queues_the_mail(
+        self, mock_db, mocker,
+    ):
+        user = user_stub()
+        mock_db.query.return_value.filter.return_value.first.return_value = user
+
+        from app.modules.investment import market_service
+        mocker.patch.object(market_service, "holdings", return_value=[])
+        mocker.patch.object(market_service, "latest_quotes", return_value={})
+        mocker.patch.object(market_service, "account", return_value=None)
+        send = mocker.patch(
+            "app.core.email.send_data_export_email", new_callable=mocker.AsyncMock,
+        )
+
+        tasks = BackgroundTasks()
+        result = await service.request_data_export(user.tc_no, mock_db, tasks)
+
+        # Arka plan görevi kuyruğa girdi; kullanıcı beklemiyor.
+        assert tasks.tasks or send.called
+        assert "message" in result
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_user_cannot_export(self, mock_db):
+        """Var olmayan bir kullanıcının verisi üretilmez."""
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        with pytest.raises(HTTPException) as exc:
+            await service.request_data_export("00000000000", mock_db, BackgroundTasks())
+        assert exc.value.status_code == 404
+
+
+class TestUnverifiedLogin:
+    def test_an_unverified_account_cannot_log_in(self, mock_db):
+        """E-posta doğrulanmadan giriş yapılamaz (main).
+
+        Doğrulama zorunlu değilse, birinin e-posta adresiyle hesap açmak o
+        adrese erişmeyi gerektirmez.
+        """
+        user = user_stub(
+            is_verified=False, hashed_password=hash_password("Password123!"),
+        )
+        mock_db.query.return_value.filter.return_value.first.return_value = user
+        with pytest.raises(HTTPException) as exc:
+            service.authenticate_user(
+                LoginRequest(tc_no=user.tc_no, password="Password123!"), mock_db,
+            )
+        assert exc.value.status_code in (401, 403)

@@ -1101,3 +1101,54 @@ describe('risk history', () => {
     expect(result.days).toBe(30)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Ayarlar (#42): şifre değiştirme, veri dışa aktarma, hesap silme
+// ---------------------------------------------------------------------------
+describe('settings actions', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('şifre değişikliğini gövdede gönderir', async () => {
+    const fetchMock = mockFetch({})
+    await apiClient.changePassword({
+      current_password: 'Password123!', new_password: 'Password456!',
+    })
+    expect(calledUrl(fetchMock)).toBe('/api/auth/change-password')
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    // Mevcut şifre de gidiyor: sunucu kimliği doğrulamadan değiştirmemeli.
+    expect(body.current_password).toBe('Password123!')
+  })
+
+  it('veri dışa aktarma isteğini POST eder', async () => {
+    const fetchMock = mockFetch({ message: 'ok' })
+    const result = await apiClient.requestDataExport()
+    expect(calledUrl(fetchMock)).toBe('/api/auth/export-data')
+    expect(result.message).toBe('ok')
+  })
+
+  it('profil güncellemesi PUT ile gider', async () => {
+    const fetchMock = mockFetch({ id: '1', first_name: 'A', last_name: 'B' })
+    await apiClient.updateProfile({ transaction_limit: 25000 })
+    expect(calledUrl(fetchMock)).toBe('/api/auth/me')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT' })
+  })
+
+  it('hesap silme başarısız olursa sunucunun gerekçesi yükseltilir', async () => {
+    // Sessizce yutulan bir silme hatası, kullanıcıya hesabının silindiğini
+    // söyleyip silmemek olurdu.
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok: false, status: 400, headers: { get: () => 'application/json' },
+      json: () => Promise.resolve({ detail: 'Silinemedi' }),
+      text: () => Promise.resolve('{"detail":"Silinemedi"}'),
+    })))
+    await expect(apiClient.deleteAccount({})).rejects.toThrow(/Silinemedi/)
+  })
+
+  it('hesap silme DELETE ile gider', async () => {
+    const fetchMock = mockFetch({})
+    await apiClient.deleteAccount({ reason: 'test' })
+    expect(calledUrl(fetchMock)).toContain('/api/auth/me')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+  })
+})

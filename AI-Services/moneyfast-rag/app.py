@@ -288,6 +288,28 @@ async def search(request: SearchRequest) -> dict[str, Any]:
     }
 
 
+@app.delete("/documents/{document_id}")
+async def delete_document(document_id: str, owner_user_id: str) -> dict[str, Any]:
+    """Kullanıcının kendi belgesini derlemden kaldırır.
+
+    `owner_user_id` ZORUNLU bir sorgu parametresi. Opsiyonel olsaydı, onu
+    göndermeyen bir çağrı sahiplik denetimi olmadan silme yapardı -- ve o
+    çağrıyı yazmak, unutmak kadar kolay olurdu.
+    """
+    try:
+        deleted = await store.delete_document(document_id, owner_user_id)
+    except Exception as exc:
+        log.exception("document deletion failed")
+        raise HTTPException(status_code=503, detail=f"vector store unavailable: {exc}")
+
+    if not deleted:
+        # Başkasının belgesi ile hiç olmayan belge AYNI cevabı alıyor: ikisini
+        # ayırmak, id deneyerek başka kullanıcıların belgelerinin varlığını
+        # keşfetmeye izin verirdi.
+        raise HTTPException(status_code=404, detail="document not found")
+    return {"status": "deleted", "document_id": document_id}
+
+
 @app.post("/ingest")
 async def ingest(document: IngestDocument) -> dict[str, Any]:
     """Load one document: split, embed, store. Idempotent by content hash."""

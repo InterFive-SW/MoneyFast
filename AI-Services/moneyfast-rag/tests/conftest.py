@@ -83,6 +83,10 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             raise state["ping"]
         return True
 
+    async def _delete_document(document_id, owner_user_id):
+        state["deleted"] = {"document_id": document_id, "owner": owner_user_id}
+        return state.get("delete_result", True)
+
     async def _ingest(conn_factory, document, chunks):
         state["ingested"] = {"document": document, "chunks": chunks}
         return state["ingest_result"]
@@ -94,6 +98,7 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return None
 
     monkeypatch.setattr(store, "match_chunks", _match_chunks)
+    monkeypatch.setattr(store, "delete_document", _delete_document)
     monkeypatch.setattr(store, "index_snapshot", _index_snapshot)
     monkeypatch.setattr(store, "ping", _ping)
     monkeypatch.setattr(store, "ingest", _ingest)

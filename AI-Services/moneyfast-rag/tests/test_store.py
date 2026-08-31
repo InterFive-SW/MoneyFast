@@ -16,6 +16,10 @@ import store
 
 
 class FakeCursor:
+    #: DELETE kaç satır etkiledi. `delete_document` bunu okuyor ve
+    #: "gerçekten bir şey silindi mi" sorusunun cevabı bu.
+    rowcount = 0
+
     def __init__(self, rows):
         self._rows = rows
 
@@ -30,10 +34,14 @@ class FakeConnection:
     def __init__(self, rows):
         self._rows = rows
         self.executed: list[tuple] = []
+        #: Testin ayarladığı DELETE sonucu.
+        self.rowcount = 0
 
     async def execute(self, sql, params=None):
         self.executed.append((sql, params))
-        return FakeCursor(self._rows)
+        cursor = FakeCursor(self._rows)
+        cursor.rowcount = self.rowcount
+        return cursor
 
     @asynccontextmanager
     async def transaction(self):
@@ -279,3 +287,35 @@ class TestOwnership:
         await store.match_chunks("[0.1]", None, top_k=5, min_similarity=None)
         sql, _ = pool.conn.executed[-1]
         assert "%(owner)s::uuid" in sql
+
+
+class TestDeleteDocument:
+    """Silmenin SQL tarafı: sahiplik WHERE'in içinde, açık derlem korunuyor."""
+
+    @pytest.mark.asyncio
+    async def test_the_owner_is_part_of_the_where_clause(self, pool):
+        pool.conn.rowcount = 1
+        await store.delete_document(
+            "33333333-3333-3333-3333-333333333333",
+            "11111111-1111-1111-1111-111111111111",
+        )
+        sql, params = pool.conn.executed[-1]
+        assert "owner_user_id = %(owner)s::uuid" in sql
+        assert params["owner"] == "11111111-1111-1111-1111-111111111111"
+
+    @pytest.mark.asyncio
+    async def test_the_public_corpus_cannot_be_deleted_through_this(self, pool):
+        """`owner_user_id IS NOT NULL` ayrıca yazılı. Bir kullanıcı isteğinin
+        ortak haber derleminden satır düşürebilmesi, silme yetkisinin
+        sızması olurdu."""
+        pool.conn.rowcount = 0
+        await store.delete_document("id", "owner")
+        sql, _ = pool.conn.executed[-1]
+        assert "owner_user_id IS NOT NULL" in sql
+
+    @pytest.mark.asyncio
+    async def test_it_reports_whether_a_row_actually_went(self, pool):
+        pool.conn.rowcount = 1
+        assert await store.delete_document("id", "owner") is True
+        pool.conn.rowcount = 0
+        assert await store.delete_document("id", "owner") is False

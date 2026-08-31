@@ -461,3 +461,51 @@ class TestIngestOwnership:
             },
         )
         assert fake_store["ingested"]["document"]["owner_user_id"] is None
+
+
+class TestDeleteDocument:
+    """Silme, sahibinin isteğidir ve yalnızca onun belgesine dokunur."""
+
+    URL = "/documents/33333333-3333-3333-3333-333333333333"
+
+    def test_the_owner_is_required(self, client):
+        """Opsiyonel olsaydı, onu göndermeyen bir çağrı sahiplik denetimi
+        olmadan silerdi -- ve o çağrıyı yazmak unutmak kadar kolay olurdu."""
+        assert client.delete(self.URL).status_code == 422
+
+    def test_it_deletes_with_the_owner(self, client, fake_store):
+        response = client.delete(
+            self.URL,
+            params={"owner_user_id": "11111111-1111-1111-1111-111111111111"},
+        )
+        assert response.status_code == 200
+        assert fake_store["deleted"]["owner"] == (
+            "11111111-1111-1111-1111-111111111111"
+        )
+
+    def test_someone_elses_document_is_indistinguishable_from_a_missing_one(
+        self, client, fake_store
+    ):
+        """Aynı 404. Ayırmak, id deneyerek başka kullanıcıların belgelerinin
+        VARLIĞINI keşfetmeye izin verirdi."""
+        fake_store["delete_result"] = False
+        response = client.delete(
+            self.URL,
+            params={"owner_user_id": "11111111-1111-1111-1111-111111111111"},
+        )
+        assert response.status_code == 404
+
+    def test_a_store_failure_is_reported_as_unavailable_not_as_deleted(
+        self, client, fake_store, monkeypatch
+    ):
+        import store as store_module
+
+        async def _boom(*_args, **_kwargs):
+            raise RuntimeError("connection refused")
+
+        monkeypatch.setattr(store_module, "delete_document", _boom)
+        response = client.delete(
+            self.URL,
+            params={"owner_user_id": "11111111-1111-1111-1111-111111111111"},
+        )
+        assert response.status_code == 503

@@ -14,7 +14,16 @@ Implements the `ai.conversations` / `ai.messages` design from
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -67,4 +76,46 @@ class Message(Base):
     #: historical bubble carries the notices it was first shown with. Being
     #: JSONB, adding either cost no migration.
     meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class ChatDocument(Base):
+    """Kullanıcının sohbete yüklediği bir dosyanın kaydı.
+
+    Metnin KENDİSİ burada değil: o, gömülmüş hâliyle vektör veritabanında
+    (`rag.documents`, sahibi bu kullanıcı). Burada duran, kullanıcının
+    "Belgelerim" listesinde gördüğü ve sildiği şey.
+
+    İki yerde tutulmasının sebebi listeleme ve silme: arayüz için vektör
+    veritabanına sorgu atmak, uygulama verisini oraya taşımak olurdu ve
+    `rag` servisi bilerek tek bir şey biliyor -- gömme ve arama.
+
+    `rag_document_id` bir foreign key DEĞİL: ayrı bir veritabanındaki satıra
+    işaret ediyor. Silme iki adım, ve sırası önemli (bkz. service.delete).
+    """
+
+    __tablename__ = "chat_documents"
+    __table_args__ = (
+        Index("idx_chat_documents_user_created", "user_id", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    #: Hangi sohbette yüklendiği. Belge kullanıcıya ait, sohbete değil --
+    #: silinen bir sohbet, kullanıcının belgesini götürmemeli.
+    thread_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    #: PDF / Excel / CSV / PowerPoint / Metin. Uzantı değil okunabilir ad:
+    #: listede gösterilen şey bu.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: PDF'te sayfa, tabloda satır, sunumda slayt.
+    units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    char_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Metin tavana takıldıysa doğru. Kırpıldığını söylememek, belgenin
+    #: yarısını okuyup tamamını okumuş gibi cevap vermek olurdu.
+    truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: `rag.documents.id`. Yükleme kısmen başarısız olduysa NULL olabilir.
+    rag_document_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)

@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     #: went on staging trades that could never be confirmed.
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     AI_ORCHESTRATOR_URL: str = "http://agents:8080"
+    #: Yüklenen belgeler buraya gömülüyor. Backend'in vektör veritabanı
+    #: kredensiyeli YOK ve olmamalı (bkz. CLAUDE.md): `rag` servisi onu tutan
+    #: tek bileşen, dolayısıyla yükleme de arama gibi HTTP üzerinden gidiyor.
+    RAG_URL: str = "http://rag:8100"
 
     model_config = {"env_file": ".env"}
 

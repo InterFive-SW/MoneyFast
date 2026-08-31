@@ -267,3 +267,28 @@ async def ingest(conn_factory, document: dict[str, Any], chunks: Sequence[tuple[
                 return None, 0
             written = await insert_chunks(conn, document_id, chunks)
     return document_id, written
+
+
+async def delete_document(document_id: str, owner_user_id: str) -> bool:
+    """Bir kullanıcının kendi belgesini siler. Chunk'lar CASCADE ile gider.
+
+    Sahiplik WHERE'in İÇİNDE ve `owner_user_id IS NOT NULL` şartı ayrıca
+    yazılı. İkisi de kasıtlı: id'yi bilen birinin başkasının belgesini
+    silememesi için birincisi, kamuya açık haber derleminin bu uçtan
+    silinememesi için ikincisi -- bir kullanıcı isteğinin ortak derlemden
+    haber düşürebilmesi, silme yetkisinin sızması olurdu.
+
+    Dönen değer: gerçekten bir satır silindi mi.
+    """
+    pool = await open_pool()
+    async with pool.connection() as conn:
+        cursor = await conn.execute(
+            """
+            DELETE FROM rag.documents
+            WHERE id = %(id)s::uuid
+              AND owner_user_id IS NOT NULL
+              AND owner_user_id = %(owner)s::uuid
+            """,
+            {"id": document_id, "owner": owner_user_id},
+        )
+        return cursor.rowcount > 0

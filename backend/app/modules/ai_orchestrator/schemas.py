@@ -123,3 +123,31 @@ class RenameConversationRequest(BaseModel):
 class DeletedConversationOut(BaseModel):
     thread_id: str
     status: str = "deleted"
+
+
+class ChatDocumentOut(BaseModel):
+    """Kullanıcının yüklediği bir belge, listede göründüğü hâliyle.
+
+    Metnin kendisi YOK: bu uç nokta neyin yüklendiğini söyler, ne yazdığını
+    değil. İçerik sohbette, kullanıcının sorusuna cevap olarak çıkar.
+    """
+
+    id: str
+    filename: str
+    #: PDF / Excel / CSV / PowerPoint / Metin.
+    kind: str
+    size_bytes: int
+    #: PDF'te sayfa, tabloda satır, sunumda slayt.
+    units: Optional[int] = None
+    char_count: Optional[int] = None
+    #: Metin tavana takıldıysa doğru. Kırpıldığını söylememek, belgenin
+    #: yarısını okuyup tamamını okumuş gibi cevap vermek olurdu.
+    truncated: bool = False
+    created_at: datetime
+
+
+class ChatDocumentListOut(BaseModel):
+    documents: list[ChatDocumentOut] = Field(default_factory=list)
+    #: Kabul edilen uzantılar; arayüz dosya seçiciyi buna göre kuruyor.
+    accepted: list[str] = Field(default_factory=list)
+    max_bytes: int = 0

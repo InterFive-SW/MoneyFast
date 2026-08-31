@@ -5,6 +5,7 @@ import type {
   BankingData, BankAccount, BankTransaction, CreditCardUpdate,
 } from '../data/mockBankingData'
 import { apiClient } from '../api/client'
+import { formatDate } from '../lib/datetime'
 import { BASE_CURRENCY, convert } from '../lib/money'
 import { useMarketStream } from '../hooks/useMarketStream'
 import type { Movement, PortfolioAccount } from '../api/client'
@@ -106,7 +107,7 @@ function formatMovementDate(isoDate: string): string {
 
   if (dayDiff === 0) return 'Bugün'
   if (dayDiff === 1) return 'Dün'
-  return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })
+  return formatDate(date, { day: 'numeric', month: 'short' })
 }
 
 /**

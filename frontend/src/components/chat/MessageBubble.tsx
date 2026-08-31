@@ -1,4 +1,5 @@
 // src/components/chat/MessageBubble.tsx
+import { formatTime } from '../../lib/datetime';
 import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload, PortfolioWidgetPayload } from '../../types/chat';
 import ChartWidget from './widgets/ChartWidget';
 import ActionWidget from './widgets/ActionWidget';
@@ -25,10 +26,7 @@ export default function MessageBubble({ message, animate = false }: MessageBubbl
   const shownText = useTypewriter(message.text, animate && !isUser);
   
   // Saati formatla (HH:mm)
-  const timeString = message.timestamp.toLocaleTimeString('tr-TR', {
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  const timeString = formatTime(message.timestamp);
 
   return (
     <div className={`flex w-full my-4 ${isUser ? 'justify-end' : 'justify-start'}`}>

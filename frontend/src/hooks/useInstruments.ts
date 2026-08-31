@@ -63,7 +63,7 @@ export interface InstrumentsState {
  * `changePercent` is refreshed alongside `price` by `useLiveRows`, so a row
  * cannot show a new price beside yesterday's change.
  */
-export function useInstruments(limit = 200, market?: string): InstrumentsState {
+export function useInstruments(limit = 1200, market?: string): InstrumentsState {
   const [fetched, setFetched] = useState<MarketInstrument[]>([]);
   const [loading, setLoading] = useState(true);
 

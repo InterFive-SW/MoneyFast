@@ -968,22 +968,12 @@ def symbol_suggestions(db: Session, symbols: Optional[list[str]]) -> list[dict[s
     return out
 
 
-def list_instruments(
-    db: Session,
-    symbols: Optional[list[str]] = None,
-    filters: Optional[dict[str, Any]] = None,
-    limit: int = 20,
-    sort_by: Optional[str] = None,
-) -> list[dict[str, Any]]:
-    """Quotes joined with fundamentals — the screening read.
+def _instrument_query(db: Session, symbols, filters):
+    """Tarama sorgusunun birleşimi ve süzgeçleri — sayfa ve SAYIM için ortak.
 
-    Instruments with no quote yet are omitted: an entry with a null price is
-    not a screening result, it is a gap, and showing it in a valuation table
-    invites the reader to treat the blank as a number.
-
-    Fundamental filters (`max_pe`) exclude rows whose value is NULL rather
-    than treating the gap as passing. "P/E below 10" must not silently mean
-    "P/E below 10, or unknown".
+    İkisi ayrı yazılsaydı, bir süzgeç birine eklenip diğerine eklenmediğinde
+    ekran "1.014 enstrümandan 15'i" derken aslında başka bir kümeyi sayıyor
+    olurdu; kullanıcı da olmayan bir sayfaya tıklardı.
     """
     filters = filters or {}
     statement = (
@@ -1052,6 +1042,28 @@ def list_instruments(
             InstrumentFundamentals.pb_ratio <= filters["max_pb"],
         )
 
+    return statement
+
+
+def list_instruments(
+    db: Session,
+    symbols: Optional[list[str]] = None,
+    filters: Optional[dict[str, Any]] = None,
+    limit: int = 20,
+    sort_by: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Quotes joined with fundamentals — the screening read.
+
+    Instruments with no quote yet are omitted: an entry with a null price is
+    not a screening result, it is a gap, and showing it in a valuation table
+    invites the reader to treat the blank as a number.
+
+    Fundamental filters (`max_pe`) exclude rows whose value is NULL rather
+    than treating the gap as passing. "P/E below 10" must not silently mean
+    "P/E below 10, or unknown".
+    """
+    statement = _instrument_query(db, symbols, filters)
+    filters = filters or {}
     ordering = {
         "change_percent": MarketQuote.change_percent.desc(),
         # "En çok düşenler" needs the other direction. Without it the only
@@ -1068,7 +1080,12 @@ def list_instruments(
         # sort had been ignored.
         raise UnknownSortError(sort_by, sorted(ordering))
     statement = statement.order_by(ordering[sort_by or "symbol"])
-    statement = statement.limit(max(1, min(200, limit)))
+    # İkincil sıralama sembol: `change_percent` gibi bir anahtarda beraberlik
+    # sık ve sırasız bir beraberlik sayfalamayı bozar -- aynı satır iki
+    # sayfada birden çıkar, başka bir satır hiç çıkmaz.
+    if (sort_by or "symbol") != "symbol":
+        statement = statement.order_by(InvestmentProduct.symbol.asc())
+    statement = statement.limit(max(1, min(1200, limit)))
 
     out = []
     for product, quote, fundamentals in db.execute(statement).all():

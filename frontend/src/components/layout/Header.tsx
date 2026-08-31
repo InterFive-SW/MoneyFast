@@ -9,6 +9,7 @@
 
 import { useState, useEffect } from 'react'
 import { useUser }             from '../../contexts/UserContext'
+import { formatLongDate, msUntilLocalMidnight } from '../../lib/datetime'
 
 interface HeaderProps {
   /**
@@ -25,12 +26,7 @@ interface HeaderProps {
  * Örnek: "Perşembe, 14 Ağustos 2026"
  */
 function getFormattedDate(): string {
-  return new Date().toLocaleDateString('tr-TR', {
-    weekday: 'long',
-    day:     'numeric',
-    month:   'long',
-    year:    'numeric',
-  })
+  return formatLongDate(new Date())
 }
 
 // ─── Bildirim Butonu Alt Bileşeni ─────────────────────────────────────────────
@@ -86,11 +82,9 @@ export default function Header({ pageTitle }: HeaderProps) {
    * Bir sonraki gece yarısına kalan süre hesaplanarak tek bir setTimeout kurulur.
    */
   useEffect(() => {
-    const now          = new Date()
-    const tomorrow     = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-    const msToMidnight = tomorrow.getTime() - now.getTime()
-
-    const timer = setTimeout(() => setDateStr(getFormattedDate()), msToMidnight)
+    // Gece yarısı ANKARA'nın gece yarısı: tarayıcının kendi diliminde
+    // hesaplanan bir zamanlayıcı tarihi saatlerce erken ya da geç çevirirdi.
+    const timer = setTimeout(() => setDateStr(getFormattedDate()), msUntilLocalMidnight())
     return () => clearTimeout(timer)
   }, [dateStr])
 

@@ -1,4 +1,5 @@
 import type { Bill } from '../../data/mockBankingData'
+import { formatDate } from '../../lib/datetime'
 
 interface Props {
   bills: Bill[]
@@ -37,7 +38,7 @@ export default function BillsWidget({ bills, onPayBill }: Props) {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-white">{bill.institution}</p>
-                  <p className="text-xs text-rose-400 mt-0.5">Son: {new Date(bill.dueDate).toLocaleDateString('tr-TR')}</p>
+                  <p className="text-xs text-rose-400 mt-0.5">Son: {formatDate(bill.dueDate)}</p>
                 </div>
               </div>
               

@@ -45,6 +45,7 @@ services:
       - ./vector-migrations/base/0001_create_vector_extension_and_rag_schema.sql:/docker-entrypoint-initdb.d/10-extension-and-schema.sql:ro
       - ./vector-migrations/base/0002_create_documents_and_chunks.sql:/docker-entrypoint-initdb.d/20-documents-and-chunks.sql:ro
       - ./vector-migrations/base/0003_create_exact_retrieval.sql:/docker-entrypoint-initdb.d/30-exact-retrieval.sql:ro
+      - ./vector-migrations/base/0004_document_ownership.sql:/docker-entrypoint-initdb.d/35-document-ownership.sql:ro
       - ./vector-db-init-grants.sh:/docker-entrypoint-initdb.d/40-grants.sh:ro
       - ./vector-db-grants.sql:/bootstrap/vector-db-grants.sql:ro
     healthcheck:

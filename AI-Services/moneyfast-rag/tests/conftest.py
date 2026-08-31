@@ -66,8 +66,13 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "ping": True,
     }
 
-    async def _match_chunks(query_vector, **kwargs):
-        state["calls"].append({"vector": query_vector, **kwargs})
+    async def _match_chunks(query_vector, owner_user_id, **kwargs):
+        # `owner_user_id` is positional here for the same reason it is
+        # positional in the real signature and in the SQL function: a caller
+        # that forgets it must fail, not silently search everything.
+        state["calls"].append(
+            {"vector": query_vector, "owner_user_id": owner_user_id, **kwargs}
+        )
         return state["rows"]
 
     async def _index_snapshot():

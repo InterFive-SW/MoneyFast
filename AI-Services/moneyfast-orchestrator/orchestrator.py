@@ -424,6 +424,12 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     args["conversation_context"] = (state.get("conversation_history") or [])[
         -HISTORY_MAX_TURNS:
     ]
+    # Whose uploaded documents this search may reach, on top of the public
+    # news corpus. Deliberately NOT the `"unknown"` sentinel the other nodes
+    # use: that is a string, and a string that matches no user reads as a
+    # narrowing filter rather than as "there is nobody here". None says the
+    # second thing, which is what an anonymous turn actually is.
+    args["user_id"] = state.get("user_id") or None
     return await _run_tool(
         state, "rag_semantic_market_search", args,
         assumptions=plan.get("assumptions") or [],

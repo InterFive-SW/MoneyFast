@@ -404,3 +404,60 @@ class TestTimestampRendering:
         fake_store["rows"] = [make_row(published_at="2025-06-01T00:00:00Z")]
         body = client.post("/search", json={"query": "tarih dizesi"}).json()
         assert body["results"][0]["published_at"] == "2025-06-01T00:00:00Z"
+
+
+class TestSearchOwnership:
+    """The owner travels from the request to the store, or the search is
+    anonymous. Nothing in between."""
+
+    def test_the_caller_identity_reaches_the_store(self, client, fake_store):
+        fake_store["rows"] = []
+        client.post(
+            "/search",
+            json={
+                "query": "bilançom",
+                "owner_user_id": "11111111-1111-1111-1111-111111111111",
+            },
+        )
+        assert fake_store["calls"][-1]["owner_user_id"] == (
+            "11111111-1111-1111-1111-111111111111"
+        )
+
+    def test_a_request_without_an_owner_searches_anonymously(self, client, fake_store):
+        """Absent means the public corpus, never everyone's."""
+        fake_store["rows"] = []
+        client.post("/search", json={"query": "banka haberleri"})
+        assert fake_store["calls"][-1]["owner_user_id"] is None
+
+
+class TestIngestOwnership:
+    def test_an_uploaded_document_is_stored_against_its_owner(self, client, fake_store):
+        client.post(
+            "/ingest",
+            json={
+                "owner_user_id": "22222222-2222-2222-2222-222222222222",
+                "title": "Bilanço",
+                "source": "Kullanıcı yüklemesi",
+                "category": "USER_UPLOAD",
+                "document_type": "USER_DOCUMENT",
+                "content": "Hasılat 585 milyar TL.",
+            },
+        )
+        assert fake_store["ingested"]["document"]["owner_user_id"] == (
+            "22222222-2222-2222-2222-222222222222"
+        )
+
+    def test_the_news_corpus_stays_ownerless(self, client, fake_store):
+        """The ingestor sends no owner, and those documents must remain
+        readable by everyone -- that is what the public corpus is."""
+        client.post(
+            "/ingest",
+            json={
+                "title": "Halkbank kaynak sağladı",
+                "source": "Patronlar Dünyası",
+                "category": "NEWS",
+                "document_type": "NEWS",
+                "content": "Banka 1,1 milyar dolar kaynak sağladı.",
+            },
+        )
+        assert fake_store["ingested"]["document"]["owner_user_id"] is None

@@ -92,6 +92,10 @@ class ContextTurn(BaseModel):
 
 
 class SearchRequest(BaseModel):
+    #: Whose private documents may be searched alongside the public corpus.
+    #: Absent means anonymous, which is the public corpus alone -- never
+    #: "everyone's". There is deliberately no value that means the latter.
+    owner_user_id: Optional[str] = None
     query: str
     conversation_context: Optional[list[ContextTurn]] = None
     top_k: int = 8
@@ -101,6 +105,9 @@ class SearchRequest(BaseModel):
 
 
 class IngestDocument(BaseModel):
+    #: NULL = public corpus (news). Non-NULL = private to that one user and
+    #: retrievable by nobody else.
+    owner_user_id: Optional[str] = None
     title: str
     source: str
     category: str
@@ -247,6 +254,7 @@ async def search(request: SearchRequest) -> dict[str, Any]:
     try:
         rows = await store.match_chunks(
             vector,
+            request.owner_user_id,
             top_k=request.top_k,
             min_similarity=request.min_similarity,
             tickers=filters.get("tickers"),
@@ -314,6 +322,7 @@ async def ingest(document: IngestDocument) -> dict[str, Any]:
             "period": document.period,
             "published_at": document.published_at,
             "content_hash": content_hash,
+            "owner_user_id": document.owner_user_id,
         },
         triples,
     )

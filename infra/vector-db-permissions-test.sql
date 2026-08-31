@@ -69,10 +69,26 @@ BEGIN
 
     IF NOT has_function_privilege(
         role_name,
-        'rag.match_chunks(vector,integer,double precision,text[],text[],text[],text[],timestamptz,timestamptz,text[])',
+        'rag.match_chunks(vector,uuid,integer,double precision,text[],text[],text[],text[],timestamptz,timestamptz,text[])',
         'EXECUTE'
     ) THEN
         RAISE EXCEPTION 'RAG role cannot execute retrieval';
+    END IF;
+
+    -- The ownerless overload must be GONE, not merely unused. CREATE OR
+    -- REPLACE with a changed parameter list creates a second function rather
+    -- than replacing the first, and that one returns every user's documents
+    -- to any caller that omits the owner argument.
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_proc p
+        JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'rag'
+          AND p.proname = 'match_chunks'
+          AND pg_catalog.pg_get_function_identity_arguments(p.oid)
+              = 'vector,integer,double precision,text[],text[],text[],text[],timestamptz,timestamptz,text[]'
+    ) THEN
+        RAISE EXCEPTION 'the ownerless match_chunks overload still exists';
     END IF;
 
     IF EXISTS (

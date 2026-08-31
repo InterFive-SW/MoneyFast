@@ -46,6 +46,12 @@ async def rag_semantic_market_search(
     filters: Optional[dict[str, Any]] = None,
     min_similarity: Optional[float] = None,
     rerank: Optional[bool] = None,
+    # Keyword-only, deliberately. Inserting it positionally shifted every
+    # existing caller by one, and the argument that landed on it was the
+    # conversation context -- a value that is not a user id but is truthy,
+    # which is the shape of a widening bug rather than a crash.
+    *,
+    user_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Executes dense-vector semantic search with optional metadata pre-filtering over the
@@ -74,6 +80,10 @@ async def rag_semantic_market_search(
             before calling. The retriever performs server-side coreference resolution
             against conversation_context and returns the resolved string in
             query_echo. Rewriting the query yourself is optional, not required.
+        user_id (str | None): The signed-in caller. Widens the search to that user's
+            OWN uploaded documents in addition to the public news corpus. Omit for an
+            anonymous turn, which searches the public corpus only. There is no value
+            that searches other users' documents.
         conversation_context (list[dict] | None): Recent turns used for server-side
             coreference and topic carry-over. Each entry: role (str, "user" or
             "assistant"), content (str). Pass the last 3 to 6 turns whenever the query
@@ -174,6 +184,10 @@ async def rag_semantic_market_search(
         base=backend_client.rag_base_url(),
         json_body={
             "query": query,
+            # Whose private documents may be searched alongside the public
+            # corpus. Omitted means anonymous -- the public corpus alone.
+            # There is no value meaning "everyone's".
+            "owner_user_id": user_id,
             "conversation_context": conversation_context,
             "top_k": max(MIN_TOP_K, min(MAX_TOP_K, DEFAULT_TOP_K if top_k is None else top_k)),
             "filters": filters,

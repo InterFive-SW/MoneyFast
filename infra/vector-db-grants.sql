@@ -89,14 +89,18 @@ SELECT format(
 )
 \gexec
 
+-- Signature carries the owner argument (0004). Naming the old one here
+-- would grant EXECUTE on a function that no longer exists, and the rag role
+-- would be unable to search at all.
 SELECT format(
-    'GRANT EXECUTE ON FUNCTION rag.match_chunks(vector, integer, double precision, text[], text[], text[], text[], timestamptz, timestamptz, text[]) TO %I',
+    'GRANT EXECUTE ON FUNCTION rag.match_chunks(vector, uuid, integer, double precision, text[], text[], text[], text[], timestamptz, timestamptz, text[]) TO %I',
     :'rag_user'
 )
 \gexec
 
 REVOKE EXECUTE ON FUNCTION rag.match_chunks(
     vector,
+    uuid,
     integer,
     double precision,
     text[],

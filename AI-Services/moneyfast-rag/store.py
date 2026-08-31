@@ -80,6 +80,7 @@ def _array(values: Optional[Sequence[str]]) -> Optional[list[str]]:
 
 async def match_chunks(
     query_vector: str,
+    owner_user_id: Optional[str],
     top_k: int,
     min_similarity: Optional[float],
     tickers: Optional[Sequence[str]] = None,
@@ -90,7 +91,12 @@ async def match_chunks(
     published_before: Optional[str] = None,
     publishers: Optional[Sequence[str]] = None,
 ) -> list[dict[str, Any]]:
-    """Run exact (or HNSW, if the optional migration is applied) retrieval."""
+    """Run exact (or HNSW, if the optional migration is applied) retrieval.
+
+    `owner_user_id` is positional and has no default, here and in the SQL
+    function, so a caller cannot omit it. NULL means anonymous: the public
+    corpus only, because `owner_user_id = NULL` is never true for any row.
+    """
     pool = await open_pool()
     async with pool.connection() as conn:
         cursor = await conn.execute(
@@ -98,6 +104,7 @@ async def match_chunks(
             SELECT *
             FROM rag.match_chunks(
                 %(embedding)s::vector,
+                %(owner)s::uuid,
                 %(top_k)s,
                 %(threshold)s,
                 %(tickers)s,
@@ -111,6 +118,7 @@ async def match_chunks(
             """,
             {
                 "embedding": query_vector,
+                "owner": owner_user_id,
                 "top_k": max(1, min(MAX_TOP_K, top_k)),
                 "threshold": min_similarity,
                 "tickers": _array(tickers),
@@ -162,27 +170,44 @@ async def upsert_document(
     ticker: Optional[str],
     period: Optional[str],
     published_at: Optional[str],
+    owner_user_id: Optional[str] = None,
 ) -> Optional[str]:
-    """Insert a document, or return None when the content hash already exists.
+    """Insert a document, or return None when this OWNER already has it.
 
-    The unique constraint on content_hash is the deduplication mechanism, so
-    re-ingesting an unchanged corpus is a no-op rather than a duplicate set of
-    chunks competing for the same retrieval slots.
+    Deduplication keeps a re-ingested corpus from writing duplicate chunks
+    that compete for the same retrieval slots. It is scoped per owner (0004):
+    globally unique content hashes meant the second person to upload a given
+    file got "duplicate" and no document of their own.
+
+    Two partial indexes back this, so the conflict target differs by branch --
+    `(content_hash) WHERE owner IS NULL` for the public corpus and
+    `(owner_user_id, content_hash)` for private ones. A single statement
+    cannot name both.
     """
     cursor = await conn.execute(
         """
         INSERT INTO rag.documents (
             title, source, source_url, category, language,
-            ticker, document_type, period, published_at, content_hash
+            ticker, document_type, period, published_at, content_hash,
+            owner_user_id
         )
         VALUES (
             %(title)s, %(source)s, %(source_url)s, %(category)s, %(language)s,
-            %(ticker)s, %(document_type)s, %(period)s, %(published_at)s, %(content_hash)s
+            %(ticker)s, %(document_type)s, %(period)s, %(published_at)s,
+            %(content_hash)s, %(owner_user_id)s::uuid
         )
-        ON CONFLICT (content_hash) DO NOTHING
+        """
+        + (
+            "ON CONFLICT (content_hash) WHERE owner_user_id IS NULL DO NOTHING"
+            if owner_user_id is None
+            else "ON CONFLICT (owner_user_id, content_hash) "
+                 "WHERE owner_user_id IS NOT NULL DO NOTHING"
+        )
+        + """
         RETURNING id
         """,
         {
+            "owner_user_id": owner_user_id,
             "title": title,
             "source": source,
             "source_url": source_url,

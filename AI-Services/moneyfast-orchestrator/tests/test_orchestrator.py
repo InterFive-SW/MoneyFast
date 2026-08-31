@@ -2841,3 +2841,42 @@ class TestHandoffCategoryVocabulary:
         for category in set(orchestrator._FLAG_SYNONYMS.values()) | {"GENERIC_DISTRESS"}:
             assert category in orchestrator._HANDOFF_INSTRUCTIONS, category
             assert category in orchestrator._CATEGORY_NOTICES, category
+
+
+class TestResearchCarriesTheCaller:
+    """The uploaded-document half of retrieval.
+
+    `market_research_node` is the only place a search is issued, so it is the
+    only place the caller's identity can be attached. Without it every search
+    is anonymous and a user's own uploads are invisible to them.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_signed_in_turn_forwards_the_user(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["rag_semantic_market_search"] = {"results": [{"chunk_id": "c1"}]}
+        patched_llm.set_response("{}")
+
+        await orchestrator.market_research_node(
+            {**base_state, "user_id": "11111111-1111-1111-1111-111111111111"}
+        )
+
+        assert fake_mcp.calls[0][1]["user_id"] == (
+            "11111111-1111-1111-1111-111111111111"
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_anonymous_turn_sends_none_not_the_unknown_sentinel(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """The other nodes fall back to the string "unknown". Here that would
+        be a user id that matches nobody -- which reads as a narrowing filter
+        rather than as "there is no one here", and hides the difference
+        between the two from anything downstream."""
+        fake_mcp.responses["rag_semantic_market_search"] = {"results": [{"chunk_id": "c1"}]}
+        patched_llm.set_response("{}")
+
+        await orchestrator.market_research_node({**base_state, "user_id": None})
+
+        assert fake_mcp.calls[0][1]["user_id"] is None

@@ -85,6 +85,7 @@ class TestMatchChunks:
     async def test_parameters_are_passed_by_name_in_the_documented_order(self, pool):
         await store.match_chunks(
             "[0.1,0.2]",
+            None,
             top_k=5,
             min_similarity=0.7,
             tickers=["THYAO"],
@@ -104,19 +105,21 @@ class TestMatchChunks:
         """The contract allows 25; rag.match_chunks raises above 20. Clamping
         here keeps a legal tool call from surfacing as "sources could not be
         consulted"."""
-        await store.match_chunks("[0.1]", top_k=25, min_similarity=None)
+        await store.match_chunks("[0.1]", None, top_k=25, min_similarity=None)
         assert pool.conn.executed[-1][1]["top_k"] == store.MAX_TOP_K
 
     @pytest.mark.asyncio
     async def test_top_k_below_one_is_raised_to_one(self, pool):
-        await store.match_chunks("[0.1]", top_k=0, min_similarity=None)
+        await store.match_chunks("[0.1]", None, top_k=0, min_similarity=None)
         assert pool.conn.executed[-1][1]["top_k"] == 1
 
     @pytest.mark.asyncio
     async def test_rows_are_returned_unchanged(self, monkeypatch):
         fake = FakePool(rows=[{"chunk_id": "c1"}])
         monkeypatch.setattr(store, "_pool", fake)
-        assert await store.match_chunks("[0.1]", top_k=5, min_similarity=None) == [{"chunk_id": "c1"}]
+        assert await store.match_chunks(
+            "[0.1]", None, top_k=5, min_similarity=None
+        ) == [{"chunk_id": "c1"}]
 
 
 class TestIndexSnapshot:
@@ -234,3 +237,45 @@ class TestPoolConstruction:
         # Constructed lazily and then reused; a second call must not rebuild.
         assert await store.open_pool() is pool
         monkeypatch.setattr(store, "_pool", None)
+
+
+class TestOwnership:
+    """Whose documents a search may reach.
+
+    Retrieval was written for one shared public corpus of news. Once users can
+    upload their own files, a document that any other user's query can return
+    is a disclosure, not a bug in a feature. These tests pin the mechanism on
+    the Python side; the SQL side is pinned by 0004 and the permissions test.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_owner_is_passed_to_the_sql_function(self, pool):
+        await store.match_chunks(
+            "[0.1]", "11111111-1111-1111-1111-111111111111",
+            top_k=5, min_similarity=None,
+        )
+        _sql, params = pool.conn.executed[-1]
+        assert params["owner"] == "11111111-1111-1111-1111-111111111111"
+
+    @pytest.mark.asyncio
+    async def test_anonymous_passes_null_rather_than_a_wildcard(self, pool):
+        """There is deliberately no value meaning "everyone's documents".
+        NULL means the public corpus alone, because `owner = NULL` is never
+        true for any row."""
+        await store.match_chunks("[0.1]", None, top_k=5, min_similarity=None)
+        _sql, params = pool.conn.executed[-1]
+        assert params["owner"] is None
+
+    @pytest.mark.asyncio
+    async def test_the_owner_argument_cannot_be_omitted(self, pool):
+        """The whole safety property. A call site that was never updated must
+        break, not quietly widen its results."""
+        with pytest.raises(TypeError):
+            await store.match_chunks("[0.1]", top_k=5, min_similarity=None)
+
+    @pytest.mark.asyncio
+    async def test_the_owner_is_cast_so_a_text_id_cannot_widen_the_match(self, pool):
+        sql, _params = pool.conn.executed[-1] if pool.conn.executed else ("", {})
+        await store.match_chunks("[0.1]", None, top_k=5, min_similarity=None)
+        sql, _ = pool.conn.executed[-1]
+        assert "%(owner)s::uuid" in sql

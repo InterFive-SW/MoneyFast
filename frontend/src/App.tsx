@@ -46,6 +46,7 @@ import FundDetail           from './pages/markets/FundDetail'
 import IndicesScreen        from './pages/markets/IndicesScreen'
 import SectorsScreen        from './pages/markets/SectorsScreen'
 import AnalysesScreen       from './pages/markets/AnalysesScreen'
+import Analiz from './pages/Analiz'
 import GenelBakis from './pages/analiz/GenelBakis'
 import RiskSekmesi from './pages/analiz/RiskSekmesi'
 import Senaryo from './pages/analiz/Senaryo'
@@ -110,19 +111,21 @@ export default function App() {
                 <Route path="transfer" element={<MoneyTransferWizard />} />
                 <Route path="new-card" element={<NewCardWizard />} />
               </Route>
-              {/* main'in sekme kabuğu yok: çocukları bizim Portföy Analizi
-                  menümüzün altında duruyor. */}
-              <Route path="analiz">
+              {/* Kabuk ŞART. Üç sekme de verisini `useAnalysis()` ile
+                  alıyor ve o bir `useOutletContext()`; ebeveyn rotanın
+                  `element`'i olmadan `null` döner ve her sekme
+                  "Cannot destructure property 'analysis' of null" ile
+                  çöker. Birleşme sırasında bu element düşmüştü, dolayısıyla
+                  Analiz hiçbir koşulda açılmıyordu -- "Yeniden dene" yalnızca
+                  aynı ağacı yeniden çizdiği için de kurtarmıyordu.
+
+                  `banking`, `investment` ve `settings` ile aynı desen. */}
+              <Route path="analiz" element={<Analiz />}>
                 <Route index             element={<Navigate to="genel" replace />} />
                 <Route path="genel"      element={<GenelBakis />} />
                 <Route path="risk"       element={<RiskSekmesi />} />
                 <Route path="senaryo"    element={<Senaryo />} />
               </Route>
-              {/* Portföy Analizi ve Risk Analizi tek çatı altında
-                  birleşti. Eski adresler yer imlerinde ve paylaşılan
-                  bağlantılarda duruyor, o yüzden 404 değil yönlendirme. */}
-              <Route path="analytics"  element={<GenelBakis />} />
-              <Route path="senaryo"    element={<Senaryo />} />
               <Route path="investment" element={<Investment />}>
                 <Route index                element={<Navigate to="hisseler" replace />} />
                 <Route path="hisseler"       element={<StocksScreen />}  />
@@ -133,12 +136,17 @@ export default function App() {
                 <Route path="sektorler"      element={<SectorsScreen />} />
                 <Route path="analizler"      element={<AnalysesScreen />} />
               </Route>
-              {/* Risk KENDİ menüsünde kalıyor.
+              {/* Eski adresler yer imlerinde ve paylaşılan bağlantılarda
+                  duruyor, o yüzden 404 değil yönlendirme.
 
-                  main bunu "Analiz" sekmelerinin altına almıştı; bizim
-                  düzenimizde Portföy Analizi ve Risk Analizi ayrı iki menü.
-                  İçerik main'in (`RiskSekmesi`), yeri bizim. */}
-              <Route path="risk"       element={<RiskSekmesi />} />
+                  Kabuğu ikinci kez mount etmek yerine yönlendirme: iki mount
+                  iki `useAnalysisData()` demek olurdu ve menüler arası her
+                  geçiş aynı iki ucu yeniden çekerdi. Ayrı menü öğeleri
+                  kenar çubuğunda duruyor (bkz. Sidebar), ikisi de bu tek
+                  kabuğun sekmelerine iniyor. */}
+              <Route path="analytics" element={<Navigate to="/analiz/genel" replace />} />
+              <Route path="senaryo"   element={<Navigate to="/analiz/senaryo" replace />} />
+              <Route path="risk"      element={<Navigate to="/analiz/risk" replace />} />
 
               {/* Ayarlar #42'den: tek bir sayfa değil, kendi alt sekmeleri
                   olan bir bölüm. */}

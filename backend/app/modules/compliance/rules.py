@@ -95,6 +95,22 @@ RULES: List[Rule] = [
         "Kesinlik iddiasını olasılıksal ve kaynaklı bir ifadeyle değiştirin.",
         replacement="[kesinlik iddiası kaldırıldı]",
     ),
+    Rule(
+        "GUA-003",
+        "Unhedged directional claim",
+        "HIGH",
+        # A forward-looking verb NOT reached by a conditional or a hedge.
+        # `beklenebilir`, `olabilir`, `görünüyor` are excluded because they
+        # ARE the hedge; a bare "yükselecek" is not.
+        r"\b(yüksele|düşe|arta|kazandıra|katlana|getire)(cak|cek)\b"
+        r"(?!\s*(mı|mi|diye|de[mğ]il))"
+        r"(?!.{0,60}(belirlemez|garanti etmez|kesin de[gğ]il|diyemem|diyemez|söyleyemem))",
+        "Çekinceye bağlanmamış yön iddiası, dayanaksız bir performans "
+        "beklentisi yaratır.",
+        "Yön okumasını koşula bağlayın ve geçmiş fiyat hareketinin geleceği "
+        "belirlemediğini aynı cümlede belirtin.",
+        replacement="[çekincesiz yön iddiası kaldırıldı]",
+    ),
     # The pattern is unchanged; the REASON is. The system now stores a
     # declared tolerance (`risk.risk_profiles`), so "we hold no profile" is no
     # longer why this is blocked. The ban survives its original justification

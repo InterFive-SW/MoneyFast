@@ -357,3 +357,73 @@ class TestMissingFundamentalsEndpoint:
             self.URL, headers={"Authorization": "Bearer s3cret"},
         ).json()
         assert body == {"symbols": ["AAPL"]}
+
+
+class TestTechnicalsEndpoint:
+    """`GET /api/market/technicals` — sohbet ile hisse detay sayfasının
+    okuduğu TEK yer. Ayrı hesaplasalardı aynı hisse için farklı bir eğilim
+    söyleyebilirlerdi."""
+
+    URL = "/api/market/technicals"
+
+    def test_an_unknown_symbol_is_an_empty_measurement_not_an_error(
+        self, market_client, mocker
+    ):
+        """"Bu enstrümanın geçmişi yok" bir cevaptır."""
+        mocker.patch.object(market_service, "resolve_symbol", return_value=None)
+
+        body = market_client.get(self.URL, params={"symbol": "YOKBOYLE"}).json()
+
+        assert body["symbol"] == "YOKBOYLE"
+        assert body["narrative"] is None
+        assert body["signals"]["trend"] == "UNKNOWN"
+        assert body["signals"]["observations"] == 0
+
+    def test_it_returns_the_signals_and_the_sentence_together(
+        self, market_client, mocker
+    ):
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            return_value=SimpleNamespace(symbol="AKBNK", currency_code="TRY"),
+        )
+        mocker.patch.object(
+            market_service, "candle_series",
+            return_value=[
+                {"timestamp": f"2026-01-{(i % 28) + 1:02d}", "open": 100.0 + i,
+                 "high": 100.0 + i, "low": 100.0 + i, "close": 100.0 + i,
+                 "volume": 1000}
+                for i in range(260)
+            ],
+        )
+
+        body = market_client.get(self.URL, params={"symbol": "akbnk"}).json()
+
+        assert body["symbol"] == "AKBNK"
+        assert body["currency"] == "TRY"
+        assert body["signals"]["trend"] == "UPTREND"
+        assert body["signals"]["sma_200"] is not None
+        assert "AKBNK" in body["narrative"]
+        assert "yükseliş eğiliminde" in body["narrative"]
+
+    def test_a_short_history_reports_the_gap_rather_than_filling_it(
+        self, market_client, mocker
+    ):
+        """30 barlık bir enstrümanda 200 günlük ortalama YOKTUR."""
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            return_value=SimpleNamespace(symbol="YENI", currency_code="TRY"),
+        )
+        mocker.patch.object(
+            market_service, "candle_series",
+            return_value=[
+                {"timestamp": f"2026-01-{(i % 28) + 1:02d}", "open": 10.0,
+                 "high": 10.0, "low": 10.0, "close": 10.0, "volume": None}
+                for i in range(30)
+            ],
+        )
+
+        body = market_client.get(self.URL, params={"symbol": "YENI"}).json()
+
+        assert body["signals"]["sma_20"] is not None
+        assert body["signals"]["sma_200"] is None
+        assert body["signals"]["volume_vs_average"] is None

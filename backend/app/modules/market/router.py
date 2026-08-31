@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.modules.investment import market_service
-from . import service, stream
+from . import service, stream, technicals
 from .schemas import (
     IngestResult,
     FundamentalsIngestRequest,
@@ -23,6 +23,7 @@ from .schemas import (
     NewsIngestRequest,
     NewsItem,
     QuoteIngestRequest,
+    TechnicalSignalsOut,
 )
 
 log = logging.getLogger("moneyfast.market")
@@ -250,6 +251,47 @@ def get_candles(
         "currency": product.currency_code or "TRY",
         "interval": "1d",
         "candles": market_service.candle_series(db, product.symbol, limit=limit),
+    }
+
+
+@router.get(
+    "/technicals",
+    response_model=TechnicalSignalsOut,
+    summary="Bir enstrümanın teknik göstergeleri ve Türkçe okuması",
+)
+def get_technicals(
+    symbol: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    """
+    Hareketli ortalamalar, RSI, 52 hafta aralığındaki konum ve eğilim.
+
+    Sohbet ile hisse detay sayfası AYNI uç noktayı okuyor. Ayrı hesaplasalardı
+    ikisi aynı hisse için farklı bir eğilim söyleyebilirdi -- risk ölçümünün
+    tek yerde toplanma sebebiyle aynı sebep.
+
+    `narrative` kullanıcıya gösterilecek cümlenin kendisi. Sayıları modele
+    verip "yorumla" demek, aynı göstergelerin her turda biraz farklı
+    anlatılması demekti; hangi durumun hangi ifadeye karşılık geldiği kodda.
+
+    Bilinmeyen sembol boş bir ölçüm döndürür, hata değil.
+    """
+    product = market_service.resolve_symbol(db, symbol)
+    if product is None:
+        return {
+            "symbol": symbol.upper(),
+            "currency": "TRY",
+            "signals": technicals.compute([]),
+            "narrative": None,
+        }
+    # 260 bar: en uzun pencere 200 günlük ortalama, 52 hafta aralığı 252.
+    bars = market_service.candle_series(db, product.symbol, limit=technicals.BARS_NEEDED)
+    signals = technicals.compute(bars)
+    return {
+        "symbol": product.symbol,
+        "currency": product.currency_code or "TRY",
+        "signals": signals,
+        "narrative": technicals.narrate(product.symbol, signals),
     }
 
 

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from app.modules.investment import market_service
@@ -304,6 +305,84 @@ class TestUpsertFundamentals:
         db = self._db("THYAO")
         assert market_service.upsert_fundamentals(db, []) == 0
         assert db.execute.called is False
+
+    def test_every_field_is_both_inserted_and_refreshed(self):
+        """The INSERT payload and the ON CONFLICT update set were two
+        separate literal tuples. A field added to one and not the other is
+        written the day an instrument first appears and never updated again
+        -- correct once, stale forever, and silent about it."""
+        db = self._db("THYAO")
+        market_service.upsert_fundamentals(
+            db, [{"symbol": "THYAO", "operating_margin": -0.026}]
+        )
+        statement = db.execute.call_args.args[0]
+        compiled = statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": False},
+        )
+        # The emitted SQL, not SQLAlchemy internals: the internal structure
+        # of an upsert is not the thing this test is about.
+        sql = str(compiled)
+        insert_clause, _, update_clause = sql.partition("DO UPDATE SET")
+
+        for field in market_service.FUNDAMENTAL_FIELDS:
+            assert field in insert_clause, f"{field} is never inserted"
+            assert field in update_clause, f"{field} is inserted but never refreshed"
+
+    def test_a_negative_margin_is_carried_not_treated_as_missing(self):
+        """An operating LOSS is the most informative thing a margin can say."""
+        db = self._db("THYAO")
+        market_service.upsert_fundamentals(
+            db, [{"symbol": "THYAO", "operating_margin": -0.026}]
+        )
+        values = db.execute.call_args.args[0].compile().params
+        assert values["operating_margin_m0"] == -0.026
+
+
+class TestFundamentalsFor:
+    """One instrument's stored fundamentals, for the page and the chat."""
+
+    def _db(self, row):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.side_effect = [
+            product("THYAO"), row,
+        ]
+        return db
+
+    def test_an_unknown_symbol_has_no_record(self):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = None
+        assert market_service.fundamentals_for(db, "YOKBOYLE") is None
+
+    def test_an_instrument_with_no_row_yet_has_no_record(self):
+        assert market_service.fundamentals_for(self._db(None), "THYAO") is None
+
+    def test_decimals_become_floats(self):
+        """`Numeric()` comes back as Decimal, which does not survive JSON."""
+        from decimal import Decimal
+
+        row = SimpleNamespace(
+            updated_at=NOW,
+            **{f: None for f in market_service.FUNDAMENTAL_FIELDS},
+        )
+        row.operating_margin = Decimal("-0.0260")
+        row.total_revenue = 26_350_999_552
+
+        out = market_service.fundamentals_for(self._db(row), "THYAO")
+
+        assert isinstance(out["operating_margin"], float)
+        assert out["operating_margin"] == pytest.approx(-0.026)
+        assert out["total_revenue"] == 26_350_999_552
+
+    def test_a_missing_field_stays_none(self):
+        """A bank has no gross margin. Reporting 0 would state a fact the
+        company never had."""
+        row = SimpleNamespace(
+            updated_at=NOW,
+            **{f: None for f in market_service.FUNDAMENTAL_FIELDS},
+        )
+        out = market_service.fundamentals_for(self._db(row), "THYAO")
+        assert out["gross_margin"] is None
 
 
 class TestListInstruments:
@@ -934,3 +1013,70 @@ class TestSymbolsWithoutFundamentals:
         db = MagicMock(spec=Session)
         db.execute.return_value.all.return_value = []
         assert market_service.symbols_without_fundamentals(db) == []
+
+
+class TestCalendarRows:
+    """Üç listenin her biri, o alanı GERÇEKTEN olan enstrümanlardan kurulur.
+
+    Verisi olmayanı boş değerlerle listeye koymak, ekranı doldurup içini
+    boşaltır.
+    """
+
+    def _db(self, rows):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = rows
+        return db
+
+    def _pair(self, symbol="THYAO", **fields):
+        base = {f: None for f in market_service.FUNDAMENTAL_FIELDS}
+        base.update(fields)
+        return (product(symbol), SimpleNamespace(**base))
+
+    def test_an_instrument_with_no_consensus_is_left_out(self):
+        rows = [self._pair(analyst_count=13, recommendation_key=None)]
+        assert market_service.calendar_rows(self._db(rows))["analysts"] == []
+
+    def test_a_consensus_without_analysts_is_left_out(self):
+        """Kaç kişinin söylediği bilinmeyen bir konsensüs, kimin söylediği
+        belirsiz bir sayıdır."""
+        rows = [self._pair(recommendation_key="buy", analyst_count=None)]
+        assert market_service.calendar_rows(self._db(rows))["analysts"] == []
+
+    def test_analysts_are_ranked_by_how_many_follow_the_name(self):
+        rows = [
+            self._pair("AAA", recommendation_key="buy", analyst_count=3),
+            self._pair("BBB", recommendation_key="hold", analyst_count=39),
+        ]
+        out = market_service.calendar_rows(self._db(rows))
+        assert [r["symbol"] for r in out["analysts"]] == ["BBB", "AAA"]
+
+    def test_dividends_are_ranked_by_yield(self):
+        rows = [
+            self._pair("AAA", dividend_yield=2.0),
+            self._pair("BBB", dividend_yield=18.0),
+        ]
+        out = market_service.calendar_rows(self._db(rows))
+        assert [r["symbol"] for r in out["dividends"]] == ["BBB", "AAA"]
+
+    def test_a_rate_without_a_yield_still_counts_as_a_dividend(self):
+        rows = [self._pair(dividend_rate=6.88, dividend_yield=None)]
+        assert len(market_service.calendar_rows(self._db(rows))["dividends"]) == 1
+
+    def test_earnings_are_ranked_by_date(self):
+        rows = [
+            self._pair("AAA", earnings_date=datetime(2026, 9, 1, tzinfo=timezone.utc)),
+            self._pair("BBB", earnings_date=datetime(2026, 7, 1, tzinfo=timezone.utc)),
+        ]
+        out = market_service.calendar_rows(self._db(rows))
+        assert [r["symbol"] for r in out["earnings"]] == ["BBB", "AAA"]
+
+    def test_an_instrument_with_no_earnings_date_is_left_out(self):
+        assert market_service.calendar_rows(self._db([self._pair()]))["earnings"] == []
+
+    def test_the_limit_caps_every_list(self):
+        rows = [
+            self._pair(f"S{i}", recommendation_key="buy", analyst_count=i)
+            for i in range(1, 11)
+        ]
+        out = market_service.calendar_rows(self._db(rows), limit=3)
+        assert len(out["analysts"]) == 3

@@ -215,10 +215,82 @@ def fetch_fundamentals(products: Iterable[dict[str, str]]) -> list[dict[str, Any
             "industry": info.get("industry") or None,
             "week52_high": _clean_number(info.get("fiftyTwoWeekHigh")),
             "week52_low": _clean_number(info.get("fiftyTwoWeekLow")),
+
+            # Gelir tablosu ve kârlılık. Aynı `.info` çağrısının atılan
+            # kısmı: yeni istek yok, yeni kota maliyeti yok.
+            "total_revenue": _int_or_none(info.get("totalRevenue")),
+            "revenue_growth": _clean_number(info.get("revenueGrowth")),
+            "gross_margin": _margin(info.get("grossMargins")),
+            "operating_margin": _margin(info.get("operatingMargins")),
+            "ebitda_margin": _margin(info.get("ebitdaMargins")),
+            "profit_margin": _margin(info.get("profitMargins")),
+            "return_on_equity": _clean_number(info.get("returnOnEquity")),
+            "return_on_assets": _clean_number(info.get("returnOnAssets")),
+            "debt_to_equity": _clean_number(info.get("debtToEquity")),
+            "current_ratio": _clean_number(info.get("currentRatio")),
+            "total_debt": _int_or_none(info.get("totalDebt")),
+            "total_cash": _int_or_none(info.get("totalCash")),
+            "free_cash_flow": _int_or_none(info.get("freeCashflow")),
+            "operating_cash_flow": _int_or_none(info.get("operatingCashflow")),
+            "enterprise_value": _int_or_none(info.get("enterpriseValue")),
+            "beta": _clean_number(info.get("beta")),
+            "trailing_eps": _clean_number(info.get("trailingEps")),
+            "forward_eps": _clean_number(info.get("forwardEps")),
+            "forward_pe": _clean_number(info.get("forwardPE")),
+            "earnings_growth": _clean_number(info.get("earningsGrowth")),
+            "payout_ratio": _clean_number(info.get("payoutRatio")),
+            "dividend_rate": _clean_number(info.get("dividendRate")),
+
+            # Analist görüşü: başkasının değerlendirmesi, aktarılabilir bir
+            # olgu. "none" sağlayıcının "görüş yok" yazma biçimi.
+            "recommendation_key": _recommendation(info.get("recommendationKey")),
+            "analyst_count": _int_or_none(info.get("numberOfAnalystOpinions")),
+            "target_mean_price": _clean_number(info.get("targetMeanPrice")),
+
+            "ex_dividend_date": _epoch_to_iso(info.get("exDividendDate")),
+            "earnings_date": _epoch_to_iso(info.get("earningsTimestamp")),
         }
 
     with ThreadPoolExecutor(max_workers=config.fundamentals_workers()) as pool:
         return [row for row in pool.map(one, wanted) if row is not None]
+
+
+def _margin(value: Any) -> Optional[float]:
+    """Bir marj, ya da None. TAM SIFIR yoktur.
+
+    Ölçüldü: AKBNK `grossMargins: 0.0` ve `ebitdaMargins: 0.0` dönüyor --
+    None değil, sıfır. Banka muhasebesinde brüt marj diye bir kalem yok ve
+    sağlayıcı "yok"u sıfır olarak veriyor. Olduğu gibi saklanırsa ekranda
+    "%0,0 brüt marj" yazar: olmayan bir ölçüm, olgu diye sunulmuş olur.
+
+    Gerçek bir şirketin marjı tam 0,0000 çıkmaz; kayıp bilgi, yanlış
+    bilgiden iyidir. `instrument_fundamentals`'ın kendi kuralı bu:
+    "defaulting a missing ratio to zero would make a stock with no earnings
+    data look like the cheapest name on the screen."
+    """
+    number = _clean_number(value)
+    return None if number == 0.0 else number
+
+
+def _recommendation(value: Any) -> Optional[str]:
+    """Analist konsensüsü. Sağlayıcı "görüş yok"u `"none"` diye yazıyor ve o
+    bir tavsiye değil; metin olarak saklanırsa ekranda tavsiye sütununda
+    "none" görünür."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lower()
+    return text or None if text not in ("none", "n/a") else None
+
+
+def _epoch_to_iso(value: Any) -> Optional[str]:
+    """Unix saniyesi -> ISO. Sağlayıcı tarihleri epoch olarak veriyor."""
+    number = _clean_number(value)
+    if number is None or number <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(number, tz=timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _clean_number(value: Any) -> Optional[float]:

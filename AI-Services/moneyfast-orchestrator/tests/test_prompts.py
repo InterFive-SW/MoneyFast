@@ -223,6 +223,64 @@ def test_expectation_management_rejection_is_present():
     assert "**Kimse size kazandırır diyemez.**" in flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
 
 
+def test_the_rejection_is_followed_by_analysis_not_a_menu():
+    """Ölçülen davranış: reddettikten sonra "neye bakabiliriz" diye bir
+    metrik listesi sunup hangisini istediğini soruyordu. Kullanıcı analiz
+    istedi, liste aldı."""
+    prompt = _unwrapped()
+
+    assert "Then GIVE THE ANALYSIS." in prompt
+    assert "Do not offer a menu of things you could look at" in prompt
+    assert "**Artış lehine**" in prompt
+    assert "**Düşüş lehine**" in prompt
+
+
+def test_a_side_is_never_padded_to_look_balanced():
+    """Her şeyin tek yönü gösterdiği bir tablo gerçek bir şeydir; onu
+    berabere gibi sunmak tarafsızlık değil, çarpıtmadır."""
+    assert "Never pad a side to make the two look balanced" in _unwrapped()
+
+
+def test_mechanism_questions_are_answerable():
+    """"Savaş çıkarsa ne olur" fiyatın NEREYE gideceğini değil, etkinin
+    NASIL taşınacağını sorar. İkincisi yasak, birincisi sorunun kendisi."""
+    prompt = _unwrapped()
+
+    assert "SCENARIO AND MECHANISM" in prompt
+    assert "these ask HOW something would transmit, not WHERE the price lands" in prompt
+    assert "Bu varsayımsal bir senaryo" in prompt
+
+
+def test_an_unquantified_mechanism_is_labelled_not_invented():
+    """Anlatılabilen ama ölçülemeyen bir mekanizma hâlâ söylenmeye değer;
+    uydurulan bir sayı değil."""
+    prompt = _unwrapped()
+
+    assert "say the mechanism is general rather than measured" in prompt
+    assert "A mechanism you can describe but not quantify is still worth saying" in prompt
+
+
+def test_leaning_is_permitted_and_bounded():
+    """İzin verilen şey verinin hangi tarafa ağır bastığını söylemek; ne
+    yapılacağını söylemek değil."""
+    prompt = _unwrapped()
+
+    assert "You may say which way the evidence leans." in prompt
+    assert "That is a statement about the DATA" in prompt
+    # Sınır, tek tek sayılarak duruyor.
+    for forbidden in (
+        "what to buy, sell, hold or avoid",
+        "whether this suits the user",
+        "a position size, an allocation, or a moment to act",
+        "a target price",
+    ):
+        assert forbidden in prompt, forbidden
+
+
+def test_a_verdict_is_not_manufactured_when_the_data_has_none():
+    assert "Manufacturing a verdict to sound decisive is the same failure" in _unwrapped()
+
+
 def test_five_onboarding_steps_are_present_in_order():
     prompt = prompts.ORCHESTRATOR_SYSTEM_PROMPT
     prompt = flat(prompt)

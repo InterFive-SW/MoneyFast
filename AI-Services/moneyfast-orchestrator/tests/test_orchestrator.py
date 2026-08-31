@@ -2841,3 +2841,211 @@ class TestHandoffCategoryVocabulary:
         for category in set(orchestrator._FLAG_SYNONYMS.values()) | {"GENERIC_DISTRESS"}:
             assert category in orchestrator._HANDOFF_INSTRUCTIONS, category
             assert category in orchestrator._CATEGORY_NOTICES, category
+
+
+class TestResearchCarriesTheCaller:
+    """The uploaded-document half of retrieval.
+
+    `market_research_node` is the only place a search is issued, so it is the
+    only place the caller's identity can be attached. Without it every search
+    is anonymous and a user's own uploads are invisible to them.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_signed_in_turn_forwards_the_user(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["rag_semantic_market_search"] = {"results": [{"chunk_id": "c1"}]}
+        patched_llm.set_response("{}")
+
+        await orchestrator.market_research_node(
+            {**base_state, "user_id": "11111111-1111-1111-1111-111111111111"}
+        )
+
+        assert fake_mcp.calls[0][1]["user_id"] == (
+            "11111111-1111-1111-1111-111111111111"
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_anonymous_turn_sends_none_not_the_unknown_sentinel(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """The other nodes fall back to the string "unknown". Here that would
+        be a user id that matches nobody -- which reads as a narrowing filter
+        rather than as "there is no one here", and hides the difference
+        between the two from anything downstream."""
+        fake_mcp.responses["rag_semantic_market_search"] = {"results": [{"chunk_id": "c1"}]}
+        patched_llm.set_response("{}")
+
+        await orchestrator.market_research_node({**base_state, "user_id": None})
+
+        assert fake_mcp.calls[0][1]["user_id"] is None
+
+
+class TestOwnDocumentsGetTheirOwnSlots:
+    """Kullanıcının yüklediği belge, haberle aynı sıralamada yarışmaz.
+
+    Ölçüldü: bir kullanıcı bilanço tablosu yükledi ve "EBITDA marjı ve
+    hasılat" sorgusu belgeyi HİÇ döndürmedi. Belge 0,605 benzerlikle
+    eşleşiyordu; binlerce haber parçası arasında ilk yirmiye giremiyordu.
+    Kendi yüklediği dosyayı bir daha göremeyen bir yükleme özelliği,
+    çalışmayan bir özelliktir.
+    """
+
+    def _plan(self, patched_llm):
+        patched_llm.set_response("{}")
+
+    @pytest.mark.asyncio
+    async def test_a_second_search_is_scoped_to_the_users_uploads(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        self._plan(patched_llm)
+        fake_mcp.responses["rag_semantic_market_search"] = {
+            "results": [{"chunk_id": "news-1"}]
+        }
+
+        await orchestrator.market_research_node({**base_state, "user_id": "u-1"})
+
+        assert len(fake_mcp.calls) == 2
+        _, second = fake_mcp.calls[1]
+        assert second["filters"] == {
+            "categories": [orchestrator.OWN_DOCUMENT_CATEGORY]
+        }
+        assert second["top_k"] == orchestrator.OWN_DOCUMENT_SLOTS
+
+    @pytest.mark.asyncio
+    async def test_own_documents_come_first_and_news_is_not_dropped(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Kullanıcının kendi dosyası, sorduğu soruya cevap veren kaynakların
+        en olası olanı -- ama haberin yerini almıyor, önüne ekleniyor."""
+        self._plan(patched_llm)
+        fake_mcp.responses["rag_semantic_market_search"] = [
+            {"results": [{"chunk_id": "news-1"}, {"chunk_id": "news-2"}]},
+            {"results": [{"chunk_id": "doc-1"}]},
+        ]
+
+        out = await orchestrator.market_research_node(
+            {**base_state, "user_id": "u-1"}
+        )
+
+        ids = [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]]
+        assert ids == ["doc-1", "news-1", "news-2"]
+
+    @pytest.mark.asyncio
+    async def test_a_chunk_found_by_both_searches_appears_once(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        self._plan(patched_llm)
+        fake_mcp.responses["rag_semantic_market_search"] = [
+            {"results": [{"chunk_id": "doc-1"}, {"chunk_id": "news-1"}]},
+            {"results": [{"chunk_id": "doc-1"}]},
+        ]
+
+        out = await orchestrator.market_research_node(
+            {**base_state, "user_id": "u-1"}
+        )
+
+        ids = [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]]
+        assert ids == ["doc-1", "news-1"]
+
+    @pytest.mark.asyncio
+    async def test_an_empty_news_search_is_no_longer_empty(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Haberde bir şey çıkmadı ama kullanıcının belgesi cevap veriyor.
+        "Kaynak bulunamadı" demek yanlış olurdu."""
+        self._plan(patched_llm)
+        fake_mcp.responses["rag_semantic_market_search"] = [
+            {"results": []},
+            {"results": [{"chunk_id": "doc-1"}]},
+        ]
+
+        out = await orchestrator.market_research_node(
+            {**base_state, "user_id": "u-1"}
+        )
+
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_an_anonymous_turn_makes_only_one_search(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        self._plan(patched_llm)
+        fake_mcp.responses["rag_semantic_market_search"] = {"results": [{"chunk_id": "c1"}]}
+
+        await orchestrator.market_research_node({**base_state, "user_id": None})
+
+        assert len(fake_mcp.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_uploaded_documents_leaves_the_result_alone(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        self._plan(patched_llm)
+        fake_mcp.responses["rag_semantic_market_search"] = [
+            {"results": [{"chunk_id": "news-1"}]},
+            {"results": []},
+        ]
+
+        out = await orchestrator.market_research_node(
+            {**base_state, "user_id": "u-1"}
+        )
+
+        ids = [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]]
+        assert ids == ["news-1"]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_news_search_is_not_papered_over(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """"Kaynaklara ulaşılamadı" gerçek bir kesintiyi bildiriyor; onu
+        kullanıcının kendi belgesiyle örtmek, çalışmayan bir kaynağı
+        çalışıyor gibi göstermek olur."""
+        self._plan(patched_llm)
+        fake_mcp.responses["rag_semantic_market_search"] = MCPUnavailable("down")
+
+        out = await orchestrator.market_research_node(
+            {**base_state, "user_id": "u-1"}
+        )
+
+        assert out["specialist_output"]["status"] == "ERROR"
+        # İkinci arama hiç denenmedi.
+        assert len(fake_mcp.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_failed_own_document_search_keeps_the_news(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """İkincil bir arama turu düşürmemeli: haber sonucu elde."""
+        self._plan(patched_llm)
+        # Kuyruk: birinci çağrı haberi döner, ikincisi patlar.
+        fake_mcp.responses["rag_semantic_market_search"] = [
+            {"results": [{"chunk_id": "news-1"}]},
+            MCPUnavailable("gone"),
+        ]
+
+        out = await orchestrator.market_research_node(
+            {**base_state, "user_id": "u-1"}
+        )
+
+        ids = [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]]
+        assert ids == ["news-1"]
+
+    @pytest.mark.asyncio
+    async def test_personal_documents_use_their_own_threshold(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """0,45 haber için doğru: binlerce parçada alakasızı elemek gerekiyor.
+        Kişisel belgelerde elenecek bir sel yok -- ve o eşik, kullanıcının
+        kendi yüklediği dosyayı kendi cümlesiyle sorduğunda (ölçülen: 0,289)
+        eliyordu."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["rag_semantic_market_search"] = {"results": [{"chunk_id": "c1"}]}
+
+        await orchestrator.market_research_node({**base_state, "user_id": "u-1"})
+
+        _, news = fake_mcp.calls[0]
+        _, own = fake_mcp.calls[1]
+        assert own["min_similarity"] < news["min_similarity"]
+        assert own["min_similarity"] == orchestrator.OWN_DOCUMENT_MIN_SIMILARITY

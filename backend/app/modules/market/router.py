@@ -24,6 +24,8 @@ from .schemas import (
     NewsItem,
     QuoteIngestRequest,
     TechnicalSignalsOut,
+    FundamentalsOut,
+    MarketCalendarOut,
 )
 
 log = logging.getLogger("moneyfast.market")
@@ -251,6 +253,50 @@ def get_candles(
         "currency": product.currency_code or "TRY",
         "interval": "1d",
         "candles": market_service.candle_series(db, product.symbol, limit=limit),
+    }
+
+
+@router.get(
+    "/calendar",
+    response_model=MarketCalendarOut,
+    summary="Analist konsensüsü, temettü ve bilanço takvimi",
+)
+def get_calendar(
+    limit: int = Query(default=40, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """"Analizler" ekranının üç listesi.
+
+    Enstrüman başına ayrı istek yerine tek sorgu: ekran otuz satır gösteriyor
+    ve otuz istek atmak, göstereceği şeyden pahalı olurdu.
+    """
+    return market_service.calendar_rows(db, limit=limit)
+
+
+@router.get(
+    "/fundamentals",
+    response_model=FundamentalsOut,
+    summary="Bir enstrümanın temel verisi ve kârlılık oranları",
+)
+def get_fundamentals(
+    symbol: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    """
+    Gelir tablosu, marjlar, kârlılık, borç ve analist konsensüsü.
+
+    Sohbet ile Piyasalar ekranları AYNI uç noktayı okuyor. Bilinmeyen sembol
+    ya da henüz çekilmemiş temel veri, boş bir kayıt döndürür -- hata değil:
+    "bu enstrümanın temel verisi yok" bir cevaptır ve ekran onu boş
+    çizebilir.
+    """
+    product = market_service.resolve_symbol(db, symbol)
+    if product is None:
+        return {"symbol": symbol.upper()}
+    return market_service.fundamentals_for(db, product.symbol) or {
+        "symbol": product.symbol,
+        "name": product.name,
+        "currency": product.currency_code or "TRY",
     }
 
 

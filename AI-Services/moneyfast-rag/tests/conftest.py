@@ -66,8 +66,13 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "ping": True,
     }
 
-    async def _match_chunks(query_vector, **kwargs):
-        state["calls"].append({"vector": query_vector, **kwargs})
+    async def _match_chunks(query_vector, owner_user_id, **kwargs):
+        # `owner_user_id` is positional here for the same reason it is
+        # positional in the real signature and in the SQL function: a caller
+        # that forgets it must fail, not silently search everything.
+        state["calls"].append(
+            {"vector": query_vector, "owner_user_id": owner_user_id, **kwargs}
+        )
         return state["rows"]
 
     async def _index_snapshot():
@@ -77,6 +82,10 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         if state["ping"] is not True:
             raise state["ping"]
         return True
+
+    async def _delete_document(document_id, owner_user_id):
+        state["deleted"] = {"document_id": document_id, "owner": owner_user_id}
+        return state.get("delete_result", True)
 
     async def _ingest(conn_factory, document, chunks):
         state["ingested"] = {"document": document, "chunks": chunks}
@@ -89,6 +98,7 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return None
 
     monkeypatch.setattr(store, "match_chunks", _match_chunks)
+    monkeypatch.setattr(store, "delete_document", _delete_document)
     monkeypatch.setattr(store, "index_snapshot", _index_snapshot)
     monkeypatch.setattr(store, "ping", _ping)
     monkeypatch.setattr(store, "ingest", _ingest)

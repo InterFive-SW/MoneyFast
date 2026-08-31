@@ -11,6 +11,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Iterable, Optional
 
 from sqlalchemy import false, func, select
@@ -460,6 +461,30 @@ def upsert_quotes(db: Session, rows: list[dict[str, Any]]) -> int:
     return len(payload)
 
 
+#: Every fundamentals column the provider fills, in one place.
+#:
+#: Listed once rather than twice: the INSERT payload and the ON CONFLICT
+#: update set were separate literal tuples, and adding a column to one and
+#: not the other writes the value on first insert and then never refreshes
+#: it -- a field that is correct the day an instrument is added and stale
+#: forever after.
+FUNDAMENTAL_FIELDS = (
+    "pe_ratio", "pb_ratio", "market_cap", "dividend_yield",
+    "sector", "industry", "week52_high", "week52_low",
+    # 0027: income statement and profitability.
+    "total_revenue", "revenue_growth",
+    "gross_margin", "operating_margin", "ebitda_margin", "profit_margin",
+    "return_on_equity", "return_on_assets",
+    "debt_to_equity", "current_ratio",
+    "total_debt", "total_cash", "free_cash_flow", "operating_cash_flow",
+    "enterprise_value", "beta",
+    "trailing_eps", "forward_eps", "forward_pe", "earnings_growth",
+    "payout_ratio", "dividend_rate",
+    "recommendation_key", "analyst_count", "target_mean_price",
+    "ex_dividend_date", "earnings_date",
+)
+
+
 def upsert_fundamentals(db: Session, rows: list[dict[str, Any]]) -> int:
     """Refresh valuation ratios. Missing values are written as NULL.
 
@@ -488,14 +513,7 @@ def upsert_fundamentals(db: Session, rows: list[dict[str, Any]]) -> int:
             {
                 "id": str(uuid.uuid4()),
                 "product_id": product_id,
-                "pe_ratio": row.get("pe_ratio"),
-                "pb_ratio": row.get("pb_ratio"),
-                "market_cap": row.get("market_cap"),
-                "dividend_yield": row.get("dividend_yield"),
-                "sector": row.get("sector"),
-                "industry": row.get("industry"),
-                "week52_high": row.get("week52_high"),
-                "week52_low": row.get("week52_low"),
+                **{field: row.get(field) for field in FUNDAMENTAL_FIELDS},
                 "updated_at": datetime.now(timezone.utc),
             }
         )
@@ -507,8 +525,7 @@ def upsert_fundamentals(db: Session, rows: list[dict[str, Any]]) -> int:
         constraint="uq_instrument_fundamentals_product",
         set_={
             key: getattr(statement.excluded, key)
-            for key in ("pe_ratio", "pb_ratio", "market_cap", "dividend_yield",
-                        "sector", "industry", "week52_high", "week52_low", "updated_at")
+            for key in FUNDAMENTAL_FIELDS + ("updated_at",)
         },
     )
     db.execute(statement)
@@ -635,6 +652,103 @@ def market_heatmap(
         # haritayı olduğundan küçük gösterir ve kimse sebebini bilmez.
         "missing": missing,
     }
+
+def fundamentals_for(db: Session, symbol: str) -> Optional[dict[str, Any]]:
+    """Every stored fundamental for one instrument, or None if unknown.
+
+    Kept OUT of `/market/instruments`: that payload is the frozen v2.2 MCP
+    contract and it answers "what is this worth", once, for a list. These are
+    thirty-odd fields about one company and most screens need none of them --
+    the same reasoning that put the technical signals on their own endpoint.
+
+    Missing stays missing. A bank has no gross margin, and rendering that as
+    0 would report a fact the company never had.
+    """
+    product = get_product(db, symbol)
+    if product is None:
+        return None
+    row = (
+        db.query(InstrumentFundamentals)
+        .filter(InstrumentFundamentals.product_id == product.id)
+        .first()
+    )
+    if row is None:
+        return None
+    out: dict[str, Any] = {
+        "symbol": product.symbol,
+        "name": product.name,
+        "currency": product.currency_code or "TRY",
+        "updated_at": row.updated_at,
+    }
+    for field in FUNDAMENTAL_FIELDS:
+        value = getattr(row, field, None)
+        # Numeric() comes back as Decimal, which is not JSON-serialisable and
+        # would be rendered by Pydantic as a string in some configurations.
+        out[field] = float(value) if isinstance(value, Decimal) else value
+    return out
+
+
+def calendar_rows(db: Session, limit: int = 40) -> dict[str, list[dict[str, Any]]]:
+    """Analist konsensüsü, temettü ve bilanço takvimi — evren genelinde.
+
+    "Analizler" ekranı bugün `mockData.ts` okuyor. Bu üç liste, her enstrüman
+    için ayrı ayrı sorulmak yerine tek sorguda geliyor: ekran otuz satır
+    gösteriyor ve otuz istek atmak, göstereceği şeyden pahalı olurdu.
+
+    Her liste, o alanı GERÇEKTEN olan enstrümanlardan kuruluyor. Verisi
+    olmayanı boş değerlerle listeye koymak, ekranı doldurup içini boşaltır.
+    """
+    rows = db.execute(
+        select(InvestmentProduct, InstrumentFundamentals)
+        .join(
+            InstrumentFundamentals,
+            InstrumentFundamentals.product_id == InvestmentProduct.id,
+        )
+    ).all()
+
+    analysts: list[dict[str, Any]] = []
+    dividends: list[dict[str, Any]] = []
+    earnings: list[dict[str, Any]] = []
+
+    for product, f in rows:
+        base = {
+            "symbol": product.symbol,
+            "name": product.name,
+            "currency": product.currency_code or "TRY",
+        }
+        # Analist görüşü BAŞKASININ değerlendirmesi. Konsensüs adı olmadan
+        # yalnızca hedef fiyat göstermek, kimin söylediği belirsiz bir sayı
+        # bırakır.
+        if f.recommendation_key and f.analyst_count:
+            analysts.append({
+                **base,
+                "recommendation": f.recommendation_key,
+                "analyst_count": f.analyst_count,
+                "target_mean_price": _opt_float(f, "target_mean_price"),
+            })
+        if f.dividend_yield or f.dividend_rate:
+            dividends.append({
+                **base,
+                "dividend_yield": _opt_float(f, "dividend_yield"),
+                "dividend_rate": _opt_float(f, "dividend_rate"),
+                "payout_ratio": _opt_float(f, "payout_ratio"),
+                "ex_dividend_date": f.ex_dividend_date,
+            })
+        if f.earnings_date:
+            earnings.append({**base, "earnings_date": f.earnings_date})
+
+    # Sıralama her listede kendi anlamına göre: en çok analistin izlediği,
+    # en yüksek verimli, en yakın bilanço.
+    analysts.sort(key=lambda r: r["analyst_count"], reverse=True)
+    dividends.sort(key=lambda r: r["dividend_yield"] or 0, reverse=True)
+    earnings.sort(key=lambda r: r["earnings_date"])
+
+    return {
+        "analysts": analysts[:limit],
+        "dividends": dividends[:limit],
+        "earnings": earnings[:limit],
+    }
+
 
 def symbols_without_fundamentals(db: Session) -> list[str]:
     """Temel verisi hiç olmayan enstrümanlar.

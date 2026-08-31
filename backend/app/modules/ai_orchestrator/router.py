@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,10 @@ from app.core.database import get_db
 from app.core.deps import get_current_user_id
 from . import service
 from .deps import ChatIdentity, resolve_chat_identity
+from . import document_service, documents
 from .schemas import (
+    ChatDocumentListOut,
+    ChatDocumentOut,
     ChatRequest,
     ChatResponse,
     ConversationDetailOut,
@@ -333,3 +336,89 @@ def delete_conversation(
     if not service.delete_conversation(db, user_id, thread_id):
         raise HTTPException(status_code=404, detail="Sohbet bulunamadı.")
     return DeletedConversationOut(thread_id=thread_id)
+
+
+# ---------------------------------------------------------------------------
+# Yüklenen belgeler
+# ---------------------------------------------------------------------------
+#
+# Sohbete eklenen dosya: metni çıkarılır, KULLANICI SAHİPLİĞİYLE gömülür ve
+# burada kaydedilir. Gömülü kopya yalnızca yükleyenin aramalarında çıkar
+# (vector-migrations 0004); paylaşılan haber derlemine karışmaz.
+
+
+@router.post(
+    "/documents",
+    response_model=ChatDocumentOut,
+    status_code=201,
+    summary="Sohbete belge yükle",
+)
+def upload_document(
+    file: UploadFile = File(...),
+    thread_id: Optional[str] = Form(None),
+    identity: ChatIdentity = Depends(resolve_chat_identity),
+    db: Session = Depends(get_db),
+):
+    """PDF, Excel, CSV, PowerPoint ya da düz metin.
+
+    Anonim yükleme YOK. Belgenin bir sahibi olmadan gömülmesi, onu paylaşılan
+    derleme koymak demek; sahibi olmayan bir belge de silinemez.
+    """
+    if not identity.user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Belge yüklemek için oturum açmanız gerekiyor.",
+        )
+
+    record = document_service.store(
+        db,
+        user_id=identity.user_id,
+        thread_id=thread_id,
+        filename=file.filename or "belge",
+        payload=file.file.read(),
+    )
+    return document_service.as_dict(record)
+
+
+@router.get(
+    "/documents",
+    response_model=ChatDocumentListOut,
+    summary="Yüklediğim belgeler",
+)
+def list_documents(
+    identity: ChatIdentity = Depends(resolve_chat_identity),
+    db: Session = Depends(get_db),
+):
+    """Yalnızca çağıranın kendi belgeleri.
+
+    Anonim çağıran boş liste alır, 401 değil: yüklediği bir şey yoktur ve
+    "belgeniz yok" doğru cevaptır.
+    """
+    records = (
+        document_service.listing(db, identity.user_id) if identity.user_id else []
+    )
+    return {
+        "documents": [document_service.as_dict(record) for record in records],
+        "accepted": sorted(documents.SUPPORTED),
+        "max_bytes": documents.MAX_UPLOAD_BYTES,
+    }
+
+
+@router.delete(
+    "/documents/{document_id}",
+    status_code=204,
+    summary="Yüklediğim bir belgeyi sil",
+)
+def delete_document(
+    document_id: str,
+    identity: ChatIdentity = Depends(resolve_chat_identity),
+    db: Session = Depends(get_db),
+):
+    """Belgeyi hem listeden hem aramadan kaldırır.
+
+    Yalnızca birini silmek, kullanıcının sildiğini sandığı ve hâlâ okunan
+    bir dosya bırakırdı.
+    """
+    if not identity.user_id:
+        raise HTTPException(status_code=401, detail="Oturum açmanız gerekiyor.")
+    document_service.delete(db, identity.user_id, document_id)

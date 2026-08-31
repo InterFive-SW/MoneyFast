@@ -92,6 +92,10 @@ class ContextTurn(BaseModel):
 
 
 class SearchRequest(BaseModel):
+    #: Whose private documents may be searched alongside the public corpus.
+    #: Absent means anonymous, which is the public corpus alone -- never
+    #: "everyone's". There is deliberately no value that means the latter.
+    owner_user_id: Optional[str] = None
     query: str
     conversation_context: Optional[list[ContextTurn]] = None
     top_k: int = 8
@@ -101,6 +105,9 @@ class SearchRequest(BaseModel):
 
 
 class IngestDocument(BaseModel):
+    #: NULL = public corpus (news). Non-NULL = private to that one user and
+    #: retrievable by nobody else.
+    owner_user_id: Optional[str] = None
     title: str
     source: str
     category: str
@@ -247,6 +254,7 @@ async def search(request: SearchRequest) -> dict[str, Any]:
     try:
         rows = await store.match_chunks(
             vector,
+            request.owner_user_id,
             top_k=request.top_k,
             min_similarity=request.min_similarity,
             tickers=filters.get("tickers"),
@@ -278,6 +286,28 @@ async def search(request: SearchRequest) -> dict[str, Any]:
         "results": [_row_to_result(row) for row in rows],
         "query_echo": resolved,
     }
+
+
+@app.delete("/documents/{document_id}")
+async def delete_document(document_id: str, owner_user_id: str) -> dict[str, Any]:
+    """Kullanıcının kendi belgesini derlemden kaldırır.
+
+    `owner_user_id` ZORUNLU bir sorgu parametresi. Opsiyonel olsaydı, onu
+    göndermeyen bir çağrı sahiplik denetimi olmadan silme yapardı -- ve o
+    çağrıyı yazmak, unutmak kadar kolay olurdu.
+    """
+    try:
+        deleted = await store.delete_document(document_id, owner_user_id)
+    except Exception as exc:
+        log.exception("document deletion failed")
+        raise HTTPException(status_code=503, detail=f"vector store unavailable: {exc}")
+
+    if not deleted:
+        # Başkasının belgesi ile hiç olmayan belge AYNI cevabı alıyor: ikisini
+        # ayırmak, id deneyerek başka kullanıcıların belgelerinin varlığını
+        # keşfetmeye izin verirdi.
+        raise HTTPException(status_code=404, detail="document not found")
+    return {"status": "deleted", "document_id": document_id}
 
 
 @app.post("/ingest")
@@ -314,6 +344,7 @@ async def ingest(document: IngestDocument) -> dict[str, Any]:
             "period": document.period,
             "published_at": document.published_at,
             "content_hash": content_hash,
+            "owner_user_id": document.owner_user_id,
         },
         triples,
     )

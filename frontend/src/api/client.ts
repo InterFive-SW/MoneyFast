@@ -246,6 +246,115 @@ export interface TechnicalSignalsOut {
     narrative: string | null;
 }
 
+/**
+ * Bir enstrümanın saklanan temel verisi.
+ *
+ * Her alan null olabilir ve null "sağlayıcı bunu yayımlamıyor" demek,
+ * SIFIR değil. Bankanın brüt marjı yoktur.
+ */
+export interface FundamentalsOut {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    updated_at: string | null;
+
+    pe_ratio: number | null;
+    pb_ratio: number | null;
+    market_cap: number | null;
+    dividend_yield: number | null;
+    sector: string | null;
+    industry: string | null;
+    week52_high: number | null;
+    week52_low: number | null;
+
+    total_revenue: number | null;
+    revenue_growth: number | null;
+    gross_margin: number | null;
+    operating_margin: number | null;
+    ebitda_margin: number | null;
+    profit_margin: number | null;
+    return_on_equity: number | null;
+    return_on_assets: number | null;
+    debt_to_equity: number | null;
+    current_ratio: number | null;
+    total_debt: number | null;
+    total_cash: number | null;
+    free_cash_flow: number | null;
+    operating_cash_flow: number | null;
+    enterprise_value: number | null;
+    beta: number | null;
+    trailing_eps: number | null;
+    forward_eps: number | null;
+    forward_pe: number | null;
+    earnings_growth: number | null;
+    payout_ratio: number | null;
+    dividend_rate: number | null;
+
+    /** Analist konsensüsü: BAŞKASININ değerlendirmesi. */
+    recommendation_key: string | null;
+    analyst_count: number | null;
+    target_mean_price: number | null;
+
+    ex_dividend_date: string | null;
+    earnings_date: string | null;
+}
+
+/** Analist konsensüsü: BAŞKASININ değerlendirmesi, ürünün kendi görüşü değil. */
+export interface AnalystRow {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    recommendation: string;
+    analyst_count: number;
+    target_mean_price: number | null;
+}
+
+export interface DividendRow {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    dividend_yield: number | null;
+    dividend_rate: number | null;
+    payout_ratio: number | null;
+    ex_dividend_date: string | null;
+}
+
+export interface EarningsRow {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    earnings_date: string;
+}
+
+export interface MarketCalendar {
+    analysts: AnalystRow[];
+    dividends: DividendRow[];
+    earnings: EarningsRow[];
+}
+
+/** Kullanıcının sohbete yüklediği bir belge, listede göründüğü hâliyle. */
+export interface ChatDocument {
+    id: string;
+    filename: string;
+    /** PDF / Excel / CSV / PowerPoint / Metin. */
+    kind: string;
+    size_bytes: number;
+    /** PDF'te sayfa, tabloda satır, sunumda slayt. */
+    units: number | null;
+    char_count: number | null;
+    /** Metin tavana takıldıysa doğru. */
+    truncated: boolean;
+    created_at: string;
+}
+
+export interface ChatDocumentList {
+    documents: ChatDocument[];
+    /** Kabul edilen uzantılar. Dosya seçici bunu okuyor: iki listenin
+     *  ayrışması, seçilebilen ama reddedilen bir dosya demek. */
+    accepted: string[];
+    max_bytes: number;
+}
+
 export type RiskLookback = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX';
 
 /** Anket soruları. Puanlar istemciye HİÇ gelmez: seçeneğin ağırlığını
@@ -371,11 +480,18 @@ class ApiClient {
      */
     private refreshInFlight: Promise<boolean> | null = null;
 
-    private authHeaders(): Record<string, string> {
+    /**
+     * @param body Gönderilecek gövde. `FormData` ise Content-Type
+     *   KURULMAZ: multipart sınırını (`boundary=...`) tarayıcı üretiyor ve
+     *   elle yazılan bir başlık onu ezerek gövdeyi sunucu tarafında
+     *   ayrıştırılamaz hâle getirir.
+     */
+    private authHeaders(body?: BodyInit | null): Record<string, string> {
         const token = localStorage.getItem('access_token');
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-        };
+        const headers: Record<string, string> = {};
+        if (!(body instanceof FormData)) {
+            headers['Content-Type'] = 'application/json';
+        }
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;
         }
@@ -413,7 +529,8 @@ class ApiClient {
      * önerileri hazırlamaya devam ediyordu.
      */
     private async authedFetch(fullUrl: string, init: RequestInit): Promise<Response> {
-        const send = () => fetch(fullUrl, { ...init, headers: this.authHeaders() });
+        const send = () =>
+            fetch(fullUrl, { ...init, headers: this.authHeaders(init.body) });
         let response = await send();
         // Giriş ve yenileme uçlarının 401'i normaldir: yanlış şifre ya da
         // ölmüş bir yenileme token'ı. Onları tazelemeye çalışmak döngü olur.
@@ -595,10 +712,58 @@ class ApiClient {
     /** Bir enstrümanın teknik görünümü. Sohbet ile hisse detay sayfası AYNI
      *  uç noktayı okuyor; ayrı hesaplasalardı aynı hisse için farklı bir
      *  eğilim söyleyebilirlerdi. */
+    /** Bir enstrümanın gelir tablosu, marjları ve analist konsensüsü.
+     *  `/market/instruments`'ten ayrı: o dondurulmuş v2.2 sözleşmesi ve bir
+     *  LİSTE için "bu ne ediyor" sorusunu yanıtlıyor. */
+    getFundamentals(symbol: string) {
+        return this.request<FundamentalsOut>(
+            `/market/fundamentals?symbol=${encodeURIComponent(symbol)}`,
+        );
+    }
+
+    /** "Analizler" ekranının üç listesi, tek çağrıda. */
+    getMarketCalendar(limit?: number) {
+        const suffix = limit === undefined ? '' : `?limit=${limit}`;
+        return this.request<MarketCalendar>(`/market/calendar${suffix}`);
+    }
+
     getTechnicalSignals(symbol: string) {
         return this.request<TechnicalSignalsOut>(
             `/market/technicals?symbol=${encodeURIComponent(symbol)}`,
         );
+    }
+
+    // ---- Sohbete yüklenen belgeler --------------------------------------
+
+    /** Bir dosyayı yükler. Metni çıkarılır ve KULLANICIYA AİT olarak gömülür;
+     *  yalnızca yükleyenin aramalarında çıkar. */
+    async uploadChatDocument(file: File, threadId?: string): Promise<ChatDocument> {
+        const form = new FormData();
+        form.append('file', file);
+        if (threadId) form.append('thread_id', threadId);
+
+        // `authedFetch` gövdeyi olduğu gibi geçiriyor; Content-Type ELLE
+        // KURULMUYOR. multipart sınırını tarayıcı üretir ve elle yazılan bir
+        // başlık onu ezip gövdeyi ayrıştırılamaz hâle getirir.
+        const response = await this.authedFetch(
+            `${this.baseUrl}/ai_orchestrator/documents`,
+            { method: 'POST', body: form },
+        );
+        if (!response.ok) throw new Error(await describeError(response));
+        return response.json();
+    }
+
+    getChatDocuments() {
+        return this.request<ChatDocumentList>('/ai_orchestrator/documents');
+    }
+
+    /** Belgeyi hem listeden hem aramadan kaldırır. */
+    async deleteChatDocument(id: string): Promise<void> {
+        const response = await this.authedFetch(
+            `${this.baseUrl}/ai_orchestrator/documents/${encodeURIComponent(id)}`,
+            { method: 'DELETE' },
+        );
+        if (!response.ok) throw new Error(await describeError(response));
     }
 
     getRiskHistory(days?: number) {

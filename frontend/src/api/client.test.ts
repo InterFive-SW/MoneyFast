@@ -12,10 +12,14 @@ import { apiClient } from './client'
 /** onSessionExpired is a static, so it is reached through the constructor. */
 const ApiClientClass = apiClient.constructor as unknown as { onSessionExpired(): void }
 
-function mockFetch(body: unknown = {}, ok = true) {
+function mockFetch(body: unknown = {}, ok: boolean | number = true) {
+  // `ok` bir sayı olarak da verilebiliyor: 415 ile 503 farklı şeyler ve
+  // hepsini 500 diye taklit etmek, durum koduna bakan bir dalı test
+  // edilemez yapardı.
+  const status = typeof ok === 'number' ? ok : ok ? 200 : 500
   const fn = vi.fn().mockResolvedValue({
-    ok,
-    status: ok ? 200 : 500,
+    ok: status >= 200 && status < 300,
+    status,
     json: async () => body,
     text: async () => JSON.stringify(body),
   })
@@ -1099,6 +1103,107 @@ describe('risk history', () => {
     const result = await apiClient.getRiskHistory(30)
     expect(calledUrl(fetchMock)).toContain('days=30')
     expect(result.days).toBe(30)
+  })
+})
+
+describe('sohbet belgeleri', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  const DOC = {
+    id: 'doc-1', filename: 'bilanco.pdf', kind: 'PDF', size_bytes: 2048,
+    units: 12, char_count: 4096, truncated: false,
+    created_at: '2026-08-31T10:00:00Z',
+  }
+  const file = () => new File(['x'], 'bilanco.pdf', { type: 'application/pdf' })
+
+  it('dosyayı multipart olarak gönderir', async () => {
+    const fetchMock = mockFetch(DOC)
+    await apiClient.uploadChatDocument(file())
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeInstanceOf(FormData)
+  })
+
+  it('Content-Type başlığını ELLE KURMAZ', async () => {
+    /* multipart sınırını tarayıcı üretir; elle yazılan bir başlık onu ezer
+       ve gövde ayrıştırılamaz hâle gelir. */
+    const fetchMock = mockFetch(DOC)
+    await apiClient.uploadChatDocument(file())
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const headers = new Headers(init.headers)
+    expect(headers.get('content-type')).toBeNull()
+  })
+
+  it('sohbet kimliğini gövdeye koyar', async () => {
+    const fetchMock = mockFetch(DOC)
+    await apiClient.uploadChatDocument(file(), 'thread-9')
+
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as FormData
+    expect(body.get('thread_id')).toBe('thread-9')
+  })
+
+  it('sohbet kimliği yoksa alanı hiç eklemez', async () => {
+    const fetchMock = mockFetch(DOC)
+    await apiClient.uploadChatDocument(file())
+
+    const body = (fetchMock.mock.calls[0][1] as RequestInit).body as FormData
+    expect(body.get('thread_id')).toBeNull()
+  })
+
+  it('reddedilen yükleme hata fırlatır', async () => {
+    mockFetch({ detail: 'Bu dosya türü okunamıyor' }, 415)
+    await expect(apiClient.uploadChatDocument(file())).rejects.toThrow()
+  })
+
+  it('listeyi getirir', async () => {
+    const fetchMock = mockFetch({ documents: [DOC], accepted: ['.pdf'], max_bytes: 10 })
+    const body = await apiClient.getChatDocuments()
+
+    expect(calledUrl(fetchMock)).toContain('/ai_orchestrator/documents')
+    expect(body.documents[0].filename).toBe('bilanco.pdf')
+  })
+
+  it('belge kimliğini adreste kodlar', async () => {
+    const fetchMock = mockFetch({}, 204)
+    await apiClient.deleteChatDocument('a/b?c')
+
+    expect(calledUrl(fetchMock)).toContain('documents/a%2Fb%3Fc')
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('DELETE')
+  })
+
+  it('silinemeyen belge hata fırlatır', async () => {
+    /* Sessizce başarılı saymak, kullanıcıya sildiğini söyleyip aranmaya
+       devam eden bir belge bırakmak olurdu. */
+    mockFetch({ detail: 'Belge şu anda silinemiyor.' }, 503)
+    await expect(apiClient.deleteChatDocument('doc-1')).rejects.toThrow()
+  })
+})
+
+describe('temel veri ve takvim', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('sembolü kodlayarak temel veriyi ister', async () => {
+    const fetchMock = mockFetch({ symbol: 'THYAO' })
+    await apiClient.getFundamentals('A/B')
+    expect(calledUrl(fetchMock)).toContain('/market/fundamentals?symbol=A%2FB')
+  })
+
+  it('takvimi sınırla birlikte ister', async () => {
+    const fetchMock = mockFetch({ analysts: [], dividends: [], earnings: [] })
+    await apiClient.getMarketCalendar(40)
+    expect(calledUrl(fetchMock)).toContain('/market/calendar?limit=40')
+  })
+
+  it('sınır verilmezse parametre eklemez', async () => {
+    /* Sunucunun kendi varsayılanı var; `?limit=undefined` onu ezmeye
+       çalışıp 422 alırdı. */
+    const fetchMock = mockFetch({ analysts: [], dividends: [], earnings: [] })
+    await apiClient.getMarketCalendar()
+    expect(calledUrl(fetchMock)).toMatch(/\/market\/calendar$/)
   })
 })
 

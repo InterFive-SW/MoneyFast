@@ -106,6 +106,38 @@ class FundamentalsIn(BaseModel):
     week52_high: Optional[float] = None
     week52_low: Optional[float] = None
 
+    # 0027: gelir tablosu ve kârlılık. Pydantic tanımadığı alanı SESSİZCE
+    # düşürür, dolayısıyla burada listelenmeyen bir alan ingestor tarafından
+    # gönderilse bile veritabanına hiç ulaşmaz -- şirket adının bir dönem
+    # başına gelen tam olarak buydu.
+    total_revenue: Optional[int] = None
+    revenue_growth: Optional[float] = None
+    gross_margin: Optional[float] = None
+    operating_margin: Optional[float] = None
+    ebitda_margin: Optional[float] = None
+    profit_margin: Optional[float] = None
+    return_on_equity: Optional[float] = None
+    return_on_assets: Optional[float] = None
+    debt_to_equity: Optional[float] = None
+    current_ratio: Optional[float] = None
+    total_debt: Optional[int] = None
+    total_cash: Optional[int] = None
+    free_cash_flow: Optional[int] = None
+    operating_cash_flow: Optional[int] = None
+    enterprise_value: Optional[int] = None
+    beta: Optional[float] = None
+    trailing_eps: Optional[float] = None
+    forward_eps: Optional[float] = None
+    forward_pe: Optional[float] = None
+    earnings_growth: Optional[float] = None
+    payout_ratio: Optional[float] = None
+    dividend_rate: Optional[float] = None
+    recommendation_key: Optional[str] = None
+    analyst_count: Optional[int] = None
+    target_mean_price: Optional[float] = None
+    ex_dividend_date: Optional[datetime] = None
+    earnings_date: Optional[datetime] = None
+
 
 class FundamentalsIngestRequest(BaseModel):
     items: List[FundamentalsIn] = Field(default_factory=list)
@@ -256,3 +288,103 @@ class TechnicalSignalsOut(BaseModel):
     #: Kullanıcıya gösterilecek Türkçe cümle, tam hâliyle. Yeterli geçmiş
     #: yoksa None -- boş bir cümle üretmek yerine hiç üretilmiyor.
     narrative: Optional[str] = None
+
+
+class FundamentalsOut(BaseModel):
+    """Bir enstrümanın saklanan tüm temel verisi.
+
+    `/market/instruments`'ten AYRI: o, dondurulmuş v2.2 sözleşmesi ve bir
+    LİSTE için "bu ne ediyor" sorusunu yanıtlıyor. Bunlar tek bir şirket
+    hakkında otuz küsur alan ve tarama ekranlarının çoğu hiçbirine
+    bakmıyor -- teknik göstergeleri kendi uç noktasına koyan gerekçenin
+    aynısı.
+
+    Her alan Optional ve öyle kalıyor. Bankanın brüt marjı YOKTUR; onu 0
+    olarak vermek, şirketin hiç sahip olmadığı bir olguyu bildirmek olur.
+    """
+
+    symbol: str
+    name: Optional[str] = None
+    currency: str = "TRY"
+    updated_at: Optional[datetime] = None
+
+    pe_ratio: Optional[float] = None
+    pb_ratio: Optional[float] = None
+    market_cap: Optional[int] = None
+    dividend_yield: Optional[float] = None
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    week52_high: Optional[float] = None
+    week52_low: Optional[float] = None
+
+    total_revenue: Optional[int] = None
+    revenue_growth: Optional[float] = None
+    gross_margin: Optional[float] = None
+    operating_margin: Optional[float] = None
+    ebitda_margin: Optional[float] = None
+    profit_margin: Optional[float] = None
+    return_on_equity: Optional[float] = None
+    return_on_assets: Optional[float] = None
+    debt_to_equity: Optional[float] = None
+    current_ratio: Optional[float] = None
+    total_debt: Optional[int] = None
+    total_cash: Optional[int] = None
+    free_cash_flow: Optional[int] = None
+    operating_cash_flow: Optional[int] = None
+    enterprise_value: Optional[int] = None
+    beta: Optional[float] = None
+    trailing_eps: Optional[float] = None
+    forward_eps: Optional[float] = None
+    forward_pe: Optional[float] = None
+    earnings_growth: Optional[float] = None
+    payout_ratio: Optional[float] = None
+    dividend_rate: Optional[float] = None
+
+    #: Analist konsensüsü: BAŞKASININ değerlendirmesi. Aktarılabilir bir olgu,
+    #: ürünün kendi görüşü değil.
+    recommendation_key: Optional[str] = None
+    analyst_count: Optional[int] = None
+    target_mean_price: Optional[float] = None
+
+    ex_dividend_date: Optional[datetime] = None
+    earnings_date: Optional[datetime] = None
+
+
+class AnalystRow(BaseModel):
+    """Bir enstrüman için analist konsensüsü.
+
+    BAŞKASININ değerlendirmesi. "16 analistin ortalama hedefi 95,39 TL"
+    aktarılabilir bir olgudur; ürünün kendi görüşü değildir.
+    """
+
+    symbol: str
+    name: Optional[str] = None
+    currency: str = "TRY"
+    recommendation: str
+    analyst_count: int
+    target_mean_price: Optional[float] = None
+
+
+class DividendRow(BaseModel):
+    symbol: str
+    name: Optional[str] = None
+    currency: str = "TRY"
+    dividend_yield: Optional[float] = None
+    dividend_rate: Optional[float] = None
+    payout_ratio: Optional[float] = None
+    ex_dividend_date: Optional[datetime] = None
+
+
+class EarningsRow(BaseModel):
+    symbol: str
+    name: Optional[str] = None
+    currency: str = "TRY"
+    earnings_date: datetime
+
+
+class MarketCalendarOut(BaseModel):
+    """"Analizler" ekranının üç listesi, tek çağrıda."""
+
+    analysts: List[AnalystRow] = Field(default_factory=list)
+    dividends: List[DividendRow] = Field(default_factory=list)
+    earnings: List[EarningsRow] = Field(default_factory=list)

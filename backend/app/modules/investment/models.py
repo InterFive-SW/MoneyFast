@@ -18,6 +18,7 @@ fundamental attached to them is real.
 
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -196,6 +197,39 @@ class InstrumentFundamentals(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
+class IndexMembership(Base):
+    """Bir enstrümanın hangi endekste yer aldığı.
+
+    Ayrı bir tablo, çünkü üyelik ÇOKTAN ÇOĞA: AAPL hem Nasdaq-100'de hem de
+    S&P 500'de. `investment_products.market` bunu taşıyamaz -- o alan hissenin
+    işlem gördüğü BORSAYI söyler (AAPL için NASDAQ) ve bir hissenin tek bir
+    borsası vardır. İkisini aynı sütuna sıkıştırmak, S&P sekmesinde Apple'ın,
+    Microsoft'un ve Nvidia'nın görünmemesi demekti; endeksin en büyük
+    üyelerini göstermeyen bir "S&P" sekmesi eksik değil, yanıltıcı olurdu.
+
+    Üyelik listeleri lisanslı bir üründür; bu yüzden migration içinde elle ve
+    tarihli yazılıyorlar (bkz. 0006, 0010, 0019).
+    """
+
+    __tablename__ = "index_memberships"
+    __table_args__ = (
+        UniqueConstraint("product_id", "index_code", name="uq_index_membership"),
+        Index("idx_index_memberships_code", "index_code"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey(f"{SCHEMA}.investment_products.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    #: `BIST`, `SP500`, `NASDAQ100`. Ekranlardaki sekmelerin okuduğu değer.
+    index_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
 class InvestmentAccount(Base):
     """A custody account. Minimal on purpose — enough to hang positions off."""
 
@@ -205,11 +239,53 @@ class InvestmentAccount(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     account_number: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    #: Aynı bankanın hesabı olduğu için IBAN'ı da var. Yokken hesap
+    #: "para gönder" ekranında adreslenemiyor ve hareketleri hiçbir yerde
+    #: görünmüyordu; kullanıcı için nakit tutan bir hesap, hareketi olmayan
+    #: bir bakiyeden ibaret kalıyordu.
+    iban: Mapped[Optional[str]] = mapped_column(String(34), unique=True, nullable=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="TRY")
     cash_balance: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class CashMovement(Base):
+    """Yatırım hesabının nakit defteri.
+
+    Bakiyeyi üç ayrı yer yazıyordu -- alım/satım takası, bankacılık köprüsü ve
+    yöneticinin para ekleme işlemi -- ve hiçbiri iz bırakmıyordu. Bakiyeden
+    geriye doğru hesaplamak da mümkün değildi: yöneticinin eklediği para hiçbir
+    kayıtta görünmediği için yeniden oynatma sessizce kayıyordu.
+
+    Bu yüzden defter, bankacılıktaki `account_transactions` ile aynı biçimde
+    tutuluyor: her satır kendi `balance_before`/`balance_after` değerini
+    taşır, dolayısıyla hesabın belirli bir andaki durumu tüm geçmişi yeniden
+    oynatmadan okunabilir.
+    """
+
+    __tablename__ = "cash_movements"
+    __table_args__ = (
+        Index("idx_cash_movements_account", "account_id", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    #: DEBIT = hesaptan çıktı, CREDIT = hesaba girdi. Bankacılık tarafıyla
+    #: aynı sözlük; iki döküm yan yana okunabilsin.
+    direction: Mapped[str] = mapped_column(String(10), nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    balance_before: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    balance_after: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    #: İşlemi doğuran kayıt: takasta öneri id'si, virmanda banka referansı.
+    #: Yönetici düzeltmesinde None -- uydurmak yerine boş bırakılır.
+    reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class PortfolioPosition(Base):

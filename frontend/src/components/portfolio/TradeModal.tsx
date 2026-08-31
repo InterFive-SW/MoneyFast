@@ -23,17 +23,24 @@ export default function TradeModal({ symbol, price, currency = 'TRY', onClose }:
   // what you are about to pay. The price prop is only the opening value.
   const quote = useQuote(symbol)
   const { rates } = useMarketStream()
-  const livePrice = quote?.price ?? price
+  // `??` DEĞİL: açılış fiyatı bilinmiyor olabilir (arama kutusundan seçilen,
+  // kullanıcının portföyünde olmayan bir hisse) ve `??` yalnızca null/undefined
+  // yakalar -- NaN geçtiğinde ekrana "NaN" yazılırdı. Sayı olmayan bir açılış
+  // değeri "henüz bilinmiyor" demektir ve canlı kotasyon gelene kadar öyle
+  // gösterilir; sıfıra düşmek, gerçek bir fiyat gibi okunurdu.
+  const opening = Number.isFinite(price) ? price : undefined
+  const livePrice = quote?.price ?? opening
   const [action, setAction] = useState<TradeAction>('Alış')
   const [quantity, setQuantity] = useState(1)
   const [limitEnabled, setLimitEnabled] = useState(false)
-  const [limitPrice, setLimitPrice] = useState(price)
+  const [limitPrice, setLimitPrice] = useState(opening ?? 0)
   const [step, setStep] = useState<Step>('form')
   const [confirmMessage, setConfirmMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
 
   const effectivePrice = limitEnabled ? limitPrice : livePrice
-  const estimatedTotal = quantity * effectivePrice
+  const priceKnown = Number.isFinite(effectivePrice)
+  const estimatedTotal = priceKnown ? quantity * (effectivePrice as number) : null
 
   async function handleConfirm() {
     setStep('submitting')
@@ -122,7 +129,11 @@ export default function TradeModal({ symbol, price, currency = 'TRY', onClose }:
               </button>
             </div>
 
-            <p className="tabular-nums text-2xl font-bold text-white mb-4">{formatWithBase(livePrice, currency, rates)}</p>
+            <p className="tabular-nums text-2xl font-bold text-white mb-4">
+              {livePrice === undefined
+                ? 'Fiyat bekleniyor…'
+                : formatWithBase(livePrice, currency, rates)}
+            </p>
 
             <div className="flex gap-2 mb-4">
               <button
@@ -186,14 +197,20 @@ export default function TradeModal({ symbol, price, currency = 'TRY', onClose }:
 
             <div className="flex items-center justify-between mb-4 px-1">
               <span className="text-xs text-slate-400">Tahmini Tutar</span>
-              <span className="tabular-nums text-sm font-semibold text-slate-200">{formatWithBase(estimatedTotal, currency, rates)}</span>
+              <span className="tabular-nums text-sm font-semibold text-slate-200">
+                {estimatedTotal === null
+                  ? '—'
+                  : formatWithBase(estimatedTotal, currency, rates)}
+              </span>
             </div>
 
             {step === 'error' && <p className="text-sm text-rose-500 mb-3">{errorMessage}</p>}
 
             <button
               onClick={handleConfirm}
-              disabled={step === 'submitting'}
+              // Fiyat bilinmeden emir hazırlanmaz: tutarı gösterilmeyen bir
+              // işlemi onaylatmak, kullanıcıya ne ödeyeceğini söylememektir.
+              disabled={step === 'submitting' || !priceKnown}
               className="w-full rounded-xl bg-slate-950 text-white py-2.5 text-sm font-semibold hover:bg-slate-800 transition-colors disabled:opacity-60"
             >
               {step === 'submitting' ? 'Gönderiliyor...' : 'ONAYLA'}

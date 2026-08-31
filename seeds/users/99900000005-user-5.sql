@@ -9,4 +9,4 @@
 -- Synthetic data only (see CLAUDE.md). Do not hand-edit; re-export.
 
 -- public.users (1)
-INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "wants_email_notifications", "is_verified") VALUES ('fce401d9-1495-47a5-a31f-3ef89dd58112', 'user.5@dummy.moneyfast.local', '$2b$12$uzYHTR40cN1rED0iaM8LVOsfU6kc15IjMTaUrVNlib0xgArTgnbZ6', TRUE, '2026-08-25T11:41:17.171393+00:00', '99900000005', 'Ayşe', 'Yıldız', '+905550000005', TRUE, TRUE) ON CONFLICT DO NOTHING;
+INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences") VALUES ('fce401d9-1495-47a5-a31f-3ef89dd58112', 'user.5@dummy.moneyfast.local', '$2b$12$uzYHTR40cN1rED0iaM8LVOsfU6kc15IjMTaUrVNlib0xgArTgnbZ6', TRUE, '2026-08-25T11:41:17.171393+00:00', '99900000005', 'Ayşe', 'Yıldız', '+905550000005', FALSE, '{}', 50000, '{}') ON CONFLICT DO NOTHING;

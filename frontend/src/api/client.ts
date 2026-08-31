@@ -25,6 +25,123 @@ export type StageTransactionRequest = components['schemas']['StageTransactionReq
 export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
 export type MarketTicker = GetResponseType<paths['/api/market/tickers']>[0];
+
+// --- Banking: bills, staged payments, saved payees -------------------------
+
+/** Vadesiz, vadeli veya yatırım — tek biçimde. */
+export interface HeatmapTile {
+    symbol: string
+    name?: string | null
+    /** Kutunun ALANI bundan geliyor. */
+    marketCap: number
+    changePercent: number
+    sector: string
+    price: number
+    currency: string
+}
+
+export interface MarketHeatmap {
+    items: HeatmapTile[]
+    /** Piyasa değeri bilinmediği için çizilemeyen enstrüman sayısı. */
+    missing: number
+}
+
+export interface InstrumentSuggestion {
+    symbol: string
+    name?: string | null
+    market?: string | null
+    currency?: string | null
+}
+
+export interface PortfolioAccount {
+    id: string
+    account_number: string
+    iban?: string | null
+    account_type: string
+    currency_code: string
+    balance: number
+    /** Vadeli hesabın saklanan yıllık oranı ve vadesi; vadesizde null. */
+    interest_rate?: number | null
+    term_days?: number | null
+    is_investment: boolean
+}
+
+export interface ApiCard {
+    id: string
+    name: string
+    brand: string
+    card_number: string
+    limit: number
+    current_debt: number
+    available_limit: number
+    due_day: number
+    color?: string | null
+    is_digital: boolean
+    settings: Record<string, unknown>
+    linked_account_id?: string | null
+}
+
+export interface ApiLoan {
+    id: string
+    title: string
+    total_amount: number
+    remaining_amount: number
+    installment_amount: number
+    installment_count: number
+    paid_installments: number
+    remaining_months: number
+    next_due?: string | null
+    progress_percentage: number
+}
+
+export interface BillLookup {
+    found: boolean
+    id?: string | null
+    institution?: string | null
+    bill_type?: string | null
+    subscriber_no?: string | null
+    amount?: number | null
+    due_day?: number | null
+}
+
+export interface StagePaymentRequest {
+    payment_type: 'TRANSFER' | 'BILL_PAYMENT' | 'CARD_PAYMENT'
+    amount?: number | null
+    destination?: string | null
+    institution?: string | null
+    subscriber_no?: string | null
+    description?: string | null
+    idempotency_key?: string | null
+}
+
+/** Hazırlanmış ama uygulanmamış bir ödeme. Onaylanana kadar para durur. */
+export interface PaymentProposal {
+    proposal_id: string
+    status: string
+    payment_type: string
+    amount: number
+    currency: string
+    destination?: string | null
+    description?: string | null
+    expires_at: string
+    balance_before?: number | null
+}
+
+export interface PaymentConfirmation {
+    proposal_id: string
+    status: string
+    reference_number: string
+    amount: number
+    currency: string
+    balance_after?: number | null
+}
+
+export interface SavedPayee {
+    id: string
+    label: string
+    institution: string
+    subscriber_no: string
+}
 // `instruments` şemada opsiyonel görünür (varsayılanı olan bir alan); satır
 // tipini almak için önce boş olmayan hâline daraltılır.
 export type CandleSeries = GetResponseType<paths['/api/market/candles']>;
@@ -93,6 +210,42 @@ export type RiskProfile = GetResponseType<paths['/api/risk/profile']> & {
     assumptions?: Record<string, unknown> | null;
 };
 /** Uç noktanın kabul ettiği kapalı küme; sunucu bunun dışını 422 ile reddeder. */
+/**
+ * Teknik göstergeler.
+ *
+ * Her alan null olabilir ve null "geçmiş bu göstergeyi hesaplayacak kadar
+ * uzun değil" demek — sıfır DEĞİL. 30 barlık bir enstrümanda 200 günlük
+ * ortalama yoktur ve arayüz onu çizmez.
+ */
+export interface TechnicalSignals {
+    observations: number;
+    last_close: number | null;
+    sma_20: number | null;
+    sma_50: number | null;
+    sma_200: number | null;
+    pct_from_sma_20: number | null;
+    pct_from_sma_50: number | null;
+    pct_from_sma_200: number | null;
+    rsi_14: number | null;
+    week52_high: number | null;
+    week52_low: number | null;
+    week52_position_pct: number | null;
+    up_days_recent: number | null;
+    recent_window: number | null;
+    volume_vs_average: number | null;
+    annualised_volatility: number | null;
+    max_drawdown_pct: number | null;
+    trend: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS' | 'UNKNOWN';
+}
+
+export interface TechnicalSignalsOut {
+    symbol: string;
+    currency: string;
+    signals: TechnicalSignals;
+    /** Gösterilecek Türkçe cümle, tam hâliyle. Yeterli geçmiş yoksa null. */
+    narrative: string | null;
+}
+
 export type RiskLookback = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX';
 
 /** Anket soruları. Puanlar istemciye HİÇ gelmez: seçeneğin ağırlığını
@@ -169,7 +322,6 @@ export type RiskSuggestion = NonNullable<RiskProfile['suggestions']>[0];
 
 export type WatchlistItem = GetResponseType<paths['/api/investment/watchlist']>['bist'][0];
 export type TopMoverItem = GetResponseType<paths['/api/investment/top-movers']>['gainers'][0];
-export type DividendItem = GetResponseType<paths['/api/investment/dividends']>[0];
 export type SectorAllocationItem = GetResponseType<paths['/api/investment/sector-allocation']>[0];
 export type HeatmapItem = GetResponseType<paths['/api/investment/heatmap']>[0];
 
@@ -374,8 +526,16 @@ class ApiClient {
         return this.request<InvestmentBalance>('/investment/portfolio/summary');
     }
 
-    getPortfolioChart() {
-        return this.request<PortfolioChartData>('/investment/portfolio/chart');
+    /**
+     * Portföyün mum serisi, TEK aralık.
+     *
+     * Beş aralığın hepsi tek istekte üretiliyordu: çağrı başına ~130 sorgu ve
+     * ölçülen 5,9 saniye. Ekran aynı anda bir aralık gösteriyor.
+     */
+    getPortfolioChart(range = 'yil') {
+        return this.request<PortfolioChartData>(
+            `/investment/portfolio/chart?range=${encodeURIComponent(range)}`,
+        );
     }
 
     getPositions() {
@@ -432,6 +592,15 @@ class ApiClient {
         });
     }
 
+    /** Bir enstrümanın teknik görünümü. Sohbet ile hisse detay sayfası AYNI
+     *  uç noktayı okuyor; ayrı hesaplasalardı aynı hisse için farklı bir
+     *  eğilim söyleyebilirlerdi. */
+    getTechnicalSignals(symbol: string) {
+        return this.request<TechnicalSignalsOut>(
+            `/market/technicals?symbol=${encodeURIComponent(symbol)}`,
+        );
+    }
+
     getRiskHistory(days?: number) {
         const suffix = days === undefined ? '' : `?days=${days}`;
         return this.request<RiskHistory>(`/risk/history${suffix}`);
@@ -445,9 +614,6 @@ class ApiClient {
         return this.request<RiskProfile>(`/risk/profile${suffix}`);
     }
 
-    getDividends() {
-        return this.request<DividendItem[]>('/investment/dividends');
-    }
 
     getSectorAllocation() {
         return this.request<SectorAllocationItem[]>('/investment/sector-allocation');
@@ -537,6 +703,45 @@ class ApiClient {
         );
     }
 
+    /**
+     * Yatırım hesabının nakit hareketleri.
+     *
+     * Ayrı bir uç, çünkü nakit `banking.accounts` değil
+     * `investment.investment_accounts` üzerinde duruyor. Yanıt bankacılık
+     * dökümüyle aynı biçimde, böylece arayüz iki listeyi de aynı satır
+     * bileşeniyle basabiliyor.
+     */
+    getInvestmentStatement(identifier: string, limit = 20) {
+        return this.request<Statement>(
+            `/investment/accounts/${encodeURIComponent(identifier)}/statement?limit=${limit}`,
+        );
+    }
+
+    /**
+     * Sembol ya da şirket adına göre enstrüman önerisi.
+     *
+     * Evren binin üzerinde enstrüman: bir açılır liste bunu taşıyamaz.
+     * Türkçe katlama sunucu tarafında (`market_service._fold`), dolayısıyla
+     * `sise` yazan `ŞİŞE`yi buluyor.
+     */
+    searchInstruments(query: string, limit = 10) {
+        return this.request<InstrumentSuggestion[]>(
+            `/market/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+        );
+    }
+
+    /**
+     * Piyasa ısı haritası: piyasa değeri ve günlük değişim.
+     *
+     * `getHeatmap` ile karıştırılmamalı -- o, kullanıcının portföyünü pozisyon
+     * ağırlığına göre gösteriyor. Bu, piyasanın kendisini gösteriyor.
+     */
+    getMarketHeatmap(market?: string, limit = 300) {
+        const query = new URLSearchParams({ limit: String(limit) })
+        if (market) query.set('market', market)
+        return this.request<MarketHeatmap>(`/market/heatmap?${query}`)
+    }
+
     /** Kategorilere göre harcama özeti. */
     getSpending(days = 30) {
         return this.request<SpendingSummary>(`/banking/spending?days=${days}`);
@@ -568,17 +773,102 @@ class ApiClient {
     }
 
     /** Portföy analizi — dağılım, trend, performans ve işlem geçmişi tek çağrıda. */
-    getPortfolioAnalysis(lookback?: RiskLookback) {
-        // Aynı pencere risk uç noktasına da gidiyor: Analiz ekranındaki tek
-        // dönem seçici ikisini birden sürüyor. Geçilmezse sunucu 1Y kullanır,
-        // ki o da risk modülünün 1Y'siyle aynı tablodan çözülüyor.
-        const suffix = lookback ? `?lookback=${lookback}` : '';
+    /**
+     * Portföy analizi.
+     *
+     * İki ayrı boyut, iki ayrı soydan geldi ve ikisi de gerçek:
+     *
+     * - `lookback` ÖLÇÜM PENCERESİ (1A, 1Y…). Aynı pencere risk uç noktasına
+     *   da gidiyor; Analiz ekranındaki tek dönem seçici ikisini birden
+     *   sürüyor. Geçilmezse sunucu 1Y kullanır.
+     * - `range='day'` ÇÖZÜNÜRLÜK: gün içi seriyi (5 dakikalık gerçek barlar)
+     *   döndürür, varsayılan günlük barlardır.
+     *
+     * İkisini tek bir parametreye sıkıştırmak, "son bir yıl" ile "bugünü
+     * dakika dakika" arasındaki farkı kaybetmek olurdu.
+     */
+    getPortfolioAnalysis(lookback?: RiskLookback, range?: 'all' | 'day') {
+        const query = new URLSearchParams();
+        if (lookback) query.set('lookback', lookback);
+        if (range) query.set('range', range);
+        const suffix = query.toString() ? `?${query}` : '';
         return this.request<PortfolioAnalysis>(`/analytics/portfolio${suffix}`);
     }
 
     /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */
+    /**
+     * Para gönderilebilecek TÜM hesaplar: vadesiz, vadeli ve yatırım.
+     *
+     * Yatırım hesabının nakiti başka bir tabloda durur; bu uç onu da aynı
+     * şekle getirir, `is_investment` ile işaretleyerek. Ekranın nerede
+     * durduğunu bilmesi gerekmiyor.
+     */
+    getAllAccounts() {
+        return this.request<PortfolioAccount[]>('/banking/accounts/all')
+    }
+
+    /** Kullanıcının kartları. `available_limit` türetilir, saklanmaz. */
+    getCards() {
+        return this.request<ApiCard[]>('/banking/cards')
+    }
+
+    /** Kart ayarları saklananın üzerine yazılır; tek anahtar gönderen bir
+     *  ekran diğerlerini sıfırlamaz. */
+    updateCardSettings(cardId: string, settings: Record<string, unknown>) {
+        return this.patch<ApiCard>(
+            `/banking/cards/${encodeURIComponent(cardId)}/settings`, { settings },
+        )
+    }
+
+    getLoans() {
+        return this.request<ApiLoan[]>('/banking/loans')
+    }
+
+    /** Abone numarasıyla açık fatura sorgular. Bulunamaması hata değildir. */
+    lookupBill(institution: string, subscriberNo: string) {
+        const q = new URLSearchParams({ institution, subscriber_no: subscriberNo })
+        return this.request<BillLookup>(`/banking/bills/lookup?${q}`)
+    }
+
+    /**
+     * Ödeme önerisi hazırlar. **Para hareket etmez.**
+     *
+     * Hisse alım-satımıyla aynı sözleşme: hazırlama ile onay ayrı iki adım.
+     * Sohbetin kendi başına para göndermesini engelleyen şey bu ayrım.
+     */
+    stagePayment(request: StagePaymentRequest) {
+        return this.post<PaymentProposal>('/api/banking/payments/stage', request)
+    }
+
+    /** Öneriyi uygular. Para yalnızca burada hareket eder. */
+    confirmPayment(proposalId: string) {
+        return this.post<PaymentConfirmation>(
+            `/api/banking/payments/${encodeURIComponent(proposalId)}/confirm`, {},
+        )
+    }
+
+    getSavedPayees() {
+        return this.request<{ payees: SavedPayee[] }>('/banking/saved-payees')
+    }
+
+    addSavedPayee(request: { label: string; institution: string; subscriber_no: string }) {
+        return this.post<SavedPayee>('/api/banking/saved-payees', request)
+    }
+
+    deleteSavedPayee(payeeId: string) {
+        return this.request<void>(
+            `/banking/saved-payees/${encodeURIComponent(payeeId)}`, 'DELETE',
+        )
+    }
+
     getCurrentUser() {
-        return this.request<{ id: string; first_name: string; last_name: string }>('/auth/me');
+        return this.request<{
+            id: string
+            first_name: string
+            last_name: string
+            /** Kimlikten türetilen, kullanıcıya özel müşteri numarası. */
+            customer_no?: string | null
+        }>('/auth/me');
     }
 
     getMarketTickers() {
@@ -717,6 +1007,68 @@ class ApiClient {
             console.error(`[API Ağ Hatası] PUT ${fullUrl} isteği başarısız oldu:`, error);
             throw error;
         }
+    }
+
+    /**
+     * Oturum açmış kullanıcının profil bilgilerini günceller.
+     * 
+     * @param data - Güncellenecek profil bilgileri
+     * @param data.email - Opsiyonel yeni e-posta adresi
+     * @param data.phone_number - Opsiyonel yeni telefon numarası
+     * @param data.notification_preferences - Backend'de PostgreSQL JSONB kolonunda saklanan, esnek bildirim tercihleri matrisi (Kategori -> Kanal -> Durum).
+     * @param data.transaction_limit - Güvenlik Merkezi → İşlem Onay Limiti slider'ından ayarlanan eşik değeri (₺).
+     * @param data.user_preferences - Görünüm & Format sekmesinden ayarlanan kullanıcı tercihleri (dil, para birimi, dashboard şablonu).
+     */
+    async updateProfile(data: {
+        email?: string;
+        phone_number?: string;
+        notification_preferences?: Record<string, Record<string, boolean>>;
+        transaction_limit?: number;
+        user_preferences?: Record<string, string>;
+    }) {
+        return this.put<{ id: string; first_name: string; last_name: string }>('/auth/me', data);
+    }
+
+    /**
+     * Oturum açmış kullanıcının şifresini güvenli bir şekilde değiştirir.
+     * Mevcut şifrenin doğrulanmasını gerektirir.
+     */
+    async changePassword(data: { current_password: string; new_password: string }) {
+        return this.post<void>('/auth/change-password', data);
+    }
+
+    /**
+     * KVKK/GDPR kapsamında kullanıcının tüm kişisel verilerinin dışa
+     * aktarılması talebini backend'e iletir. İstek başarılı olduğunda
+     * backend bir arka plan görevi başlatır ve dosya hazırlandığında
+     * kullanıcının kayıtlı e-posta adresine gönderir.
+     */
+    async requestDataExport() {
+        return this.post<{ message: string }>('/auth/export-data', {});
+    }
+
+    /**
+     * Kullanıcı hesabını kalıcı olarak kapatır (soft delete).
+     *
+     * GÜVENLİK & YASAL UYUM:
+     * Bu metod backend'de `is_active=False` yaparak hesabı devre dışı bırakır;
+     * MASAK ve finansal düzenleme gereklilikleri gereği kullanıcı kaydı
+     * veritabanından fiziksel olarak silinmez. Frontend'deki çok adımlı onay
+     * modalı (kullanıcının bilinçli olarak "KAPAT" yazması) bu çağrıyı korur.
+     *
+     * Başarılı dönüşte çağıran taraf localStorage'ı temizleyerek
+     * kullanıcıyı /login sayfasına yönlendirmelidir.
+     */
+    async deleteAccount(data: { reason?: string }) {
+        const normalizedUrl = `${this.baseUrl}/auth/me`;
+        const response = await this.authedFetch(normalizedUrl, {
+            method: 'DELETE',
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+            throw new Error(await describeError(response));
+        }
+        return await response.json();
     }
 }
 

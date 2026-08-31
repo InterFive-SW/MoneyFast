@@ -9,12 +9,14 @@ being true by accident.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.orm import Session
 
 from app.modules.investment import service
+from app.modules.investment.models import CashMovement, PortfolioPosition
 
 
 def proposal(
@@ -75,8 +77,24 @@ class TestBuy:
     def test_a_new_holding_is_created(self):
         fix = Fixture(position=None)
         service.settle(fix.db, proposal(quantity=10), account())
-        assert len(fix.added) == 1
-        assert float(fix.added[0].quantity) == 10
+        positions = [row for row in fix.added if isinstance(row, PortfolioPosition)]
+        assert len(positions) == 1
+        assert float(positions[0].quantity) == 10
+
+    def test_the_cash_movement_is_recorded(self):
+        """Takas artık nakit defterine de yazar.
+
+        Yazmadığı sürece yatırım hesabının gösterebileceği bir hareket dökümü
+        yoktu: bakiye değişiyor, değişikliği anlatan hiçbir satır kalmıyordu.
+        """
+        fix = Fixture(position=None)
+        service.settle(fix.db, proposal(quantity=10, net_amount=3022.26), account(25000.0))
+        movements = [row for row in fix.added if isinstance(row, CashMovement)]
+        assert len(movements) == 1
+        assert movements[0].direction == "DEBIT"
+        assert float(movements[0].amount) == pytest.approx(3022.26)
+        assert float(movements[0].balance_before) == pytest.approx(25000.0)
+        assert float(movements[0].balance_after) == pytest.approx(21977.74)
 
     def test_the_cost_basis_is_the_reference_price_not_the_all_in_net(self):
         """Fees are an expense, not part of what the shares are worth. Folding
@@ -329,3 +347,79 @@ class TestForeignCurrency:
                 acct,
             )
         assert "TRY" in str(excinfo.value)
+
+
+class TestCashStatement:
+    """Döküm defterden okunur, bakiyeden yeniden oynatılarak üretilmez.
+
+    Bakiyeyi üç ayrı yer yazıyor ve biri -- yöneticinin düzeltmesi -- hiçbir
+    zaman bir işleme bağlanmıyor; geriye doğru hesap bu yüzden sessizce
+    kayardı.
+    """
+
+    def _account(self):
+        return SimpleNamespace(
+            id="ia-1", account_number="TR-INV", iban="TR00INV",
+            currency_code="TRY", cash_balance=1500.0,
+        )
+
+    def _db(self, rows):
+        db = MagicMock(spec=Session)
+        chain = db.query.return_value.filter.return_value.order_by.return_value
+        chain.limit.return_value.all.return_value = rows
+        return db
+
+    def test_rows_are_projected_onto_the_banking_shape(self):
+        """Bankacılık dökümüyle aynı alanlar; arayüz iki listeyi de aynı satır
+        bileşeniyle basabilsin."""
+        row = SimpleNamespace(
+            reference="PRP-1", direction="DEBIT", amount=500.0,
+            balance_after=1500.0, description="Alım — THYAO x2",
+            created_at=datetime(2026, 8, 20, tzinfo=timezone.utc),
+        )
+        out = service.cash_statement(self._db([row]), self._account())
+        assert out["iban"] == "TR00INV"
+        assert out["balance"] == 1500.0
+        movement = out["movements"][0]
+        assert movement["reference_number"] == "PRP-1"
+        assert movement["direction"] == "DEBIT"
+        assert movement["balance_after"] == 1500.0
+        # Bir alımın karşısında IBAN yoktur; açıklama zaten enstrümanı söylüyor.
+        assert movement["counterparty_iban"] is None
+
+    def test_an_account_without_a_stored_iban_still_reports_one(self):
+        account = self._account()
+        account.iban = None
+        out = service.cash_statement(self._db([]), account)
+        assert out["iban"] == service.iban_for("TR-INV")
+
+    def test_no_movements_is_an_empty_list_not_an_error(self):
+        """Hiç hareketi olmayan hesap boş görünür; hata değildir."""
+        assert service.cash_statement(self._db([]), self._account())["movements"] == []
+
+
+class TestRecordCashMovement:
+    def test_direction_is_read_from_the_sign_not_supplied(self):
+        """Yön tutardan değil, bakiyenin gidiş yönünden okunur -- iki ayrı
+        alan tutmak, ikisinin çelişebileceği bir durum yaratırdı."""
+        db = MagicMock(spec=Session)
+        account = SimpleNamespace(id="ia-1")
+        credit = service.record_cash_movement(
+            db, account, amount=100.0, balance_before=0.0, balance_after=100.0,
+            description="giriş",
+        )
+        debit = service.record_cash_movement(
+            db, account, amount=-40.0, balance_before=100.0, balance_after=60.0,
+            description="çıkış",
+        )
+        assert credit.direction == "CREDIT" and float(credit.amount) == 100.0
+        assert debit.direction == "DEBIT" and float(debit.amount) == 40.0
+
+    def test_a_long_description_is_trimmed_to_the_column(self):
+        """Sütun 255; kırpmamak kaydın tamamını düşürürdü."""
+        movement = service.record_cash_movement(
+            MagicMock(spec=Session), SimpleNamespace(id="ia-1"),
+            amount=1.0, balance_before=0.0, balance_after=1.0,
+            description="x" * 400,
+        )
+        assert len(movement.description) == 255

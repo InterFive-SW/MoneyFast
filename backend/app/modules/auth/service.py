@@ -1,3 +1,5 @@
+import hashlib
+
 from fastapi import BackgroundTasks, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -23,7 +25,8 @@ from app.modules.auth.schemas import (
     ForgotPasswordRequest,
     ResetPasswordRequest,
     UserUpdateRequest,
-    ChangePasswordRequest
+    ChangePasswordRequest,
+    DeleteAccountRequest
 )
 
 
@@ -113,12 +116,18 @@ def create_user(payload: RegisterRequest, db: Session, background_tasks: Backgro
 
     # Modules call each other directly in this monolith; what stays inside the
     # owning module is the MODEL, not the behaviour (see CLAUDE.md).
-    from app.modules.banking.service import ensure_account as ensure_bank_account
+    from app.modules.banking.service import (
+        ensure_account as ensure_bank_account,
+        ensure_savings_account,
+    )
     from app.modules.investment.service import ensure_account
 
     ensure_account(db, str(user.id))
-    # A deposit account too, so "para gönder" has somewhere to send from.
+    # A deposit account too, so "para gönder" has somewhere to send from, and
+    # a savings account so it has somewhere to send TO. With one account the
+    # transfer screen could only ever send money away from the customer.
     ensure_bank_account(db, str(user.id))
+    ensure_savings_account(db, str(user.id))
 
     db.commit()
     db.refresh(user)
@@ -128,6 +137,20 @@ def create_user(payload: RegisterRequest, db: Session, background_tasks: Backgro
     background_tasks.add_task(send_verification_email, user.email, token)
     
     return UserResponse.model_validate(user)
+
+
+def customer_no_for(user_id: str) -> str:
+    """Kullanıcı kimliğinden türetilen, sabit sekiz haneli müşteri numarası.
+
+    Saklanmıyor: yeni bir sütun, hiçbir zaman değişmeyecek ve tamamen
+    kimlikten çıkarılabilen bir değer için gereksiz bir kayıt olurdu.
+
+    Dilimlenerek değil, özetlenerek üretiliyor -- `banking/service._digits_for`
+    ile aynı gerekçe: kullanıcı kimlikleri onaltılık, yalnızca rakamlarını
+    almak harfleriyle ayrışan iki kullanıcıya aynı numarayı verirdi.
+    """
+    digest = hashlib.sha256(str(user_id).encode("utf-8")).hexdigest()
+    return str(int(digest[:12], 16)).zfill(8)[:8]
 
 
 def verify_email(token: str, db: Session) -> dict:
@@ -170,18 +193,21 @@ def send_password_reset(payload: ForgotPasswordRequest, db: Session, background_
         User.email == payload.email
     ).first()
     
-    if not user:
-        # GÜVENLİK: Sistemde hesap olup olmadığını belli etmemek için
-        # genel bir başarı mesajı dönebilirsiniz. Fakat MoneyFast mimarisinde
-        # kullanıcıyı uyarmak tercih edilmiş olabilir. 
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Verilen T.C. Kimlik No ve E-posta adresi eşleşmiyor veya kayıtlı değil.",
-        )
-        
-    token = create_reset_token(email=user.email)
-    background_tasks.add_task(send_password_reset_email, user.email, token)
-    
+    # GÜVENLİK: Hesabın VAR OLUP OLMADIĞI sızdırılmaz.
+    #
+    # Buradaki ilk hal, eşleşme bulunamadığında "eşleşmiyor veya kayıtlı
+    # değil" diyen bir 404 döndürüyordu. Bu, bir TC/e-posta çiftinin sistemde
+    # kayıtlı olup olmadığını isteyen herkese açık bir sorguya çeviriyor --
+    # şifre sıfırlama ekranı, kullanıcı listesi doğrulama aracına dönüşüyor.
+    #
+    # Bu modülün KENDİ testi de ("always returns a generic success message")
+    # genel cevabı bekliyordu; uygulama ile testi aynı fikirde değildi.
+    # Güvenli yön seçildi: cevap her iki durumda da aynı, e-posta yalnızca
+    # gerçekten eşleşen bir kullanıcı varsa gönderiliyor.
+    if user:
+        token = create_reset_token(email=user.email)
+        background_tasks.add_task(send_password_reset_email, user.email, token)
+
     return {"message": "Şifre sıfırlama bağlantısı e-posta adresinize gönderildi."}
 
 
@@ -228,8 +254,19 @@ def update_user_profile(user_tc: str, payload: UserUpdateRequest, db: Session) -
         user.email = payload.email
     if payload.phone_number is not None:
         user.phone_number = payload.phone_number
-    if payload.wants_email_notifications is not None:
-        user.wants_email_notifications = payload.wants_email_notifications
+    if payload.notification_preferences is not None:
+        # JSONB alanı SQLAlchemy tarafından otomatik olarak json/dict nesnesine dönüştürülür
+        user.notification_preferences = payload.notification_preferences
+    if payload.transaction_limit is not None:
+        # Güvenlik Merkezi → İşlem Onay Limiti değeri. Pydantic şemasında
+        # [0, 250_000] aralığına kısıtlandığı için ek validasyona gerek yoktur.
+        user.transaction_limit = payload.transaction_limit
+    if payload.user_preferences is not None:
+        # Görünüm & Format tercihleri (dil, para birimi, dashboard şablonu).
+        # Mevcut JSONB içeriğiyle merge edilir: frontend yalnızca değişen
+        # anahtarları gönderebilir, geri kalanı korunur.
+        merged = {**(user.user_preferences or {}), **payload.user_preferences}
+        user.user_preferences = merged
 
     db.commit()
     db.refresh(user)
@@ -258,3 +295,104 @@ def change_user_password(user_tc: str, payload: ChangePasswordRequest, db: Sessi
     
     return {"message": "Şifreniz başarıyla değiştirildi."}
 
+
+async def request_data_export(user_tc: str, db: Session, background_tasks: BackgroundTasks) -> dict:
+    """Kullanıcının KVKK/GDPR kapsamındaki veri dışa aktarma talebini alır."""
+    user = db.query(User).filter(User.tc_no == user_tc).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kullanıcı bulunamadı.",
+        )
+    
+    # Kullanıcı verilerini derle
+    user_data = {
+        "profile": {
+            "tc_no": user.tc_no,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "user_preferences": getattr(user, 'user_preferences', {}),
+            "notification_preferences": getattr(user, 'notification_preferences', {}),
+        }
+    }
+    
+    # Portföy Özetini Derle
+    from app.modules.investment import market_service
+    from app.modules.investment import ai_service
+    
+    rows = market_service.holdings(db, user_id=user.id)
+    quotes = market_service.latest_quotes(db)
+    rates = ai_service.fx_rates(quotes)
+    account = market_service.account(db, user_id=user.id)
+    
+    cash = float(account.cash_balance) if account else 0.0
+    bist = sum(
+        value for value in (
+            ai_service.holding_value(r, rates) for r in rows
+            if (r.get("currency") or "TRY") == "TRY"
+        ) if value is not None
+    )
+    foreign_try = sum(
+        value for value in (
+            ai_service.holding_value(r, rates) for r in rows
+            if (r.get("currency") or "TRY") != "TRY"
+        ) if value is not None
+    )
+    total_try = cash + bist + foreign_try
+    
+    portfolio_summary = {
+        "cash": cash,
+        "bist": bist,
+        "us": foreign_try,
+        "total_value": total_try,
+    }
+    
+    from app.core.email import send_data_export_email
+    background_tasks.add_task(send_data_export_email, user.email, user_data, portfolio_summary)
+    
+    return {
+        "message": f"Veri dışa aktarma talebiniz alındı. Dosyanız hazırlanıp PDF olarak {user.email} adresine gönderilecektir."
+    }
+
+def deactivate_account(user_tc: str, reason: str | None, db: Session) -> dict:
+    """Kullanıcı hesabını kalıcı olarak devre dışı bırakır (soft delete).
+
+    GÜVENLİK & YASAL UYUM KARARI:
+    Finansal düzenleme ve KVKK/MASAK yükümlülükleri gereği kullanıcı kaydı
+    veritabanından fiziksel olarak silinmez (hard delete YASAKTIR). Bunun
+    yerine `is_active` bayrağı False yapılır:
+      1. Kullanıcı artık giriş yapamaz (`authenticate_user` bunu kontrol eder).
+      2. Token yenileme reddedilir (`refresh_access_token` `is_active`'i denetler).
+      3. Yasal inceleme gerektiren durumlarda veriler erişilebilir kalır.
+
+    Opsiyonel olarak ayrılma nedeni kaydedilir; bu veri ürün analitiği ve
+    kullanıcı kaybı (churn) analizleri için değerlidir.
+    """
+    user = db.query(User).filter(User.tc_no == user_tc).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kullanıcı bulunamadı.",
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bu hesap zaten devre dışı bırakılmış.",
+        )
+    
+    user.is_active = False
+    db.commit()
+    
+    # NOT: `reason` şu an loga yazılır; ileride ayrı bir `account_closures`
+    # tablosuna kaydedilebilir.
+    if reason:
+        import logging
+        logging.getLogger(__name__).info(
+            f"Account deactivated: user={user.id}, reason={reason}"
+        )
+    
+    return {"message": "Hesabınız başarıyla kapatıldı."}

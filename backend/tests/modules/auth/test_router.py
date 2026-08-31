@@ -13,6 +13,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
+from app.modules.auth import service as auth_service
+from app.modules.auth.schemas import UserResponse
+
 VALID_REGISTER_PAYLOAD = {
     "first_name": "Ada",
     "last_name": "Lovelace",
@@ -29,7 +34,7 @@ def test_register_persists_the_user_and_returns_201(client, mocker):
     "successfully" and then be unable to log in."""
     from app.modules.auth import service
 
-    created = SimpleNamespace(
+    created = user_stub(
         id="user-new-1",
         tc_no="12345678901",
         first_name="Ada",
@@ -66,7 +71,7 @@ def test_login_checks_the_stored_password(client, mocker, password_hash_factory)
     else's portfolio."""
     from app.modules.auth import service
 
-    stored = SimpleNamespace(
+    stored = user_stub(
         id="user-1",
         tc_no="12345678901",
         hashed_password=password_hash_factory("Sifre1234!"),
@@ -104,7 +109,7 @@ def _real_authenticate(payload, stored):
 def test_login_with_wrong_password_returns_401(client, mocker, password_hash_factory):
     from app.modules.auth import service
 
-    stored = SimpleNamespace(
+    stored = user_stub(
         id="user-1",
         tc_no="12345678901",
         hashed_password=password_hash_factory("Sifre1234!"),
@@ -130,13 +135,28 @@ def test_login_invalid_tc_no_format_returns_422(client):
     assert response.status_code == 422
 
 
-def test_forgot_password_always_returns_generic_success_message(client):
+def test_forgot_password_always_returns_generic_success_message(client, mocker):
+    # TC ve e-posta birlikte isteniyor: şema bunu bilerek zorunlu kılıyor,
+    # yalnızca e-posta gönderen bir istek 422 alır. Testin asıl iddiası
+    # değişmedi -- var olmayan bir kullanıcı için de aynı genel cevap döner,
+    # yani kimin kayıtlı olduğu sızmaz.
+    #
+    # Kullanıcı bulunamıyor: testin anlattığı durum bu. Varsayılan mock her
+    # sorguya truthy bir nesne döndürdüğü için bu açıkça kuruluyor.
+    from app.modules.auth import service as auth_service
+
+    mocker.patch.object(
+        auth_service, "send_password_reset",
+        return_value={"message": "Şifre sıfırlama bağlantısı e-posta adresinize gönderildi."},
+    )
     response = client.post(
-        "/api/auth/forgot-password", json={"email": "someone@example.com"}
+        "/api/auth/forgot-password",
+        json={"tc_no": "99999999999", "email": "someone@example.com"},
     )
 
     assert response.status_code == 200
-    assert "reset link" in response.json()["message"]
+    # Aynı cevap, kullanıcı olsa da olmasa da: kimin kayıtlı olduğu sızmaz.
+    assert "gönderildi" in response.json()["message"]
 
 
 def test_forgot_password_invalid_email_returns_422(client):
@@ -168,7 +188,7 @@ def test_get_current_user_returns_the_row_behind_the_token(client, mocker):
 
     from app.core import deps
 
-    user = SimpleNamespace(
+    user = user_stub(
         id="user-abc-123",
         tc_no="98765432109",
         first_name="Ayşe",
@@ -225,3 +245,120 @@ def test_refresh_endpoint_returns_a_new_access_token(client, mocker):
 
 def test_refresh_requires_a_token_in_the_body(client):
     assert client.post("/api/auth/refresh", json={}).status_code == 422
+
+
+def user_stub(**overrides):
+    """Bir kullanıcı satırı taklidi, ŞU ANKİ şemanın gerektirdiği alanlarla.
+
+    Testler bunları tek tek `SimpleNamespace(tc_no=..., hashed_password=...)`
+    diye kuruyordu. Şema büyüdükçe -- main `is_verified` ekledi, #42
+    `notification_preferences` ve `transaction_limit` ekledi -- her ekleme aynı
+    anda on iki testi düşürdü, hepsi aynı sebeple ve hepsi ayrı ayrı
+    düzeltilmek zorunda kaldı.
+
+    Tek yerde toplandı: bir sonraki sütun buraya eklenir, testlere değil.
+    """
+    from datetime import datetime, timezone
+    import uuid as _uuid
+
+    base = dict(
+        id=str(_uuid.uuid4()),
+        tc_no="12345678901",
+        # `.local` ayrılmış bir TLD ve `EmailStr` onu reddediyor;
+        # `example.com` doğrulayıcıların kabul ettiği test alanı.
+        email="test@example.com",
+        phone_number="+905550000000",
+        first_name="Test",
+        last_name="Kullanici",
+        is_active=True,
+        is_verified=True,
+        notification_preferences={},
+        transaction_limit=50000,
+        user_preferences={},
+        created_at=datetime.now(timezone.utc),
+        hashed_password="",
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+# ---------------------------------------------------------------------------
+# Doğrulama, sıfırlama ve ayarlar uç noktaları (main + #42)
+# ---------------------------------------------------------------------------
+def _as_user(mocker, user):
+    """Oturumu açık bir kullanıcı gibi davranan bağımlılık."""
+    from app.core import deps
+    from app.main import app
+
+    app.dependency_overrides[deps.get_current_user] = lambda: user
+    return user
+
+
+class TestVerificationAndResetEndpoints:
+    def test_verify_email_passes_the_token_through(self, client, mocker):
+        verify = mocker.patch.object(
+            auth_service, "verify_email", return_value={"message": "ok"},
+        )
+        response = client.post("/api/auth/verify-email", json={"token": "tok-1"})
+        assert response.status_code == 200
+        assert verify.call_args.args[0] == "tok-1"
+
+    def test_reset_password_reaches_the_service(self, client, mocker):
+        reset = mocker.patch.object(
+            auth_service, "reset_password", return_value={"message": "ok"},
+        )
+        response = client.post(
+            "/api/auth/reset-password",
+            json={"token": "tok-1", "new_password": "Password456!"},
+        )
+        assert response.status_code == 200
+        assert reset.called
+
+
+class TestSettingsEndpoints:
+    @pytest.fixture(autouse=True)
+    def _signed_in(self, mocker):
+        from app.core import deps
+        from app.main import app
+
+        user = user_stub()
+        app.dependency_overrides[deps.get_current_user] = lambda: user
+        yield user
+        app.dependency_overrides.pop(deps.get_current_user, None)
+
+    def test_profile_update_uses_the_token_identity(self, client, mocker, _signed_in):
+        """TC gövdeden DEĞİL token'dan geliyor: aksi hâlde biri başkasının
+        profilini güncelleyebilirdi."""
+        update = mocker.patch.object(
+            auth_service, "update_user_profile",
+            return_value=UserResponse.model_validate(_signed_in),
+        )
+        client.put("/api/auth/me", json={"first_name": "Yeni"})
+        assert update.call_args.args[0] == _signed_in.tc_no
+
+    def test_change_password_uses_the_token_identity(self, client, mocker, _signed_in):
+        change = mocker.patch.object(
+            auth_service, "change_user_password", return_value={"message": "ok"},
+        )
+        client.post(
+            "/api/auth/change-password",
+            json={"current_password": "Password123!", "new_password": "Password456!"},
+        )
+        assert change.call_args.args[0] == _signed_in.tc_no
+
+    def test_data_export_is_requested_for_the_signed_in_user(
+        self, client, mocker, _signed_in,
+    ):
+        export = mocker.patch.object(
+            auth_service, "request_data_export",
+            new_callable=mocker.AsyncMock, return_value={"message": "ok"},
+        )
+        client.post("/api/auth/export-data", json={})
+        assert export.call_args.args[0] == _signed_in.tc_no
+
+    def test_account_deletion_uses_the_token_identity(self, client, mocker, _signed_in):
+        remove = mocker.patch.object(
+            auth_service, "deactivate_account", return_value={"message": "ok"},
+        )
+        client.request("DELETE", "/api/auth/me", json={"reason": "test"})
+        assert remove.call_args.args[0] == _signed_in.tc_no

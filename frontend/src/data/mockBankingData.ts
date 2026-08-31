@@ -1,10 +1,17 @@
 export interface BankAccount {
   id: string
   name: string
-  type: 'checking' | 'savings' | 'foreign_currency'
+  /** `investment` is the yatırım account. Its balance lives in
+   *  `investment_accounts.cash_balance`, not in banking — but it spends and
+   *  receives like an account, so it is one here. */
+  type: 'checking' | 'savings' | 'foreign_currency' | 'investment'
   balance: number
   currency: string
   accountNumber: string
+  /** Vadeli hesabın saklanan yıllık oranı ve vadesi; vadesizde tanımsız.
+   *  Ekranda bir dönem `%42.50` / `32 Gün` diye sabit yazılıydı. */
+  interestRate?: number | null
+  termDays?: number | null
 }
 
 export interface CreditCard {

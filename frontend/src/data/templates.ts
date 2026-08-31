@@ -28,7 +28,6 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
 
       // 4. Satır - Piyasalar ve Gündem
       { id: 'iv-top-movers',   type: 'top-movers',           x: 0, y: 10, w: 4, h: 3 },
-      { id: 'iv-dividends',    type: 'dividend-calendar',    x: 4, y: 10, w: 4, h: 3 },
       { id: 'iv-news',         type: 'news',                 x: 8, y: 10, w: 4, h: 3 },
 
       { id: 'iv-risk',         type: 'risk-summary',         x: 0, y: 13, w: 4, h: 3 },

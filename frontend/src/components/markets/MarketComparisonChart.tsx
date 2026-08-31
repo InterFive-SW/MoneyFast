@@ -3,6 +3,7 @@ import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, X
 import type { MarketInstrument } from '../../data/mockData'
 import { useComparisonSeries } from '../../hooks/useComparisonSeries'
 import { signedPercent, seriesName } from '../../lib/chartFormat'
+import InstrumentPicker from './InstrumentPicker'
 
 interface Props {
   instruments: MarketInstrument[]
@@ -41,27 +42,39 @@ export default function MarketComparisonChart({ instruments }: Props) {
         </h3>
       </div>
 
-      <div className="flex flex-wrap gap-1.5 mb-4">
-        {instruments.map((item) => {
-          const isSelected = selected.includes(item.symbol)
-          const disabled = !isSelected && selected.length >= MAX_SELECTION
-          return (
-            <button
-              key={item.symbol}
-              onClick={() => toggleSymbol(item.symbol)}
-              disabled={disabled}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors ${
-                isSelected
-                  ? 'bg-slate-800 text-white border-slate-800'
-                  : disabled
-                  ? 'bg-slate-800/5 text-slate-300 border-white/10 cursor-not-allowed'
-                  : 'bg-slate-800 text-slate-300 border-white/10 hover:border-slate-300'
-              }`}
-            >
-              {item.symbol}
-            </button>
-          )
-        })}
+      {/* Seçim ARAMAYLA. Her enstrüman için bir düğme basmak evren 190
+          enstrümanken idare ediyordu; binin üzerine çıkınca ekranın yarısını
+          kaplayan bir düğme duvarına dönüştü. */}
+      <div className="mb-4 flex flex-col gap-2">
+        <InstrumentPicker
+          onPick={toggleSymbol}
+          disabled={selected.length >= MAX_SELECTION}
+          placeholder={
+            selected.length >= MAX_SELECTION
+              ? `En fazla ${MAX_SELECTION} enstrüman`
+              : 'Karşılaştırmaya ekle — sembol ya da şirket adı'
+          }
+        />
+        {selected.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {selected.map((symbol, index) => (
+              <button
+                key={symbol}
+                onClick={() => toggleSymbol(symbol)}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white transition hover:border-rose-400/60"
+                aria-label={`${symbol} karşılaştırmadan çıkar`}
+              >
+                <span
+                  aria-hidden
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: PALETTE[index % PALETTE.length] }}
+                />
+                {symbol}
+                <span aria-hidden className="text-slate-500">×</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {selected.length === 0 ? (
@@ -88,6 +101,13 @@ export default function MarketComparisonChart({ instruments }: Props) {
                   stroke={PALETTE[index % PALETTE.length]}
                   strokeWidth={2}
                   dot={false}
+                  /* Borsalar aynı günlerde kapanmıyor: BIST'in tatil olduğu bir
+                     günde Nasdaq serisi doluyken BIST serisinin o tarihte
+                     anahtarı hiç yok. connectNulls olmadan Recharts çizgiyi
+                     orada kesiyordu — grafiğin "kesintili" görünmesinin sebebi
+                     buydu. Veri yok demek sıfır demek değil; çizgi o günü
+                     atlayarak devam etmeli. */
+                  connectNulls
                 />
               ))}
             </LineChart>

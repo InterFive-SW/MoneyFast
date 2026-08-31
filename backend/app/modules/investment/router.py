@@ -7,20 +7,21 @@ from typing import List, Dict, Optional
 from app.core.database import get_db
 from app.core.deps import get_current_user_id, get_optional_user_id
 from . import ai_service, market_service, service
+from app.modules.analytics import service as analytics_service
 from .models import TransactionProposal
 from .ai_schemas import (
     PortfolioPositionsOut, StageTransactionRequest, StageTransactionOut,
 )
 from .schemas import (
     InvestmentBalance, Position, Order, CandlestickDataPoint, AssetAllocationItem,
-    WatchlistItem, TopMoverItem, DividendItem, SectorAllocationItem, HeatmapItem,
-    OrderProposeRequest, OrderConfirmRequest
+    WatchlistItem, TopMoverItem, SectorAllocationItem, HeatmapItem,
+    OrderProposeRequest, OrderConfirmRequest, CashStatementOut
 )
 
 router = APIRouter(tags=["investment"])
 
 @router.get("/portfolio/summary", response_model=InvestmentBalance)
-async def get_portfolio_summary(
+def get_portfolio_summary(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -67,42 +68,98 @@ async def get_portfolio_summary(
     }
 
 @router.get("/portfolio/chart", response_model=Dict[str, List[CandlestickDataPoint]])
-async def get_portfolio_chart(
-    symbol: str = Query(default="XU100"),
+def get_portfolio_chart(
+    range: str = Query(default="yil"),
     db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
 ):
-    """
-    Mum (candlestick) grafiği verisi — gerçek `investment.market_candles`
-    satırlarından, farklı zaman dilimleri için.
+    """Portföyün KENDİ değerinin mum serisi.
 
-    Varsayılan sembol XU100: portföyün kendi zaman serisi ancak günlük
-    anlık görüntüler biriktikçe oluşur, endeks ise ilk günden itibaren gerçek.
-    """
-    product = market_service.resolve_symbol(db, symbol)
-    if product is None:
-        raise HTTPException(status_code=404, detail=f"Bilinmeyen sembol: {symbol}")
+    Bu uç nokta uzun süre `XU100` döndürüyordu -- BIST 100 endeksini, "Portföy
+    Performansı" başlığının altında. Gerekçesi de buradaydı: "portföyün kendi
+    zaman serisi ancak günlük anlık görüntüler biriktikçe oluşur". O gerekçe
+    artık geçerli değil: seri, elde olan mumlardan ve pozisyonların zaman
+    içindeki miktarından hesaplanabiliyor.
 
-    series = market_service.candle_series(db, product.symbol, limit=400)
-    # Windows the dashboard offers. Bars, not calendar days: a 5-day window on
-    # a market that was shut for three of them should still draw five bars.
-    windows = {"gun": 1, "hafta": 5, "ay": 22, "yil": 252, "tum": len(series)}
+    **Tek pencere hesaplanır.** Önceden beş pencerenin hepsi her istekte
+    üretiliyordu ve her biri bütün pozisyonların barlarını yeniden okuyordu:
+    çağrı başına ~130 sorgu, ölçülen 5,9 saniye ve 173 KB yanıt. Arayüz aynı
+    anda tek bir aralık gösteriyor, dolayısıyla tek bir aralık dönüyor.
+
+    Bilinmeyen bir aralık adı sessizce varsayılana düşmez: ekranda hangi
+    aralığın çizildiğini bilmemek, yanlış aralığı doğru sanmaktan kötüdür.
+    """
+    if range not in analytics_service.CANDLE_RANGES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Bilinmeyen aralık: {range}. "
+                   f"Geçerli olanlar: {', '.join(analytics_service.CANDLE_RANGES)}.",
+        )
+
+    holdings = market_service.holdings(db, user_id=user_id)
+    priced = [row for row in holdings if row.get("price") is not None]
+    proposals = _confirmed_proposals(db, user_id)
+
+    account = market_service.account(db, user_id=user_id)
+    base_currency = (getattr(account, "currency_code", None) or "TRY")
+    quotes = market_service.latest_quotes(db)
+
+    interval, bucket, window, limit = analytics_service.CANDLE_RANGES[range]
+
+    # Tek pencere hesaplandığı için her sembol tam bir kez okunuyor; ara
+    # bellek gerekmiyor. Beş pencerenin hepsi üretilirken aynı barlar beş kez
+    # çekiliyordu -- çözüm önbellek değil, istenmeyen dört pencereyi hiç
+    # hesaplamamaktı.
+    def bars_for(symbol: str) -> list:
+        return market_service.candle_bars(db, symbol, limit=limit, interval=interval)
+
+    def fx_for(code: str) -> list:
+        return market_service.candle_closes(
+            db, f"{code}{base_currency}", limit=limit, interval=interval
+        )
+
+    # Para birimleri toplanmadan ÖNCE çevrilir, geçmiş kurla.
+    rate_at = analytics_service._rate_lookup(
+        priced, base_currency, fx_for, ai_service.fx_rates(quotes),
+    )
+    candles = analytics_service.portfolio_candles(
+        priced,
+        bars_for=bars_for,
+        proposals=proposals,
+        bucket_seconds=bucket,
+        rate_at=rate_at,
+        window_days=window,
+    )
     return {
-        key: [
+        range: [
             {
-                "time": int(bar["timestamp"].timestamp()),
-                "open": bar["open"], "high": bar["high"],
-                "low": bar["low"], "close": bar["close"],
-                "value": bar.get("volume") or 0,
-                "color": "#22c55e" if bar["close"] >= bar["open"] else "#ef4444",
+                **candle,
+                # Portföyün hacmi yoktur; alan sözleşmede olduğu için sıfır
+                # geçiliyor, arayüz hacim panelini çizmiyor.
+                "value": 0,
+                "color": "#22c55e" if candle["close"] >= candle["open"] else "#ef4444",
             }
-            for bar in series[-count:]
+            for candle in candles
         ]
-        for key, count in windows.items()
-        if count > 0
     }
 
+
+def _confirmed_proposals(db: Session, user_id: Optional[str]) -> list:
+    """Onaylanmış işlemler -- pozisyonun zaman içindeki miktarını veren tek kayıt."""
+    if not user_id:
+        return []
+    return (
+        db.query(TransactionProposal)
+        .filter(
+            TransactionProposal.user_id == user_id,
+            TransactionProposal.status == "CONFIRMED",
+        )
+        .all()
+    )
+
+
 @router.get("/positions", response_model=List[Position])
-async def get_positions(
+def get_positions(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -130,6 +187,14 @@ def _as_frontend_position(row: dict) -> dict:
     daily = (price - previous) * quantity if (previous and price) else 0.0
     return {
         "symbol": row["symbol"],
+        # `holdings()` bunları zaten taşıyordu; burada düşürülüyorlardı.
+        # `currency` ile aynı hikâye: ana sayfadaki "Son Pozisyonlar" tablosu
+        # tür ve giriş tarihi sütunlarını dolduramadığı için o sütunlar boş
+        # kalıyordu -- veri eksik olduğu için değil, sorulmadığı için.
+        "name": row.get("name"),
+        "market": row.get("market"),
+        "productType": row.get("product_type"),
+        "openedAt": row.get("opened_at"),
         # Carried through. `holdings()` had it all along; dropping it here is
         # why the dashboard rendered a dollar price under a "Pozisyon (₺)"
         # heading.
@@ -146,7 +211,7 @@ def _as_frontend_position(row: dict) -> dict:
 
 
 @router.get("/orders", response_model=List[Order])
-async def get_orders(db: Session = Depends(get_db)):
+def get_orders(db: Session = Depends(get_db)):
     """
     Geçmiş ve bekleyen emirler.
 
@@ -158,8 +223,42 @@ async def get_orders(db: Session = Depends(get_db)):
     return market_service.recent_orders(db)
 
 
+
+@router.get(
+    "/accounts/{identifier}/statement",
+    response_model=CashStatementOut,
+    summary="Yatırım hesabı hareketleri",
+)
+def cash_statement(
+    identifier: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Yatırım hesabının nakit hareketleri.
+
+    Hesap IBAN'ıyla ya da hesap numarasıyla çağrılabilir; bankacılık arayüzü
+    elindeki iki alandan hangisi doluysa onu gönderiyor.
+
+    Bankacılık dökümüyle aynı 404 kuralı: başkasının hesabının var olduğunu
+    doğrulamak bile fazla bilgi.
+    """
+    account = market_service.account(db, user_id=user_id, allow_demo_fallback=False)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Hesap bulunamadı.")
+
+    wanted = identifier.replace(" ", "").upper()
+    known = {
+        (account.account_number or "").replace(" ", "").upper(),
+        (account.iban or service.iban_for(account.account_number)).replace(" ", "").upper(),
+    }
+    if wanted not in known:
+        raise HTTPException(status_code=404, detail="Hesap bulunamadı.")
+
+    return service.cash_statement(db, account, limit=limit)
+
 @router.get("/asset-allocation", response_model=List[AssetAllocationItem])
-async def get_asset_allocation(
+def get_asset_allocation(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -224,7 +323,7 @@ async def get_asset_allocation(
 
 
 @router.get("/watchlist", response_model=Dict[str, List[WatchlistItem]])
-async def get_watchlist(
+def get_watchlist(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
@@ -270,7 +369,7 @@ async def get_watchlist(
 
 
 @router.post("/watchlist/{symbol}", response_model=Dict[str, str])
-async def add_to_watchlist(
+def add_to_watchlist(
     symbol: str,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -283,7 +382,7 @@ async def add_to_watchlist(
 
 
 @router.delete("/watchlist/{symbol}", response_model=Dict[str, str])
-async def remove_from_watchlist(
+def remove_from_watchlist(
     symbol: str,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -295,7 +394,7 @@ async def remove_from_watchlist(
 
 
 @router.get("/top-movers", response_model=Dict[str, List[TopMoverItem]])
-async def get_top_movers(db: Session = Depends(get_db), limit: int = Query(default=5, ge=1, le=20)):
+def get_top_movers(db: Session = Depends(get_db), limit: int = Query(default=5, ge=1, le=20)):
     """
     Günün en çok kazandıran ve kaybettiren hisseleri — "yükselenler/düşenler".
 
@@ -324,20 +423,8 @@ async def get_top_movers(db: Session = Depends(get_db), limit: int = Query(defau
     }
 
 
-@router.get("/dividends", response_model=List[DividendItem])
-async def get_dividends(db: Session = Depends(get_db)):
-    """
-    Temettü verimi — sağlayıcıdan gelen `dividend_yield` üzerinden.
-
-    Ex-date ve ödeme tarihi bu sağlayıcıda yok; uydurulmuş tarih göstermek
-    yerine boş bırakılıyor. Yanlış bir temettü tarihi, kullanıcının o tarihe
-    göre işlem yapmasına sebep olabilir.
-    """
-    return market_service.dividend_rows(db)
-
-
 @router.get("/sector-allocation", response_model=List[SectorAllocationItem])
-async def get_sector_allocation(
+def get_sector_allocation(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -377,7 +464,7 @@ async def get_sector_allocation(
 
 
 @router.get("/heatmap", response_model=List[HeatmapItem])
-async def get_heatmap(
+def get_heatmap(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -421,7 +508,7 @@ async def get_heatmap(
     response_model=PortfolioPositionsOut,
     summary="Portföy pozisyonları (MCP v2.1 sözleşmesi)",
 )
-async def get_portfolio_positions_for_ai(
+def get_portfolio_positions_for_ai(
     user_id: str,
     db: Session = Depends(get_db),
     account_ids: Optional[List[str]] = Query(default=None),
@@ -477,7 +564,7 @@ async def get_portfolio_positions_for_ai(
     response_model=StageTransactionOut,
     summary="İşlem önerisi hazırla (MCP v2.1 sözleşmesi)",
 )
-async def stage_transaction(
+def stage_transaction(
     request: StageTransactionRequest,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
@@ -526,6 +613,18 @@ async def stage_transaction(
     product = (
         market_service.resolve_symbol(db, raw_symbol, strict=True) if raw_symbol else None
     )
+    # When the name does not resolve, say THAT -- and offer what it might have
+    # been. Without this the raw text flowed on as the symbol, no price was
+    # found for it, and the blocker read "Fiyat bilgisi bulunamayan enstrüman:
+    # aple" -- blaming the price for a name that was never recognised.
+    # Suggestions only: strict mode still refuses to pick one, because a
+    # misread ticker on the money path buys the wrong company.
+    symbol_suggestions: list[str] = []
+    if raw_symbol and product is None:
+        symbol_suggestions = [
+            candidate.symbol
+            for candidate in market_service.resolve_candidates(db, raw_symbol)
+        ]
 
     # Whose portfolio and cash this proposal is measured against. The
     # authenticated identity wins; `mcp` calls with a service identity and
@@ -588,6 +687,7 @@ async def stage_transaction(
         reference_price=reference_price,
         held_quantity=held_quantity,
         resolved_symbol=product.symbol if product else None,
+        symbol_suggestions=symbol_suggestions,
         currency=currency,
         available_cash=float(owner.cash_balance) if owner is not None else None,
         cash_currency=(owner.currency_code if owner is not None else "TRY") or "TRY",
@@ -658,7 +758,7 @@ def _persist_proposal(
     response_model=Dict[str, str],
     summary="Kullanıcının onayladığı işlem önerisini kesinleştir",
 )
-async def confirm_transaction_proposal(
+def confirm_transaction_proposal(
     proposal_id: str,
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
@@ -828,7 +928,7 @@ def _confirm_transfer(db: Session, proposal, user_id, now) -> Dict[str, str]:
     response_model=List[Dict[str, Optional[str]]],
     summary="Sembol haritası (servisler arası)",
 )
-async def list_products(db: Session = Depends(get_db)):
+def list_products(db: Session = Depends(get_db)):
     """
     `ingestor` servisinin hangi sembolleri çekeceğini öğrendiği uç nokta.
 

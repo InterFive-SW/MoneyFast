@@ -18,7 +18,8 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, optional_oauth2_scheme
+from app.core.deps import CREDENTIALS_ERROR, get_current_user, optional_oauth2_scheme
+from app.core.security import ADMIN_TOKEN_TYPE, decode_access_token
 
 
 class ChatIdentity(NamedTuple):
@@ -40,6 +41,15 @@ def resolve_chat_identity(
 ) -> ChatIdentity:
     if not token:
         return ChatIdentity(user_id=None, token_present=False)
+
+    # An administrator has no customer capabilities at all, and the chat is
+    # one of them. Falling through would leave them with an ANONYMOUS session
+    # -- which leaks nothing, but is still the chat answering an identity that
+    # is not supposed to have it. Refused rather than downgraded.
+    payload = decode_access_token(token)
+    if payload and payload.get("typ") == ADMIN_TOKEN_TYPE:
+        raise CREDENTIALS_ERROR
+
     try:
         user = get_current_user(token=token, db=db)
     except HTTPException:

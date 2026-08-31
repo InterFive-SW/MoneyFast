@@ -12,3 +12,4 @@ python-multipart>=0.0.9
 aiofiles>=23.2.1
 httpx>=0.27,<0.29
 fastapi-mail>=1.4.1
+fpdf2>=2.7.9

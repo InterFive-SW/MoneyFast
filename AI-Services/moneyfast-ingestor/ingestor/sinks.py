@@ -200,3 +200,49 @@ def push_news_to_rag(client: httpx.Client, items: list[dict]) -> int:
         except Exception as exc:
             log.warning("rag ingest failed for %r: %s", item["title"][:60], exc)
     return written
+
+
+def trigger_interest_accrual(client: httpx.Client) -> dict:
+    """Vadeli hesap faizlerini işletmesi için backend'i uyarır.
+
+    Faizi burada HESAPLAMIYOR: para bankacılık modülünün işi ve bu servisin
+    veritabanı kredensiyeli yok. Yapılan tek şey, günde bir kez zamanlayıcının
+    ürettiği tetiği iletmek.
+    """
+    response = client.post(
+        f"{config.backend_url()}/banking/interest/accrue",
+        headers=_headers(),
+        timeout=config.request_timeout(),
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_intraday_symbols(client: httpx.Client) -> set[str]:
+    """Gün içi bar gereken semboller, backend'e sorularak.
+
+    Burada yapılandırılmıyor: kimin neyi tuttuğu uygulamanın bilgisi ve bu
+    servisin veritabanı kredensiyeli yok.
+    """
+    response = client.get(
+        f"{config.backend_url()}/market/candles/intraday-symbols",
+        headers=_headers(),
+        timeout=config.request_timeout(),
+    )
+    response.raise_for_status()
+    return set((response.json() or {}).get("symbols") or [])
+
+
+def fetch_missing_fundamentals(client: httpx.Client) -> set[str]:
+    """Temel verisi eksik semboller, backend'e sorularak.
+
+    Hepsini her açılışta çekmek yerine yalnızca eksikleri: çeyreklik raporlarla
+    değişen oranları durmadan yeniden yazmanın anlamı yok.
+    """
+    response = client.get(
+        f"{config.backend_url()}/market/fundamentals/missing",
+        headers=_headers(),
+        timeout=config.request_timeout(),
+    )
+    response.raise_for_status()
+    return set((response.json() or {}).get("symbols") or [])

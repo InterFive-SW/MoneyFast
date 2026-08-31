@@ -12,7 +12,14 @@ import { UserProvider }     from './contexts/UserContext'
 import ProtectedRoute       from './components/auth/ProtectedRoute'
 import DashboardLayout      from './components/layout/DashboardLayout'
 import Landing              from './pages/Landing'
+import Home                 from './pages/Home'
 import Login                from './pages/Login'
+import SavedPayeesView     from './components/banking/SavedPayeesView'
+import AdminRoute          from './components/admin/AdminRoute'
+import AdminLayout         from './components/admin/AdminLayout'
+import AdminLogin          from './pages/admin/AdminLogin'
+import AdminUsers          from './pages/admin/AdminUsers'
+import AdminBills          from './pages/admin/AdminBills'
 import ForgotPassword       from './pages/ForgotPassword'
 import ResetPassword        from './pages/ResetPassword'
 import VerifyEmail          from './pages/VerifyEmail'
@@ -43,8 +50,13 @@ import Analiz from './pages/Analiz'
 import GenelBakis from './pages/analiz/GenelBakis'
 import RiskSekmesi from './pages/analiz/RiskSekmesi'
 import Senaryo from './pages/analiz/Senaryo'
-import Settings from './pages/Settings'
 
+import SettingsLayout from './pages/settings/SettingsLayout'
+import ProfileSettings from './pages/settings/ProfileSettings'
+import SecuritySettings from './pages/settings/SecuritySettings'
+import NotificationSettings from './pages/settings/NotificationSettings'
+import AppearanceSettings from './pages/settings/AppearanceSettings'
+import PrivacySettings from './pages/settings/PrivacySettings'
 export default function App() {
   return (
     /*
@@ -58,6 +70,17 @@ export default function App() {
           {/* ── Genel / Auth Rotaları ──────────────────────────────────── */}
           <Route path="/"                 element={<Landing />}          />
           <Route path="login"             element={<Login />}            />
+          {/* Operator area. Outside ProtectedRoute and DashboardLayout on
+              purpose: an administrator holds no customer session and none
+              of the customer navigation. */}
+          <Route path="admin/login"       element={<AdminLogin />}       />
+          <Route path="admin" element={<AdminRoute />}>
+            <Route element={<AdminLayout />}>
+              <Route index element={<Navigate to="/admin/users" replace />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="bills" element={<AdminBills />} />
+            </Route>
+          </Route>
           <Route path="forgot-password"   element={<ForgotPassword />}   />
           <Route path="reset-password"    element={<ResetPassword />}    />
           <Route path="verify-email"      element={<VerifyEmail />}      />
@@ -72,7 +95,11 @@ export default function App() {
           */}
           <Route element={<ProtectedRoute />}>
             <Route element={<DashboardLayout />}>
-              <Route path="dashboard"  element={<Dashboard />}  />
+              {/* Ana sayfa bakiyelerle açılır, tıpkı bir bankacılık
+                  uygulaması gibi. Uygulamayı ayıran yatırım sohbeti bir tık
+                  uzakta; ilk görülen şey olarak değil. */}
+              <Route path="dashboard"     element={<Home />}       />
+              <Route path="hizli-finans"  element={<Dashboard />}  />
               <Route path="chat"       element={<Chat />}       />
               <Route path="portfolio"  element={<Portfolio />}  />
               <Route path="banking" element={<Banking />}>
@@ -80,19 +107,25 @@ export default function App() {
                 <Route path="accounts" element={<AccountsView />} />
                 <Route path="accounts/:accountId/transactions" element={<AccountTransactionsView />} />
                 <Route path="cards" element={<CardsView />} />
+                <Route path="saved" element={<SavedPayeesView />} />
                 <Route path="transfer" element={<MoneyTransferWizard />} />
                 <Route path="new-card" element={<NewCardWizard />} />
               </Route>
+              {/* Kabuk ŞART. Üç sekme de verisini `useAnalysis()` ile
+                  alıyor ve o bir `useOutletContext()`; ebeveyn rotanın
+                  `element`'i olmadan `null` döner ve her sekme
+                  "Cannot destructure property 'analysis' of null" ile
+                  çöker. Birleşme sırasında bu element düşmüştü, dolayısıyla
+                  Analiz hiçbir koşulda açılmıyordu -- "Yeniden dene" yalnızca
+                  aynı ağacı yeniden çizdiği için de kurtarmıyordu.
+
+                  `banking`, `investment` ve `settings` ile aynı desen. */}
               <Route path="analiz" element={<Analiz />}>
                 <Route index             element={<Navigate to="genel" replace />} />
                 <Route path="genel"      element={<GenelBakis />} />
                 <Route path="risk"       element={<RiskSekmesi />} />
                 <Route path="senaryo"    element={<Senaryo />} />
               </Route>
-              {/* Portföy Analizi ve Risk Analizi tek çatı altında
-                  birleşti. Eski adresler yer imlerinde ve paylaşılan
-                  bağlantılarda duruyor, o yüzden 404 değil yönlendirme. */}
-              <Route path="analytics"  element={<Navigate to="/analiz/genel" replace />} />
               <Route path="investment" element={<Investment />}>
                 <Route index                element={<Navigate to="hisseler" replace />} />
                 <Route path="hisseler"       element={<StocksScreen />}  />
@@ -103,8 +136,28 @@ export default function App() {
                 <Route path="sektorler"      element={<SectorsScreen />} />
                 <Route path="analizler"      element={<AnalysesScreen />} />
               </Route>
-              <Route path="risk"       element={<Navigate to="/analiz/risk" replace />} />
-              <Route path="settings"   element={<Settings />}   />
+              {/* Eski adresler yer imlerinde ve paylaşılan bağlantılarda
+                  duruyor, o yüzden 404 değil yönlendirme.
+
+                  Kabuğu ikinci kez mount etmek yerine yönlendirme: iki mount
+                  iki `useAnalysisData()` demek olurdu ve menüler arası her
+                  geçiş aynı iki ucu yeniden çekerdi. Ayrı menü öğeleri
+                  kenar çubuğunda duruyor (bkz. Sidebar), ikisi de bu tek
+                  kabuğun sekmelerine iniyor. */}
+              <Route path="analytics" element={<Navigate to="/analiz/genel" replace />} />
+              <Route path="senaryo"   element={<Navigate to="/analiz/senaryo" replace />} />
+              <Route path="risk"      element={<Navigate to="/analiz/risk" replace />} />
+
+              {/* Ayarlar #42'den: tek bir sayfa değil, kendi alt sekmeleri
+                  olan bir bölüm. */}
+              <Route path="settings" element={<SettingsLayout />}>
+                <Route index element={<Navigate to="profile" replace />} />
+                <Route path="profile" element={<ProfileSettings />} />
+                <Route path="security" element={<SecuritySettings />} />
+                <Route path="notifications" element={<NotificationSettings />} />
+                <Route path="appearance" element={<AppearanceSettings />} />
+                <Route path="privacy" element={<PrivacySettings />} />
+              </Route>
             </Route>
           </Route>
         </Routes>

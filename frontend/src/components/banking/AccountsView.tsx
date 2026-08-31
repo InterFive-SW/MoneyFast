@@ -2,6 +2,8 @@ import React from 'react'
 import { useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
+import type { BankAccount } from '../../data/mockBankingData'
+import { apiClient } from '../../api/client'
 
 /**
  * AccountsView Bileşeni
@@ -11,6 +13,21 @@ import { BankingContextType } from '../../pages/Banking'
  * "Hesaplarım" seçildiğinde bu bileşen aktif olur.
  */
 
+/**
+ * Hesap türünün ekranda görünen adı.
+ *
+ * Eskiden iki dallı bir üçlü operatördü ve son dalı `'Döviz'`di: `checking` ve
+ * `savings` dışındaki HER tür oradan düşüyordu, dolayısıyla yatırım hesabı
+ * "Döviz" diye etiketleniyordu. Tanınmayan bir tür artık `—` gösterir --
+ * bilinmediğini söylemek, son dalın cevabını vermekten iyidir.
+ */
+const ACCOUNT_TYPE_LABELS: Record<BankAccount['type'], string> = {
+  checking: 'Vadesiz',
+  savings: 'Vadeli',
+  investment: 'Yatırım',
+  foreign_currency: 'Döviz',
+}
+
 export default function AccountsView() {
   const navigate = useNavigate()
   const { data, openFeatureNotReadyModal } = useOutletContext<BankingContextType>()
@@ -18,6 +35,34 @@ export default function AccountsView() {
 
   // Varsayılan olarak ilk hesabı seçili yapıyoruz
   const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || '')
+
+  /**
+   * Hesap sahibi, oturumdaki kullanıcının kendisi.
+   *
+   * Bu iki alan sabit yazılıydı: adı "Bireysel Müşteri", müşteri numarası
+   * `84938201`. İkincisi daha kötüsüydü -- her müşteride aynı olan bir
+   * "müşteri numarası", müşteriyi ayırt etmeyen bir numaradır.
+   */
+  const [holder, setHolder] = useState<{ name: string; customerNo: string } | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    void apiClient
+      .getCurrentUser()
+      .then((user) => {
+        if (cancelled) return
+        setHolder({
+          name: `${user.first_name} ${user.last_name}`.trim(),
+          customerNo: user.customer_no ?? '—',
+        })
+      })
+      // Kimlik alınamazsa alanlar boş görünür. Sabit bir isim yazmak, o ismi
+      // doğrulanmış bir bilgi gibi göstermek olurdu.
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Yeni bir hesap eklendiğinde onu otomatik seç
   const prevLengthRef = React.useRef(accounts.length)
@@ -189,7 +234,7 @@ export default function AccountsView() {
                     <div>
                       <div className="text-[11px] text-slate-400 uppercase tracking-wide">Hesap Türü</div>
                       <div className="text-slate-200 font-medium capitalize">
-                        {selectedAccount.type === 'checking' ? 'Vadesiz' : selectedAccount.type === 'savings' ? 'Vadeli' : 'Döviz'}
+                        {ACCOUNT_TYPE_LABELS[selectedAccount.type] ?? '—'}
                       </div>
                     </div>
                     <div>
@@ -213,23 +258,42 @@ export default function AccountsView() {
                   <div className="flex flex-col gap-4">
                     <div>
                       <div className="text-[11px] text-slate-400 uppercase tracking-wide">Ad Soyad</div>
-                      <div className="text-slate-200 font-medium">Bireysel Müşteri</div>
+                      <div className="text-slate-200 font-medium">
+                        {holder?.name ?? '—'}
+                      </div>
                     </div>
                     <div>
                       <div className="text-[11px] text-slate-400 uppercase tracking-wide">Müşteri No</div>
-                      <div className="text-slate-200 font-mono text-sm">84938201</div>
+                      <div className="text-slate-200 font-mono text-sm">
+                        {holder?.customerNo ?? '—'}
+                      </div>
                     </div>
                     
-                    {/* Vadeli Ekstra Alanları Mock */}
-                    {selectedAccount.type === 'savings' && (
+                    {/* Vadeli hesabın oranı ve vadesi -- kayıttan.
+
+                        Bu iki alan sabit metindi (`%42.50`, `32 Gün`) ve
+                        arkalarında ne bir sütun ne de bir faiz işletmesi
+                        vardı: vadenin sonunda bakiyeye hiçbir şey olmuyordu.
+                        Ürün günlük hesaba çevrildi; oran da kaydın kendisi. */}
+                    {selectedAccount.type === 'savings' &&
+                      selectedAccount.interestRate != null && (
                       <div className="pt-4 mt-2 border-t border-white/5 grid grid-cols-2 gap-4">
                         <div>
                           <div className="text-[11px] text-brandBlue uppercase tracking-wide font-bold">Faiz Oranı</div>
-                          <div className="text-slate-200 font-medium">%42.50</div>
+                          <div className="text-slate-200 font-medium tabular-nums">
+                            %{selectedAccount.interestRate.toLocaleString('tr-TR', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </div>
                         </div>
                         <div>
                           <div className="text-[11px] text-brandBlue uppercase tracking-wide font-bold">Vade Süresi</div>
-                          <div className="text-slate-200 font-medium">32 Gün</div>
+                          <div className="text-slate-200 font-medium tabular-nums">
+                            {selectedAccount.termDays != null
+                              ? `${selectedAccount.termDays} Gün`
+                              : '—'}
+                          </div>
                         </div>
                       </div>
                     )}

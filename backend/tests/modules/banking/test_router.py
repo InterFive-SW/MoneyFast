@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user_id
+from app.core.deps import get_current_user_id, get_optional_user_id
 from app.main import app
 from app.modules.banking import service
 
@@ -35,6 +35,9 @@ def bank_client():
     db = MagicMock(spec=Session)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_current_user_id] = lambda: "user-1"
+    # Staging also accepts a SERVICE caller (mcp) naming the user in the body,
+    # so it depends on the optional resolver rather than the required one.
+    app.dependency_overrides[get_optional_user_id] = lambda: "user-1"
     try:
         with TestClient(app) as client:
             client.db = db
@@ -42,6 +45,7 @@ def bank_client():
     finally:
         app.dependency_overrides.pop(get_db, None)
         app.dependency_overrides.pop(get_current_user_id, None)
+        app.dependency_overrides.pop(get_optional_user_id, None)
 
 
 class TestAccounts:
@@ -251,3 +255,315 @@ class TestSavingsGoalsEndpoint:
             "/api/banking/savings-goals", json={"name": "X", "target_amount": 0},
         )
         assert response.status_code == 422
+
+
+class TestBillsAndPayments:
+    """The HTTP surface for money movement.
+
+    The property under test on `/payments/stage` is a negative one: it returns
+    a proposal and nothing else happens. That split is what lets the assistant
+    prepare a payment it cannot make.
+    """
+
+    def test_a_lookup_with_no_open_bill_is_an_answer_not_an_error(self, bank_client, mocker):
+        """"Nothing is owed for this number" is a perfectly good reply to a
+        lookup, so 200 with found=false rather than 404."""
+        from app.modules.banking import payments
+
+        mocker.patch.object(payments, "find_open_bill", return_value=None)
+        response = bank_client.get(
+            "/api/banking/bills/lookup?institution=BEDAS&subscriber_no=x",
+        )
+        assert response.status_code == 200
+        assert response.json()["found"] is False
+
+    def test_a_found_bill_reports_what_is_owed(self, bank_client, mocker):
+        from app.modules.banking import payments
+
+        mocker.patch.object(payments, "find_open_bill", return_value=SimpleNamespace(
+            id="b-1", institution="BEDAŞ", bill_type="electricity",
+            subscriber_no="TEST-1", amount=842.5, due_day=15,
+        ))
+        body = bank_client.get(
+            "/api/banking/bills/lookup?institution=BEDA%C5%9E&subscriber_no=TEST-1",
+        ).json()
+        assert body["found"] is True and body["amount"] == 842.5
+
+    def test_staging_returns_a_proposal(self, bank_client, mocker):
+        from datetime import datetime, timezone
+
+        from app.modules.banking import payments
+
+        mocker.patch.object(payments, "stage", return_value=SimpleNamespace(
+            id="PAY-1", status="PENDING", payment_type="BILL_PAYMENT",
+            amount=842.5, currency_code="TRY", destination_reference="TEST-1",
+            payload={"description": "BEDAŞ fatura ödemesi", "balance_before": 10000.0},
+            expires_at=datetime.now(timezone.utc),
+        ))
+        body = bank_client.post("/api/banking/payments/stage", json={
+            "payment_type": "BILL_PAYMENT", "institution": "BEDAŞ",
+            "subscriber_no": "TEST-1",
+        }).json()
+        assert body["proposal_id"] == "PAY-1" and body["status"] == "PENDING"
+
+    def test_a_refused_staging_is_422(self, bank_client, mocker):
+        from app.modules.banking import payments
+
+        mocker.patch.object(
+            payments, "stage", side_effect=payments.PaymentError("Bakiye yetersiz"),
+        )
+        response = bank_client.post("/api/banking/payments/stage", json={
+            "payment_type": "TRANSFER", "amount": 1, "destination": "TR00",
+        })
+        assert response.status_code == 422
+
+    def test_confirming_applies_the_payment(self, bank_client, mocker):
+        from app.modules.banking import payments
+
+        mocker.patch.object(payments, "confirm", return_value={
+            "proposal_id": "PAY-1", "status": "CONFIRMED", "reference_number": "TRF-1",
+            "amount": 842.5, "currency": "TRY", "balance_after": 9157.5,
+        })
+        body = bank_client.post("/api/banking/payments/PAY-1/confirm").json()
+        assert body["status"] == "CONFIRMED" and body["balance_after"] == 9157.5
+
+    def test_a_refused_confirm_is_422(self, bank_client, mocker):
+        from app.modules.banking import payments
+
+        mocker.patch.object(
+            payments, "confirm", side_effect=payments.PaymentError("süresi doldu"),
+        )
+        assert bank_client.post(
+            "/api/banking/payments/PAY-1/confirm",
+        ).status_code == 422
+
+    def test_cancelling_a_proposal(self, bank_client, mocker):
+        from app.modules.banking import payments
+
+        mocker.patch.object(payments, "cancel", return_value=True)
+        assert bank_client.post("/api/banking/payments/PAY-1/cancel").status_code == 204
+
+    def test_cancelling_a_missing_proposal_is_404(self, bank_client, mocker):
+        from app.modules.banking import payments
+
+        mocker.patch.object(payments, "cancel", return_value=False)
+        assert bank_client.post("/api/banking/payments/nope/cancel").status_code == 404
+
+
+class TestSavedPayeeEndpoints:
+    def test_saved_payees_are_listed(self, bank_client, mocker):
+        from app.modules.banking import payments
+
+        mocker.patch.object(payments, "saved_payees", return_value=[SimpleNamespace(
+            id="p-1", label="BEDAŞ", institution="BEDAŞ", subscriber_no="TEST-1",
+        )])
+        body = bank_client.get("/api/banking/saved-payees").json()
+        assert body["payees"][0]["subscriber_no"] == "TEST-1"
+
+    def test_a_payee_is_saved(self, bank_client, mocker):
+        from app.modules.banking import payments
+
+        mocker.patch.object(payments, "save_payee", return_value=SimpleNamespace(
+            id="p-1", label="BEDAŞ", institution="BEDAŞ", subscriber_no="TEST-1",
+        ))
+        response = bank_client.post("/api/banking/saved-payees", json={
+            "label": "BEDAŞ", "institution": "BEDAŞ", "subscriber_no": "TEST-1",
+        })
+        assert response.status_code == 200
+
+    def test_a_payee_is_deleted(self, bank_client, mocker):
+        from app.modules.banking import payments
+
+        mocker.patch.object(payments, "delete_payee", return_value=True)
+        assert bank_client.delete("/api/banking/saved-payees/p-1").status_code == 204
+
+    def test_deleting_a_missing_payee_is_404(self, bank_client, mocker):
+        from app.modules.banking import payments
+
+        mocker.patch.object(payments, "delete_payee", return_value=False)
+        assert bank_client.delete("/api/banking/saved-payees/nope").status_code == 404
+
+
+class TestWhoAPaymentIsStagedFor:
+    """Staging is reachable two ways; confirming is not.
+
+    `mcp` calls stage with a SERVICE identity and names the user in the body,
+    the same arrangement `investment/transactions/stage` uses. Confirm keeps
+    demanding a user token, so the assistant can prepare a payment and only
+    the person whose money it is can make it happen.
+    """
+
+    def test_a_service_caller_may_name_the_user(self, mocker):
+        from datetime import datetime, timezone
+
+        from app.modules.banking import payments
+
+        staged = mocker.patch.object(payments, "stage", return_value=SimpleNamespace(
+            id="PAY-1", status="PENDING", payment_type="TRANSFER", amount=1.0,
+            currency_code="TRY", destination_reference="TR00", payload={},
+            expires_at=datetime.now(timezone.utc),
+        ))
+        app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
+        app.dependency_overrides[get_optional_user_id] = lambda: None  # service call
+        try:
+            with TestClient(app) as client:
+                response = client.post("/api/banking/payments/stage", json={
+                    "user_id": "user-9", "payment_type": "TRANSFER",
+                    "amount": 1, "destination": "TR00",
+                })
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_optional_user_id, None)
+        assert response.status_code == 200
+        assert staged.call_args.kwargs["user_id"] == "user-9"
+
+    def test_a_token_wins_over_the_body(self, bank_client, mocker):
+        """Trusting the body while someone else is authenticated would let
+        anyone stage a payment in another person's name."""
+        response = bank_client.post("/api/banking/payments/stage", json={
+            "user_id": "someone-else", "payment_type": "TRANSFER",
+            "amount": 1, "destination": "TR00",
+        })
+        assert response.status_code == 403
+
+    def test_neither_a_token_nor_a_body_user_is_refused(self):
+        app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
+        app.dependency_overrides[get_optional_user_id] = lambda: None
+        try:
+            with TestClient(app) as client:
+                response = client.post("/api/banking/payments/stage", json={
+                    "payment_type": "TRANSFER", "amount": 1, "destination": "TR00",
+                })
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(get_optional_user_id, None)
+        assert response.status_code == 401
+
+
+class TestUnifiedAccountList:
+    def test_banking_and_investment_arrive_in_one_shape(self, bank_client, mocker):
+        """The transfer screen should not have to know that investment cash
+        lives in another table; `is_investment` is the only hint it needs."""
+        mocker.patch.object(service, "portfolio_accounts", return_value=[
+            {"id": "a-1", "account_number": "1", "iban": "TR1", "account_type": "vadesiz",
+             "currency_code": "TRY", "balance": 100.0, "is_investment": False},
+            {"id": "ia-1", "account_number": "TR-INV", "iban": None,
+             "account_type": "yatirim", "currency_code": "TRY", "balance": 250.0,
+             "is_investment": True},
+        ])
+        body = bank_client.get("/api/banking/accounts/all").json()
+        assert [a["account_type"] for a in body] == ["vadesiz", "yatirim"]
+        assert body[1]["is_investment"] is True
+
+
+class TestCardAndLoanEndpoints:
+    def test_cards_are_listed_with_the_derived_limit(self, bank_client, mocker):
+        from app.modules.banking import products
+
+        mocker.patch.object(products, "cards_for", return_value=[{
+            "id": "c-1", "name": "Platinum", "brand": "mastercard",
+            "card_number": "5287 **** **** 8024", "limit": 50000.0,
+            "current_debt": 8450.75, "available_limit": 41549.25, "due_day": 12,
+            "color": None, "is_digital": False, "settings": {}, "linked_account_id": None,
+        }])
+        body = bank_client.get("/api/banking/cards").json()
+        assert body[0]["available_limit"] == 41549.25
+
+    def test_loans_are_listed_with_progress(self, bank_client, mocker):
+        from app.modules.banking import products
+
+        mocker.patch.object(products, "loans_for", return_value=[{
+            "id": "l-1", "title": "K", "total_amount": 60000.0,
+            "remaining_amount": 55000.0, "installment_amount": 5000.0,
+            "installment_count": 12, "paid_installments": 1, "remaining_months": 11,
+            "next_due": None, "progress_percentage": 8.3,
+        }])
+        body = bank_client.get("/api/banking/loans").json()
+        assert body[0]["progress_percentage"] == 8.3
+
+    def test_card_settings_are_updated(self, bank_client, mocker):
+        from app.modules.banking import products
+
+        mocker.patch.object(products, "update_card_settings", return_value=None)
+        mocker.patch.object(products, "cards_for", return_value=[{
+            "id": "c-1", "name": "Platinum", "brand": "visa", "card_number": "4 **** 1",
+            "limit": 100.0, "current_debt": 0.0, "available_limit": 100.0, "due_day": 1,
+            "color": None, "is_digital": False, "settings": {"frozen": True},
+            "linked_account_id": None,
+        }])
+        body = bank_client.patch(
+            "/api/banking/cards/c-1/settings", json={"settings": {"frozen": True}},
+        ).json()
+        assert body["settings"] == {"frozen": True}
+
+    def test_settings_on_an_unknown_card_are_404(self, bank_client, mocker):
+        from app.modules.banking import products
+
+        mocker.patch.object(
+            products, "update_card_settings",
+            side_effect=products.ProductError("Kart bulunamadı."),
+        )
+        assert bank_client.patch(
+            "/api/banking/cards/ghost/settings", json={"settings": {}},
+        ).status_code == 404
+
+    def test_a_card_is_closed(self, bank_client, mocker):
+        from app.modules.banking import products
+
+        mocker.patch.object(products, "close_card", return_value=True)
+        assert bank_client.delete("/api/banking/cards/c-1").status_code == 204
+
+    def test_closing_an_unknown_card_is_404(self, bank_client, mocker):
+        from app.modules.banking import products
+
+        mocker.patch.object(products, "close_card", return_value=False)
+        assert bank_client.delete("/api/banking/cards/ghost").status_code == 404
+
+    def test_closing_a_card_with_debt_is_422(self, bank_client, mocker):
+        from app.modules.banking import products
+
+        mocker.patch.object(
+            products, "close_card",
+            side_effect=products.ProductError("Borcu olan kart kapatılamaz."),
+        )
+        assert bank_client.delete("/api/banking/cards/c-1").status_code == 422
+
+
+class TestAccrueInterestEndpoint:
+    """Faiz işletme uç noktası.
+
+    Servis işi: faiz ödemek bankanın işi, müşterinin eylemi değil.
+    """
+
+    URL = "/api/banking/interest/accrue"
+
+    def test_a_customer_token_cannot_trigger_it(self, bank_client, monkeypatch):
+        """Müşteriye kendi faizini tetikleme yetkisi vermek, aynı günü tekrar
+        tekrar denemesine davetiye olurdu."""
+        monkeypatch.setenv("BACKEND_API_KEY", "service-key")
+        assert bank_client.post(self.URL).status_code == 401
+
+    def test_it_refuses_when_the_key_is_unset(self, bank_client, monkeypatch):
+        """Bir env değişkeni eksik diye sessizce herkese açılan uç nokta,
+        kimsenin fark etmediği türden bir şey."""
+        monkeypatch.delenv("BACKEND_API_KEY", raising=False)
+        assert bank_client.post(self.URL).status_code == 503
+
+    def test_the_service_key_gets_the_posted_movements(
+        self, bank_client, mocker, monkeypatch
+    ):
+        monkeypatch.setenv("BACKEND_API_KEY", "service-key")
+        mocker.patch.object(
+            service, "accrue_interest",
+            return_value=[{
+                "account_number": "2000000000001", "amount": 5.21, "days": 1,
+                "reference_number": "TRF-1", "balance_after": 5005.21,
+            }],
+        )
+        response = bank_client.post(
+            self.URL, headers={"Authorization": "Bearer service-key"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["accrued"] == 1
+        assert body["movements"][0]["amount"] == 5.21

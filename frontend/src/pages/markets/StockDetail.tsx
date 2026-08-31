@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { MOCK_EARNINGS_REPORTS, MOCK_DIVIDEND_ANNOUNCEMENTS, MOCK_FUNDS } from '../../data/mockData'
 import { useInstrument } from '../../hooks/useInstrument'
 import SampleDataBadge from '../../components/markets/SampleDataBadge'
+import TeknikGorunum from '../../components/markets/TeknikGorunum'
 
 type DetailTab = 'ozet' | 'finansallar' | 'oran-analizi' | 'temettu' | 'fon-pozisyonlari'
 
@@ -112,6 +113,7 @@ export default function StockDetail() {
 
       <div className="bg-slate-800/70 backdrop-blur-md rounded-[2rem] p-6 border border-white/50 shadow-sm">
         {activeTab === 'ozet' && (
+          <div className="flex flex-col gap-5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
               { label: 'Piyasa Değeri', value: `${fmtCompact(instrument.marketCap)} ${instrument.unit}` },
@@ -128,6 +130,12 @@ export default function StockDetail() {
                 <div className="text-sm font-bold tabular-nums text-white">{stat.value}</div>
               </div>
             ))}
+          </div>
+
+          {/* Hesaplanmış eğilim. Sohbetin okuduğu uç noktanın AYNISI: ikisi
+              ayrı hesaplasaydı aynı hisse için farklı bir eğilim
+              söyleyebilirlerdi. */}
+          <TeknikGorunum symbol={symbol.toUpperCase()} />
           </div>
         )}
 

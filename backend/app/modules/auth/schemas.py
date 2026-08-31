@@ -5,7 +5,7 @@ Kimlik doğrulama ve kullanıcı yönetimi için Veri Transfer Nesneleri (DTO'la
 Pydantic V2 kullanarak girdi verilerini sıkı bir şekilde doğrular.
 """
 
-from typing import Optional
+from typing import Optional, Dict
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
@@ -63,8 +63,26 @@ class UserResponse(UserBase):
     email: EmailStr
     phone_number: str
     is_active: bool
-    wants_email_notifications: bool
+    
+    # JSONB mimarisine uygun olarak, kategori ve kanala göre bildirim tercihlerini tutar.
+    notification_preferences: Dict[str, Dict[str, bool]] = Field(..., description="Kullanıcının detaylı bildirim tercihleri matrisi")
+
+    # Güvenlik Merkezi → İşlem Onay Limiti slider'ından ayarlanan eşik değeri.
+    # Bu değerin üzerindeki para transferlerinde ek doğrulama (SMS/2FA) istenir.
+    transaction_limit: int = Field(..., description="Ek doğrulama gerektiren transfer eşiği (₺)")
+
+    # Görünüm & Format sekmesinden ayarlanan kullanıcı tercihleri (dil, para
+    # birimi, varsayılan dashboard şablonu). JSONB olarak saklandığı için
+    # şema genişletmeye gerek kalmadan yeni tercih anahtarları eklenebilir.
+    user_preferences: Dict[str, str] = Field(..., description="Kullanıcıya özgü görünüm ve bölgesel tercihler")
+    
     created_at: datetime
+
+    #: Ekranlarda gösterilen müşteri numarası. Saklanmıyor, kullanıcı
+    #: kimliğinden türetiliyor -- hesap numaralarının ve IBAN'ların zaten
+    #: üretildiği yöntemin aynısı. Arayüzde bir dönem HERKES için aynı sabit
+    #: (`84938201`) yazılıydı, yani müşteriyi ayırt etmeyen bir "müşteri no".
+    customer_no: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -125,7 +143,18 @@ class UserUpdateRequest(BaseModel):
     """
     email: Optional[EmailStr] = None
     phone_number: Optional[str] = Field(None, pattern=r"^\+?[0-9]{10,15}$")
-    wants_email_notifications: Optional[bool] = None
+    
+    # JSONB yapısına uygun opsiyonel bildirim tercihleri
+    notification_preferences: Optional[Dict[str, Dict[str, bool]]] = Field(None, description="Opsiyonel olarak güncellenecek detaylı bildirim matrisi")
+
+    # Güvenlik → İşlem Onay Limiti (₺). Pydantic seviyesinde 0 ile 250.000₺
+    # arasına kısıtlanmıştır; frontend slider aynı aralığı yansıtır.
+    transaction_limit: Optional[int] = Field(None, ge=0, le=250000, description="Ek doğrulama gerektiren transfer eşiği (₺)")
+
+    # Görünüm & Format tercihleri. Anahtar-değer çiftleri olarak
+    # saklandığı için frontend hangi anahtarları gönderirse backend
+    # doğrudan JSONB kolonuna yazar.
+    user_preferences: Optional[Dict[str, str]] = Field(None, description="Kullanıcıya özgü görünüm ve bölgesel tercihler")
 
 
 class ChangePasswordRequest(BaseModel):
@@ -147,4 +176,17 @@ class ChangePasswordRequest(BaseModel):
         if not any(char.isdigit() for char in v):
             raise ValueError("Şifre en az bir rakam içermelidir")
         return v
+
+
+class DeleteAccountRequest(BaseModel):
+    """Hesap kapatma (soft delete) isteği için şema.
+
+    KVKK/GDPR UYUM NOTU:
+    Hesap kapatma geri dönüşü olmayan (irreversible) kritik bir aksiyondur.
+    Frontend'de çok adımlı onay modalı ("KAPAT" yazma zorunluluğu) ile
+    korunduğu için bu şemada yalnızca opsiyonel ayrılma nedeni istenir.
+    Gerçek silme yerine soft-delete (is_active=False) uygulanır; yasal
+    saklama yükümlülükleri gereği kullanıcı kaydı veritabanında kalır.
+    """
+    reason: Optional[str] = Field(None, max_length=500, description="Kullanıcının opsiyonel ayrılma nedeni")
 

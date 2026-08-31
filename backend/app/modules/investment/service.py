@@ -15,13 +15,19 @@ agree with each other, which is all it claims to do.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from .models import InvestmentAccount, InvestmentProduct, PortfolioPosition
+from .models import (
+    CashMovement,
+    InvestmentAccount,
+    InvestmentProduct,
+    PortfolioPosition,
+)
 
 log = logging.getLogger("moneyfast.investment.settlement")
 
@@ -46,6 +52,57 @@ class SettlementError(Exception):
     """The proposal cannot be settled. Carries a user-facing Turkish reason."""
 
 
+def iban_for(account_number: str) -> str:
+    """Yatırım hesabının sentetik ama biçimi doğru IBAN'ı.
+
+    Kasıtlı olarak TR00: gerçek bir kontrol hanesi bu hesapları
+    yönlendirilebilir gibi gösterirdi ve buradaki hiçbir şey bir ödeme ağına
+    çıkmıyor. Numaranın kendisi değil özeti kullanılıyor -- `TR-0003-28BFBC42`
+    gibi bir numarada yalnızca birkaç rakam var ve rakamları alıp doldurmak
+    iki farklı hesabı aynı IBAN'a düşürebilirdi.
+
+    `alembic/versions/0017_*.py` aynı hesabı yapıyor; ikisi ayrışırsa geri
+    doldurulan IBAN ile yeni açılan hesabınki farklı biçimde olur.
+    """
+    digest = hashlib.sha256(str(account_number).encode("utf-8")).hexdigest()
+    body = str(int(digest[:20], 16)).zfill(16)[:16]
+    return f"TR00{body}00000{body[:2]}"
+
+
+def record_cash_movement(
+    db: Session,
+    account: InvestmentAccount,
+    *,
+    amount: float,
+    balance_before: float,
+    balance_after: float,
+    description: str,
+    reference: Optional[str] = None,
+    when: Optional[datetime] = None,
+) -> CashMovement:
+    """Nakit defterine tek satır yazar. Commit ETMEZ -- çağıran sahibidir.
+
+    Bakiyeyi değiştiren her yol buradan geçmeli. Üç yazar vardı (takas,
+    bankacılık köprüsü, yönetici düzeltmesi) ve hiçbiri iz bırakmadığı için
+    hesabın gösterebileceği bir hareket dökümü yoktu.
+
+    Yön tutardan değil, bakiyenin gidiş yönünden okunur: `amount` işaretli
+    gelir, artı ise para girmiştir.
+    """
+    movement = CashMovement(
+        account_id=account.id,
+        direction="CREDIT" if amount >= 0 else "DEBIT",
+        amount=abs(round(float(amount), 2)),
+        balance_before=round(float(balance_before), 2),
+        balance_after=round(float(balance_after), 2),
+        reference=reference,
+        description=description[:255],
+        created_at=when or datetime.now(timezone.utc),
+    )
+    db.add(movement)
+    return movement
+
+
 def ensure_account(db: Session, user_id: str) -> InvestmentAccount:
     """The user's investment account, created if they do not have one yet.
 
@@ -68,6 +125,7 @@ def ensure_account(db: Session, user_id: str) -> InvestmentAccount:
         # Unique per account and stable: derived from the user id rather than
         # a counter, so two concurrent registrations cannot collide on it.
         account_number=f"TR-{str(user_id).replace('-', '')[:12].upper()}",
+        iban=iban_for(f"TR-{str(user_id).replace('-', '')[:12].upper()}"),
         name="Yatırım Hesabı",
         currency_code="TRY",
         cash_balance=STARTING_CASH,
@@ -77,6 +135,45 @@ def ensure_account(db: Session, user_id: str) -> InvestmentAccount:
     log.info("created investment account for user %s", user_id)
     return account
 
+
+
+def cash_statement(
+    db: Session, account: InvestmentAccount, limit: int = 50
+) -> dict:
+    """Yatırım hesabının hareket dökümü.
+
+    Defterden okunur, bakiyeden yeniden oynatılarak üretilmez: bakiyeyi üç ayrı
+    yer yazıyor ve biri (yönetici düzeltmesi) hiçbir zaman bir işleme
+    bağlanmıyor, dolayısıyla geriye doğru hesap sessizce kayardı.
+
+    Karşı taraf alanı bilerek doldurulmuyor: bir alım işleminin karşısında bir
+    IBAN yoktur, açıklama zaten enstrümanı söylüyor.
+    """
+    rows = (
+        db.query(CashMovement)
+        .filter(CashMovement.account_id == account.id)
+        .order_by(CashMovement.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "account_number": account.account_number,
+        "iban": account.iban or iban_for(account.account_number),
+        "balance": float(account.cash_balance),
+        "currency_code": account.currency_code or "TRY",
+        "movements": [
+            {
+                "reference_number": row.reference,
+                "direction": row.direction,
+                "amount": float(row.amount),
+                "balance_after": float(row.balance_after),
+                "counterparty_iban": None,
+                "description": row.description,
+                "created_at": row.created_at,
+            }
+            for row in rows
+        ],
+    }
 
 def _position(
     db: Session, account_id: str, product_id: str
@@ -228,6 +325,16 @@ def _settle_buy(
         position.updated_at = now
 
     account.cash_balance = cash - net_amount
+    record_cash_movement(
+        db,
+        account,
+        amount=-net_amount,
+        balance_before=cash,
+        balance_after=float(account.cash_balance),
+        description=f"Alım — {proposal.symbol} x{quantity:g}",
+        reference=proposal.id,
+        when=now,
+    )
     log.info(
         "settled BUY %s x%s for %s, cash %.2f -> %.2f",
         proposal.symbol, quantity, proposal.id, cash, float(account.cash_balance),
@@ -267,6 +374,15 @@ def _settle_sell(
         position.updated_at = datetime.now(timezone.utc)
 
     account.cash_balance = cash + net_amount
+    record_cash_movement(
+        db,
+        account,
+        amount=net_amount,
+        balance_before=cash,
+        balance_after=float(account.cash_balance),
+        description=f"Satım — {proposal.symbol} x{quantity:g}",
+        reference=proposal.id,
+    )
     log.info(
         "settled SELL %s x%s for %s, cash %.2f -> %.2f",
         proposal.symbol, quantity, proposal.id, cash, float(account.cash_balance),

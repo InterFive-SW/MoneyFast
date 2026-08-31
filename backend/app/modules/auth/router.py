@@ -15,7 +15,8 @@ from app.modules.auth.schemas import (
     ResetPasswordRequest, 
     VerifyEmailRequest,
     UserUpdateRequest,
-    ChangePasswordRequest
+    ChangePasswordRequest,
+    DeleteAccountRequest
 )
 from app.core import deps
 from app.core.database import get_db
@@ -40,7 +41,7 @@ router = APIRouter(tags=["Authentication"])
     status_code=status.HTTP_201_CREATED,
     summary="Yeni bir kullanıcı kaydet"
 )
-async def register(user_in: schemas.RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def register(user_in: schemas.RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Girdilerini doğrulayarak ve şifrelerini güvenli bir şekilde hashleyerek yeni bir kullanıcı kaydeder.
 
@@ -58,7 +59,7 @@ async def register(user_in: schemas.RegisterRequest, background_tasks: Backgroun
     response_model=schemas.TokenResponse,
     summary="Kullanıcıyı doğrula ve JWT token döndür"
 )
-async def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
+def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
     """
     TC ve şifresini doğrulayarak bir kullanıcıyı doğrular ve ardından bir JWT erişim token'ı verir.
 
@@ -77,7 +78,7 @@ async def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)
     response_model=schemas.TokenResponse,
     summary="Yenileme token'ı ile yeni bir access token al",
 )
-async def refresh(payload: schemas.RefreshRequest, db: Session = Depends(get_db)):
+def refresh(payload: schemas.RefreshRequest, db: Session = Depends(get_db)):
     """
     Süresi dolmuş bir access token'ı, uzun ömürlü yenileme token'ıyla tazeler.
 
@@ -95,7 +96,7 @@ async def refresh(payload: schemas.RefreshRequest, db: Session = Depends(get_db)
     status_code=status.HTTP_200_OK,
     summary="E-posta adresini doğrula"
 )
-async def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
+def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
     """
     Kullanıcının e-posta adresini JWT token üzerinden doğrular.
     GÜVENLİK: Sadece geçerli ve süresi dolmamış tokenlar kabul edilir.
@@ -108,7 +109,7 @@ async def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db
     status_code=status.HTTP_200_OK,
     summary="Şifre sıfırlama bağlantısı iste"
 )
-async def forgot_password(payload: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def forgot_password(payload: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Kullanıcıya e-posta yoluyla şifre sıfırlama bağlantısı gönderir.
     GÜVENLİK: TC Kimlik ve E-posta doğrulaması yapılarak yetkisiz erişim önlenir.
@@ -122,7 +123,7 @@ async def forgot_password(payload: ForgotPasswordRequest, background_tasks: Back
     status_code=status.HTTP_200_OK,
     summary="Yeni şifre belirle"
 )
-async def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
     """
     Geçerli bir şifre sıfırlama token'ı ile kullanıcının şifresini yeniler.
     GÜVENLİK: JWT token'ı doğrulanır, şifre bcrypt ile hashlenerek saklanır.
@@ -148,7 +149,9 @@ async def get_current_user(user=Depends(deps.get_current_user)):
     aynı kullanıcının iki isteğinin farklı kimliklere sahip olması demekti ve
     konuşmaların bir kullanıcıya bağlanmasını imkânsız kılıyordu.
     """
-    return user
+    payload = schemas.UserResponse.model_validate(user)
+    payload.customer_no = service.customer_no_for(user.id)
+    return payload
 
 
 @router.put(
@@ -156,7 +159,7 @@ async def get_current_user(user=Depends(deps.get_current_user)):
     response_model=schemas.UserResponse,
     summary="Mevcut kullanıcının profilini güncelle"
 )
-async def update_profile(
+def update_profile(
     payload: UserUpdateRequest,
     db: Session = Depends(get_db),
     user=Depends(deps.get_current_user)
@@ -173,7 +176,7 @@ async def update_profile(
     status_code=status.HTTP_200_OK,
     summary="Kullanıcının şifresini değiştir"
 )
-async def change_password(
+def change_password(
     payload: ChangePasswordRequest,
     db: Session = Depends(get_db),
     user=Depends(deps.get_current_user)
@@ -184,6 +187,54 @@ async def change_password(
     """
     return service.change_user_password(user.tc_no, payload, db)
 
+
+@router.post(
+    "/export-data",
+    status_code=status.HTTP_200_OK,
+    summary="KVKK/GDPR veri dışa aktarma talebi oluştur"
+)
+async def export_data(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user=Depends(deps.get_current_user)
+):
+    """Kullanıcının tüm kişisel verilerinin dışa aktarılması talebini alır.
+
+    KVKK/GDPR UYUM:
+    6698 sayılı KVKK ve AB Genel Veri Koruma Tüzüğü (GDPR) kapsamında
+    kullanıcılar, platformda saklanan tüm kişisel verilerinin makine
+    tarafından okunabilir bir formatta (JSON/CSV/ZIP) kendilerine
+    teslim edilmesini talep etme hakkına sahiptir. Bu endpoint o
+    talebi başlatır; dosya hazırlandığında kullanıcının kayıtlı
+    e-posta adresine gönderilir.
+    """
+    return await service.request_data_export(user.tc_no, db, background_tasks)
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_200_OK,
+    summary="Kullanıcı hesabını kalıcı olarak kapat (soft delete)"
+)
+def delete_account(
+    payload: DeleteAccountRequest,
+    db: Session = Depends(get_db),
+    user=Depends(deps.get_current_user)
+):
+    """Kullanıcı hesabını kalıcı olarak devre dışı bırakır.
+
+    GÜVENLİK & MİMARİ KARAR:
+    Bu endpoint, kullanıcı kaydını veritabanından SILMEZ (hard delete).
+    Bunun yerine `is_active=False` yaparak (soft delete) hesabı devre
+    dışı bırakır. Bu yaklaşım:
+      • MASAK ve finansal düzenleme uyumunu korur (işlem geçmişi saklı kalır).
+      • Kullanıcının tekrar giriş yapmasını engeller.
+      • Yasal inceleme durumunda verilerin erişilebilir kalmasını sağlar.
+
+    Frontend'de çok adımlı onay modalı ("KAPAT" yazma zorunluluğu) ile
+    korunur; yetkisiz veya kazara tetiklenmesi önlenir.
+    """
+    return service.deactivate_account(user.tc_no, payload.reason, db)
 
 
 @router.get(

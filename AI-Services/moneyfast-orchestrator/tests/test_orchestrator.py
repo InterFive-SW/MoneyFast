@@ -463,7 +463,7 @@ class TestMarketResearchNode:
         args = fake_mcp.calls[0][1]
         assert args["query"] == base_state["user_message"]
         assert args["top_k"] == 8
-        assert args["min_similarity"] == 0.35
+        assert args["min_similarity"] == 0.45
 
     @pytest.mark.asyncio
     async def test_only_the_context_window_is_sent_as_context(
@@ -816,13 +816,17 @@ class TestTransactionNode:
 class TestHandoffNode:
     @pytest.mark.asyncio
     async def test_returns_an_instruction_and_calls_no_tool(self, fake_mcp, base_state):
+        """`DISTRESS_SIGNAL` alone says a turn is in trouble, not WHICH
+        trouble -- so it lands on the generic branch, not the budgeting one.
+        """
         out = await orchestrator.handoff_node(
             {**base_state, "safety_flags": ["DISTRESS_SIGNAL"]}
         )
         payload = out["specialist_output"]
         assert payload["status"] == "HANDOFF"
         assert payload["safety_flags"] == ["DISTRESS_SIGNAL"]
-        assert "Do not screen" in payload["instruction"]
+        assert payload["handoff_category"] == "GENERIC_DISTRESS"
+        assert "Do NOT assume the problem is financial" in payload["instruction"]
         assert fake_mcp.calls == []
 
     @pytest.mark.asyncio
@@ -871,6 +875,88 @@ class TestHandoffNode:
         assert out["crisis_notices"] == []
         assert "Do not screen" in out["specialist_output"]["instruction"]
 
+    @pytest.mark.asyncio
+    async def test_a_suicide_statement_the_regex_missed_is_still_not_budgeting(
+        self, fake_mcp, base_state
+    ):
+        """Measured, 31 Aug: "ok i get it i am jumping off a cliff".
+
+        The regex held `jump off`, which does not match "jumping off", so the
+        only signal was the router model's -- and it spells the flag
+        `SELF_HARM`, one character class from the canonical name. The exact
+        match in `handoff_node` missed it, the `else` branch was
+        FINANCIAL_DISTRESS, and the user was told that borrowed money raises
+        risk, with no crisis line.
+        """
+        out = await orchestrator.handoff_node(
+            {**base_state, "safety_flags": ["SELF_HARM"], "primary_intent": "SELF_HARM"}
+        )
+        assert out["specialist_output"]["handoff_category"] == "SELF_HARM_RISK"
+        assert out["crisis_notices"] == [orchestrator.CRISIS_RESOURCES_TR]
+        assert "Do not screen" not in out["specialist_output"]["instruction"]
+
+    @pytest.mark.asyncio
+    async def test_the_intent_alone_is_enough(self, fake_mcp, base_state):
+        """In that turn `primary_intent` was already SELF_HARM and nothing
+        read it."""
+        out = await orchestrator.handoff_node(
+            {**base_state, "safety_flags": [], "primary_intent": "SUICIDE"}
+        )
+        assert out["specialist_output"]["handoff_category"] == "SELF_HARM_RISK"
+
+    @pytest.mark.asyncio
+    async def test_a_disclosed_condition_is_not_a_budgeting_problem(
+        self, fake_mcp, base_state
+    ):
+        """Measured, 31 Aug: "ben şizofrenim" was answered with the
+        borrowed-money lecture, because no category existed for it and
+        FINANCIAL_DISTRESS was the fallback."""
+        out = await orchestrator.handoff_node(
+            {
+                **base_state,
+                "safety_flags": ["DISTRESS_SIGNAL"],
+                "primary_intent": "MENTAL_HEALTH",
+            }
+        )
+        payload = out["specialist_output"]
+        assert payload["handoff_category"] == "MENTAL_HEALTH_DISCLOSURE"
+        assert out["crisis_notices"] == [orchestrator.CRISIS_RESOURCES_TR]
+        assert "Do not screen" not in payload["instruction"]
+        assert "Do NOT diagnose" in payload["instruction"]
+
+    @pytest.mark.asyncio
+    async def test_the_worst_signal_wins(self, fake_mcp, base_state):
+        out = await orchestrator.handoff_node(
+            {
+                **base_state,
+                "safety_flags": ["FINANCIAL_DISTRESS", "MENTAL_HEALTH", "SUICIDAL"],
+            }
+        )
+        assert out["specialist_output"]["handoff_category"] == "SELF_HARM_RISK"
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_flag_never_reaches_the_budgeting_answer(
+        self, fake_mcp, base_state
+    ):
+        """The whole point of the fallback change: a name nobody anticipated
+        must not select a content category."""
+        out = await orchestrator.handoff_node(
+            {**base_state, "safety_flags": ["DISTRESS_SIGNAL", "SOMETHING_NEW"]}
+        )
+        assert out["specialist_output"]["handoff_category"] == "GENERIC_DISTRESS"
+        assert out["crisis_notices"] == [orchestrator.CRISIS_RESOURCES_TR]
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_flag_is_carried_not_dropped(self, fake_mcp, base_state):
+        """It cannot pick the category, but it stays visible in the trace."""
+        out = await orchestrator.handoff_node(
+            {**base_state, "safety_flags": ["DISTRESS_SIGNAL", "SOMETHING_NEW"]}
+        )
+        assert out["specialist_output"]["safety_flags"] == [
+            "DISTRESS_SIGNAL",
+            "SOMETHING_NEW",
+        ]
+
     def test_crisis_resources_name_real_lines(self):
         """A hallucinated helpline is worse than none: the model once offered
         ALO 182, the health-appointment line."""
@@ -913,7 +999,7 @@ class TestKeepCrisis:
 class TestSynthesisNode:
     @pytest.mark.asyncio
     async def test_produces_a_draft_from_specialist_output(self, patched_llm, base_state):
-        patched_llm.set_response("**Kullandığım filtreler:** ...\n\nPortföyünüzde 500 lot THYAO var.")
+        patched_llm.set_response("BIST 100 içinden baktım.\n\nPortföyünüzde 500 lot THYAO var.")
         out = await orchestrator.synthesis_node(
             {**base_state, "specialist_output": {"status": "OK", "data": {}}}
         )
@@ -1935,7 +2021,7 @@ class TestSimilarityThresholdCalibration:
         patched_llm.set_response('{"arguments": {"min_similarity": 0.9}}')
         await orchestrator.market_research_node(base_state)
         _, args = fake_mcp.calls[0]
-        assert args["min_similarity"] == 0.35
+        assert args["min_similarity"] == 0.45
 
     @pytest.mark.asyncio
     async def test_threshold_is_tunable_without_a_rebuild(
@@ -1961,6 +2047,91 @@ class TestMarketDataNode:
         out = await orchestrator.market_data_node(base_state)
         assert fake_mcp.calls[0][1]["symbols"] == ["THYAO"]
         assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_an_open_question_reaches_the_trend_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Measured, 31 Aug: "akbankı yorumlar mısın" went to the document
+        search, found no article, and the user was told "Akbank hakkında veri
+        bulunamadı" -- about an instrument with a live price, published
+        fundamentals and roughly seven hundred daily bars."""
+        fake_mcp.responses["get_technical_signals"] = {
+            "symbol": "AKBNK", "narrative": "AKBNK yükseliş eğiliminde.",
+            "signals": {"trend": "UPTREND"},
+        }
+        patched_llm.set_response(
+            '{"tool": "get_technical_signals", "arguments": {"symbol": "AKBNK"}}'
+        )
+
+        out = await orchestrator.market_data_node(base_state)
+
+        assert fake_mcp.calls[0][0] == "get_technical_signals"
+        assert fake_mcp.calls[0][1] == {"symbol": "AKBNK"}
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_the_trend_tool_falls_back_to_the_routers_ticker(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """The plan chose the tool but named no symbol; the router already
+        extracted one."""
+        fake_mcp.responses["get_technical_signals"] = {
+            "symbol": "THYAO", "narrative": "THYAO yatay seyrediyor.",
+            "signals": {"trend": "SIDEWAYS"},
+        }
+        patched_llm.set_response('{"tool": "get_technical_signals", "arguments": {}}')
+
+        await orchestrator.market_data_node(
+            {**base_state, "entities": {"tickers": ["THYAO"]}}
+        )
+
+        assert fake_mcp.calls[0][1] == {"symbol": "THYAO"}
+
+    @pytest.mark.asyncio
+    async def test_no_symbol_anywhere_falls_through_to_the_price_path(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """A one-symbol tool called with no symbol answers nothing. The price
+        path can still work from whatever the turn did name."""
+        fake_mcp.responses["get_market_data"] = {"instruments": []}
+        patched_llm.set_response(
+            '{"tool": "get_technical_signals", "arguments": {"filters": {"max_pe": 10}}}'
+        )
+
+        await orchestrator.market_data_node(base_state)
+
+        assert fake_mcp.calls[0][0] == "get_market_data"
+
+    @pytest.mark.asyncio
+    async def test_a_stray_symbol_argument_never_reaches_the_screen(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """`symbol` belongs to the trend tool. get_market_data rejects an
+        unknown key rather than ignoring it, which would fail the turn."""
+        fake_mcp.responses["get_market_data"] = {"instruments": []}
+        patched_llm.set_response('{"arguments": {"symbol": "THYAO", "filters": {}}}')
+
+        await orchestrator.market_data_node(base_state)
+
+        assert "symbol" not in fake_mcp.calls[0][1]
+
+    @pytest.mark.asyncio
+    async def test_no_narrative_is_reported_as_an_empty_reading(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Too little history to read. The agent must say so rather than
+        assembling a trend out of the raw figures."""
+        fake_mcp.responses["get_technical_signals"] = {
+            "symbol": "YENI", "narrative": None, "signals": {"trend": "UNKNOWN"},
+        }
+        patched_llm.set_response(
+            '{"tool": "get_technical_signals", "arguments": {"symbol": "YENI"}}'
+        )
+
+        out = await orchestrator.market_data_node(base_state)
+
+        assert out["specialist_output"]["status"] == "EMPTY"
 
     @pytest.mark.asyncio
     async def test_filters_reach_the_tool(self, fake_mcp, patched_llm, base_state):
@@ -2523,3 +2694,150 @@ class TestDirectionGuard:
         state = {**base_state, "user_message": "ASELS satsana"}
         out = await orchestrator.transaction_node(state)
         assert out["specialist_output"]["status"] == "OK"
+
+
+class TestInstrumentIsVerifiedBeforeAsking:
+    """The measured bug: `get_market_data` was never called.
+
+    Three consecutive turns -- "nvvvvdi hissesi almak", "aple alcam" and
+    "ndivia nasıl" -- all reached an answer with no market lookup in the
+    trace. The model recognised "aple" as Apple from its own knowledge,
+    declared NVVVVDI non-existent from the same place, and told the user data
+    for "ndivia" could not be retrieved while the backend resolves it to NVDA.
+
+    The prompt already said to check first. This module has been here before:
+    `_keep_crisis` exists because a mandatory instruction was followed about
+    half the time. So on the one path where being wrong costs money, the check
+    runs in code.
+    """
+
+    NEEDS_QUANTITY = json.dumps({
+        "status": "NEEDS_INPUT",
+        "missing_fields": ["quantity"],
+        "clarification_request": "Kaç adet almak istersiniz?",
+        "arguments": {"instrument": {"symbol": "NVVVVDI"}},
+    })
+
+    @pytest.mark.asyncio
+    async def test_a_missing_instrument_is_reported_instead_of_a_quantity_question(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(self.NEEDS_QUANTITY)
+        fake_mcp.responses["get_market_data"] = {
+            "instruments": [],
+            "warnings": ["Şu semboller bulunamadı veya fiyatı yok: NVVVVDI"],
+        }
+        out = await orchestrator.transaction_node(base_state)
+        assert out["specialist_output"]["missing_fields"] == ["instrument"]
+        assert "Kaç adet" not in out["specialist_output"]["clarification_request"]
+
+    @pytest.mark.asyncio
+    async def test_the_lookup_actually_happens(self, fake_mcp, patched_llm, base_state):
+        """The whole point: a tool call, not the model's recollection."""
+        patched_llm.set_response(self.NEEDS_QUANTITY)
+        fake_mcp.responses["get_market_data"] = {"instruments": []}
+        await orchestrator.transaction_node(base_state)
+        assert any(name == "get_market_data" for name, _ in fake_mcp.calls)
+
+    @pytest.mark.asyncio
+    async def test_the_resolvers_own_suggestion_is_passed_through(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Rather than writing a second, differently worded version of the
+        same sentence."""
+        patched_llm.set_response(self.NEEDS_QUANTITY)
+        fake_mcp.responses["get_market_data"] = {
+            "instruments": [],
+            "warnings": ["«ndivia» için tam eşleşme yok. Bunlardan biri mi: NVDA?"],
+        }
+        out = await orchestrator.transaction_node(base_state)
+        assert "NVDA" in out["specialist_output"]["clarification_request"]
+
+    @pytest.mark.asyncio
+    async def test_an_instrument_that_exists_lets_the_question_through(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Verification must not turn every clarification into a refusal."""
+        patched_llm.set_response(self.NEEDS_QUANTITY)
+        fake_mcp.responses["get_market_data"] = {"instruments": [{"symbol": "NVDA"}]}
+        out = await orchestrator.transaction_node(base_state)
+        assert out["specialist_output"]["missing_fields"] == ["quantity"]
+
+    @pytest.mark.asyncio
+    async def test_a_lookup_failure_does_not_become_a_denial(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """An unreachable tool is not proof the instrument is missing. The
+        turn continues; staging resolves strictly and refuses on its own."""
+        patched_llm.set_response(self.NEEDS_QUANTITY)
+        fake_mcp.responses["get_market_data"] = MCPUnavailable("mcp down")
+        out = await orchestrator.transaction_node(base_state)
+        assert out["specialist_output"]["missing_fields"] == ["quantity"]
+
+    @pytest.mark.asyncio
+    async def test_a_turn_naming_no_instrument_is_left_alone(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(json.dumps({
+            "status": "NEEDS_INPUT",
+            "missing_fields": ["instrument"],
+            "clarification_request": "Hangi hisseyi almak istersiniz?",
+            "arguments": {},
+        }))
+        out = await orchestrator.transaction_node(base_state)
+        assert not any(name == "get_market_data" for name, _ in fake_mcp.calls)
+
+    def test_the_symbol_is_found_however_the_model_expressed_it(self):
+        state = {"entities": {"tickers": ["THYAO"]}}
+        assert orchestrator._named_symbol(
+            {"arguments": {"instrument": {"symbol": "ASELS"}}}, state) == "ASELS"
+        assert orchestrator._named_symbol({"arguments": {"symbol": "GARAN"}}, state) == "GARAN"
+        # Falls back to whatever the router extracted.
+        assert orchestrator._named_symbol({"arguments": {}}, state) == "THYAO"
+        assert orchestrator._named_symbol({"arguments": {}}, {"entities": {}}) is None
+
+
+class TestHandoffCategoryVocabulary:
+    """The names a distress signal can arrive under.
+
+    The regex pre-filter emits a fixed vocabulary, but `router_node` unions
+    the ROUTER MODEL's own flags into the same list without checking them,
+    and the model does not use those names. Pinning the table is what stops
+    a synonym from silently selecting the wrong response.
+    """
+
+    def test_every_self_harm_synonym_lands_on_the_same_category(self):
+        for name in ("SELF_HARM", "SELF_HARM_RISK", "SUICIDE", "SUICIDAL",
+                     "SUICIDE_RISK", "SUICIDAL_IDEATION", "SELF_INJURY"):
+            assert orchestrator.handoff_category([name]) == "SELF_HARM_RISK", name
+
+    def test_coercion_synonyms(self):
+        for name in ("COERCION", "COERCION_RISK", "THREAT", "BLACKMAIL", "EXTORTION"):
+            assert orchestrator.handoff_category([name]) == "COERCION_RISK", name
+
+    def test_financial_distress_is_only_chosen_when_actually_flagged(self):
+        """It stopped being the fallback. It is still the answer for the case
+        it was written for."""
+        assert orchestrator.handoff_category(["FINANCIAL_DISTRESS"]) == "FINANCIAL_DISTRESS"
+
+    def test_nothing_at_all_is_still_safe(self):
+        assert orchestrator.handoff_category([]) == "GENERIC_DISTRESS"
+        assert orchestrator.handoff_category([], None) == "GENERIC_DISTRESS"
+
+    def test_an_intent_that_means_nothing_here_is_ignored(self):
+        assert orchestrator.handoff_category([], "PORTFOLIO_QUERY") == "GENERIC_DISTRESS"
+
+    def test_precedence_is_worst_first(self):
+        assert orchestrator.handoff_category(
+            ["FINANCIAL_DISTRESS", "COERCION"]
+        ) == "COERCION_RISK"
+        assert orchestrator.handoff_category(
+            ["MENTAL_HEALTH", "FINANCIAL_DISTRESS"]
+        ) == "MENTAL_HEALTH_DISCLOSURE"
+
+    def test_every_category_has_an_instruction_and_a_notice_entry(self):
+        """A category reachable from the table but missing from either dict
+        would raise KeyError inside the handoff -- on a distress turn."""
+        for category in set(orchestrator._FLAG_SYNONYMS.values()) | {"GENERIC_DISTRESS"}:
+            assert category in orchestrator._HANDOFF_INSTRUCTIONS, category
+            assert category in orchestrator._CATEGORY_NOTICES, category

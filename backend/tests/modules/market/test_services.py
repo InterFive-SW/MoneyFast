@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.investment import market_service
 from app.modules.market import service as news_service
+from app.modules.market import service as market_module_service
 
 NOW = datetime.now(timezone.utc)
 
@@ -245,11 +246,12 @@ class TestCandleCloses:
 
         db = MagicMock(spec=Session)
         db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id="p-1")
-        rows = [
-            SimpleNamespace(timestamp=NOW, close_price=300.0),
-            SimpleNamespace(timestamp=NOW - timedelta(days=1), close_price=295.0),
+        # Core select ile okunuyor: sadece iki sütun için ORM nesnesi kurmak,
+        # sorgunun kendisinden yüz kat pahalıydı.
+        db.execute.return_value.all.return_value = [
+            (NOW, 300.0),
+            (NOW - timedelta(days=1), 295.0),
         ]
-        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = rows
         series = market_service.candle_closes(db, "TEST-THYAO")
         assert [price for _, price in series] == [295.0, 300.0]
 
@@ -317,3 +319,67 @@ class TestFundamentalsNameField:
         from app.modules.market.schemas import FundamentalsIn
 
         assert FundamentalsIn(symbol="ASELS").name is None
+
+
+class TestRefreshQuotes:
+    """Sohbet için anlık fiyat tazeleme.
+
+    Fiyatı backend çekmiyor: yfinance'a çıkan tek bileşen ingestor ve
+    veritabanı kredensiyeli olmayan da o.
+    """
+
+    def test_nothing_to_do_without_symbols(self):
+        assert market_module_service.refresh_quotes([]) is False
+        assert market_module_service.refresh_quotes(["  "]) is False
+
+    def test_an_unconfigured_install_simply_does_not_refresh(self, monkeypatch):
+        """Tazeleme yoksa bu bir hata değil: fiyatlar toplu turdan gelir."""
+        monkeypatch.delenv("INGESTOR_REFRESH_URL", raising=False)
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        assert market_module_service.refresh_quotes(["THYAO"]) is False
+
+        monkeypatch.setenv("INGESTOR_REFRESH_URL", "http://ingestor:8200")
+        monkeypatch.delenv("BACKEND_API_KEY", raising=False)
+        assert market_module_service.refresh_quotes(["THYAO"]) is False
+
+    def test_it_posts_the_symbols_and_reports_success(self, monkeypatch, mocker):
+        monkeypatch.setenv("INGESTOR_REFRESH_URL", "http://ingestor:8200/")
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        post = mocker.patch.object(
+            market_module_service.httpx, "post",
+            return_value=SimpleNamespace(
+                raise_for_status=lambda: None, json=lambda: {"refreshed": 1},
+            ),
+        )
+        assert market_module_service.refresh_quotes(["thyao"]) is True
+        assert post.call_args.kwargs["json"] == {"symbols": ["THYAO"]}
+        assert post.call_args.args[0] == "http://ingestor:8200/refresh"
+
+    def test_too_many_symbols_are_trimmed(self, monkeypatch, mocker):
+        """Bu yolu toplu çekim için kullanmak, on beş dakikalık turun var olma
+        sebebini ortadan kaldırırdı."""
+        monkeypatch.setenv("INGESTOR_REFRESH_URL", "http://ingestor:8200")
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        post = mocker.patch.object(
+            market_module_service.httpx, "post",
+            return_value=SimpleNamespace(
+                raise_for_status=lambda: None, json=lambda: {"refreshed": 0},
+            ),
+        )
+        many = [f"S{i}" for i in range(market_module_service.REFRESH_MAX_SYMBOLS + 10)]
+        market_module_service.refresh_quotes(many)
+        sent = post.call_args.kwargs["json"]["symbols"]
+        assert len(sent) == market_module_service.REFRESH_MAX_SYMBOLS
+
+    def test_a_failure_is_swallowed_so_the_turn_still_answers(
+        self, monkeypatch, mocker
+    ):
+        """Tazeleme denemesi başarısız diye sohbetin cevapsız kalması, eski
+        fiyattan kötüdür."""
+        monkeypatch.setenv("INGESTOR_REFRESH_URL", "http://ingestor:8200")
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        mocker.patch.object(
+            market_module_service.httpx, "post",
+            side_effect=RuntimeError("ingestor down"),
+        )
+        assert market_module_service.refresh_quotes(["THYAO"]) is False

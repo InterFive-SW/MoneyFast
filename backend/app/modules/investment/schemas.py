@@ -1,3 +1,4 @@
+from datetime import datetime
 from pydantic import BaseModel
 from typing import List, Literal, Optional
 
@@ -24,6 +25,13 @@ class Position(BaseModel):
     #: The instrument's own currency. Dropped for a long time, which is why
     #: the frontend had to guess and guessed ₺ for a dollar-priced stock.
     currency: str = "TRY"
+    #: Şirket adı, borsa, ürün türü ve pozisyonun açıldığı tarih. Dördü de
+    #: `holdings()` içinde vardı ve bu izdüşümde düşürülüyordu; ana sayfadaki
+    #: pozisyon tablosu bu yüzden tür ve tarih sütunlarını dolduramıyordu.
+    name: Optional[str] = None
+    market: Optional[str] = None
+    productType: Optional[str] = None
+    openedAt: Optional[datetime] = None
 
 
 class Order(BaseModel):
@@ -74,17 +82,6 @@ class TopMoverItem(BaseModel):
     currency: str = "TRY"
 
 
-class DividendItem(BaseModel):
-    symbol: str
-    exDate: str
-    paymentDate: str
-    amount: float
-    yieldPercent: float
-    #: The instrument's own currency. Dropped for a long time, which is why
-    #: the frontend had to guess and guessed ₺ for a dollar-priced stock.
-    currency: str = "TRY"
-
-
 class SectorAllocationItem(BaseModel):
     sector: str
     percentage: float
@@ -114,3 +111,31 @@ class OrderConfirmRequest(BaseModel):
     """
     order_id: str
     action: str
+
+
+class CashMovementOut(BaseModel):
+    """Yatırım hesabının nakit defterinden tek satır.
+
+    `banking.MovementOut` ile kasıtlı olarak aynı alanlar: bankacılık arayüzü
+    iki dökümü de aynı satır bileşeniyle basabilsin. Tek fark
+    `reference_number`'ın boş olabilmesi -- yöneticinin yaptığı bir düzeltmenin
+    banka referansı yoktur ve uydurmak, olmayan bir işleme atıf yapmak olurdu.
+    """
+
+    reference_number: Optional[str] = None
+    direction: str
+    amount: float
+    balance_after: float
+    counterparty_iban: Optional[str] = None
+    description: Optional[str] = None
+    created_at: datetime
+
+
+class CashStatementOut(BaseModel):
+    """Yatırım hesabının hareket dökümü."""
+
+    account_number: str
+    iban: Optional[str] = None
+    balance: float
+    currency_code: str
+    movements: List[CashMovementOut] = []

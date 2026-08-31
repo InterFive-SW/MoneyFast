@@ -11,16 +11,19 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.modules.investment import market_service
-from . import service, stream
+from . import service, stream, technicals
 from .schemas import (
     IngestResult,
     FundamentalsIngestRequest,
     CandleSeriesOut,
     InstrumentListOut,
+    InstrumentSuggestion,
+    MarketHeatmapOut,
     MarketTicker,
     NewsIngestRequest,
     NewsItem,
     QuoteIngestRequest,
+    TechnicalSignalsOut,
 )
 
 log = logging.getLogger("moneyfast.market")
@@ -54,7 +57,7 @@ def require_service_token(
 
 
 @router.get("/tickers", response_model=List[MarketTicker])
-async def get_market_tickers(db: Session = Depends(get_db)):
+def get_market_tickers(db: Session = Depends(get_db)):
     """
     Gösterge panelindeki ticker şeridi için anlık fiyatlar.
 
@@ -81,7 +84,7 @@ async def get_market_tickers(db: Session = Depends(get_db)):
 
 
 @router.get("/news", response_model=List[NewsItem])
-async def get_market_news(
+def get_market_news(
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
@@ -113,12 +116,54 @@ async def get_market_news(
     ]
 
 
+
+@router.get(
+    "/heatmap",
+    response_model=MarketHeatmapOut,
+    summary="Piyasa ısı haritası (piyasa değeri ve günlük değişim)",
+)
+def market_heatmap(
+    market: Optional[str] = Query(default=None),
+    limit: int = Query(default=300, ge=1, le=600),
+    db: Session = Depends(get_db),
+):
+    """Bir endeksin ısı haritası.
+
+    `GET /api/investment/heatmap` ile karıştırılmamalı: o, kullanıcının
+    portföyünü pozisyon ağırlığına göre gösteriyor. Bu, piyasanın kendisini
+    gösteriyor -- her hisse piyasa değeri kadar yer kaplıyor.
+
+    `market` bir borsa (BIST, NASDAQ) ya da bir endeks (SP500) olabilir; aynı
+    alan ikisini de taşıyor çünkü AAPL Nasdaq'ta işlem görür VE S&P 500
+    üyesidir.
+    """
+    return market_service.market_heatmap(db, market=market, limit=limit)
+
+
+@router.get(
+    "/search",
+    response_model=List[InstrumentSuggestion],
+    summary="Enstrüman arama (yazdıkça öneri)",
+)
+def search_instruments(
+    q: str = Query(..., min_length=1, max_length=64),
+    limit: int = Query(default=10, ge=1, le=25),
+    db: Session = Depends(get_db),
+):
+    """Sembol ya da şirket adına göre öneri listesi.
+
+    Evren binin üzerinde enstrüman; bir açılır liste bunu taşıyamaz. Türkçe
+    katlama `market_service._fold` ile yapılıyor, dolayısıyla `sise` yazan
+    `ŞİŞE`yi buluyor.
+    """
+    return market_service.search_instruments(db, q, limit=limit)
+
 @router.get(
     "/instruments",
     response_model=InstrumentListOut,
     summary="Enstrüman fiyatları ve temel oranları (tarama)",
 )
-async def list_instruments(
+def list_instruments(
     symbols: Optional[List[str]] = Query(default=None),
     sector: Optional[str] = Query(default=None),
     market: Optional[str] = Query(default=None),
@@ -139,6 +184,17 @@ async def list_instruments(
     altında" sorgusu sessizce "F/K'sı 10'un altında ya da bilinmiyor" anlamına
     gelmemeli; verisi olmayan bir hisse ucuz görünmemeli.
     """
+    # Adı verilen bir enstrüman sorulduğunda fiyat ÖNCE tazelenir.
+    #
+    # Toplu tur on beş dakikada bir dönüyor; ekranlar için yeterli, "THYAO kaç
+    # TL" sorusu için değil. Tarama sorgularında yapılmaz: bir tarama yüzlerce
+    # satır okur ve hiçbiri tek bir anlık fiyata bağlı karar değildir.
+    #
+    # Başarısız olursa sessizce devam edilir -- elde olan fiyat, cevapsız
+    # kalmaktan iyidir.
+    if symbols:
+        service.refresh_quotes(symbols)
+
     filters = {
         "sector": sector, "market": market,
         "max_pe": max_pe, "min_pe": min_pe, "max_pb": max_pb,
@@ -172,7 +228,7 @@ async def list_instruments(
     response_model=CandleSeriesOut,
     summary="Bir enstrümanın günlük mum verisi",
 )
-async def get_candles(
+def get_candles(
     symbol: str = Query(..., min_length=1),
     limit: int = Query(default=180, ge=2, le=400),
     db: Session = Depends(get_db),
@@ -195,6 +251,47 @@ async def get_candles(
         "currency": product.currency_code or "TRY",
         "interval": "1d",
         "candles": market_service.candle_series(db, product.symbol, limit=limit),
+    }
+
+
+@router.get(
+    "/technicals",
+    response_model=TechnicalSignalsOut,
+    summary="Bir enstrümanın teknik göstergeleri ve Türkçe okuması",
+)
+def get_technicals(
+    symbol: str = Query(..., min_length=1),
+    db: Session = Depends(get_db),
+):
+    """
+    Hareketli ortalamalar, RSI, 52 hafta aralığındaki konum ve eğilim.
+
+    Sohbet ile hisse detay sayfası AYNI uç noktayı okuyor. Ayrı hesaplasalardı
+    ikisi aynı hisse için farklı bir eğilim söyleyebilirdi -- risk ölçümünün
+    tek yerde toplanma sebebiyle aynı sebep.
+
+    `narrative` kullanıcıya gösterilecek cümlenin kendisi. Sayıları modele
+    verip "yorumla" demek, aynı göstergelerin her turda biraz farklı
+    anlatılması demekti; hangi durumun hangi ifadeye karşılık geldiği kodda.
+
+    Bilinmeyen sembol boş bir ölçüm döndürür, hata değil.
+    """
+    product = market_service.resolve_symbol(db, symbol)
+    if product is None:
+        return {
+            "symbol": symbol.upper(),
+            "currency": "TRY",
+            "signals": technicals.compute([]),
+            "narrative": None,
+        }
+    # 260 bar: en uzun pencere 200 günlük ortalama, 52 hafta aralığı 252.
+    bars = market_service.candle_series(db, product.symbol, limit=technicals.BARS_NEEDED)
+    signals = technicals.compute(bars)
+    return {
+        "symbol": product.symbol,
+        "currency": product.currency_code or "TRY",
+        "signals": signals,
+        "narrative": technicals.narrate(product.symbol, signals),
     }
 
 
@@ -252,7 +349,7 @@ async def market_stream(request: Request):
     summary="Fiyat ve mum verisi yükle (servisler arası)",
     dependencies=[Depends(require_service_token)],
 )
-async def ingest_market_data(request: QuoteIngestRequest, db: Session = Depends(get_db)):
+def ingest_market_data(request: QuoteIngestRequest, db: Session = Depends(get_db)):
     """`ingestor` servisinin fiyat ve OHLCV verisi yazdığı uç nokta."""
     quotes = market_service.upsert_quotes(db, [q.model_dump() for q in request.quotes])
     candles = market_service.upsert_candles(db, [c.model_dump() for c in request.candles])
@@ -265,7 +362,7 @@ async def ingest_market_data(request: QuoteIngestRequest, db: Session = Depends(
     summary="Mum verisi kapsaması (servisler arası)",
     dependencies=[Depends(require_service_token)],
 )
-async def candle_coverage(db: Session = Depends(get_db)):
+def candle_coverage(db: Session = Depends(get_db)):
     """`ingestor`'ın açılışta neyi geri dolduracağını sorduğu uç nokta.
 
     Sembol başına kaç günlük bar tutulduğunu ve en yenisinin tarihini döner.
@@ -275,13 +372,43 @@ async def candle_coverage(db: Session = Depends(get_db)):
     return market_service.candle_coverage(db)
 
 
+@router.get(
+    "/candles/intraday-symbols",
+    summary="Gün içi bar gereken semboller (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def intraday_symbols(db: Session = Depends(get_db)):
+    """`ingestor`'ın gün içi bar çekeceği kümeyi sorduğu uç nokta.
+
+    Evrenin tamamı değil: gün içi seriye ihtiyaç duyan tek ekran portföy
+    performansı, dolayısıyla yalnızca tutulan, izlenen ve kur/endeks
+    enstrümanları. Bin enstrümanın 15 dakikalık barlarını sürekli çekmek,
+    gereğinden kat kat fazla istek olurdu.
+    """
+    return {"symbols": market_service.intraday_symbols(db)}
+
+
+@router.get(
+    "/fundamentals/missing",
+    summary="Temel verisi eksik enstrümanlar (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def fundamentals_missing(db: Session = Depends(get_db)):
+    """`ingestor`'ın açılışta neyi dolduracağını sorduğu uç nokta.
+
+    Yalnızca eksik olanlar: hepsini her açılışta yeniden çekmek, çeyreklik
+    raporlarla değişen oranları durmadan yeniden yazmak olurdu.
+    """
+    return {"symbols": market_service.symbols_without_fundamentals(db)}
+
+
 @router.post(
     "/news/ingest",
     response_model=IngestResult,
     summary="Haber yükle (servisler arası)",
     dependencies=[Depends(require_service_token)],
 )
-async def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db)):
+def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db)):
     written = service.upsert_news(db, [item.model_dump() for item in request.items])
     log.info("ingested %d new news items of %d offered", written, len(request.items))
     return {"quotes_written": 0, "candles_written": 0, "news_written": written}
@@ -293,7 +420,7 @@ async def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db))
     summary="Temel oranları yükle (servisler arası)",
     dependencies=[Depends(require_service_token)],
 )
-async def ingest_fundamentals(request: FundamentalsIngestRequest, db: Session = Depends(get_db)):
+def ingest_fundamentals(request: FundamentalsIngestRequest, db: Session = Depends(get_db)):
     """
     Değerleme oranlarını günceller.
 

@@ -29,6 +29,13 @@ EXPECTED_TOOLS = {
     "validate_compliance_rules",
     "classify_and_route_intent",
     "prepare_transaction_proposal",
+    # v2.8: banking. Both stop at a proposal -- there is no execute tool.
+    "lookup_bill",
+    "prepare_payment_proposal",
+    # v2.10: trend state for one instrument. Separate from get_market_data
+    # because it needs price HISTORY, and the history can be too short to
+    # answer -- a failure mode a current quote does not have.
+    "get_technical_signals",
 }
 
 #: Every tool that reaches the backend. classify_and_route_intent is
@@ -42,7 +49,10 @@ HTTP_TOOLS = EXPECTED_TOOLS - {"classify_and_route_intent"}
 class TestWiring:
     def test_server_identity_constants(self):
         assert server.SERVER_NAME == "moneyfast"
-        assert server.CONTRACT_VERSION == "v2.4"
+        # v2.10: `get_technical_signals` eklendi. Bilerek yapılan bir
+        # sözleşme değişikliği, dolayısıyla iddia gevşetilmiyor, onunla
+        # birlikte taşınıyor.
+        assert server.CONTRACT_VERSION == "v2.10"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -53,11 +63,12 @@ class TestWiring:
         assert "Fail closed" in instructions
         assert "stages only" in instructions
 
-    def test_domain_modules_cover_all_seven_domains(self):
+    def test_domain_modules_cover_every_domain(self):
         domains = {name for name, _ in server.DOMAIN_MODULES}
         assert domains == {
             "orchestrator", "portfolio", "market_data", "market_research",
-            "risk_strategy", "compliance", "transaction",
+            "risk_strategy", "compliance", "transaction", "banking",
+            "technical",
         }
 
     def test_every_domain_module_exposes_register(self):
@@ -97,7 +108,7 @@ class TestWiring:
 # ==========================================================================
 class TestDiscovery:
     @pytest.mark.asyncio
-    async def test_all_eight_tools_are_discoverable(self):
+    async def test_every_tool_is_discoverable(self):
         tools = await server.mcp.list_tools()
         assert {t.name for t in tools} == EXPECTED_TOOLS
 

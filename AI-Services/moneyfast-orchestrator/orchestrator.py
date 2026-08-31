@@ -342,25 +342,53 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
 
 
 async def market_data_node(state: MoneyFastState) -> dict[str, Any]:
-    """Current prices and valuation ratios, for any instrument."""
+    """Current prices and valuation ratios, or the trend of one instrument."""
     plan = await _llm_json(
         SPECIALIST_PROMPTS["MARKET_DATA_AGENT"], _specialist_task(state), fast=True
     )
     args = plan.get("arguments") or {}
+    assumptions = plan.get("assumptions") or []
+
+    # Two tools behind one agent: what it COSTS and how it is DOING. The
+    # split is here rather than in the router because both answer questions
+    # about a named instrument from data this system holds -- and sending the
+    # open ones ("yorumlar mısın") to the document search is what produced
+    # "Akbank hakkında veri bulunamadı" for an instrument with seven hundred
+    # bars of history.
+    if plan.get("tool") == "get_technical_signals":
+        symbol = args.get("symbol") or _first_ticker(state)
+        if symbol:
+            return await _run_tool(
+                state, "get_technical_signals", {"symbol": symbol},
+                assumptions=assumptions,
+                # `narrative` empty means the history is too short to read.
+                # The figures still travel; the agent reports the gap.
+                empty_when=lambda p: not p.get("narrative"),
+            )
+        # No symbol to look up. Falling through to the price path lets the
+        # turn be answered from whatever the user did name, rather than
+        # calling a one-symbol tool with nothing.
+
     # A turn that named no instrument and no filter would otherwise screen the
     # entire universe and hand the model 50 rows to summarise.
     if not args.get("symbols") and not args.get("filters"):
-        entities = state.get("entities") or {}
-        tickers = entities.get("tickers") or []
+        tickers = (state.get("entities") or {}).get("tickers") or []
         if tickers:
             args["symbols"] = tickers
+    args.pop("symbol", None)
     args.setdefault("top_k", 20)
     return await _run_tool(
         state, "get_market_data", args,
-        assumptions=plan.get("assumptions") or [],
+        assumptions=assumptions,
         empty_when=lambda p: not p.get("instruments"),
         repair_prompt=SPECIALIST_PROMPTS["MARKET_DATA_AGENT"],
     )
+
+
+def _first_ticker(state: MoneyFastState) -> Optional[str]:
+    """The instrument the router extracted, when the plan named none."""
+    tickers = (state.get("entities") or {}).get("tickers") or []
+    return tickers[0] if tickers else None
 
 
 async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
@@ -373,14 +401,24 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     # Cosine thresholds are a property of the embedding model, not a product
     # constant. The tool contract documents 0.62, which is calibrated for E5;
     # the corpus is embedded with paraphrase-multilingual-MiniLM, whose scores
-    # run lower. Measured against the live corpus: a clearly relevant article
-    # scores 0.43-0.72 and off-topic ones sit below 0.35, so 0.62 silently
-    # discarded good hits and the assistant reported "no sources found" for
-    # news it was holding.
+    # run lower, so 0.62 discarded good hits and the assistant reported "no
+    # sources found" for news it was holding.
+    #
+    # 0.35 then overcorrected. Measured over one day of real turns:
+    #
+    #   "hangi bankalar ile ilgili haberer var"   0.685 .. 0.579   relevant
+    #   "halkbank özelinde detaylandırır mısın"   0.577 .. 0.537   relevant
+    #   "bana banka haberleri getir"              0.592 .. 0.466   relevant
+    #   "hisse senedi analiz"                     0.398 .. 0.365   JUNK
+    #
+    # The junk band tops out below 0.40 and the worst genuine hit sits at
+    # 0.466, so 0.45 separates them with room on both sides. That last query
+    # returned a German bank's brothel-loan investigation and it was
+    # presented to the user as stock analysis.
     #
     # Overridden here rather than in the tool, because the caller owns this
     # choice and the contract's default has to stay what it says.
-    args["min_similarity"] = float(os.getenv("RAG_MIN_SIMILARITY", "0.35"))
+    args["min_similarity"] = float(os.getenv("RAG_MIN_SIMILARITY", "0.45"))
     # The retriever scans this reversed and folds in the newest user turn it
     # finds, so the count only affects payload size, not what gets resolved.
     args["conversation_context"] = (state.get("conversation_history") or [])[
@@ -469,9 +507,91 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     return out
 
 
+async def _verify_named_instrument(
+    state: MoneyFastState, plan: dict[str, Any]
+) -> Optional[dict[str, Any]]:
+    """Look the named instrument up BEFORE anything is asked about it.
+
+    Measured, from three consecutive turns: "nvvvvdi hissesi almak", "aple
+    alcam" and "ndivia nasıl" all reached an answer with `get_market_data`
+    NEVER CALLED. The model recognised "aple" as Apple from its own knowledge,
+    invented that NVVVVDI does not exist, and told the user data for "ndivia"
+    could not be retrieved -- while the backend resolves ndivia to NVDA
+    perfectly well.
+
+    The prompt already tells the specialist to check first. A prompt is
+    advisory: this module already learned that with `_keep_crisis`, where a
+    mandatory instruction was followed about half the time. So the check runs
+    in code, on the one path where being wrong costs money.
+
+    Returns a NEEDS_INPUT specialist output when the name does not resolve,
+    or None to let the turn continue.
+    """
+    named = _named_symbol(plan, state)
+    if not named:
+        return None
+
+    try:
+        payload = await get_mcp_client().call("get_market_data", {"symbols": [named]})
+    except (MCPUnavailable, MCPToolError):
+        # A lookup failure is not proof the instrument is missing. Let the turn
+        # continue; staging resolves strictly and refuses on its own.
+        return None
+
+    if payload.get("instruments"):
+        return None
+
+    # Not found. The tool's warning already carries the candidates the resolver
+    # produced, phrased for a person -- pass that through rather than writing a
+    # second, differently worded version of the same sentence.
+    suggestion = next(
+        (w for w in (payload.get("warnings") or []) if "biri mi" in w), None
+    )
+    return {
+        "specialist_output": {
+            "agent": "TRANSACTION_AGENT",
+            "status": "NEEDS_INPUT",
+            "missing_fields": ["instrument"],
+            "clarification_request": suggestion or (
+                f"«{named}» diye bir enstrüman bulamadım. "
+                f"Sembolü ya da tam adını yazar mısınız?"
+            ),
+        }
+    }
+
+
+def _named_symbol(plan: dict[str, Any], state: MoneyFastState) -> Optional[str]:
+    """Whatever instrument this turn is about, however the model expressed it."""
+    args = plan.get("arguments") or {}
+    instrument = args.get("instrument") or {}
+    candidates = [
+        instrument.get("symbol") if isinstance(instrument, dict) else None,
+        args.get("symbol"),
+    ]
+    tickers = (state.get("entities") or {}).get("tickers") or []
+    candidates.extend(tickers[:1])
+    for value in candidates:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 async def transaction_node(state: MoneyFastState) -> dict[str, Any]:
     plan = await _llm_json(SPECIALIST_PROMPTS["TRANSACTION_AGENT"], _specialist_task(state))
+
     if plan.get("status") == "NEEDS_INPUT" or not plan.get("arguments"):
+        # About to ask for something more -- usually a quantity. Confirm the
+        # instrument EXISTS first. Asking "how many NVVVVDI?" and finding out
+        # only at staging that there is no such thing is a question that
+        # should never have been put.
+        #
+        # Only on this path: a complete request goes to staging, which already
+        # resolves strictly and refuses with suggestions. The measured failures
+        # were all of the "asked for a quantity" kind.
+        unknown = await _verify_named_instrument(state, plan)
+        if unknown is not None:
+            return unknown
+
         return {
             "specialist_output": {
                 "agent": "TRANSACTION_AGENT",
@@ -606,20 +726,116 @@ _HANDOFF_INSTRUCTIONS = {
         "them to a human adviser -- this product cannot do that. "
         "No emoji, no humour."
     ),
+    # A disclosed condition is not a crisis, a threat, or a budgeting
+    # problem. "ben şizofrenim" was answered with the FINANCIAL_DISTRESS
+    # text -- a lecture on how borrowed money raises risk -- because this
+    # category did not exist and that one was the fallback.
+    "MENTAL_HEALTH_DISCLOSURE": (
+        "The user has disclosed a mental health condition or difficulty. "
+        "This is NOT a crisis and NOT a financial turn. Respond briefly and "
+        "warmly in Turkish: acknowledge what they shared without dramatising "
+        "it, and make clear they are still welcome here. "
+        "Do NOT mention markets, portfolios, debt, budgeting, investing or "
+        "risk tolerance. Do NOT diagnose, advise on treatment, or ask about "
+        "symptoms. Do NOT offer to connect them to an adviser or specialist "
+        "-- this product cannot do that. "
+        "You MAY offer to continue with whatever they were asking about. "
+        "Do not state phone numbers yourself; they are appended verbatim. "
+        "No emoji, no humour, at most three sentences."
+    ),
+    # The fallback. Distress was detected but not identified, so the reply
+    # must be safe under EVERY reading of it -- which means no financial
+    # content, because the one thing we know is that we do not know which
+    # kind of trouble this is.
+    "GENERIC_DISTRESS": (
+        "The user is in some form of distress that has not been identified. "
+        "Respond briefly and warmly in Turkish: acknowledge it, and ask an "
+        "open question about what would help. "
+        "Do NOT assume the problem is financial. Do NOT mention markets, "
+        "portfolios, debt, budgeting or investing unless the user has "
+        "already raised them in this turn. Do NOT offer to connect them to "
+        "an adviser -- this product cannot do that. "
+        "Do not state phone numbers yourself; they are appended verbatim. "
+        "No emoji, no humour, at most three sentences."
+    ),
 }
+
+#: The vocabulary `handoff_node` selects on.
+#:
+#: The regex pre-filter emits these names, but the ROUTER MODEL emits its own
+#: and `router_node` unions them into the same list without checking. Measured:
+#: "i am jumping off a cliff" produced `SELF_HARM` -- one character class away
+#: from the canonical name -- and `handoff_node`, which matched exact strings
+#: and fell through to FINANCIAL_DISTRESS, answered a suicide statement with
+#: budgeting tips and no crisis line.
+#:
+#: The synonyms are the model's observed and plausible outputs. `primary_intent`
+#: is read through the same table: in that turn the intent was already
+#: `SELF_HARM` and nothing looked at it.
+_FLAG_SYNONYMS = {
+    "SELF_HARM": "SELF_HARM_RISK",
+    "SELF_HARM_RISK": "SELF_HARM_RISK",
+    "SELF_INJURY": "SELF_HARM_RISK",
+    "SUICIDE": "SELF_HARM_RISK",
+    "SUICIDAL": "SELF_HARM_RISK",
+    "SUICIDE_RISK": "SELF_HARM_RISK",
+    "SUICIDAL_IDEATION": "SELF_HARM_RISK",
+    "COERCION": "COERCION_RISK",
+    "COERCION_RISK": "COERCION_RISK",
+    "THREAT": "COERCION_RISK",
+    "EXTORTION": "COERCION_RISK",
+    "BLACKMAIL": "COERCION_RISK",
+    "MENTAL_HEALTH": "MENTAL_HEALTH_DISCLOSURE",
+    "MENTAL_HEALTH_DISCLOSURE": "MENTAL_HEALTH_DISCLOSURE",
+    "PSYCHOLOGICAL_DISTRESS": "MENTAL_HEALTH_DISCLOSURE",
+    "FINANCIAL_DISTRESS": "FINANCIAL_DISTRESS",
+}
+
+#: Most serious first. A turn carrying several is answered as the worst one.
+_CATEGORY_PRECEDENCE = (
+    "SELF_HARM_RISK",
+    "COERCION_RISK",
+    "MENTAL_HEALTH_DISCLOSURE",
+    "FINANCIAL_DISTRESS",
+)
+
+#: Resources per category. FINANCIAL_DISTRESS carries none deliberately: its
+#: answer is budgeting, and a crisis line under a debt question would
+#: misread the situation back at the user.
+_CATEGORY_NOTICES = {
+    "SELF_HARM_RISK": [CRISIS_RESOURCES_TR],
+    "COERCION_RISK": [COERCION_RESOURCES_TR],
+    "MENTAL_HEALTH_DISCLOSURE": [CRISIS_RESOURCES_TR],
+    "FINANCIAL_DISTRESS": [],
+    "GENERIC_DISTRESS": [CRISIS_RESOURCES_TR],
+}
+
+
+def handoff_category(flags: list[str], primary_intent: str | None = None) -> str:
+    """Which distress response this turn gets.
+
+    Unrecognised signals land on GENERIC_DISTRESS, never on
+    FINANCIAL_DISTRESS. The cost of the two mistakes is not symmetric: a
+    suicidal user handed a budgeting lecture is a far worse outcome than an
+    indebted user handed an unnecessarily gentle one, and the fallback is by
+    definition the branch taken when we do not know which we are looking at.
+    """
+    candidates = {
+        _FLAG_SYNONYMS[name]
+        for name in list(flags) + ([primary_intent] if primary_intent else [])
+        if name in _FLAG_SYNONYMS
+    }
+    for category in _CATEGORY_PRECEDENCE:
+        if category in candidates:
+            return category
+    return "GENERIC_DISTRESS"
 
 
 async def handoff_node(state: MoneyFastState) -> dict[str, Any]:
     """Unsafe or distress. No tools, no screens, no instruments."""
     flags = state.get("safety_flags") or []
-    # Self-harm outranks the others: a turn carrying both is answered as the
-    # more serious one.
-    if "SELF_HARM_RISK" in flags:
-        category, notices = "SELF_HARM_RISK", [CRISIS_RESOURCES_TR]
-    elif "COERCION_RISK" in flags:
-        category, notices = "COERCION_RISK", [COERCION_RESOURCES_TR]
-    else:
-        category, notices = "FINANCIAL_DISTRESS", []
+    category = handoff_category(flags, state.get("primary_intent"))
+    notices = _CATEGORY_NOTICES[category]
 
     return {
         "crisis_notices": notices,

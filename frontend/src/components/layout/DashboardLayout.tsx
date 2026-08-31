@@ -57,48 +57,37 @@ function AIAssistantFAB({ onTogglePopup, isOpen }: AIAssistantFABProps) {
 
   return (
     <button
-      type="button"
       onClick={onTogglePopup}
-      aria-label="AI Finansal Asistan'ı aç"
+      aria-label={isOpen ? "AI Finansal Asistan'ı kapat" : "AI Finansal Asistan'ı aç"}
+      aria-expanded={isOpen}
       title="AI Finansal Asistan"
-      className={`fixed bottom-8 right-6 md:right-10 z-50 flex items-center justify-center gap-2 rounded-full px-5 py-3.5 shadow-2xl transition-all duration-300 hover:scale-105 hover:-translate-y-1 focus:outline-none overflow-hidden group ${
-        isOpen 
-          ? 'bg-slate-800 text-white shadow-slate-900/20 ring-1 ring-white/10' 
-          : 'bg-white/10 backdrop-blur-md text-brandBlue shadow-[0_0_20px_rgba(75,123,229,0.3)] ring-1 ring-white/10 hover:bg-white/20 hover:shadow-[0_0_30px_rgba(75,123,229,0.5)]'
+      className={`group fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full shadow-2xl transition-all duration-300 hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-brandBlue focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
+        isOpen
+          ? 'bg-slate-800 text-white ring-1 ring-white/10'
+          : 'bg-brandBlue text-white shadow-[0_0_24px_rgba(75,123,229,0.45)] ring-1 ring-white/10 hover:shadow-[0_0_32px_rgba(75,123,229,0.65)]'
       }`}
     >
-      {/* Arka plan parlaması (Kapalıyken) */}
-      {!isOpen && (
-        <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-brandBlue/20 to-primary-500/20 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+      {isOpen ? (
+        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      ) : (
+        <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
       )}
-      
-      <div className="relative flex items-center gap-2">
-        {isOpen ? (
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        ) : (
-          <svg
-            className="w-5 h-5 text-brandBlue"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M13 10V3L4 14h7v7l9-11h-7z"
-            />
-          </svg>
-        )}
-        
-        {!isOpen && (
-          <span className="text-sm font-semibold tracking-wide bg-gradient-to-r from-brandBlue to-primary-400 bg-clip-text text-transparent">
-            Yapay Zeka
-          </span>
-        )}
-      </div>
+
+      {/* Ad, butonun kapladığı alanı büyütmeden yalnızca üzerine gelindiğinde
+          görünür: etiketi hep taşımak, balonu sağ alt köşedeki işlevsel
+          düğmelerin üstüne oturacak kadar genişletiyordu. */}
+      {!isOpen && (
+        <span
+          className="pointer-events-none absolute right-full mr-3 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white opacity-0 shadow-lg ring-1 ring-white/10 transition-opacity duration-200 group-hover:opacity-100"
+          role="tooltip"
+        >
+          Yapay Zeka
+        </span>
+      )}
     </button>
   )
 }
@@ -112,6 +101,10 @@ export default function DashboardLayout() {
   const location  = useLocation()
   const pageTitle = ROUTE_TITLE_MAP[location.pathname] ?? FALLBACK_TITLE
   const [isChatPopupOpen, setIsChatPopupOpen] = useState(false);
+
+  // Balonun gösterildiği tek koşul; hem FAB hem de alt dolgu bunu okuyor,
+  // böylece ikisi ayrışamaz.
+  const showAssistantBubble = location.pathname !== '/chat';
 
   // Chat sayfasına gidilirse popup'ı kapat
   React.useEffect(() => {
@@ -148,7 +141,16 @@ export default function DashboardLayout() {
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <Header pageTitle={pageTitle} />
 
-          <main className="flex-1 overflow-y-auto" id="main-content">
+          {/* Alt boşluk YALNIZCA balon görünürken.
+
+              Boşluk, sayfanın son satırının yüzen asistan balonunun altında
+              kalmaması için var. Sohbet sayfasında balon zaten gizleniyor ve
+              o sayfa `h-full`; dolayısıyla orada bu dolgu bir şeyin altından
+              çıkmasını sağlamıyor, sayfayı 6rem erken bitiriyordu. */}
+          <main
+            className={`flex-1 overflow-y-auto ${showAssistantBubble ? 'pb-24' : ''}`}
+            id="main-content"
+          >
             {/* Sayfa çökerse sidebar ve header ayakta kalsın; kullanıcı
                 boş beyaz ekranda kalmak yerine başka bir sayfaya geçebilsin. */}
             <ErrorBoundary label="Sayfa">

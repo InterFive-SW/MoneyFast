@@ -100,11 +100,9 @@ describe('endpoint paths', () => {
     ['getOrders', '/api/investment/orders'],
     ['getWatchlist', '/api/investment/watchlist'],
     ['getTopMovers', '/api/investment/top-movers'],
-    ['getDividends', '/api/investment/dividends'],
     ['getAssetAllocation', '/api/investment/asset-allocation'],
     ['getSectorAllocation', '/api/investment/sector-allocation'],
     ['getHeatmap', '/api/investment/heatmap'],
-    ['getPortfolioChart', '/api/investment/portfolio/chart'],
     ['getMarketTickers', '/api/market/tickers'],
     ['getMarketNews', '/api/market/news'],
     ['getPortfolioAnalysis', '/api/analytics/portfolio'],
@@ -300,6 +298,78 @@ describe('the banking endpoints', () => {
     apiClient.getStatement('TR 001', 5)
     expect(calledUrl(fetchMock)).toContain('TR%20001')
     expect(calledUrl(fetchMock)).toContain('limit=5')
+  })
+
+  it('asks the investment endpoint for the investment statement', () => {
+    /**
+     * Ayrı bir uç, çünkü yatırım nakdi `banking.accounts` değil
+     * `investment.investment_accounts` üzerinde duruyor. Bankacılık ucuna
+     * sorulduğunda 404 dönüyor ve tek bir reddedilen istek bütün sayfayı
+     * düşürüyordu.
+     */
+    const fetchMock = mockFetch({})
+    apiClient.getInvestmentStatement('TR00 123', 5)
+    expect(calledUrl(fetchMock)).toContain('/investment/accounts/TR00%20123/statement')
+    expect(calledUrl(fetchMock)).toContain('limit=5')
+  })
+
+  it('defaults the investment statement limit', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getInvestmentStatement('TR00123')
+    expect(calledUrl(fetchMock)).toContain('limit=20')
+  })
+
+  it('asks for one chart range, not all five', () => {
+    /* Beş aralığın hepsi tek istekte üretiliyordu: çağrı başına ~130 sorgu ve
+       ölçülen 5,9 saniye. Ekran aynı anda bir aralık gösteriyor. */
+    const fetchMock = mockFetch({})
+    apiClient.getPortfolioChart('hafta')
+    expect(calledUrl(fetchMock)).toBe('/api/investment/portfolio/chart?range=hafta')
+  })
+
+  it('defaults the chart range to the year', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getPortfolioChart()
+    expect(calledUrl(fetchMock)).toContain('range=yil')
+  })
+
+  it('sends the market filter to the heatmap', () => {
+    const fetchMock = mockFetch({ items: [], missing: 0 })
+    apiClient.getMarketHeatmap('SP500', 50)
+    expect(calledUrl(fetchMock)).toContain('market=SP500')
+    expect(calledUrl(fetchMock)).toContain('limit=50')
+  })
+
+  it('omits the market when none is chosen', () => {
+    const fetchMock = mockFetch({ items: [], missing: 0 })
+    apiClient.getMarketHeatmap()
+    expect(calledUrl(fetchMock)).not.toContain('market=')
+  })
+
+  it('encodes the search term and the limit', () => {
+    /* Evren binin üzerinde enstrüman: bir açılır liste taşımaz, arama
+       sunucuda. */
+    const fetchMock = mockFetch([])
+    apiClient.searchInstruments('şişe cam', 5)
+    expect(calledUrl(fetchMock)).toContain('/market/search?q=%C5%9Fi%C5%9Fe%20cam')
+    expect(calledUrl(fetchMock)).toContain('limit=5')
+  })
+
+  it('defaults the search limit', () => {
+    const fetchMock = mockFetch([])
+    apiClient.searchInstruments('thy')
+    expect(calledUrl(fetchMock)).toContain('limit=10')
+  })
+
+  it('asks for the intraday series only when a range is given', () => {
+    /* "Gün" görünümü 15 dakikalık gerçek barları okur; diğerleri günlük. */
+    const withRange = mockFetch({})
+    apiClient.getPortfolioAnalysis(undefined, 'day')
+    expect(calledUrl(withRange)).toContain('/analytics/portfolio?range=day')
+
+    const without = mockFetch({})
+    apiClient.getPortfolioAnalysis()
+    expect(calledUrl(without)).toBe('/api/analytics/portfolio')
   })
 
   it('passes the spending window', () => {
@@ -839,6 +909,102 @@ describe('transfers and error messages', () => {
   })
 })
 
+describe('banking payments', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('looks a bill up by institution and subscriber number', () => {
+    // Found by number rather than owned by a user: the number on the paper is
+    // the key, and that is what makes a saved payee worth keeping.
+    const fetchMock = mockFetch({ found: false })
+    apiClient.lookupBill('BEDAŞ', 'TEST-900112')
+    const url = calledUrl(fetchMock)
+    expect(url).toContain('/api/banking/bills/lookup')
+    expect(url).toContain('institution=BEDA')
+    expect(url).toContain('subscriber_no=TEST-900112')
+  })
+
+  it('stages a payment without moving money', () => {
+    // Staging and confirming are two calls on purpose. That split is the only
+    // reason the assistant can prepare a payment it cannot make.
+    const fetchMock = mockFetch({ proposal_id: 'PAY-1' })
+    apiClient.stagePayment({ payment_type: 'BILL_PAYMENT', institution: 'İSKİ', subscriber_no: '1' })
+    expect(calledUrl(fetchMock)).toBe('/api/banking/payments/stage')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+  })
+
+  it('confirms by proposal id', () => {
+    const fetchMock = mockFetch({ status: 'CONFIRMED' })
+    apiClient.confirmPayment('PAY-1')
+    expect(calledUrl(fetchMock)).toBe('/api/banking/payments/PAY-1/confirm')
+  })
+
+  it('escapes a proposal id rather than pasting it into the path', () => {
+    const fetchMock = mockFetch({})
+    apiClient.confirmPayment('a/b')
+    expect(calledUrl(fetchMock)).toBe('/api/banking/payments/a%2Fb/confirm')
+  })
+
+  it('reads saved payees', () => {
+    const fetchMock = mockFetch({ payees: [] })
+    apiClient.getSavedPayees()
+    expect(calledUrl(fetchMock)).toBe('/api/banking/saved-payees')
+  })
+
+  it('adds a saved payee', () => {
+    const fetchMock = mockFetch({ id: 'p-1' })
+    apiClient.addSavedPayee({ label: 'BEDAŞ', institution: 'BEDAŞ', subscriber_no: '1' })
+    expect(calledUrl(fetchMock)).toBe('/api/banking/saved-payees')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+  })
+
+  it('deletes a saved payee', () => {
+    const fetchMock = mockFetch({})
+    apiClient.deleteSavedPayee('p-1')
+    expect(calledUrl(fetchMock)).toBe('/api/banking/saved-payees/p-1')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+  })
+})
+
+describe('accounts', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('asks for every account money can move between', () => {
+    // Including the investment account, whose cash lives in another table —
+    // the screen should not have to know that.
+    const fetchMock = mockFetch([])
+    apiClient.getAllAccounts()
+    expect(calledUrl(fetchMock)).toBe('/api/banking/accounts/all')
+  })
+})
+
+describe('cards and loans', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reads the cards', () => {
+    const fetchMock = mockFetch([])
+    apiClient.getCards()
+    expect(calledUrl(fetchMock)).toBe('/api/banking/cards')
+  })
+
+  it('reads the loans', () => {
+    const fetchMock = mockFetch([])
+    apiClient.getLoans()
+    expect(calledUrl(fetchMock)).toBe('/api/banking/loans')
+  })
+
+  it('merges card settings rather than replacing them', () => {
+    // A screen that toggles one switch must not clear the others; the
+    // backend merges, and the client sends only what changed.
+    const fetchMock = mockFetch({})
+    apiClient.updateCardSettings('card-1', { frozen: true })
+    expect(calledUrl(fetchMock)).toBe('/api/banking/cards/card-1/settings')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PATCH' })
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Risk tolerans anketi
 // ---------------------------------------------------------------------------
@@ -933,5 +1099,90 @@ describe('risk history', () => {
     const result = await apiClient.getRiskHistory(30)
     expect(calledUrl(fetchMock)).toContain('days=30')
     expect(result.days).toBe(30)
+  })
+})
+
+describe('teknik görünüm', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  const body = {
+    symbol: 'AKBNK',
+    currency: 'TRY',
+    signals: { trend: 'UPTREND', sma_200: null, observations: 252 },
+    narrative: 'AKBNK yükseliş eğiliminde.',
+  }
+
+  it('sembolü sorguya koyar', async () => {
+    const fetchMock = mockFetch(body)
+    await apiClient.getTechnicalSignals('AKBNK')
+    expect(calledUrl(fetchMock)).toContain('/market/technicals?symbol=AKBNK')
+  })
+
+  it('sembolü kodlar', async () => {
+    /* Sembol adresin içine giriyor; kodlanmadan geçen bir eğik çizgi ya da
+       soru işareti başka bir uç noktaya sorar. */
+    const fetchMock = mockFetch(body)
+    await apiClient.getTechnicalSignals('A/B?C')
+    expect(calledUrl(fetchMock)).toContain('symbol=A%2FB%3FC')
+  })
+
+  it('null bir göstergeyi null olarak taşır', async () => {
+    /* null "geçmiş bu göstergeyi hesaplayacak kadar uzun değil" demek;
+       sıfıra çevirmek "fiyat tam ortalamasının üzerinde" demek olurdu. */
+    const result = await (mockFetch(body), apiClient.getTechnicalSignals('AKBNK'))
+    expect(result.signals.sma_200).toBeNull()
+    expect(result.narrative).toBe('AKBNK yükseliş eğiliminde.')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Ayarlar (#42): şifre değiştirme, veri dışa aktarma, hesap silme
+// ---------------------------------------------------------------------------
+describe('settings actions', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('şifre değişikliğini gövdede gönderir', async () => {
+    const fetchMock = mockFetch({})
+    await apiClient.changePassword({
+      current_password: 'Password123!', new_password: 'Password456!',
+    })
+    expect(calledUrl(fetchMock)).toBe('/api/auth/change-password')
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    // Mevcut şifre de gidiyor: sunucu kimliği doğrulamadan değiştirmemeli.
+    expect(body.current_password).toBe('Password123!')
+  })
+
+  it('veri dışa aktarma isteğini POST eder', async () => {
+    const fetchMock = mockFetch({ message: 'ok' })
+    const result = await apiClient.requestDataExport()
+    expect(calledUrl(fetchMock)).toBe('/api/auth/export-data')
+    expect(result.message).toBe('ok')
+  })
+
+  it('profil güncellemesi PUT ile gider', async () => {
+    const fetchMock = mockFetch({ id: '1', first_name: 'A', last_name: 'B' })
+    await apiClient.updateProfile({ transaction_limit: 25000 })
+    expect(calledUrl(fetchMock)).toBe('/api/auth/me')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'PUT' })
+  })
+
+  it('hesap silme başarısız olursa sunucunun gerekçesi yükseltilir', async () => {
+    // Sessizce yutulan bir silme hatası, kullanıcıya hesabının silindiğini
+    // söyleyip silmemek olurdu.
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok: false, status: 400, headers: { get: () => 'application/json' },
+      json: () => Promise.resolve({ detail: 'Silinemedi' }),
+      text: () => Promise.resolve('{"detail":"Silinemedi"}'),
+    })))
+    await expect(apiClient.deleteAccount({})).rejects.toThrow(/Silinemedi/)
+  })
+
+  it('hesap silme DELETE ile gider', async () => {
+    const fetchMock = mockFetch({})
+    await apiClient.deleteAccount({ reason: 'test' })
+    expect(calledUrl(fetchMock)).toContain('/api/auth/me')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
   })
 })

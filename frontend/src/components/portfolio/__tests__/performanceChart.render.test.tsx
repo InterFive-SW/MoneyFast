@@ -33,18 +33,26 @@ vi.mock('lightweight-charts', () => {
   }
 })
 
-/** A year of daily bars, oldest first — the shape /api/market/candles returns. */
-function candles(count = 300) {
-  const day = 86_400_000
-  const start = Date.now() - count * day
-  return Array.from({ length: count }, (_, i) => ({
-    timestamp: new Date(start + i * day).toISOString(),
+/**
+ * Pencere pencere mum serisi -- `/api/investment/portfolio/chart`'ın biçimi.
+ *
+ * Bu uç nokta `XU100`'ü döndürüyordu: BIST 100 endeksini, "Portföy
+ * Performansı" başlığının altında. Artık portföyün kendi değer serisi geliyor
+ * ve her aralık kendi çözünürlüğünde.
+ */
+function ranges(count = 300) {
+  const day = 86_400
+  const start = Math.floor(Date.now() / 1000) - count * day
+  const bars = Array.from({ length: count }, (_, i) => ({
+    time: start + i * day,
     open: 100 + i * 0.1,
     high: 101 + i * 0.1,
     low: 99 + i * 0.1,
     close: 100.5 + i * 0.1,
-    volume: 1000 + i,
+    value: 0,
+    color: '#22c55e',
   }))
+  return { gun: bars, hafta: bars, ay: bars, yil: bars, iki_yil: bars }
 }
 
 beforeEach(() => {
@@ -52,7 +60,7 @@ beforeEach(() => {
     observe() {} unobserve() {} disconnect() {}
   } as never)
   vi.stubGlobal('fetch', vi.fn(() =>
-    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ candles: candles() }) }),
+    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(ranges()) }),
   ))
   localStorage.setItem('access_token', 'test-token')
 })
@@ -76,7 +84,11 @@ describe('PortfolioPerformanceChart', () => {
 
   it('says so honestly when the series really is empty', async () => {
     vi.stubGlobal('fetch', vi.fn(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ candles: [] }) }),
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ gun: [], hafta: [], ay: [], yil: [], iki_yil: [] }),
+      }),
     ))
     const { container } = render(<PortfolioPerformanceChart />)
     await new Promise((r) => setTimeout(r, 120))

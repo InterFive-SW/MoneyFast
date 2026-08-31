@@ -18,9 +18,9 @@ export interface Candle {
   color?: string // hacim çubuğunun rengi
 }
 
-export type RangePreset = 'Gün' | 'Hafta' | 'Ay' | '3 Ay' | 'Yıl'
+export type RangePreset = 'Gün' | 'Hafta' | 'Ay' | 'Yıl' | '2 Yıl'
 
-export const RANGE_PRESETS: RangePreset[] = ['Gün', 'Hafta', 'Ay', '3 Ay', 'Yıl']
+export const RANGE_PRESETS: RangePreset[] = ['Gün', 'Hafta', 'Ay', 'Yıl', '2 Yıl']
 
 const DAY = 86_400
 
@@ -29,8 +29,8 @@ const PRESET_DAYS: Record<RangePreset, number> = {
   'Gün': 1,
   'Hafta': 7,
   'Ay': 30,
-  '3 Ay': 90,
   'Yıl': 365,
+  '2 Yıl': 730,
 }
 
 /** The window a preset covers, relative to the series actually loaded. */

@@ -187,3 +187,72 @@ class CandleSeriesOut(BaseModel):
     currency: str = "TRY"
     interval: str = "1d"
     candles: List[CandleOut] = Field(default_factory=list)
+
+
+class InstrumentSuggestion(BaseModel):
+    """Arama kutusunun gösterdiği tek satır."""
+
+    symbol: str
+    name: Optional[str] = None
+    market: Optional[str] = None
+    currency: Optional[str] = None
+
+
+class HeatmapTile(BaseModel):
+    """Isı haritasında bir kutu."""
+
+    symbol: str
+    name: Optional[str] = None
+    #: Kutunun ALANI bundan geliyor. Değeri bilinmeyen enstrüman haritaya
+    #: girmiyor: varsayılan bir boyut, ona sahip olmadığı bir ağırlık verirdi.
+    marketCap: float
+    changePercent: float
+    sector: str = "Bilinmiyor"
+    price: float
+    currency: str = "TRY"
+
+
+class MarketHeatmapOut(BaseModel):
+    items: List[HeatmapTile] = []
+    #: Piyasa değeri ya da günlük değişimi olmadığı için çizilemeyen sayısı.
+    #: Sessizce düşen kutular haritayı olduğundan küçük gösterir.
+    missing: int = 0
+
+
+class TechnicalSignals(BaseModel):
+    """Hesaplanan göstergeler.
+
+    Her alan `Optional`: yeterli bar olmadığında değer YOKTUR. 60 barı olan
+    bir enstrümanda `sma_200` boştur, elde olan barlarla hesaplanmış bir
+    yaklaşık değil -- "200 günlük ortalama" adını taşıyıp 60 günü ölçen bir
+    sayı, okuyanı yanıltır.
+    """
+
+    observations: int = 0
+    last_close: Optional[float] = None
+    sma_20: Optional[float] = None
+    sma_50: Optional[float] = None
+    sma_200: Optional[float] = None
+    pct_from_sma_20: Optional[float] = None
+    pct_from_sma_50: Optional[float] = None
+    pct_from_sma_200: Optional[float] = None
+    rsi_14: Optional[float] = None
+    week52_high: Optional[float] = None
+    week52_low: Optional[float] = None
+    week52_position_pct: Optional[float] = None
+    up_days_recent: Optional[int] = None
+    recent_window: Optional[int] = None
+    volume_vs_average: Optional[float] = None
+    annualised_volatility: Optional[float] = None
+    max_drawdown_pct: Optional[float] = None
+    #: UPTREND / DOWNTREND / SIDEWAYS / UNKNOWN
+    trend: str = "UNKNOWN"
+
+
+class TechnicalSignalsOut(BaseModel):
+    symbol: str
+    currency: str = "TRY"
+    signals: TechnicalSignals
+    #: Kullanıcıya gösterilecek Türkçe cümle, tam hâliyle. Yeterli geçmiş
+    #: yoksa None -- boş bir cümle üretmek yerine hiç üretilmiyor.
+    narrative: Optional[str] = None

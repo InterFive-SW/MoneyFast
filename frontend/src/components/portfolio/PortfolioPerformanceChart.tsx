@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries, HistogramSeries } from 'lightweight-charts'
+import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries } from 'lightweight-charts'
 import {
   presetRangeFor,
   sliceSeries,
@@ -9,10 +9,27 @@ import {
 } from '../../data/portfolioSeries'
 import type { RangePreset } from '../../data/portfolioSeries'
 import { apiClient } from '../../api/client'
+import { BASE_CURRENCY } from '../../lib/money'
 import type { Candle } from '../../data/portfolioSeries'
 
-/** The index the performance chart tracks until per-account snapshots exist. */
-const BENCHMARK_SYMBOL = 'XU100'
+/**
+ * Hazır aralık -> sunucunun döndürdüğü seri anahtarı.
+ *
+ * Her aralık KENDİ çözünürlüğünde geliyor: gün 5 dakikalık barlardan (bir
+ * seansta 78 nokta), hafta ve ay aynı barların 15 dakikalık ve saatlik
+ * kovalarından, yıl ve iki yıl günlük barlardan. Tek bir günlük seriyi
+ * dilimlemek, bir haftayı yedi noktayla çizmek demekti.
+ */
+const RANGE_KEYS: Record<RangePreset, string> = {
+  'Gün': 'gun',
+  'Hafta': 'hafta',
+  'Ay': 'ay',
+  'Yıl': 'yil',
+  '2 Yıl': 'iki_yil',
+}
+
+/** Serbest tarih aralığı en geniş günlük seriden dilimlenir. */
+const CUSTOM_SOURCE_KEY = 'iki_yil'
 
 type Mode = RangePreset | 'custom'
 
@@ -24,29 +41,38 @@ type Mode = RangePreset | 'custom'
  */
 export default function PortfolioPerformanceChart() {
   const [mode, setMode] = useState<Mode>('Yıl')
-  // Real daily bars. This chart drew a seeded random walk from
-  // data/portfolioSeries.ts — its own header said an API call would replace
-  // the generator, and /api/market/candles now serves genuine ones.
-  const [series, setSeries] = useState<Candle[]>([])
+  /**
+   * Portföyün KENDİ değer serisi.
+   *
+   * Bu grafik `XU100`'ü çiziyordu -- BIST 100 endeksini, "Portföy
+   * Performansı" başlığının altında. Gerçek bir seriydi ama kullanıcının
+   * serisi değildi: ekranda 1.382.868 TL yazarken grafik 14.623'te duruyordu.
+   */
+  const [ranges, setRanges] = useState<Record<string, Candle[]>>({})
+
+  // Görünen aralık ne ise o isteniyor; aralık değişince yenisi çekiliyor ve
+  // bir kez gelen seri saklanıyor, geri dönüldüğünde tekrar sorulmuyor.
+  const activeKey = mode === 'custom' ? CUSTOM_SOURCE_KEY : RANGE_KEYS[mode]
 
   useEffect(() => {
+    if (ranges[activeKey]) return
+    let cancelled = false
     apiClient
-      .getCandles(BENCHMARK_SYMBOL, 400)
-      .then((response) =>
-        setSeries(
-          (response.candles ?? []).map((bar) => ({
-            time: Math.floor(new Date(bar.timestamp).getTime() / 1000),
-            open: bar.open,
-            high: bar.high,
-            low: bar.low,
-            close: bar.close,
-            value: bar.volume ?? 0,
-            color: bar.close >= bar.open ? '#10b981' : '#ef4444',
-          })),
-        ),
-      )
+      .getPortfolioChart(activeKey)
+      .then((response) => {
+        if (cancelled) return
+        setRanges((prev) => ({
+          ...prev,
+          ...(response as unknown as Record<string, Candle[]>),
+        }))
+      })
       .catch((error) => console.error('Failed to load performance series', error))
-  }, [])
+    return () => {
+      cancelled = true
+    }
+  }, [activeKey, ranges])
+
+  const series = useMemo(() => ranges[activeKey] ?? [], [ranges, activeKey])
   const [pickerOpen, setPickerOpen] = useState(false)
   const [fromInput, setFromInput] = useState('')
   const [toInput, setToInput] = useState('')
@@ -56,7 +82,6 @@ export default function PortfolioPerformanceChart() {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
-  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
 
   // `series` belongs in both dependency lists: it starts empty and is filled
   // by the fetch above. Without it neither memo recomputed when the bars
@@ -100,14 +125,8 @@ export default function PortfolioPerformanceChart() {
     })
     chartRef.current = chart
 
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: 'volume' },
-      priceScaleId: '',
-    })
-    chart.priceScale('').applyOptions({
-      scaleMargins: { top: 0.8, bottom: 0 },
-    })
-    volumeSeriesRef.current = volumeSeries
+    // Hacim paneli YOK: bir portföyün işlem hacmi yoktur. Buradaki çubuklar
+    // endeksin hacmiydi ve grafik endeksi çizdiği sürece tutarlıydı.
 
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#26a69a',
@@ -132,13 +151,12 @@ export default function PortfolioPerformanceChart() {
       chart.remove()
       chartRef.current = null
       candlestickSeriesRef.current = null
-      volumeSeriesRef.current = null
     }
   }, [])
 
   // Seçili aralık değişince veriyi güncelle
   useEffect(() => {
-    if (!candlestickSeriesRef.current || !volumeSeriesRef.current || !chartRef.current) return
+    if (!candlestickSeriesRef.current || !chartRef.current) return
     if (data.length === 0) return
 
     const candleData = data.map((d) => ({
@@ -149,15 +167,8 @@ export default function PortfolioPerformanceChart() {
       close: d.close,
     }))
 
-    const volumeData = data.map((d) => ({
-      time: d.time as any,
-      value: d.value || 0,
-      color: d.color,
-    }))
-
     try {
       candlestickSeriesRef.current.setData(candleData)
-      volumeSeriesRef.current.setData(volumeData)
       chartRef.current.timeScale().fitContent()
     } catch (err) {
       console.error('Chart data error:', err)
@@ -220,7 +231,14 @@ export default function PortfolioPerformanceChart() {
     <div className="flex flex-col h-full w-full bg-slate-900/50 backdrop-blur-xl rounded-[2rem] p-5 border border-white/10 shadow-2xl">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4 z-10">
         <div className="flex items-center gap-3">
-          <h3 className="text-[13px] uppercase tracking-wider font-semibold text-slate-200">Portföy Performansı</h3>
+          <h3 className="text-[13px] uppercase tracking-wider font-semibold text-slate-200">
+            Portföy Performansı
+            {/* Birim yazılı: eksendeki sayılar bir para birimi taşımadan
+                okunamaz ve portföy hesabın taban para biriminde değerleniyor. */}
+            <span className="ml-2 text-[11px] font-medium normal-case tracking-normal text-slate-500">
+              ({BASE_CURRENCY})
+            </span>
+          </h3>
           {rangeLabel && (
             <span className="text-[11px] font-medium text-slate-400 bg-slate-800/5 px-2 py-0.5 rounded-full tabular-nums">
               {rangeLabel}

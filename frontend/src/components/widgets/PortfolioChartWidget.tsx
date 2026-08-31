@@ -1,20 +1,28 @@
 import { useState, useEffect, useRef } from 'react'
-import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries, HistogramSeries } from 'lightweight-charts'
+import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries } from 'lightweight-charts'
 import { apiClient } from '../../api/client'
+import { BASE_CURRENCY } from '../../lib/money'
 
-type TimeFilter = 'Gün' | 'Hafta' | 'Ay' | 'Yıl' | 'Tümü'
+type TimeFilter = 'Gün' | 'Hafta' | 'Ay' | 'Yıl' | '2 Yıl'
 
 /**
  * The backend keys its ranges without diacritics. "3 Ay" is gone because the
  * endpoint has no such bucket — offering a filter with no data behind it just
  * renders an empty chart.
  */
+/**
+ * Aralık -> sunucunun döndürdüğü seri anahtarı.
+ *
+ * Her aralık kendi çözünürlüğünde geliyor; gün 5 dakikalık barlardan, hafta ve
+ * ay onların 15 dakikalık ve saatlik kovalarından, yıl ve iki yıl günlük
+ * barlardan.
+ */
 const RANGE_KEYS: Record<TimeFilter, string> = {
   'Gün': 'gun',
   'Hafta': 'hafta',
   'Ay': 'ay',
   'Yıl': 'yil',
-  'Tümü': 'tum',
+  '2 Yıl': 'iki_yil',
 }
 
 interface ChartPoint {
@@ -39,18 +47,31 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
   // the genuine series and was called from nowhere.
   const [series, setSeries] = useState<Record<string, ChartPoint[]>>({})
 
+  // Görünen aralık ne ise o isteniyor; hepsini birden çekmek çağrı başına
+  // ~130 sorgu ve ölçülen 5,9 saniye demekti.
   useEffect(() => {
+    const key = RANGE_KEYS[filter]
+    if (series[key]) return
+    let cancelled = false
     apiClient
-      .getPortfolioChart()
-      .then((response) => setSeries(response as unknown as Record<string, ChartPoint[]>))
+      .getPortfolioChart(key)
+      .then((response) => {
+        if (cancelled) return
+        setSeries((prev) => ({
+          ...prev,
+          ...(response as unknown as Record<string, ChartPoint[]>),
+        }))
+      })
       .catch((error) => console.error('Failed to load portfolio chart', error))
-  }, [])
+    return () => {
+      cancelled = true
+    }
+  }, [filter, series])
 
   const points = series[RANGE_KEYS[filter]] ?? []
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
   const candlestickSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
-  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null)
 
   useEffect(() => {
     if (!chartContainerRef.current) return
@@ -86,20 +107,8 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
     })
     chartRef.current = chart
 
-    // Volume Serisi (Altta olacak)
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: {
-        type: 'volume',
-      },
-      priceScaleId: '', // priceScaleId boş olmalı ki overlay olarak altta kalsın
-    })
-    chart.priceScale('').applyOptions({
-      scaleMargins: {
-        top: 0.8,
-        bottom: 0,
-      },
-    })
-    volumeSeriesRef.current = volumeSeries
+    // Hacim paneli YOK: bir portföyün işlem hacmi yoktur. Buradaki çubuklar
+    // endeksin hacmiydi ve grafik endeksi çizdiği sürece tutarlıydı.
 
     // Mum Serisi
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
@@ -127,7 +136,6 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
       chart.remove()
       chartRef.current = null
       candlestickSeriesRef.current = null
-      volumeSeriesRef.current = null
     }
   }, [])
 
@@ -136,7 +144,7 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
   // hiç çizilmiyordu — grafik, kullanıcı aralığı değiştirene kadar boş
   // kalıyordu.
   useEffect(() => {
-    if (!candlestickSeriesRef.current || !volumeSeriesRef.current || !chartRef.current) return
+    if (!candlestickSeriesRef.current || !chartRef.current) return
 
     const data = points
 
@@ -153,16 +161,8 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
       close: d.close,
     }))
 
-    // Hacim datası
-    const volumeData = uniqueData.map((d) => ({
-      time: d.time as any,
-      value: d.value || 0,
-      color: d.color,
-    }))
-
     try {
       candlestickSeriesRef.current.setData(candleData)
-      volumeSeriesRef.current.setData(volumeData)
       chartRef.current.timeScale().fitContent()
     } catch (err) {
       console.error("Chart data error:", err)
@@ -177,7 +177,10 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
     
     return (
       <div className="flex flex-col h-full w-full bg-transparent p-1 items-center justify-center text-center">
-        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">Portföy Performansı (Özet)</h3>
+        <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-2">
+          Portföy Performansı (Özet)
+          <span className="ml-1.5 normal-case tracking-normal text-slate-500">({BASE_CURRENCY})</span>
+        </h3>
         <div className={`text-2xl font-bold ${isPositive ? 'text-accent-500' : 'text-rose-500'}`}>
           {latestData ? latestData.close.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' }) : '-'}
         </div>
@@ -195,7 +198,7 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
         </div>
         
         <div className="flex space-x-1 bg-white/5 p-1 rounded-lg">
-          {(['Gün', 'Hafta', 'Ay', 'Yıl', 'Tümü'] as TimeFilter[]).map((f) => (
+          {(['Gün', 'Hafta', 'Ay', 'Yıl', '2 Yıl'] as TimeFilter[]).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}

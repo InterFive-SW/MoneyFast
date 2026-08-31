@@ -94,6 +94,20 @@ async function mounted() {
   return view
 }
 
+/**
+ * Mount, then open a stored conversation.
+ *
+ * Hydration deliberately no longer opens one -- landing in the middle of an
+ * hours-old conversation was the bug. Tests about an OPEN conversation have
+ * to open it, which is what a user now does by picking it from the list.
+ */
+async function mountedOnSession(threadId = 't-1') {
+  const view = await mounted()
+  await waitFor(() => expect(view.result.current.sessions.length).toBeGreaterThan(0))
+  await act(async () => view.result.current.loadSession(threadId))
+  return view
+}
+
 // --------------------------------------------------------------------------
 // Hydration
 // --------------------------------------------------------------------------
@@ -105,8 +119,20 @@ describe('hydration', () => {
     expect(result.current.sessions[0].origin).toBe('server')
   })
 
-  it('opens the most recent conversation and loads its messages', async () => {
+  it('lists conversations without opening one', async () => {
+    /* Hydration used to open `items[0]`, so every landing dropped the user
+       into their most recent conversation -- the popup would greet them with
+       a half-finished proposal from hours earlier, context long gone. The
+       list is worth restoring; resuming it unasked is not. */
     const { result } = await mounted()
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1))
+    expect(result.current.activeSessionId).toBeNull()
+    expect(result.current.messages).toEqual([])
+    expect(apiClient.getConversation).not.toHaveBeenCalled()
+  })
+
+  it('loads the messages once that conversation is opened', async () => {
+    const { result } = await mountedOnSession()
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
     expect(result.current.activeSessionId).toBe('t-1')
     expect(result.current.messages[1].disclosures).toEqual([
@@ -157,7 +183,7 @@ describe('hydration', () => {
 
   it('keeps the session listed when its messages fail to load', async () => {
     vi.mocked(apiClient.getConversation).mockRejectedValue(new Error('boom'))
-    const { result } = await mounted()
+    const { result } = await mountedOnSession()
     await waitFor(() => expect(result.current.notice).toBe(HISTORY_LOAD_ERROR))
     expect(result.current.sessions).toHaveLength(1)
   })
@@ -200,18 +226,21 @@ describe('session management', () => {
       items: [CONVERSATION, older], total: 2, limit: 30, offset: 0,
     })
     const { result } = await mounted()
-    // Hydration opens only the most recent one; the other stays a stub.
+    // Hydration opens neither; both stay stubs until one is picked.
     await waitFor(() => expect(result.current.sessions).toHaveLength(2))
+    expect(result.current.sessions[0].messagesLoaded).toBe(false)
     expect(result.current.sessions[1].messagesLoaded).toBe(false)
 
     await act(async () => result.current.loadSession('t-2'))
     await waitFor(() => expect(result.current.activeSessionId).toBe('t-2'))
     expect(apiClient.getConversation).toHaveBeenCalledWith('t-2')
-    expect(apiClient.getConversation).toHaveBeenCalledTimes(2)
+    // Bir kez, iki değil: hidrasyon artık kendiliğinden bir konuşma açmıyor,
+    // dolayısıyla tek çağrı kullanıcının açtığı oturum için.
+    expect(apiClient.getConversation).toHaveBeenCalledTimes(1)
   })
 
   it('does not refetch a session whose messages are already loaded', async () => {
-    const { result } = await mounted()
+    const { result } = await mountedOnSession()
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
     act(() => result.current.createNewSession())
     const localId = result.current.activeSessionId as string
@@ -308,7 +337,7 @@ describe('session management', () => {
   })
 
   it('dismisses the context panel', async () => {
-    const { result } = await mounted()
+    const { result } = await mountedOnSession()
     await waitFor(() => expect(result.current.activeContext).toBe('THYAO'))
     act(() => result.current.dismissContext())
     expect(result.current.activeContext).toBeNull()
@@ -328,7 +357,7 @@ describe('session management', () => {
 // --------------------------------------------------------------------------
 describe('sending a message', () => {
   it('appends the question and the answer', async () => {
-    const { result } = await mounted()
+    const { result } = await mountedOnSession()
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
     await act(async () => { await result.current.handleSendMessage('selam') })
     expect(result.current.messages.map((m) => m.text)).toEqual([
@@ -362,7 +391,7 @@ describe('sending a message', () => {
   })
 
   it('sends the prior turns and the thread id', async () => {
-    const { result } = await mounted()
+    const { result } = await mountedOnSession()
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
     await act(async () => { await result.current.handleSendMessage('peki ya o?') })
     const body = vi.mocked(apiClient.streamChat).mock.calls[0][0] as any
@@ -376,7 +405,7 @@ describe('sending a message', () => {
   it('refreshes the session before every turn', async () => {
     /* An expired token returns 200-anonymous on the chat endpoints, so
        authedFetch's 401-driven refresh never fires on this path. */
-    const { result } = await mounted()
+    const { result } = await mountedOnSession()
     await waitFor(() => expect(result.current.messages).toHaveLength(2))
     vi.mocked(apiClient.ensureFreshSession).mockClear()
     await act(async () => { await result.current.handleSendMessage('selam') })
@@ -562,7 +591,7 @@ describe('edge cases', () => {
       messages: [{ ...DETAIL.messages[0], disclosures: undefined as never }],
       context_topic: null,
     })
-    const { result } = await mounted()
+    const { result } = await mountedOnSession()
     await waitFor(() => expect(result.current.messages).toHaveLength(1))
     expect(result.current.messages[0].disclosures).toEqual([])
     expect(result.current.activeContext).toBeNull()

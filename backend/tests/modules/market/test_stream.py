@@ -208,3 +208,67 @@ class TestPollerExit:
         stream._subscribers.discard(queue)
         await asyncio.sleep(0.05)
         assert task.done()
+
+
+class TestFrameSize:
+    """Kare boyutu.
+
+    Evren 190 enstrümandan 1010'a çıkınca her tam kare 88 KB oldu ve fiyat her
+    değiştiğinde açık olan her sekmeye gidiyordu -- menülerde hissedilen
+    takılmanın bir parçası buydu.
+    """
+
+    @pytest.mark.asyncio
+    async def test_an_unchanged_market_sends_metadata_only(self, monkeypatch):
+        """Hiçbir fiyat kıpırdamadığında da tarayıcının gösterdiği yaş
+        ilerlemeli -- ama bunun için 1011 kotasyonu yeniden yollamak
+        gerekmiyor."""
+        monkeypatch.setattr(stream, "POLL_SECONDS", 0.01)
+        monkeypatch.setattr(stream, "FRESHNESS_REFRESH_SECONDS", 0.0)
+        monkeypatch.setattr(stream, "FULL_RESYNC_SECONDS", 1_000.0)
+        stream.configure(frame)
+
+        queue = await stream.subscribe()
+        await asyncio.sleep(0.05)
+
+        first = queue.get_nowait()
+        assert first["partial"] is False
+        assert first["quotes"], "the first frame must carry the whole snapshot"
+
+        later = queue.get_nowait()
+        assert later["partial"] is True
+        assert later["quotes"] == {}
+
+    @pytest.mark.asyncio
+    async def test_only_changed_quotes_are_sent(self, monkeypatch):
+        monkeypatch.setattr(stream, "POLL_SECONDS", 0.01)
+        monkeypatch.setattr(stream, "FULL_RESYNC_SECONDS", 1_000.0)
+        prices = iter([300.0, 300.0, 311.0])
+
+        def moving():
+            payload = frame()
+            payload["quotes"] = {
+                "THYAO": {"price": next(prices, 311.0)},
+                "ASELS": {"price": 90.0},
+            }
+            return payload
+
+        stream.configure(moving)
+        queue = await stream.subscribe()
+        await asyncio.sleep(0.06)
+
+        queue.get_nowait()  # ilk tam kare
+        delta = queue.get_nowait()
+        assert delta["partial"] is True
+        # Kıpırdamayan sembol karede yok.
+        assert set(delta["quotes"]) == {"THYAO"}
+
+    def test_a_first_frame_is_never_a_delta(self):
+        """Akışa ortadan katılan bir istemci yalnızca farkları alsaydı, hiç
+        görmediği sembollerde boşluk kalırdı."""
+        quotes = {"THYAO": {"price": 300.0}}
+        assert stream._changed_quotes(quotes, None) == quotes
+
+    def test_nothing_changed_is_an_empty_delta(self):
+        quotes = {"THYAO": {"price": 300.0}}
+        assert stream._changed_quotes(quotes, dict(quotes)) == {}

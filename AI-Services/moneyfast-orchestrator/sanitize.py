@@ -69,6 +69,14 @@ INTERNAL_KEYS = (
     "volatility_annualized", "risk_free_rate", "observation_count",
     "data_quality", "is_statistically_reliable", "excluded_symbols",
     "gap_filled_days",
+    # Technical signals (v2.10). `rsi_14` and `sma_50` are the likeliest of
+    # these to be written out verbatim -- they read like names rather than
+    # keys, and the model has no way to know they are ours.
+    "sma_20", "sma_50", "sma_200", "rsi_14",
+    "pct_from_sma_20", "pct_from_sma_50", "pct_from_sma_200",
+    "week52_position_pct", "up_days_recent", "recent_window",
+    "volume_vs_average", "max_drawdown_pct", "annualised_volatility",
+    "last_close", "observations", "narrative",
 )
 
 #: An identifier standing on its own, not part of a longer word.

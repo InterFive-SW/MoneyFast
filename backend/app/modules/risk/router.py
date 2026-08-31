@@ -31,7 +31,7 @@ router = APIRouter(tags=["risk"])
     response_model=RiskResponse,
     summary="Portföy risk metrikleri (MCP v2.1 sözleşmesi)",
 )
-async def calculate_risk(request: RiskRequest, db: Session = Depends(get_db)):
+def calculate_risk(request: RiskRequest, db: Session = Depends(get_db)):
     """
     Verilen pozisyon kümesi için geçmişe dönük (ex-post) risk istatistikleri döner.
 
@@ -192,7 +192,7 @@ def _declared_payload(declared) -> dict | None:
     response_model=RiskProfileOut,
     summary="Kullanıcının risk profili (Risk sayfası)",
 )
-async def risk_profile(
+def risk_profile(
     # Same closed set the POST body enforces, and normalised the same way.
     lookback: str = Depends(lookback_param),
     db: Session = Depends(get_db),
@@ -256,7 +256,7 @@ async def risk_profile(
     dependencies=[Depends(require_service_token)],
     summary="Risk profili özeti (MCP v2.4 sözleşmesi)",
 )
-async def risk_summary_for_ai(
+def risk_summary_for_ai(
     user_id: str,
     lookback: str = Depends(lookback_param),
     db: Session = Depends(get_db),
@@ -311,7 +311,7 @@ async def get_questionnaire():
     response_model=AssessmentResultOut,
     summary="Anketi gönder ve risk profilini güncelle",
 )
-async def submit_assessment(
+def submit_assessment(
     request: AssessmentRequest,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -351,7 +351,7 @@ async def submit_assessment(
     response_model=RiskHistoryOut,
     summary="Risk puanının zaman içindeki seyri",
 )
-async def risk_history(
+def risk_history(
     days: int = Query(90, ge=7, le=365),
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -375,7 +375,7 @@ async def risk_history(
     response_model=SimulationOut,
     summary="\"Ne olur?\" — varsayımsal bir değişikliğin risk etkisi",
 )
-async def simulate(
+def simulate(
     request: SimulationRequest,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),

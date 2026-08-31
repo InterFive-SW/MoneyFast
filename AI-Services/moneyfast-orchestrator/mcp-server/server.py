@@ -6,7 +6,14 @@ Each module exposes a `register(mcp)` function; the tool callables stay at
 module level so they can be imported and unit-tested without a running
 server.
 
-Contracts follow "MCP Tools Interface Definitions v2.4": the six v2.1 tools
+Contracts follow "MCP Tools Interface Definitions v2.9", the union of two
+lineages that developed in parallel: v2.4 on main added
+get_risk_profile_summary, v2.8 on the banking branch added lookup_bill and
+prepare_payment_proposal. Both are kept; the version is bumped past both
+rather than to the higher of the two, because "v2.8" would claim main's risk
+tool was never added.
+
+The v2.4 lineage, unchanged: the six v2.1 tools
 are unchanged, get_market_data was added at v2.2 because v2.1 had no way to
 reach the price of an instrument the user does not own, v2.3 put cash on
 get_portfolio_positions, and v2.4 adds get_risk_profile_summary -- the risk
@@ -43,16 +50,27 @@ import market_research_tools
 import orchestrator_tools
 import portfolio_tools
 import risk_strategy_tools
+import banking_tools
+import technical_tools
 import transaction_tools
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("moneyfast.mcp")
 
 SERVER_NAME = "moneyfast"
-CONTRACT_VERSION = "v2.4"
+#: v2.9: iki ayrı soydan gelen eklemelerin BİRLEŞİMİ. `main` v2.4'te
+#: `get_risk_profile_summary`'i ekledi, bu dal v2.8'de iki bankacılık aracını.
+#: İkisi de gerçek ve farklı; birleşmiş sözleşme ikisinden de yeni olduğu için
+#: yüksek olanı almak yerine bir üstüne çıkılıyor -- v2.8 demek, main'in risk
+#: aracının hiç eklenmediğini söylemek olurdu.
+#: v2.10: `get_technical_signals`. `get_market_data`'nın v2.2 şeması
+#: DEĞİŞMEDİ -- o "şu an ne ediyor" sorusunun cevabı, hareketli ortalama ise
+#: başka bir soru ve başka bir başarısızlık biçimi var (geçmiş ister, ve
+#: geçmiş cevaplayamayacak kadar kısa olabilir).
+CONTRACT_VERSION = "v2.10"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Eight tools across seven domains.
+MoneyFast tool server. Eleven tools across nine domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -62,6 +80,10 @@ Data:    get_portfolio_positions, get_market_data,
 Prices:  get_market_data is the ONLY source for the price or valuation of an
          instrument the user does not hold. A null fundamental means the
          provider does not publish it; report "veri yok", never 0.
+Trend:   get_technical_signals answers "how is it DOING" as opposed to "what
+         does it cost". Relay its `narrative` verbatim, caveat included; a
+         null field there means the history is too short to compute it, and
+         you must not describe an indicator that came back null.
 Empty:   an empty list is a valid, complete answer. Never substitute
          remembered or illustrative data for it.
 Gate:    validate_compliance_rules runs on every user-facing draft that
@@ -81,6 +103,8 @@ DOMAIN_MODULES = (
     ("risk_strategy", risk_strategy_tools),
     ("compliance", compliance_tools),
     ("transaction", transaction_tools),
+    ("banking", banking_tools),
+    ("technical", technical_tools),
 )
 
 

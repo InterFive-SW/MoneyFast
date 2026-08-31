@@ -29,7 +29,9 @@ interface MeResponse {
   tc_no:      string
   email:      string
   phone_number?: string
-  wants_email_notifications: boolean
+  notification_preferences: Record<string, Record<string, boolean>>
+  transaction_limit: number
+  user_preferences: Record<string, string>
 }
 
 /** Uygulama genelinde kullanılan normalize edilmiş kullanıcı profili */
@@ -48,8 +50,14 @@ export interface UserProfile {
   email:     string
   /** Telefon numarası */
   phoneNumber?: string
-  /** E-posta bildirim tercihi */
-  wantsEmailNotifications: boolean
+  /** PostgreSQL JSONB kaynaklı detaylı bildirim tercihleri matrisi (Kategori -> Kanal -> Durum) */
+  notificationPreferences: Record<string, Record<string, boolean>>
+  /** Güvenlik Merkezi → İşlem Onay Limiti (₺). Bu eşiğin üzerindeki
+   *  transferlerde ek doğrulama (SMS/2FA) istenir. */
+  transactionLimit: number
+  /** Görünüm & Format tercihleri (dil, para birimi, dashboard şablonu).
+   *  JSONB olarak saklanır; yeni tercih eklemek şema değişikliği gerektirmez. */
+  userPreferences: Record<string, string>
 }
 
 /** Context değer yapısı */
@@ -72,7 +80,19 @@ const FALLBACK_PROFILE: UserProfile = {
   tcNo:      '',
   initials:  'KL',
   email:     '',
-  wantsEmailNotifications: true
+  notificationPreferences: {
+    security: { email: true, push: true, sms: true },
+    transactions: { email: true, push: true, sms: false },
+    market: { email: false, push: true, sms: false },
+    reports: { email: true, push: false, sms: false },
+    marketing: { email: false, push: false, sms: false },
+  },
+  transactionLimit: 50000,
+  userPreferences: {
+    currency: 'TRY',
+    language: 'tr',
+    default_template: 'balanced',
+  }
 }
 
 // ─── JWT Decode Yardımcısı ────────────────────────────────────────────────────
@@ -127,7 +147,19 @@ function buildProfile(data: Partial<MeResponse>, tcNo: string): UserProfile {
     initials,
     email: data.email ?? '',
     phoneNumber: data.phone_number,
-    wantsEmailNotifications: data.wants_email_notifications ?? true
+    notificationPreferences: data.notification_preferences ?? {
+      security: { email: true, push: true, sms: true },
+      transactions: { email: true, push: true, sms: false },
+      market: { email: false, push: true, sms: false },
+      reports: { email: true, push: false, sms: false },
+      marketing: { email: false, push: false, sms: false },
+    },
+    transactionLimit: data.transaction_limit ?? 50000,
+    userPreferences: data.user_preferences ?? {
+      currency: 'TRY',
+      language: 'tr',
+      default_template: 'balanced',
+    }
   }
 }
 

@@ -162,14 +162,50 @@ def test_mandatory_disclaimer_is_exact():
     )
 
 
+def _unwrapped() -> str:
+    """The prompt with its hard line wraps collapsed.
+
+    The constant is wrapped at 79 columns, so a sentence to assert on is
+    routinely split across two lines and a plain `in` misses it. Collapsing
+    the wrap lets a test name the rule it is pinning rather than a fragment
+    that happens to fit.
+    """
+    return " ".join(prompts.ORCHESTRATOR_SYSTEM_PROMPT.split())
+
+
 def test_headers_are_exact_and_bold():
-    assert prompts.FILTERS_HEADER == "**Kullandığım filtreler:**"
     assert prompts.OBSERVATIONS_HEADER == "**Öne çıkan gözlemler:**"
+
+
+def test_the_filters_heading_is_forbidden_not_merely_absent():
+    """It came back as a form the model filled in even where nothing had been
+    filtered -- a plain news search headed by a filter list naming a keyword
+    and a result cap. Deleting the constant is not enough; the prompt has to
+    say not to write it."""
+    assert not hasattr(prompts, "FILTERS_HEADER")
+    assert 'NEVER write a "Kullandığım filtreler:" heading' in _unwrapped()
+
+
+def test_method_is_still_required_just_not_as_a_block():
+    """The transparency requirement did not go away with the heading."""
+    prompt = _unwrapped()
+    assert "but say it in a SENTENCE, in your own words, not a labelled block" in prompt
+    assert "Cover the same ground a heading would: which universe" in prompt
+
+
+def test_direction_stays_forbidden_except_for_a_relayed_reading():
+    """The opening exists so a computed technical reading can be relayed; it
+    is not a licence to compose a forecast."""
+    prompt = _unwrapped()
+    assert "Never predict a price or a return." in prompt
+    assert 'A bare "yükselecek" has none of those and stays forbidden' in prompt
+    assert "any forward claim you compose yourself rather than relay" in prompt
+    assert "Never drop the caveat" in prompt
 
 
 @pytest.mark.parametrize(
     "constant",
-    ["MANDATORY_DISCLAIMER", "FILTERS_HEADER", "OBSERVATIONS_HEADER"],
+    ["MANDATORY_DISCLAIMER", "OBSERVATIONS_HEADER"],
 )
 def test_verbatim_constants_appear_inside_the_orchestrator_prompt(constant):
     """The constants exist for code; the prompt must carry the same strings,
@@ -319,7 +355,11 @@ def test_market_research_specialist_marks_snippets_untrusted():
 #: measured wrong-instrument bug, so its budget is larger on purpose. The gate
 #: still exists to catch UNNOTICED growth -- raise a number here only with a
 #: reason worth writing down.
-PROMPT_BUDGETS = {"TRANSACTION_AGENT": 3200}
+#: MARKET_DATA_AGENT carries TWO tools since v2.10 -- the price lookup and
+#: the trend reading -- so it needs the envelope and the choosing rule for
+#: both. Raised deliberately and by a measured amount, not to whatever the
+#: prompt happens to be.
+PROMPT_BUDGETS = {"TRANSACTION_AGENT": 3200, "MARKET_DATA_AGENT": 3000}
 DEFAULT_PROMPT_BUDGET = 2500
 
 
@@ -365,10 +405,14 @@ def test_comparing_two_instruments_is_a_data_question():
     assert "COMPARING two named instruments is MARKET_DATA_AGENT" in prompts.ROUTER_PROMPT
 
 
-def test_a_single_lookup_omits_the_methodology_block():
+def test_a_single_lookup_says_nothing_about_method():
     """"Sıralama: fiyat yüksekten düşüğe, en fazla 10" under a one-stock price
-    describes a screen that never happened."""
-    assert "belongs to a SCREEN" in prompts.ORCHESTRATOR_SYSTEM_PROMPT
+    describes a screen that never happened. The rule survives the removal of
+    the heading -- it is the reason the heading went."""
+    assert (
+        "When no filter or sort shaped the answer, say nothing about method at all."
+        in _unwrapped()
+    )
 
 
 class TestInstrumentIsVerifiedBeforeAsking:

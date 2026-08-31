@@ -51,6 +51,7 @@ import orchestrator_tools
 import portfolio_tools
 import risk_strategy_tools
 import banking_tools
+import technical_tools
 import transaction_tools
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -62,10 +63,14 @@ SERVER_NAME = "moneyfast"
 #: İkisi de gerçek ve farklı; birleşmiş sözleşme ikisinden de yeni olduğu için
 #: yüksek olanı almak yerine bir üstüne çıkılıyor -- v2.8 demek, main'in risk
 #: aracının hiç eklenmediğini söylemek olurdu.
-CONTRACT_VERSION = "v2.9"
+#: v2.10: `get_technical_signals`. `get_market_data`'nın v2.2 şeması
+#: DEĞİŞMEDİ -- o "şu an ne ediyor" sorusunun cevabı, hareketli ortalama ise
+#: başka bir soru ve başka bir başarısızlık biçimi var (geçmiş ister, ve
+#: geçmiş cevaplayamayacak kadar kısa olabilir).
+CONTRACT_VERSION = "v2.10"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Ten tools across eight domains.
+MoneyFast tool server. Eleven tools across nine domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -75,6 +80,10 @@ Data:    get_portfolio_positions, get_market_data,
 Prices:  get_market_data is the ONLY source for the price or valuation of an
          instrument the user does not hold. A null fundamental means the
          provider does not publish it; report "veri yok", never 0.
+Trend:   get_technical_signals answers "how is it DOING" as opposed to "what
+         does it cost". Relay its `narrative` verbatim, caveat included; a
+         null field there means the history is too short to compute it, and
+         you must not describe an indicator that came back null.
 Empty:   an empty list is a valid, complete answer. Never substitute
          remembered or illustrative data for it.
 Gate:    validate_compliance_rules runs on every user-facing draft that
@@ -95,6 +104,7 @@ DOMAIN_MODULES = (
     ("compliance", compliance_tools),
     ("transaction", transaction_tools),
     ("banking", banking_tools),
+    ("technical", technical_tools),
 )
 
 

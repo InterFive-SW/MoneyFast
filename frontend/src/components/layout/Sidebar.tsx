@@ -3,11 +3,10 @@
  */
 
 import { useState }             from 'react'
-import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode }       from 'react'
 import { useUser }              from '../../contexts/UserContext'
 import logoInline               from '../../assets/logo-inline.png'
-import { isMatch }              from '../../lib/nav'
 
 // ─── Navigasyon Veri Yapısı ───────────────────────────────────────────────────
 
@@ -16,11 +15,6 @@ interface NavItem {
   label:  string
   icon:   ReactNode
   end?:   boolean
-  /** NavLink'in kendi eşleşmesine EK adres önekleri.
-   *
-   *  Portföy Analizi `/analiz/genel`'e gidiyor ama Senaryo sekmesi de ona
-   *  ait; `to` tek bir adres olduğu için NavLink oradayken sönerdi. */
-  match?: string[]
 }
 
 // ─── Inline SVG İkon Bileşenleri ─────────────────────────────────────────────
@@ -111,28 +105,6 @@ function IconAnalytics({ className }: IconProps) {
   )
 }
 
-/** Risk: kalkan. Analytics'in pasta grafiğinden ayrı bir şey olduğu bir
- *  bakışta görünmeli -- iki menü öğesi aynı ikonu taşısaydı ayrı iki giriş
- *  olmalarının sebebi kaybolurdu. */
-function IconRisk({ className }: IconProps) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      <path d="M12 8v4" />
-      <path d="M12 16h.01" />
-    </svg>
-  )
-}
-
 // ─── Navigasyon Yapılandırması ────────────────────────────────────────────────
 
 const NAV_ITEMS: NavItem[] = [
@@ -140,11 +112,9 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/hizli-finans',  label: 'Hızlı Finans',  icon: <IconDashboard  className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/banking',    label: 'Banka İşlemleri',    icon: <IconBanking    className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/portfolio',  label: 'Portföyüm',          icon: <IconPortfolio  className="h-[18px] w-[18px] shrink-0" /> },
-  // Analiz TEK sayfa, kenar çubuğunda İKİ giriş: sayfanın kendi sekme şeridi
-  // main'den geliyor, menü düzeni bizim. İkisi de aynı kabuğa indiği için
-  // aralarında geçmek veriyi yeniden çekmiyor.
-  { to: '/analiz/genel', label: 'Portföy Analizi', icon: <IconAnalytics className="h-[18px] w-[18px] shrink-0" />, match: ['/analiz/senaryo'] },
-  { to: '/analiz/risk',  label: 'Risk Analizi',    icon: <IconRisk      className="h-[18px] w-[18px] shrink-0" /> },
+  // Tek giriş: sayfanın kendi sekme şeridi (Genel Bakış / Risk / Senaryo)
+  // zaten üç bölümü veriyor, menüde ikinci bir bölünmeye gerek yok.
+  { to: '/analiz',     label: 'Analiz',             icon: <IconAnalytics  className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/investment', label: 'Piyasalar',          icon: <IconMarkets    className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/chat',       label: 'Yapay Zeka Asistan', icon: <IconChat       className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/settings',   label: 'Ayarlar',            icon: <IconSettings   className="h-[18px] w-[18px] shrink-0" /> },
@@ -162,28 +132,20 @@ interface NavItemProps {
  * genişletilmiş modda ikon + etiket gösterir.
  */
 function SidebarNavItem({ item, isCollapsed }: NavItemProps) {
-  const { pathname } = useLocation()
-  // NavLink kendi eşleşmesini yapar; `match` yalnızca EKLER. Aktifliği tümden
-  // buradan hesaplasaydık NavLink'in adres çözümlemesini (göreli yollar,
-  // sondaki eğik çizgi) elle tekrar etmek gerekirdi.
-  const alsoActive = (item.match ?? []).some((prefix) => isMatch(pathname, prefix))
-
   return (
     <li className="relative">
       <NavLink
         to={item.to}
         end={item.end}
-        className={({ isActive: linkActive }) =>
+        className={({ isActive }) =>
           `group flex items-center gap-3.5 rounded-2xl px-4 py-3 text-[15px] transition-all duration-200 ${
-            linkActive || alsoActive
+            isActive
               ? 'bg-white/10 text-white font-semibold border border-white/10'
               : 'text-slate-400 font-medium hover:bg-white/5 hover:text-slate-200 border border-transparent'
           }`
         }
       >
-        {({ isActive: linkActive }) => {
-          const isActive = linkActive || alsoActive
-          return (
+        {({ isActive }) => (
           <>
             {/* Navigasyon ikonu */}
             <span className={`transition-colors duration-200 ${isActive ? 'text-brandBlue' : 'text-slate-400 group-hover:text-slate-200'}`}>
@@ -204,8 +166,7 @@ function SidebarNavItem({ item, isCollapsed }: NavItemProps) {
               <span className="absolute right-4 h-1.5 w-1.5 shrink-0 rounded-full bg-brandBlue" aria-hidden="true" />
             )}
           </>
-          )
-        }}
+        )}
       </NavLink>
 
       {/* CSS Tooltip — yalnızca daraltılmış modda görünür */}

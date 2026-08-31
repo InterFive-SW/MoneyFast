@@ -210,6 +210,42 @@ export type RiskProfile = GetResponseType<paths['/api/risk/profile']> & {
     assumptions?: Record<string, unknown> | null;
 };
 /** Uç noktanın kabul ettiği kapalı küme; sunucu bunun dışını 422 ile reddeder. */
+/**
+ * Teknik göstergeler.
+ *
+ * Her alan null olabilir ve null "geçmiş bu göstergeyi hesaplayacak kadar
+ * uzun değil" demek — sıfır DEĞİL. 30 barlık bir enstrümanda 200 günlük
+ * ortalama yoktur ve arayüz onu çizmez.
+ */
+export interface TechnicalSignals {
+    observations: number;
+    last_close: number | null;
+    sma_20: number | null;
+    sma_50: number | null;
+    sma_200: number | null;
+    pct_from_sma_20: number | null;
+    pct_from_sma_50: number | null;
+    pct_from_sma_200: number | null;
+    rsi_14: number | null;
+    week52_high: number | null;
+    week52_low: number | null;
+    week52_position_pct: number | null;
+    up_days_recent: number | null;
+    recent_window: number | null;
+    volume_vs_average: number | null;
+    annualised_volatility: number | null;
+    max_drawdown_pct: number | null;
+    trend: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS' | 'UNKNOWN';
+}
+
+export interface TechnicalSignalsOut {
+    symbol: string;
+    currency: string;
+    signals: TechnicalSignals;
+    /** Gösterilecek Türkçe cümle, tam hâliyle. Yeterli geçmiş yoksa null. */
+    narrative: string | null;
+}
+
 export type RiskLookback = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX';
 
 /** Anket soruları. Puanlar istemciye HİÇ gelmez: seçeneğin ağırlığını
@@ -554,6 +590,15 @@ class ApiClient {
             changes,
             ...(lookback ? { lookback } : {}),
         });
+    }
+
+    /** Bir enstrümanın teknik görünümü. Sohbet ile hisse detay sayfası AYNI
+     *  uç noktayı okuyor; ayrı hesaplasalardı aynı hisse için farklı bir
+     *  eğilim söyleyebilirlerdi. */
+    getTechnicalSignals(symbol: string) {
+        return this.request<TechnicalSignalsOut>(
+            `/market/technicals?symbol=${encodeURIComponent(symbol)}`,
+        );
     }
 
     getRiskHistory(days?: number) {

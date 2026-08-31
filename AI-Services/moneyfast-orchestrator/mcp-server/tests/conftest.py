@@ -98,6 +98,7 @@ ROUTES = {
     "/risk/calculate": "risk",
     "/risk/profile/": "risk_summary",
     "/market/instruments": "instruments",
+    "/market/technicals": "technicals",
     "/compliance/validate": "compliance",
     # v2.8 banking. `payments/stage` is listed BEFORE the investment stage
     # route would ever be consulted for it; the two paths do not overlap, but

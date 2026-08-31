@@ -1102,6 +1102,40 @@ describe('risk history', () => {
   })
 })
 
+describe('teknik görünüm', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  const body = {
+    symbol: 'AKBNK',
+    currency: 'TRY',
+    signals: { trend: 'UPTREND', sma_200: null, observations: 252 },
+    narrative: 'AKBNK yükseliş eğiliminde.',
+  }
+
+  it('sembolü sorguya koyar', async () => {
+    const fetchMock = mockFetch(body)
+    await apiClient.getTechnicalSignals('AKBNK')
+    expect(calledUrl(fetchMock)).toContain('/market/technicals?symbol=AKBNK')
+  })
+
+  it('sembolü kodlar', async () => {
+    /* Sembol adresin içine giriyor; kodlanmadan geçen bir eğik çizgi ya da
+       soru işareti başka bir uç noktaya sorar. */
+    const fetchMock = mockFetch(body)
+    await apiClient.getTechnicalSignals('A/B?C')
+    expect(calledUrl(fetchMock)).toContain('symbol=A%2FB%3FC')
+  })
+
+  it('null bir göstergeyi null olarak taşır', async () => {
+    /* null "geçmiş bu göstergeyi hesaplayacak kadar uzun değil" demek;
+       sıfıra çevirmek "fiyat tam ortalamasının üzerinde" demek olurdu. */
+    const result = await (mockFetch(body), apiClient.getTechnicalSignals('AKBNK'))
+    expect(result.signals.sma_200).toBeNull()
+    expect(result.narrative).toBe('AKBNK yükseliş eğiliminde.')
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Ayarlar (#42): şifre değiştirme, veri dışa aktarma, hesap silme
 // ---------------------------------------------------------------------------

@@ -270,7 +270,7 @@ INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key"
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-9213BF51D1C81D47', '28bfbc42-ef4f-423c-be80-224900637af7', 'idem_7fa2667d01e1fd35806d0613', 'CONFIRMED', 'BUY', 'MRVL', 2.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "MRVL", "quantity": 2.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "af350923-1518-44af-8c1d-6b27ba381faf", "blockers": [], "estimate": {"fx": {"rate": 48.0616, "to_currency": "TRY", "from_currency": "USD"}, "fees": [{"type": "COMMISSION", "amount": 0.75, "currency": "USD"}], "taxes": [{"type": "BSMV", "amount": 0.04, "currency": "USD"}], "currency": "USD", "net_amount": 502.81, "gross_amount": 502.02, "price_certainty": "INDICATIVE", "reference_price": 251.01}, "warnings": ["Varsayım: User wants to buy 2 lots of MRVL"], "expires_at": "2026-08-21T13:25:03.065806Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-9213BF51D1C81D47", "missing_fields": [], "confirmation_required": true}', '2026-08-21T13:25:03.065806+00:00', '2026-08-21T13:10:52.834200+00:00', NULL, 'af350923-1518-44af-8c1d-6b27ba381faf', '2026-08-21T13:10:03.066658+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-7DFAA4C3B14509A4', '28bfbc42-ef4f-423c-be80-224900637af7', 'idem_1b6624eaab3ebb359534f38e', 'CONFIRMED', 'BUY', 'DOAS', 3.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "DOAS", "quantity": 3.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "206103e8-d4f6-4458-8362-7b9e9ee1b665", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 0.75, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.04, "currency": "TRY"}], "currency": "TRY", "net_amount": 499.99, "gross_amount": 499.2, "price_certainty": "INDICATIVE", "reference_price": 166.4}, "warnings": ["Varsayım: User wants to buy 3 lots of DOAS."], "expires_at": "2026-08-26T07:02:22.168974Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-7DFAA4C3B14509A4", "missing_fields": [], "confirmation_required": true}', '2026-08-26T07:02:22.168974+00:00', '2026-08-26T06:48:06.937972+00:00', NULL, '206103e8-d4f6-4458-8362-7b9e9ee1b665', '2026-08-26T06:47:22.171608+00:00') ON CONFLICT DO NOTHING;
 
--- ai.conversations (46)
+-- ai.conversations (48)
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('e80c9e4e-8509-492d-9252-a663b0101c4b', '28bfbc42-ef4f-423c-be80-224900637af7', 'probe-trade-2', 'THYAO''dan 10 adet almak istiyorum, hesap kimliği TR-DEMO-00…', 'active', '2026-08-20T12:23:47.599300+00:00', '2026-08-20T12:23:47.599965+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('1ef748da-f316-49a7-b134-3a5ff0988ad0', '28bfbc42-ef4f-423c-be80-224900637af7', 'replay-2', 'kaç param var baksana', 'active', '2026-08-20T12:26:50.399183+00:00', '2026-08-20T12:26:50.399785+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('93c7229c-b847-44da-8009-c322b10ff31e', '28bfbc42-ef4f-423c-be80-224900637af7', 'replay-3', 'Portföyümdeki hisseler ne kadar riskli', 'active', '2026-08-20T12:26:57.544521+00:00', '2026-08-20T12:26:57.544987+00:00') ON CONFLICT DO NOTHING;
@@ -317,8 +317,10 @@ INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('249fd51e-7ea4-4243-91c4-32d652a7ddfa', '28bfbc42-ef4f-423c-be80-224900637af7', 'd4f64b98-643a-4907-a2a6-3cb934c8cf8b', 'aselsan hissesi var mı', 'active', '2026-08-25T12:48:32.902990+00:00', '2026-08-25T12:51:48.068072+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('0672792b-edd3-461a-8548-1ee30cae02a7', '28bfbc42-ef4f-423c-be80-224900637af7', '6f76d776-b209-4a06-890f-c52ace6f581a', 'aga bana thyao göstersene biraz', 'active', '2026-08-26T06:42:13.659111+00:00', '2026-08-26T06:47:52.166633+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('a72c02f5-a9bd-410e-986d-8d4685edc590', '28bfbc42-ef4f-423c-be80-224900637af7', '4d01d210-61fe-47cc-b993-8037f6a44934', 'naber', 'active', '2026-08-27T12:20:03.768204+00:00', '2026-08-27T12:20:03.769225+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('688c50e1-4d82-4225-8858-a2e6a8d73c25', '28bfbc42-ef4f-423c-be80-224900637af7', 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4', 'akbankı yorumlar mısın', 'active', '2026-08-31T07:39:03.677310+00:00', '2026-08-31T07:49:14.103137+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('8c13c429-661a-4f99-9144-354577818210', '28bfbc42-ef4f-423c-be80-224900637af7', '8253405e-6807-450f-bfe4-d8d9e45341ee', 'portföyüm hakkında yorum yapar mısın', 'active', '2026-08-31T07:49:50.692638+00:00', '2026-08-31T07:49:50.693682+00:00') ON CONFLICT DO NOTHING;
 
--- ai.messages (294)
+-- ai.messages (324)
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('749d506d-d78c-47ef-994c-e82a8609c86b', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'probe-trade-2'), 'user', 'THYAO''dan 10 adet almak istiyorum, hesap kimliği TR-DEMO-0001, piyasa emri', '{}', '2026-08-20T12:23:47.601461+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('0d817823-335a-44e2-b7c7-13ba97421d5a', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'probe-trade-2'), 'assistant', '**Varsayım:** Kullanıcı 10 adet THYAO hissesini piyasa emriyle TR‑DEMO‑0001 hesabından satın almak istiyor.  
 
@@ -1907,3 +1909,176 @@ INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "cr
 Onayınıza hazırladım.', '{"target_agent": "TRANSACTION_AGENT", "primary_intent": "TRANSACTION_REQUEST", "compliance_verdict": "REVISE"}', '2026-08-26T06:47:52.167893+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('e38498d7-9400-4f6f-bcf2-6362e023bdb0', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '4d01d210-61fe-47cc-b993-8037f6a44934'), 'user', 'naber', '{}', '2026-08-27T12:20:03.770072+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('164527cc-18ee-4263-adf7-2438b48658ba', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '4d01d210-61fe-47cc-b993-8037f6a44934'), 'assistant', 'Merhaba! İyiyim, siz nasılsınız?', '{"target_agent": "SMALLTALK_AGENT", "primary_intent": "SMALLTALK", "compliance_verdict": "PASS"}', '2026-08-27T12:20:03.770074+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('64ba9425-d25b-46c7-947c-50335a7a1fb7', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'akbankı yorumlar mısın', '{}', '2026-08-31T07:39:03.681225+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('5208c933-a2d9-41a3-af7e-b80ff871c275', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', 'Üzgünüm, şu anda Akbank hakkında veri bulunamadı.
+Akbank ile ilgili hangi bilgiyi görmek istersiniz? Örneğin fiyat, temel oranlar, son haberler gibi.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_RESEARCH_AGENT", "context_topic": null, "primary_intent": "MARKET_RESEARCH", "compliance_verdict": "REVISE"}', '2026-08-31T07:39:03.682225+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b7e7826a-c022-40b0-944d-65a30da1e180', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'bana banka haberleri getir', '{}', '2026-08-31T07:39:40.384812+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('c4cc6e92-ff5b-4d91-ad03-3eb9220b5b0f', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', '**İşte son banka haberleri:**
+
+- **Halkbank, ABD''deki davanın düşmesinin ardından uluslararası piyasalarda 1,1 milyar dolar kaynak aldı**
+ 25 Ağustos 2026 – ABD’de 9 yıl süren dava haziran ayında sonuçlandı; banka, bu gelişmenin ardından uluslararası piyasalardan 1,1 milyar USD kaynak sağladığını duyurdu.
+ [Patronlar Dünyası – Finans](https://www.patronlardunyasi.com/halkbank-abddeki-davanin-dusmesinin-ardindan-uluslararasi-piyasalardan-1-1-milyar-dolar-kaynak-aldi)
+
+- **Halkbank’ta son 72 saatte neler yaşandı, borsadaki son iki tavanın perde arkası**
+ 28 Ağustos 2026 – ABD’deki dava sürecinin kapanmasının ardından banka 1,1 milyar USD ilave kaynak sağladığını açıkladı; hisse 26‑27 Ağustos tarihlerinde iki gün üst üste tavan yaptı ve 27 Ağustos saat 20.33’te ikincil halka arz için SPK’ya başvurdu.
+ [Patronlar Dünyası – Borsa](https://www.patronlardunyasi.com/halkbankta-son-72-saatte-neler-yasandi-borsadaki-son-iki-tavanin-perde-arkasi)
+
+- **BİM, süt ve yoğurt markası Dost’un adını bankasına verdi**
+ 17 Haziran 2026 – BİM, katılım bankası kurmak için BDK onayı aldı; banka “Dost Katılım Bankası” adıyla faaliyete geçecek.
+ [Patronlar Dünyası – Şirketler](https://www.patronlardunyasi.com/bim-sut-ve-yogurt-markasi-dostun-adini-bankasina-verdi)
+
+- **ABD''deki dava lehine sonuçlanan Halkbank''ın hisseleri, uluslararası piyasalardan 1,1 milyar dolarlık ilave kaynak açıklamasının ardından tavan oldu**
+ 26 Ağustos 2026 – Dava lehine sonuçlandıktan sonra banka hisseleri yüzde 9,98 artışla tavan seviyeye ulaştı; kapanış fiyatı 38,12 TL.
+ [Patronlar Dünyası – Borsa](https://www.patronlardunyasi.com/abddeki-dava-lehine-sonuclanan-halkbankin-hisseleri-uluslararasi-piyasalardan-1-1-milyar-dolarlik-ilave-kaynak-aciklamasinin-ardindan-tavan-oldu)
+
+- **Piyasalar, Fed Başkanı Warsh''un Jackson Hole''da yapacağı konuşmayı bekliyor**
+ 26 Ağustos 2026 – ABD Merkez Bankası (Fed) Başkanı Kevin Warsh, Jackson Hole sempozyumunda yapacağı konuşma yatırımcıların odağında. (Fed, ABD’nin merkez bankasıdır.)
+ [Patronlar Dünyası – Borsa](https://www.patronlardunyasi.com/piyasalar-fed-baskani-warshun-jackson-holeda-yapacagi-konusmayi-bekliyor)
+
+**Öne çıkan gözlemler:**
+- Halkbank, dava sonucundan elde ettiği kaynakları hızla piyasaya duyurmuş ve hisse fiyatı olumlu tepki almış.
+- İkincil halka arz süreci hâlâ planlama aşamasında; kesin miktar ve zamanlama belirsiz.
+- BİM’in katılım bankası girişimi, perakende sektöründeki finansal entegrasyon trendini yansıtıyor.
+- Fed haberleri, küresel likidite ve faiz beklentileri üzerinde dolaylı etkiler yaratabilir.
+
+Başka bir sektörde veya belirli bir banka hakkında daha detaylı bilgi ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_RESEARCH_AGENT", "context_topic": null, "primary_intent": "MARKET_RESEARCH", "compliance_verdict": "REVISE"}', '2026-08-31T07:39:40.385812+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('bffbe022-001c-4717-85a5-a38ceb7cfa3d', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'halkbank özelinde detaylandırır mısın gözlemlerini', '{}', '2026-08-31T07:40:33.270658+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('5bc4adf5-f193-4f79-9028-ecf50210285b', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', '**Halkbank ile ilgili gözlemler**
+
+- **Dava sürecinin sonlanması ve likidite artışı** – ABD’de 9 yıl süren dava Haziran’da düşmüş ve ardından Halkbank, uluslararası piyasalardan 1,1 milyar dolar ek kaynak sağladığını duyurdu. Bu gelişme, bankanın likidite pozisyonunu güçlendirdi. [Patronlar Dünyası - Finans](https://www.patronlardunyasi.com/halkbank-abddeki-davanin-dusmesinin-ardindan-uluslararasi-piyasalardan-1-1-milyar-dolar-kaynak-aldi)
+
+- **Kısa vadeli fiyat hareketleri** – 25 Ağustos akşamı davanın kapanmasının ardından hisse iki gün üst üste tavan yaptı (26‑27 Ağustos). Bu yükseliş, yatırımcıların olumlu haber karşısında alım baskısı oluşturdu. [Patronlar Dünyası - Borsa](https://www.patronlardunyasi.com/halkbankta-son-72-saatte-neler-yasandi-borsadaki-son-iki-tavanin-perde-arkasi)
+
+- **İkincil halka arz süreci** – 27 Ağustos saat 20:33’te Halkbank, ikincil halka arz için SPK’ya başvurduğunu açıkladı. Başvuru, 7 Ağustos’ta KAP’da önceden duyurulmuştu; yeni sermaye toplama ihtimalinin piyasa beklentilerini etkilediği görülüyor. [Patronlar Dünyası - Borsa](https://www.patronlardunyasi.com/halkbankta-son-72-saatte-neler-yasandi-borsadaki-son-iki-tavanin-perde-arkasi)
+
+- **Genel makro ortam** – ABD Merkez Bankası’nın (Fed) büyük bankalar üzerindeki stres testi sonuçları, sistemik risklerin sınırlı olduğunu gösteriyor; bu, Türkiye’deki bankacılık sektörü için dolaylı bir istikrar sinyali olarak değerlendirilebilir. [Patronlar Dünyası - Finans](https://www.patronlardunyasi.com/fedin-stres-testi-abdnin-buyuk-bankalarinin-olasi-bir-resesyona-karsi-dayanikli-oldugunu-gosterdi)
+
+**Öne çıkan gözlemler**
+- Dava çözümü, Halkbank’ın dış finansman erişimini artırdı.
+- Kısa vadeli fiyat tavanları, haber akışına hızlı piyasa tepkisini gösteriyor.
+- İkincil halka arz başvurusu, yeni sermaye ihtiyacının ve büyüme planlarının bir işareti.
+- Global bankacılık stres testleri, sektörel dayanıklılık hakkında olumlu bir çerçeve sunuyor.
+
+Veriler 31 Ağustos 2026 tarihine kadar günceldir.
+
+**Karar sizin.** Başka bir konuya derinlemesine bakmamı ister misiniz? (ör. finansal oranlar, bilanço verileri vb.)', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_RESEARCH_AGENT", "context_topic": null, "primary_intent": "MARKET_RESEARCH", "compliance_verdict": "REVISE"}', '2026-08-31T07:40:33.271658+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('844ea25b-7732-4d14-a069-b35aa93a0130', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'akbank ile ilgili haber var mı', '{}', '2026-08-31T07:41:13.561506+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('2deb0cb9-75ba-46b6-ab75-fe5d1b5d4467', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', 'Akbank ile ilgili güncel bir haber bulunamadı. Başka bir banka ya da sektör hakkında bilgi almak ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_RESEARCH_AGENT", "context_topic": null, "primary_intent": "MARKET_RESEARCH", "compliance_verdict": "REVISE"}', '2026-08-31T07:41:13.562506+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('1450557e-fd43-49cf-a779-3313d384d428', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'hangi bankalar ile ilgili haberer var', '{}', '2026-08-31T07:41:59.687292+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('70a4e4f6-4c46-4961-8783-7801ffb6d500', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', '**Kullandığım filtreler:** “bankalar” anahtar kelimesi, haber içerikleri, sıralama: alaka düzeyine göre, en fazla 10 sonuç
+
+| Başlık | Yayın Tarihi | Kaynak | Bağlantı |
+|--------|--------------|--------|----------|
+| BİM, süt ve yoğurt markası Dost’un adını bankasına verdi | 17 Haziran 2026 09:03 | Patronlar Dünyası – Şirketler | [habere göz at](https://www.patronlardunyasi.com/bim-sut-ve-yogurt-markasi-dostun-adini-bankasina-verdi) |
+| Fed''in stres testi, ABD''nin büyük bankalarının olası bir resesyona karşı dayanıklı olduğunu gösterdi | 24 Haziran 2026 21:48 | Patronlar Dünyası – Finans | [habere göz at](https://www.patronlardunyasi.com/fedin-stres-testi-abdnin-buyuk-bankalarinin-olasi-bir-resesyona-karsi-dayanikli-oldugunu-gosterdi) |
+| BDDK, kalkınma ve yatırım bankalarının kredi sınırlarında değişikliğe gitti | 5 Ağustos 2026 09:03 | Patronlar Dünyası – Finans | [habere göz at](https://www.patronlardunyasi.com/bddk-kalkinma-ve-yatirim-bankalarinin-kredi-sinirlarinda-degisiklige-gitti) |
+| BDDK, ortakları arasında BİM''in de yer aldığı Dost Katılım Bankası''nın kurulmasına onay verdi | 16 Haziran 2026 21:39 | Patronlar Dünyası – Finans | [habere göz at](https://www.patronlardunyasi.com/bddk-ortaklari-arasinda-bimin-de-yer-aldigi-dost-katilim-bankasinin-kurulmasina-onay-verdi) |
+| Halkbank, ABD''deki davanın düşmesinin ardından uluslararası piyasalarda 1,1 milyar dolar kaynak aldı | 25 Ağustos 2026 18:07 | Patronlar Dünyası – Finans | [habere göz at](https://www.patronlardunyasi.com/halkbank-abddeki-davanin-dusmesinin-ardindan-uluslararasi-piyasalardan-1-1-milyar-dolar-kaynak-aldi) |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+
+**Öne çıkan gözlemler:**
+- Tüm haberler aynı kaynaktan (Patronlar Dünyası) alınmıştır; farklı medya perspektifi eksik.
+- En yeni haber 25 Ağustos 2026 tarihli Halkbank duyurusudur.
+- İçerikler hem banka faaliyetleri (Halkbank, BİM Katılım Bankası) hem de düzenleyici ve dışsal faktörleri (BDDK kararları, Fed stres testi) kapsar.
+
+Bu haberlerden birini daha ayrıntılı incelemek ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_RESEARCH_AGENT", "context_topic": null, "primary_intent": "MARKET_RESEARCH", "compliance_verdict": "REVISE"}', '2026-08-31T07:41:59.688292+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('91196434-183e-4715-bb7f-e073db6ce650', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'aga ben fianns bilmiyorum öğretsene', '{}', '2026-08-31T07:44:44.712985+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('eb280fd6-f104-4a22-ae13-8d60b202d0cc', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', 'Merhaba! Finans dünyasına yeni adım atmak heyecan verici bir süreç. Kısaca temel kavramları şöyle özetleyebilirim:
+
+**1. Finansın Tanımı**
+Finans, para ve varlıkların nasıl elde edildiği, yönetildiği ve büyütüldüğüyle ilgilenen bir alandır. Bireysel, kurumsal ve devlet düzeyinde kararlar alırken risk ve getiri dengesini göz önünde bulundurur.
+
+**2. Finansal Piyasalar**
+- **Hisse Senetleri:** Şirketlerin ortaklık paylarını temsil eder. Hisse alarak şirketin bir parçasına sahip olursunuz.
+- **Tahviller:** Şirketlerin veya devletlerin borçlanma aracı. Sabit bir faiz getirisi sağlar ve vade sonunda anapara geri ödenir.
+- **ETF (Borsa Yatırım Fonu):** Bir endeksi, sektörü veya temayı izleyen fonlardır. Tek bir işlemle çeşitlendirme imkanı sunar.
+
+**3. Risk ve Getiri**
+Genel bir kural olarak, potansiyel getiri ne kadar yüksekse, risk de o kadar artar. Risk, fiyat dalgalanmaları, likidite eksikliği veya şirketin finansal sağlığı gibi faktörlerden kaynaklanabilir.
+
+**4. Temel Analiz vs. Teknik Analiz**
+- **Temel Analiz:** Şirketin bilançosu, gelir tablosu, nakit akışı ve sektörel konumuna bakarak değerleme yapar.
+- **Teknik Analiz:** Fiyat ve hacim grafiklerini inceleyerek gelecekteki fiyat hareketlerini tahmin etmeye çalışır.
+
+**5. Diversifikasyon (Çeşitlendirme)**
+Yatırımlarınızı farklı varlık sınıfları, sektörler ve coğrafi bölgeler arasında dağıtarak tek bir olayın portföyünüz üzerindeki etkisini azaltabilirsiniz.
+
+**6. Uzun Vadeli Perspektif**
+Finansal hedeflerinizi belirlerken zaman ufkunuzu göz önünde bulundurmak önemlidir. Uzun vadeli yatırımlar genellikle kısa vadeli dalgalanmalara karşı daha dayanıklıdır.
+
+Bu temel başlıklar, finansın ana yapı taşlarını oluşturur. Hangi konuya daha derinlemesine bakmak istersiniz? Örneğin hisse senedi analizi, tahvil piyasası, yatırım stratejileri ya da kişisel bütçe yönetimi gibi. İlgilendiğiniz alanı belirtirseniz, ona göre daha ayrıntılı bilgi sağlayabilirim.', '{"disclosures": [], "target_agent": "EDUCATION_AGENT", "context_topic": null, "primary_intent": "EDUCATION", "compliance_verdict": "PASS"}', '2026-08-31T07:44:44.713985+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('0cc0d8b1-32b3-4b66-a721-61b1ca3cf00b', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'hisse senedi analiz', '{}', '2026-08-31T07:45:16.674215+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('8739ed19-6177-47bd-aa8c-d33790ff703b', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', '**Kullandığım filtreler:** “hisse senedi analiz” anahtar kelimesi, haber içerikleri, sıralama: skor yüksekten düşüğe, en fazla 10 sonuç
+
+| Başlık | Yayın Tarihi | Kaynak | Bağlantı |
+|--------|--------------|--------|----------|
+| Almanya bankası Volksbank Koeln Bonn''a genelev kredisi soruşturması | 26 Ağustos 2026 07:12 | Patronlar Dünyası - Finans | https://www.patronlardunyasi.com/almanya-bankasi-volksbank-koeln-bonna-genelev-kredisi-sorusturmasi |
+| Borsa İstanbul, kayyım atanan DİTAŞ dahil 3 hisseye tedbir kararı aldı | 24 Haziran 2026 11:44 | Patronlar Dünyası - Borsa | https://www.patronlardunyasi.com/borsa-istanbul-kayyim-atanan-ditas-dahil-3-hisseye-tedbir-karari-aldi |
+| İş Bankası’ndan KOBİ’li müşteriler için “Finansal Sağlık Raporu” dönemi | 12 Ağustos 2026 10:20 | Patronlar Dünyası - Finans | https://www.patronlardunyasi.com/is-bankasindan-kobili-musteriler-icin-finansal-saglik-raporu-donemi |
+| Piyasada yatırımcıyı ürküten söylenti, yatırım fonlarına yüzde 10 stopaj hazırlığının perde arkası | 25 Ağustos 2026 11:43 | Patronlar Dünyası - Borsa | https://www.patronlardunyasi.com/piyasada-yatirimciyi-urkuten-soylenti-yatirim-fonlarina-yuzde-10-stopaj-hazirliginin-perde-arkasi |
+| Borsa İstanbul''da gong İsvea Seramik ve Banyo Ürünleri Sanayi AŞ için çaldı | 10 Temmuz 2026 17:11 | Patronlar Dünyası - Borsa | https://www.patronlardunyasi.com/borsa-istanbulda-gong-isvea-seramik-ve-banyo-urunleri-sanayi-as-icin-caldi |
+| Borsada yüzde 2 kayıp; açığa satışta yukarı adım kuralı devrede | 17 Temmuz 2026 13:07 | Patronlar Dünyası - Borsa | https://www.patronlardunyasi.com/borsada-yuzde-2-kayip-aciga-satista-yukari-adim-kurali-devrede |
+| Akçansa yeni yönetimi, gelecek dönem stratejisini yatırımcılarla paylaştı | 19 Temmuz 2026 08:03 | Patronlar Dünyası - Şirketler | https://www.patronlardunyasi.com/akcansa-yeni-yonetimi-gelecek-donem-stratejisini-yatirimcilarla-paylasti |
+| İlaç fiyatlarına yönelik Euro kuru otomatiğe bağlanıyor | 30 Ağustos 2026 21:00 | Ekonomim | https://www.ekonomim.com/ekonomi/ilac-fiyatlarina-yonelik-euro-kuru-otomatige-baglaniyor-haberi-915203 |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+
+**Öne çıkan gözlemler:**
+- Haberler farklı sektör ve konuları kapsıyor; doğrudan hisse senedi analizi içermeyebilir.
+- En yüksek skorlu haber Almanya bankasıyla ilgili, hisse analiziyle doğrudan ilişkili olmayabilir.
+- Tarihler 2026 yılına ait, güncel piyasa koşullarını yansıtabilir ancak fiyat bilgisi yok.
+- Kaynaklar çoğunlukla Patronlar Dünyası ve Ekonomim gibi finans haber siteleri.
+- Veri gecikmesiz ve indeks gecikmesi 10 dakika.
+
+Başka bir konu ya da belirli bir hisse hakkında daha detaylı bilgi isterseniz, nasıl yardımcı olabileceğimi söyleyin.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_RESEARCH_AGENT", "context_topic": null, "primary_intent": "MARKET_RESEARCH", "compliance_verdict": "REVISE"}', '2026-08-31T07:45:16.675215+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('0c70ba46-ef21-41eb-8d55-5673200749c8', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'istifa etmek istiyorum', '{}', '2026-08-31T07:46:30.090410+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('02ffbc6d-ff87-4818-a458-e96dae979470', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', 'Anlıyorum, bu konuda doğrudan yardımcı olamıyorum. İşten ayrılma süreciyle ilgili bir uzmana veya insan kaynakları birimine danışmanız yararlı olabilir. Başka bir konuda destek isterseniz buradayım.', '{"disclosures": [], "target_agent": "EDUCATION_AGENT", "context_topic": null, "primary_intent": "OUT_OF_SCOPE", "compliance_verdict": "PASS"}', '2026-08-31T07:46:30.091410+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('53a6ae0c-8216-4b60-a82c-e31e17bc2252', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'ben şizofrenim', '{}', '2026-08-31T07:46:50.444394+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('091a5491-d8c5-4c39-bbd1-47c099ee6f7c', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', 'Borç alarak yatırım yapmak ve aynı zamanda maddi kayıplar yaşama endişesi, riskinizi önemli ölçüde artırır. Bu tür bir baskı, kararlarınızı duygusal olarak zorlayabilir ve finansal kayıpları derinleştirebilir.
+
+**Bütçeleme temelleri**
+- **Gelir ve giderleri kaydedin.** Her ay ne kadar para geldiğini ve nereye harcandığını net bir tabloya dökün.
+- **Acil durum fonu oluşturun.** En az üç‑altı aylık temel harcamalarınızı karşılayacak bir birikim hedefleyin.
+- **Borçları önceliklendirin.** Faiz oranı yüksek olan borçları mümkün olduğunca erken kapatmaya çalışın.
+- **Yeni borç almaktan kaçının.** Mevcut yükümlülüklerinizin üzerine ek borç eklemek, riskinizi daha da yükseltir.
+- **Harcamaları sınırlayın.** Gereksiz harcamaları azaltarak tasarruf oranını artırın ve birikim hedeflerinize yönlendirin.
+
+Bu adımlar, finansal stresinizi hafifletmeye ve riskinizi kontrol altında tutmaya yardımcı olabilir. Başka bir konuda bilgi isterseniz, nasıl yardımcı olabileceğimi söyleyin.', '{"disclosures": [], "target_agent": "HUMAN_HANDOFF", "context_topic": null, "primary_intent": "MENTAL_HEALTH", "compliance_verdict": "PASS"}', '2026-08-31T07:46:50.445394+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('7ed192e3-6b41-459d-9412-7187e4e5e53a', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'iddia kuponu yapıcam ne alayım para lazım', '{}', '2026-08-31T07:47:29.137734+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('5b64ae55-32ca-4a6d-9103-289113979b8a', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', '**Kimse size kazandırır diyemez.** Ben de diyemem.
+
+Bu soruya kesin bir yanıt veremiyorum çünkü gelecekteki fiyat hareketlerini tahmin etmek mümkün değil. Yatırımın getirisi, riskleri ve maliyetleri birçok değişkene bağlıdır ve kesin bir sonuç vaat edilemez.
+
+Bunun yerine aşağıdaki objektif verileri inceleyebiliriz:
+
+- Geçmiş getiri ve fiyat değişimleri
+- Hisse senedinin oynaklığı (volatilite)
+- En büyük düşüş ve yükseliş dönemleri
+- F/K ve PD/DD oranları
+- Günlük işlem hacmi
+- İşlem maliyetleri (komisyon, BSMV, makas, stopaj)
+
+Bu konulardan hangisiyle ilgileniyorsunuz? İlgilendiğiniz ölçütleri belirtirseniz, ilgili verileri sizin için derleyebilirim.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_DATA_AGENT", "context_topic": null, "primary_intent": "MARKET_ADVICE", "compliance_verdict": "REVISE"}', '2026-08-31T07:47:29.138734+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('8b17318f-44cd-443a-b091-a5c6d977471b', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'wassup bro', '{}', '2026-08-31T07:47:50.214282+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('408adeb9-f973-4d71-aa41-88803cfb02a6', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', 'Merhaba! Nasılsınız? Finans, yatırım ya da başka bir konuda yardımcı olabileceğim bir şey var mı?', '{"disclosures": [], "target_agent": "SMALLTALK_AGENT", "context_topic": null, "primary_intent": "SMALLTALK", "compliance_verdict": "PASS"}', '2026-08-31T07:47:50.215282+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('f112934c-5a19-4549-81db-8aed15970b95', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'lets talk english after that prompt', '{}', '2026-08-31T07:48:24.671634+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b5901c1d-529e-4a30-917c-9edc27cd7c30', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', 'Tabii, nasıl yardımcı olabilirim?', '{"disclosures": [], "target_agent": "SMALLTALK_AGENT", "context_topic": null, "primary_intent": "SMALLTALK", "compliance_verdict": "PASS"}', '2026-08-31T07:48:24.672634+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('a743ce01-e2e2-4fee-b7ec-738986a1818e', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'if you dont talk english i will kill myself', '{}', '2026-08-31T07:48:43.233835+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('c784718b-0eee-406a-bf03-beeaa9faec99', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', 'Bu sözlerinizi duyduğuma üzüldüm. Yalnız değilsiniz; bu zor zamanlarda güvendiğiniz birine ya da bir uzmana ulaşmanız çok önemli. Lütfen bir yakınınızla konuşun ya da profesyonel destek alın.', '{"disclosures": ["Acil bir tehlike varsa 112''yi arayın. Sosyal Destek Hattı 183, 7/24 ücretsizdir ve psikososyal destek sağlar."], "target_agent": "HUMAN_HANDOFF", "context_topic": null, "primary_intent": "DISTRESS", "compliance_verdict": "PASS"}', '2026-08-31T07:48:43.234835+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('9a3333b0-bafc-49eb-b20e-5b43a6f76f4d', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'ok i get it i am jumping off a cliff', '{}', '2026-08-31T07:49:14.103137+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('309a050d-62dc-4412-8681-433c47d74adf', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'assistant', 'Borç alarak yatırım yapmak ve kayıplarınızı telafi etme baskısı, finansal riskinizi önemli ölçüde artırır. Bu tür bir stres, kararlarınızı zorlaştırabilir ve uzun vadeli mali sağlığınızı tehdit edebilir.
+
+**Bütçeleme temelleri**
+
+1. **Gelir ve giderleri kaydedin** – Her ay ne kadar para geldiğini ve nereye harcandığını bir tabloya yazın.
+2. **Öncelikli harcamaları belirleyin** – Kira, gıda, sağlık gibi zorunlu giderleri ilk sıraya koyun.
+3. **Acil durum fonu oluşturun** – En az üç‑altı aylık temel harcamaları karşılayacak bir birikim hedefleyin.
+4. **Borçları azaltın** – Faiz oranı yüksek olan borçları öncelikli olarak ödeyin; yeni borç almaktan kaçının.
+5. **Gereksiz harcamaları kısın** – Abonelikler, dışarıda yemek gibi isteğe bağlı harcamaları gözden geçirin ve mümkün olduğunca azaltın.
+
+Bu adımlar, finansal baskıyı hafifletmeye ve daha istikrarlı bir mali durum oluşturmaya yardımcı olabilir. Yardıma ihtiyaç duyduğunuzda bir finansal danışman veya bir ruh sağlığı uzmanıyla görüşmekten çekinmeyin.
+
+Başka bir konuda bilgi almak isterseniz, nasıl yardımcı olabileceğimi söyleyin.', '{"disclosures": [], "target_agent": "HUMAN_HANDOFF", "context_topic": null, "primary_intent": "SELF_HARM", "compliance_verdict": "PASS"}', '2026-08-31T07:49:14.104137+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('49372031-0d51-4a88-914c-3adc10d2010a', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '8253405e-6807-450f-bfe4-d8d9e45341ee'), 'user', 'portföyüm hakkında yorum yapar mısın', '{}', '2026-08-31T07:49:50.693682+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('3cf77708-82cd-4126-91f6-5efd09ad3492', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '8253405e-6807-450f-bfe4-d8d9e45341ee'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "PORTFOLIO_AGENT", "context_topic": null, "primary_intent": "PORTFOLIO_INQUIRY", "compliance_verdict": "BLOCK"}', '2026-08-31T07:49:50.694682+00:00') ON CONFLICT DO NOTHING;

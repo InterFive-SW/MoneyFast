@@ -79,7 +79,14 @@ _SELF_HARM_PATTERNS = (
     r"suicid",
     r"self.?harm",
     r"want to die",
-    r"jump off",
+    # Inflected forms. `jump off` did not match "jumping off a cliff", which
+    # is how a real turn reached the handoff carrying only the model's flag
+    # -- and the model spells it `SELF_HARM`, not `SELF_HARM_RISK`. The
+    # normalisation in `handoff_category` is the actual guard; this closes
+    # the hole that made it necessary.
+    r"jump\w*\s+(off|from)",
+    r"throw(ing)? myself",
+    r"kendimi (asag[iı]ya |yukar[iı]dan )?(at|birak|birakti|atacag)",
 )
 
 #: Severe financial hardship. Real distress, but the response is budgeting and

@@ -293,10 +293,52 @@ class TestCycles:
         assert run.run_candles(None) == {"fetched": 3, "candles_written": 2}
 
     def test_push_failure_leaves_the_cycle_reporting_what_it_fetched(self, monkeypatch):
+        """Bir de: yazılan sayısı sıfır olarak BİLDİRİLİR, hiç bildirilmez değil.
+
+        Anahtarın düşmesi, çağıranın `.get("candles_written", 0)` ile aynı
+        sıfıra ulaşmasını sağlıyordu ama "sıfır bar yazıldı" ile "bu turda bar
+        yazma adımı hiç olmadı" arasındaki farkı siliyordu.
+        """
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
         monkeypatch.setattr(run.yfinance_source, "fetch_candles", lambda p, days: [1])
         monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: None)
-        assert run.run_candles(None) == {"fetched": 1}
+        assert run.run_candles(None) == {"fetched": 1, "candles_written": 0}
+
+    def test_daily_bars_are_pushed_in_chunks(self, monkeypatch):
+        """Ölçülen hata: 1.011 enstrüman için 638.968 bar tek gövdede gitti,
+        istek zaman aşımına uğradı ve turun tamamı kayboldu -- günlük kapanış
+        okuyan tek tüketici olan risk ölçümü herkes için boş kaldı."""
+        rows = list(range(run.CANDLE_PUSH_CHUNK * 2 + 7))
+        sizes = []
+
+        def _push(client, quotes, candles):
+            sizes.append(len(candles))
+            return {"candles_written": len(candles)}
+
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.yfinance_source, "fetch_candles", lambda p, days: rows)
+        monkeypatch.setattr(run.sinks, "push_market_data", _push)
+
+        result = run.run_candles(None)
+        assert sizes == [run.CANDLE_PUSH_CHUNK, run.CANDLE_PUSH_CHUNK, 7]
+        assert result == {"fetched": len(rows), "candles_written": len(rows)}
+
+    def test_one_failing_chunk_does_not_cost_the_others(self, monkeypatch):
+        """Parçalamanın asıl kazancı: zaman aşımına uğrayan parça yalnızca
+        kendi barlarını götürür. Kapsama denetimi o sembolleri bir sonraki
+        açılışta yine eksik bulur ve tekrar dener."""
+        rows = list(range(run.CANDLE_PUSH_CHUNK + 3))
+        calls = []
+
+        def _push(client, quotes, candles):
+            calls.append(len(candles))
+            return None if len(calls) == 1 else {"candles_written": len(candles)}
+
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.yfinance_source, "fetch_candles", lambda p, days: rows)
+        monkeypatch.setattr(run.sinks, "push_market_data", _push)
+
+        assert run.run_candles(None) == {"fetched": len(rows), "candles_written": 3}
 
 
 class TestBackendNewsPush:

@@ -300,12 +300,28 @@ def run_candles(client: httpx.Client, symbols: set[str] | None = None) -> dict:
         if not products:
             return {"fetched": 0, "candles_written": 0}
     candles = yfinance_source.fetch_candles(products, days=config.history_days())
-    result = sinks.push_market_data(client, [], candles) or {}
+
+    # Gün içi yolla AYNI parçalama. Buraya eklenmemişti ve ilk açılış
+    # ölçüldüğünde 1.011 enstrüman için 638.968 bar tek bir gövdede
+    # gönderiliyordu: istek zaman aşımına uğruyor, sinks bir hata satırı yazıp
+    # None dönüyor ve turun TAMAMI kayboluyordu. Yazılan günlük bar sayısı
+    # sıfırdı, dolayısıyla risk ölçümü -- günlük kapanışları okuyan tek
+    # tüketici -- herkes için "ölçülemedi" veriyordu.
+    #
+    # "Ya hep ya hiç" olmaması da ayrıca önemli: zaman aşımına uğrayan bir
+    # parça yalnızca kendi barlarını götürür, bir sonraki açılışta kapsama
+    # denetimi o sembolleri yine eksik bulur ve tekrar dener.
+    written = 0
+    for start in range(0, len(candles), CANDLE_PUSH_CHUNK):
+        chunk = candles[start:start + CANDLE_PUSH_CHUNK]
+        result = sinks.push_market_data(client, [], chunk) or {}
+        written += result.get("candles_written", 0)
+
     log.info(
-        "candle cycle: %d symbols, %d bars offered, %s new",
-        len(products), len(candles), result.get("candles_written", 0),
+        "candle cycle: %d symbols, %d bars offered, %d new",
+        len(products), len(candles), written,
     )
-    return {"fetched": len(candles), **result}
+    return {"fetched": len(candles), "candles_written": written}
 
 
 def backfill_candles(client: httpx.Client) -> dict:

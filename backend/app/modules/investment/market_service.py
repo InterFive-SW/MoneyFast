@@ -688,6 +688,68 @@ def fundamentals_for(db: Session, symbol: str) -> Optional[dict[str, Any]]:
     return out
 
 
+def calendar_rows(db: Session, limit: int = 40) -> dict[str, list[dict[str, Any]]]:
+    """Analist konsensüsü, temettü ve bilanço takvimi — evren genelinde.
+
+    "Analizler" ekranı bugün `mockData.ts` okuyor. Bu üç liste, her enstrüman
+    için ayrı ayrı sorulmak yerine tek sorguda geliyor: ekran otuz satır
+    gösteriyor ve otuz istek atmak, göstereceği şeyden pahalı olurdu.
+
+    Her liste, o alanı GERÇEKTEN olan enstrümanlardan kuruluyor. Verisi
+    olmayanı boş değerlerle listeye koymak, ekranı doldurup içini boşaltır.
+    """
+    rows = db.execute(
+        select(InvestmentProduct, InstrumentFundamentals)
+        .join(
+            InstrumentFundamentals,
+            InstrumentFundamentals.product_id == InvestmentProduct.id,
+        )
+    ).all()
+
+    analysts: list[dict[str, Any]] = []
+    dividends: list[dict[str, Any]] = []
+    earnings: list[dict[str, Any]] = []
+
+    for product, f in rows:
+        base = {
+            "symbol": product.symbol,
+            "name": product.name,
+            "currency": product.currency_code or "TRY",
+        }
+        # Analist görüşü BAŞKASININ değerlendirmesi. Konsensüs adı olmadan
+        # yalnızca hedef fiyat göstermek, kimin söylediği belirsiz bir sayı
+        # bırakır.
+        if f.recommendation_key and f.analyst_count:
+            analysts.append({
+                **base,
+                "recommendation": f.recommendation_key,
+                "analyst_count": f.analyst_count,
+                "target_mean_price": _opt_float(f, "target_mean_price"),
+            })
+        if f.dividend_yield or f.dividend_rate:
+            dividends.append({
+                **base,
+                "dividend_yield": _opt_float(f, "dividend_yield"),
+                "dividend_rate": _opt_float(f, "dividend_rate"),
+                "payout_ratio": _opt_float(f, "payout_ratio"),
+                "ex_dividend_date": f.ex_dividend_date,
+            })
+        if f.earnings_date:
+            earnings.append({**base, "earnings_date": f.earnings_date})
+
+    # Sıralama her listede kendi anlamına göre: en çok analistin izlediği,
+    # en yüksek verimli, en yakın bilanço.
+    analysts.sort(key=lambda r: r["analyst_count"], reverse=True)
+    dividends.sort(key=lambda r: r["dividend_yield"] or 0, reverse=True)
+    earnings.sort(key=lambda r: r["earnings_date"])
+
+    return {
+        "analysts": analysts[:limit],
+        "dividends": dividends[:limit],
+        "earnings": earnings[:limit],
+    }
+
+
 def symbols_without_fundamentals(db: Session) -> list[str]:
     """Temel verisi hiç olmayan enstrümanlar.
 

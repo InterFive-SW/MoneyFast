@@ -1182,6 +1182,31 @@ describe('sohbet belgeleri', () => {
   })
 })
 
+describe('temel veri ve takvim', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('sembolü kodlayarak temel veriyi ister', async () => {
+    const fetchMock = mockFetch({ symbol: 'THYAO' })
+    await apiClient.getFundamentals('A/B')
+    expect(calledUrl(fetchMock)).toContain('/market/fundamentals?symbol=A%2FB')
+  })
+
+  it('takvimi sınırla birlikte ister', async () => {
+    const fetchMock = mockFetch({ analysts: [], dividends: [], earnings: [] })
+    await apiClient.getMarketCalendar(40)
+    expect(calledUrl(fetchMock)).toContain('/market/calendar?limit=40')
+  })
+
+  it('sınır verilmezse parametre eklemez', async () => {
+    /* Sunucunun kendi varsayılanı var; `?limit=undefined` onu ezmeye
+       çalışıp 422 alırdı. */
+    const fetchMock = mockFetch({ analysts: [], dividends: [], earnings: [] })
+    await apiClient.getMarketCalendar()
+    expect(calledUrl(fetchMock)).toMatch(/\/market\/calendar$/)
+  })
+})
+
 describe('teknik görünüm', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => vi.unstubAllGlobals())

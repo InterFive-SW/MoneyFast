@@ -25,6 +25,7 @@ from .schemas import (
     QuoteIngestRequest,
     TechnicalSignalsOut,
     FundamentalsOut,
+    MarketCalendarOut,
 )
 
 log = logging.getLogger("moneyfast.market")
@@ -253,6 +254,23 @@ def get_candles(
         "interval": "1d",
         "candles": market_service.candle_series(db, product.symbol, limit=limit),
     }
+
+
+@router.get(
+    "/calendar",
+    response_model=MarketCalendarOut,
+    summary="Analist konsensüsü, temettü ve bilanço takvimi",
+)
+def get_calendar(
+    limit: int = Query(default=40, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """"Analizler" ekranının üç listesi.
+
+    Enstrüman başına ayrı istek yerine tek sorgu: ekran otuz satır gösteriyor
+    ve otuz istek atmak, göstereceği şeyden pahalı olurdu.
+    """
+    return market_service.calendar_rows(db, limit=limit)
 
 
 @router.get(

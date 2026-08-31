@@ -492,3 +492,36 @@ class TestFundamentalsEndpoint:
         # Zarar korunuyor: negatif bir marj eksik veri değil, olgu.
         assert body["operating_margin"] == pytest.approx(-0.026)
         assert body["gross_margin"] is None
+
+
+class TestCalendarEndpoint:
+    """`GET /api/market/calendar` — "Analizler" ekranının üç listesi."""
+
+    URL = "/api/market/calendar"
+
+    def test_it_returns_the_three_lists(self, market_client, mocker):
+        mocker.patch.object(
+            market_service, "calendar_rows",
+            return_value={
+                "analysts": [{
+                    "symbol": "AAPL", "name": "Apple Inc.", "currency": "USD",
+                    "recommendation": "buy", "analyst_count": 39,
+                    "target_mean_price": 324.45,
+                }],
+                "dividends": [],
+                "earnings": [],
+            },
+        )
+
+        body = market_client.get(self.URL).json()
+
+        assert body["analysts"][0]["analyst_count"] == 39
+        assert body["dividends"] == []
+
+    def test_the_limit_reaches_the_service(self, market_client, mocker):
+        rows = mocker.patch.object(
+            market_service, "calendar_rows",
+            return_value={"analysts": [], "dividends": [], "earnings": []},
+        )
+        market_client.get(self.URL, params={"limit": 5})
+        assert rows.call_args.kwargs["limit"] == 5

@@ -246,6 +246,92 @@ export interface TechnicalSignalsOut {
     narrative: string | null;
 }
 
+/**
+ * Bir enstrümanın saklanan temel verisi.
+ *
+ * Her alan null olabilir ve null "sağlayıcı bunu yayımlamıyor" demek,
+ * SIFIR değil. Bankanın brüt marjı yoktur.
+ */
+export interface FundamentalsOut {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    updated_at: string | null;
+
+    pe_ratio: number | null;
+    pb_ratio: number | null;
+    market_cap: number | null;
+    dividend_yield: number | null;
+    sector: string | null;
+    industry: string | null;
+    week52_high: number | null;
+    week52_low: number | null;
+
+    total_revenue: number | null;
+    revenue_growth: number | null;
+    gross_margin: number | null;
+    operating_margin: number | null;
+    ebitda_margin: number | null;
+    profit_margin: number | null;
+    return_on_equity: number | null;
+    return_on_assets: number | null;
+    debt_to_equity: number | null;
+    current_ratio: number | null;
+    total_debt: number | null;
+    total_cash: number | null;
+    free_cash_flow: number | null;
+    operating_cash_flow: number | null;
+    enterprise_value: number | null;
+    beta: number | null;
+    trailing_eps: number | null;
+    forward_eps: number | null;
+    forward_pe: number | null;
+    earnings_growth: number | null;
+    payout_ratio: number | null;
+    dividend_rate: number | null;
+
+    /** Analist konsensüsü: BAŞKASININ değerlendirmesi. */
+    recommendation_key: string | null;
+    analyst_count: number | null;
+    target_mean_price: number | null;
+
+    ex_dividend_date: string | null;
+    earnings_date: string | null;
+}
+
+/** Analist konsensüsü: BAŞKASININ değerlendirmesi, ürünün kendi görüşü değil. */
+export interface AnalystRow {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    recommendation: string;
+    analyst_count: number;
+    target_mean_price: number | null;
+}
+
+export interface DividendRow {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    dividend_yield: number | null;
+    dividend_rate: number | null;
+    payout_ratio: number | null;
+    ex_dividend_date: string | null;
+}
+
+export interface EarningsRow {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    earnings_date: string;
+}
+
+export interface MarketCalendar {
+    analysts: AnalystRow[];
+    dividends: DividendRow[];
+    earnings: EarningsRow[];
+}
+
 /** Kullanıcının sohbete yüklediği bir belge, listede göründüğü hâliyle. */
 export interface ChatDocument {
     id: string;
@@ -626,6 +712,21 @@ class ApiClient {
     /** Bir enstrümanın teknik görünümü. Sohbet ile hisse detay sayfası AYNI
      *  uç noktayı okuyor; ayrı hesaplasalardı aynı hisse için farklı bir
      *  eğilim söyleyebilirlerdi. */
+    /** Bir enstrümanın gelir tablosu, marjları ve analist konsensüsü.
+     *  `/market/instruments`'ten ayrı: o dondurulmuş v2.2 sözleşmesi ve bir
+     *  LİSTE için "bu ne ediyor" sorusunu yanıtlıyor. */
+    getFundamentals(symbol: string) {
+        return this.request<FundamentalsOut>(
+            `/market/fundamentals?symbol=${encodeURIComponent(symbol)}`,
+        );
+    }
+
+    /** "Analizler" ekranının üç listesi, tek çağrıda. */
+    getMarketCalendar(limit?: number) {
+        const suffix = limit === undefined ? '' : `?limit=${limit}`;
+        return this.request<MarketCalendar>(`/market/calendar${suffix}`);
+    }
+
     getTechnicalSignals(symbol: string) {
         return this.request<TechnicalSignalsOut>(
             `/market/technicals?symbol=${encodeURIComponent(symbol)}`,

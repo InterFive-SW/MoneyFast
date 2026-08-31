@@ -1013,3 +1013,70 @@ class TestSymbolsWithoutFundamentals:
         db = MagicMock(spec=Session)
         db.execute.return_value.all.return_value = []
         assert market_service.symbols_without_fundamentals(db) == []
+
+
+class TestCalendarRows:
+    """Üç listenin her biri, o alanı GERÇEKTEN olan enstrümanlardan kurulur.
+
+    Verisi olmayanı boş değerlerle listeye koymak, ekranı doldurup içini
+    boşaltır.
+    """
+
+    def _db(self, rows):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = rows
+        return db
+
+    def _pair(self, symbol="THYAO", **fields):
+        base = {f: None for f in market_service.FUNDAMENTAL_FIELDS}
+        base.update(fields)
+        return (product(symbol), SimpleNamespace(**base))
+
+    def test_an_instrument_with_no_consensus_is_left_out(self):
+        rows = [self._pair(analyst_count=13, recommendation_key=None)]
+        assert market_service.calendar_rows(self._db(rows))["analysts"] == []
+
+    def test_a_consensus_without_analysts_is_left_out(self):
+        """Kaç kişinin söylediği bilinmeyen bir konsensüs, kimin söylediği
+        belirsiz bir sayıdır."""
+        rows = [self._pair(recommendation_key="buy", analyst_count=None)]
+        assert market_service.calendar_rows(self._db(rows))["analysts"] == []
+
+    def test_analysts_are_ranked_by_how_many_follow_the_name(self):
+        rows = [
+            self._pair("AAA", recommendation_key="buy", analyst_count=3),
+            self._pair("BBB", recommendation_key="hold", analyst_count=39),
+        ]
+        out = market_service.calendar_rows(self._db(rows))
+        assert [r["symbol"] for r in out["analysts"]] == ["BBB", "AAA"]
+
+    def test_dividends_are_ranked_by_yield(self):
+        rows = [
+            self._pair("AAA", dividend_yield=2.0),
+            self._pair("BBB", dividend_yield=18.0),
+        ]
+        out = market_service.calendar_rows(self._db(rows))
+        assert [r["symbol"] for r in out["dividends"]] == ["BBB", "AAA"]
+
+    def test_a_rate_without_a_yield_still_counts_as_a_dividend(self):
+        rows = [self._pair(dividend_rate=6.88, dividend_yield=None)]
+        assert len(market_service.calendar_rows(self._db(rows))["dividends"]) == 1
+
+    def test_earnings_are_ranked_by_date(self):
+        rows = [
+            self._pair("AAA", earnings_date=datetime(2026, 9, 1, tzinfo=timezone.utc)),
+            self._pair("BBB", earnings_date=datetime(2026, 7, 1, tzinfo=timezone.utc)),
+        ]
+        out = market_service.calendar_rows(self._db(rows))
+        assert [r["symbol"] for r in out["earnings"]] == ["BBB", "AAA"]
+
+    def test_an_instrument_with_no_earnings_date_is_left_out(self):
+        assert market_service.calendar_rows(self._db([self._pair()]))["earnings"] == []
+
+    def test_the_limit_caps_every_list(self):
+        rows = [
+            self._pair(f"S{i}", recommendation_key="buy", analyst_count=i)
+            for i in range(1, 11)
+        ]
+        out = market_service.calendar_rows(self._db(rows), limit=3)
+        assert len(out["analysts"]) == 3

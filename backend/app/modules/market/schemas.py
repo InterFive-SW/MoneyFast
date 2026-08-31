@@ -348,3 +348,43 @@ class FundamentalsOut(BaseModel):
 
     ex_dividend_date: Optional[datetime] = None
     earnings_date: Optional[datetime] = None
+
+
+class AnalystRow(BaseModel):
+    """Bir enstrüman için analist konsensüsü.
+
+    BAŞKASININ değerlendirmesi. "16 analistin ortalama hedefi 95,39 TL"
+    aktarılabilir bir olgudur; ürünün kendi görüşü değildir.
+    """
+
+    symbol: str
+    name: Optional[str] = None
+    currency: str = "TRY"
+    recommendation: str
+    analyst_count: int
+    target_mean_price: Optional[float] = None
+
+
+class DividendRow(BaseModel):
+    symbol: str
+    name: Optional[str] = None
+    currency: str = "TRY"
+    dividend_yield: Optional[float] = None
+    dividend_rate: Optional[float] = None
+    payout_ratio: Optional[float] = None
+    ex_dividend_date: Optional[datetime] = None
+
+
+class EarningsRow(BaseModel):
+    symbol: str
+    name: Optional[str] = None
+    currency: str = "TRY"
+    earnings_date: datetime
+
+
+class MarketCalendarOut(BaseModel):
+    """"Analizler" ekranının üç listesi, tek çağrıda."""
+
+    analysts: List[AnalystRow] = Field(default_factory=list)
+    dividends: List[DividendRow] = Field(default_factory=list)
+    earnings: List[EarningsRow] = Field(default_factory=list)

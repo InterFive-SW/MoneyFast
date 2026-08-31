@@ -1,9 +1,15 @@
 // src/components/chat/ChatInput.tsx
 import { useState, KeyboardEvent, useRef, useEffect } from 'react';
+import { formatSize, useChatDocuments } from '../../hooks/useChatDocuments';
 
 interface ChatInputProps {
   onSendMessage: (text: string) => void;
   disabled?: boolean;
+  /** Belge hangi sohbete iliştirilecek. Belge KULLANICIYA ait, sohbete
+   *  değil -- silinen bir sohbet belgeyi götürmez -- ama nereden geldiğini
+   *  bilmek, bir sonraki tura hangi belgenin bağlamda olduğunu söylemeyi
+   *  mümkün kılıyor. */
+  threadId?: string;
 }
 
 /**
@@ -12,9 +18,20 @@ interface ChatInputProps {
  * Ekranın en altına sabitlenmiş mesaj gönderme formudur.
  * Kullanıcı girdisini alır ve üst bileşene iletir.
  */
-export default function ChatInput({ onSendMessage, disabled = false }: ChatInputProps) {
+export default function ChatInput({ onSendMessage, disabled = false, threadId }: ChatInputProps) {
   const [inputText, setInputText] = useState<string>('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const docs = useChatDocuments();
+
+  const handleFiles = async (files: FileList | null) => {
+    for (const file of Array.from(files ?? [])) {
+      await docs.upload(file, threadId);
+    }
+    // Aynı dosyanın ikinci kez seçilebilmesi için: `input[type=file]` aynı
+    // değer yeniden seçildiğinde `change` üretmez.
+    if (fileRef.current) fileRef.current.value = '';
+  };
 
   // Metin kutusunun yüksekliğini içeriğe göre ayarla
   useEffect(() => {
@@ -44,6 +61,50 @@ export default function ChatInput({ onSendMessage, disabled = false }: ChatInput
 
   return (
     <div className="w-full flex flex-col items-center">
+      {/* Yükleme hatası: sunucunun kendi mesajı gösteriliyor. "Bu dosya türü
+          okunamıyor" ile "dosya çok büyük" farklı şeyler ve kullanıcının
+          yapacağı şey de farklı. */}
+      {docs.error && (
+        <div className="w-full max-w-4xl mb-2 flex items-start justify-between gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-4 py-2.5">
+          <span className="text-xs leading-relaxed text-amber-200">{docs.error}</span>
+          <button
+            type="button"
+            onClick={docs.dismissError}
+            className="text-xs text-amber-300/70 hover:text-amber-200"
+            aria-label="Uyarıyı kapat"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Yüklenen belgeler. Sohbete değil KULLANICIYA ait olduğu için
+          gönderdikten sonra da duruyorlar. */}
+      {docs.documents.length > 0 && (
+        <div className="w-full max-w-4xl mb-2 flex flex-wrap gap-2">
+          {docs.documents.map((doc) => (
+            <span
+              key={doc.id}
+              className="group flex items-center gap-2 rounded-full border border-white/10 bg-slate-800/60 py-1 pl-3 pr-1.5 text-xs text-slate-300"
+              title={`${doc.kind} · ${formatSize(doc.size_bytes)}${doc.truncated ? ' · kırpıldı' : ''}`}
+            >
+              <span className="max-w-[16rem] truncate">{doc.filename}</span>
+              {/* Kırpılan belge bunu SÖYLÜYOR: yarısını okuyup tamamını
+                  okumuş gibi cevap vermek olurdu. */}
+              {doc.truncated && <span className="text-amber-400/80">kırpıldı</span>}
+              <button
+                type="button"
+                onClick={() => void docs.remove(doc.id)}
+                className="rounded-full p-1 text-slate-500 hover:bg-white/10 hover:text-slate-200"
+                aria-label={`${doc.filename} belgesini sil`}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="w-full max-w-4xl relative flex flex-col bg-slate-800/50 border border-white/10 rounded-3xl p-3 shadow-sm focus-within:ring-2 focus-within:ring-brandBlue/20 focus-within:border-brandBlue transition-all">
         <textarea
           ref={textareaRef}
@@ -58,7 +119,24 @@ export default function ChatInput({ onSendMessage, disabled = false }: ChatInput
         
         <div className="flex items-center justify-between mt-2 px-1">
           <div className="flex items-center gap-2">
-            <button type="button" className="p-2 text-slate-400 hover:text-slate-300 hover:bg-white/10 rounded-full transition-colors" aria-label="Dosya Ekle">
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              // Kabul edilen liste SUNUCUDAN geliyor: elle yazılmış bir
+              // kopya ayrışırsa, seçilebilen ama reddedilen bir dosya olur.
+              accept={docs.accepted.join(',')}
+              onChange={(e) => void handleFiles(e.target.files)}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={docs.uploading}
+              className="p-2 text-slate-400 hover:text-slate-300 hover:bg-white/10 rounded-full transition-colors disabled:opacity-50"
+              aria-label="Doküman ekle (PDF, XLS, CSV, PPT, TXT)"
+              title="Doküman ekle (PDF, XLS, CSV, PPT, TXT)"
+            >
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
                 <path strokeLinecap="round" strokeLinejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
               </svg>

@@ -246,6 +246,29 @@ export interface TechnicalSignalsOut {
     narrative: string | null;
 }
 
+/** Kullanıcının sohbete yüklediği bir belge, listede göründüğü hâliyle. */
+export interface ChatDocument {
+    id: string;
+    filename: string;
+    /** PDF / Excel / CSV / PowerPoint / Metin. */
+    kind: string;
+    size_bytes: number;
+    /** PDF'te sayfa, tabloda satır, sunumda slayt. */
+    units: number | null;
+    char_count: number | null;
+    /** Metin tavana takıldıysa doğru. */
+    truncated: boolean;
+    created_at: string;
+}
+
+export interface ChatDocumentList {
+    documents: ChatDocument[];
+    /** Kabul edilen uzantılar. Dosya seçici bunu okuyor: iki listenin
+     *  ayrışması, seçilebilen ama reddedilen bir dosya demek. */
+    accepted: string[];
+    max_bytes: number;
+}
+
 export type RiskLookback = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX';
 
 /** Anket soruları. Puanlar istemciye HİÇ gelmez: seçeneğin ağırlığını
@@ -371,11 +394,18 @@ class ApiClient {
      */
     private refreshInFlight: Promise<boolean> | null = null;
 
-    private authHeaders(): Record<string, string> {
+    /**
+     * @param body Gönderilecek gövde. `FormData` ise Content-Type
+     *   KURULMAZ: multipart sınırını (`boundary=...`) tarayıcı üretiyor ve
+     *   elle yazılan bir başlık onu ezerek gövdeyi sunucu tarafında
+     *   ayrıştırılamaz hâle getirir.
+     */
+    private authHeaders(body?: BodyInit | null): Record<string, string> {
         const token = localStorage.getItem('access_token');
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-        };
+        const headers: Record<string, string> = {};
+        if (!(body instanceof FormData)) {
+            headers['Content-Type'] = 'application/json';
+        }
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;
         }
@@ -413,7 +443,8 @@ class ApiClient {
      * önerileri hazırlamaya devam ediyordu.
      */
     private async authedFetch(fullUrl: string, init: RequestInit): Promise<Response> {
-        const send = () => fetch(fullUrl, { ...init, headers: this.authHeaders() });
+        const send = () =>
+            fetch(fullUrl, { ...init, headers: this.authHeaders(init.body) });
         let response = await send();
         // Giriş ve yenileme uçlarının 401'i normaldir: yanlış şifre ya da
         // ölmüş bir yenileme token'ı. Onları tazelemeye çalışmak döngü olur.
@@ -599,6 +630,39 @@ class ApiClient {
         return this.request<TechnicalSignalsOut>(
             `/market/technicals?symbol=${encodeURIComponent(symbol)}`,
         );
+    }
+
+    // ---- Sohbete yüklenen belgeler --------------------------------------
+
+    /** Bir dosyayı yükler. Metni çıkarılır ve KULLANICIYA AİT olarak gömülür;
+     *  yalnızca yükleyenin aramalarında çıkar. */
+    async uploadChatDocument(file: File, threadId?: string): Promise<ChatDocument> {
+        const form = new FormData();
+        form.append('file', file);
+        if (threadId) form.append('thread_id', threadId);
+
+        // `authedFetch` gövdeyi olduğu gibi geçiriyor; Content-Type ELLE
+        // KURULMUYOR. multipart sınırını tarayıcı üretir ve elle yazılan bir
+        // başlık onu ezip gövdeyi ayrıştırılamaz hâle getirir.
+        const response = await this.authedFetch(
+            `${this.baseUrl}/ai_orchestrator/documents`,
+            { method: 'POST', body: form },
+        );
+        if (!response.ok) throw new Error(await describeError(response));
+        return response.json();
+    }
+
+    getChatDocuments() {
+        return this.request<ChatDocumentList>('/ai_orchestrator/documents');
+    }
+
+    /** Belgeyi hem listeden hem aramadan kaldırır. */
+    async deleteChatDocument(id: string): Promise<void> {
+        const response = await this.authedFetch(
+            `${this.baseUrl}/ai_orchestrator/documents/${encodeURIComponent(id)}`,
+            { method: 'DELETE' },
+        );
+        if (!response.ok) throw new Error(await describeError(response));
     }
 
     getRiskHistory(days?: number) {

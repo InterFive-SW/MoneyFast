@@ -136,7 +136,7 @@ export default function Chat() {
         <div className="shrink-0 w-full bg-gradient-to-t from-slate-950 via-slate-950/95 to-transparent pt-4 pb-4 px-4 md:px-8">
           <div className="max-w-3xl mx-auto w-full flex flex-col items-center">
             <PersistenceNotice message={notice} onDismiss={dismissNotice} />
-            <ChatInput onSendMessage={handleSendMessage} disabled={isTyping} />
+            <ChatInput onSendMessage={handleSendMessage} disabled={isTyping} threadId={activeSessionId ?? undefined} />
           </div>
         </div>
       </div>

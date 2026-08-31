@@ -430,11 +430,100 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     # narrowing filter rather than as "there is nobody here". None says the
     # second thing, which is what an anonymous turn actually is.
     args["user_id"] = state.get("user_id") or None
-    return await _run_tool(
+
+    result = await _run_tool(
         state, "rag_semantic_market_search", args,
         assumptions=plan.get("assumptions") or [],
         empty_when=lambda p: not p.get("results"),
     )
+    return await _fold_in_own_documents(state, args, result)
+
+
+#: Kullanıcının kendi belgelerine ayrılan sonuç sayısı.
+#:
+#: Tek bir aramada haberle YARIŞTIRMAK, yüklenen belgeyi pratikte
+#: bulunamaz yapıyor. Ölçüldü: bir kullanıcı bilanço tablosu yükledi,
+#: "EBITDA marjı ve hasılat" sorgusu belgeyi hiç döndürmedi; belge
+#: aslında 0,605 benzerlikle eşleşiyordu ama binlerce haber parçası
+#: arasında ilk yirmiye giremiyordu. Kendi yüklediği dosyayı bir daha
+#: göremeyen bir yükleme özelliği, çalışmayan bir özelliktir.
+OWN_DOCUMENT_SLOTS = 3
+
+#: Yüklenen belgelerin `rag`'daki kategorisi (bkz. backend document_service).
+OWN_DOCUMENT_CATEGORY = "USER_UPLOAD"
+
+#: Kullanıcının kendi belgeleri için AYRI ve daha düşük eşik.
+#:
+#: 0,45 haber için doğru: binlerce parçalık bir derlemde alakasız olanı
+#: elemek gerekiyor ve ölçüm o bandı gösterdi. Kişisel belgelerde elenecek
+#: bir sel yok -- kullanıcının bir avuç dosyası var ve sorusu onlardan
+#: birine değiniyorsa en iyi eşleşmeyi vermek neredeyse her zaman doğru.
+#:
+#: Ölçüldü, kullanıcının kendi yüklediği bilanço tablosuna karşı:
+#:
+#:   "bilançoda EBITDA marjı"                    0,390
+#:   "EBITDA marjı"                              0,380
+#:   "hasılat ne kadar"                          0,314
+#:   "Yüklediğim bilançoda EBITDA marjı ne olmuş?" 0,289
+#:
+#: Sonuncusu kullanıcının GERÇEKTEN yazdığı cümle ve dolgu kelimeleri
+#: gömmeyi seyreltiyor. 0,45 hepsini eliyordu: kullanıcı dosyayı yükledi,
+#: sordu ve "veri bulunamadı" cevabı aldı. 0,25 dördünü de geçiriyor.
+OWN_DOCUMENT_MIN_SIMILARITY = 0.25
+
+
+async def _fold_in_own_documents(
+    state: MoneyFastState, args: dict[str, Any], result: dict[str, Any]
+) -> dict[str, Any]:
+    """Kullanıcının kendi belgelerine ayrı bir arama ve ayrı yer.
+
+    Haberle aynı sıralamada yarıştırmak yerine ikinci bir arama yapılıyor:
+    biri "piyasada ne söyleniyor", diğeri "bu kullanıcı ne yükledi". İki ayrı
+    soru ve tek bir benzerlik sıralaması ikincisini her zaman kaybettiriyor.
+
+    Haber sonuçları KIRPILMIYOR, belgeler önlerine ekleniyor: kullanıcının
+    kendi dosyası, sorduğu soruya cevap veren kaynakların en olası olanı.
+
+    Bu arama başarısız olursa tur düşmez -- elde olan haber sonuçlarıyla
+    devam eder.
+    """
+    if not args.get("user_id"):
+        return result
+
+    # Haber araması hata verdiyse karışılmıyor: "kaynaklara ulaşılamadı"
+    # gerçek bir kesintiyi bildiriyor ve onu kullanıcının kendi belgesiyle
+    # örtmek, çalışmayan bir kaynağı çalışıyor gibi göstermek olur.
+    if (result.get("specialist_output") or {}).get("status") == "ERROR":
+        return result
+
+    own_args = {
+        **args,
+        "top_k": OWN_DOCUMENT_SLOTS,
+        "filters": {"categories": [OWN_DOCUMENT_CATEGORY]},
+        "min_similarity": float(
+            os.getenv("RAG_OWN_DOCUMENT_MIN_SIMILARITY", str(OWN_DOCUMENT_MIN_SIMILARITY))
+        ),
+    }
+    try:
+        own = await get_mcp_client().call("rag_semantic_market_search", own_args)
+    except (MCPUnavailable, MCPToolError) as exc:
+        log.warning("own-document search failed: %s", exc)
+        return result
+
+    documents = (own or {}).get("results") or []
+    if not documents:
+        return result
+
+    payload = result.get("specialist_output") or {}
+    existing = (payload.get("data") or {}).get("results") or []
+    seen = {row.get("chunk_id") for row in documents}
+    merged = documents + [row for row in existing if row.get("chunk_id") not in seen]
+
+    payload.setdefault("data", {})["results"] = merged
+    # Boş bir haber araması, kullanıcının belgesi bulunduğunda artık boş
+    # değil: "kaynak bulunamadı" demek yanlış olurdu.
+    payload["status"] = "OK"
+    return {**result, "specialist_output": payload}
 
 
 async def risk_node(state: MoneyFastState) -> dict[str, Any]:

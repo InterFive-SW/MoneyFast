@@ -45,7 +45,7 @@ router = APIRouter(tags=["banking"])
 
 
 @router.get("/accounts", response_model=List[BankAccountOut], summary="Hesaplarım")
-async def list_accounts(
+def list_accounts(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
@@ -64,7 +64,7 @@ async def list_accounts(
     "/interest/accrue",
     summary="Vadeli hesap faizlerini işle (servis işi)",
 )
-async def accrue_interest(
+def accrue_interest(
     db: Session = Depends(get_db),
     _: None = Depends(require_service_token),
 ):
@@ -86,7 +86,7 @@ async def accrue_interest(
     response_model=List[PortfolioAccountOut],
     summary="Para gönderilebilecek tüm hesaplar",
 )
-async def list_all_accounts(
+def list_all_accounts(
     db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id),
 ):
     """Bankacılık hesapları VE yatırım hesabı, tek biçimde.
@@ -101,7 +101,7 @@ async def list_all_accounts(
 
 
 @router.post("/transfers", response_model=TransferOut, summary="Para transferi")
-async def create_transfer(
+def create_transfer(
     request: TransferRequest,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -143,7 +143,7 @@ async def create_transfer(
     response_model=StatementOut,
     summary="Hesap hareketleri",
 )
-async def statement(
+def statement(
     account_number: str,
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -183,7 +183,7 @@ async def statement(
 
 
 @router.get("/spending", response_model=SpendingSummaryOut, summary="Aylık harcama özeti")
-async def spending_summary(
+def spending_summary(
     days: int = Query(default=30, ge=1, le=365),
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -215,7 +215,7 @@ async def spending_summary(
 
 
 @router.get("/balance-history", response_model=BalanceHistoryOut, summary="Bakiye geçmişi")
-async def balance_history(
+def balance_history(
     limit: int = Query(default=30, ge=2, le=200),
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -248,7 +248,7 @@ async def balance_history(
 
 
 @router.get("/savings-goals", response_model=List[SavingsGoalOut], summary="Birikim hedefleri")
-async def list_savings_goals(
+def list_savings_goals(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
@@ -257,7 +257,7 @@ async def list_savings_goals(
 
 
 @router.post("/savings-goals", response_model=SavingsGoalOut, summary="Birikim hedefi ekle")
-async def create_savings_goal(
+def create_savings_goal(
     request: SavingsGoalIn,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -290,7 +290,7 @@ async def health_check():
 @router.get(
     "/bills/lookup", response_model=BillLookupOut, summary="Abone no ile fatura sorgula",
 )
-async def lookup_bill(
+def lookup_bill(
     institution: str,
     subscriber_no: str,
     db: Session = Depends(get_db),
@@ -314,7 +314,7 @@ async def lookup_bill(
 @router.post(
     "/payments/stage", response_model=PaymentProposalOut, summary="Ödeme önerisi hazırla",
 )
-async def stage_payment(
+def stage_payment(
     request: StagePaymentRequest,
     db: Session = Depends(get_db),
     authenticated_user_id: Optional[str] = Depends(get_optional_user_id),
@@ -377,7 +377,7 @@ async def stage_payment(
     response_model=PaymentConfirmOut,
     summary="Ödemeyi onayla",
 )
-async def confirm_payment(
+def confirm_payment(
     proposal_id: str,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -392,7 +392,7 @@ async def confirm_payment(
 
 
 @router.post("/payments/{proposal_id}/cancel", status_code=204, summary="Öneriyi iptal et")
-async def cancel_payment(
+def cancel_payment(
     proposal_id: str,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -404,7 +404,7 @@ async def cancel_payment(
 @router.get(
     "/saved-payees", response_model=SavedPayeeListOut, summary="Kayıtlı işlemlerim",
 )
-async def list_saved_payees(
+def list_saved_payees(
     db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id),
 ):
     rows = payments.saved_payees(db, user_id)
@@ -422,7 +422,7 @@ async def list_saved_payees(
 @router.post(
     "/saved-payees", response_model=SavedPayeeOut, summary="Kayıtlı işlem ekle",
 )
-async def add_saved_payee(
+def add_saved_payee(
     request: SavePayeeRequest,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -438,7 +438,7 @@ async def add_saved_payee(
 
 
 @router.delete("/saved-payees/{payee_id}", status_code=204, summary="Kayıtlı işlemi sil")
-async def remove_saved_payee(
+def remove_saved_payee(
     payee_id: str,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -453,7 +453,7 @@ async def remove_saved_payee(
 
 
 @router.get("/cards", response_model=List[CardOut], summary="Kartlarım")
-async def list_cards(
+def list_cards(
     db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id),
 ):
     return [CardOut(**row) for row in products.cards_for(db, user_id)]
@@ -462,7 +462,7 @@ async def list_cards(
 @router.patch(
     "/cards/{card_id}/settings", response_model=CardOut, summary="Kart ayarları",
 )
-async def update_card_settings(
+def update_card_settings(
     card_id: str,
     request: CardSettingsRequest,
     db: Session = Depends(get_db),
@@ -483,7 +483,7 @@ async def update_card_settings(
 
 
 @router.delete("/cards/{card_id}", status_code=204, summary="Kartı kapat")
-async def close_card(
+def close_card(
     card_id: str,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -498,7 +498,7 @@ async def close_card(
 
 
 @router.get("/loans", response_model=List[LoanOut], summary="Kredilerim")
-async def list_loans(
+def list_loans(
     db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id),
 ):
     return [LoanOut(**row) for row in products.loans_for(db, user_id)]

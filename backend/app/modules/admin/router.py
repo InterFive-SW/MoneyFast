@@ -39,7 +39,7 @@ router = APIRouter(tags=["Admin"])
 
 
 @router.post("/login", response_model=AdminTokenResponse, summary="Yönetici girişi")
-async def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
+def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db)):
     """Authenticate an administrator.
 
     Separate from `/api/auth/login` because the identities are separate: this
@@ -66,7 +66,7 @@ async def admin_login(request: AdminLoginRequest, db: Session = Depends(get_db))
 
 
 @router.get("/users", response_model=List[AdminUserRow], summary="Tüm müşteriler")
-async def list_users(db: Session = Depends(get_db), admin=Depends(require_admin)):
+def list_users(db: Session = Depends(get_db), admin=Depends(require_admin)):
     """Every customer with their cash and portfolio value."""
     return [AdminUserRow(**row) for row in service.list_customers(db)]
 
@@ -76,7 +76,7 @@ async def list_users(db: Session = Depends(get_db), admin=Depends(require_admin)
     response_model=AdjustmentResult,
     summary="Bakiye düzeltmesi",
 )
-async def adjust_cash(
+def adjust_cash(
     user_id: str,
     request: CashAdjustmentRequest,
     db: Session = Depends(get_db),
@@ -103,7 +103,7 @@ async def adjust_cash(
     response_model=AdjustmentResult,
     summary="Pozisyon düzeltmesi",
 )
-async def adjust_position(
+def adjust_position(
     user_id: str,
     request: PositionAdjustmentRequest,
     db: Session = Depends(get_db),
@@ -121,7 +121,7 @@ async def adjust_position(
 
 
 @router.post("/bills", response_model=BillOut, summary="Fatura tanımla")
-async def issue_bill(
+def issue_bill(
     request: IssueBillRequest,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
@@ -145,7 +145,7 @@ async def issue_bill(
 
 
 @router.get("/bills", response_model=BillListOut, summary="Tanımlı faturalar")
-async def list_bills(db: Session = Depends(get_db), admin=Depends(require_admin)):
+def list_bills(db: Session = Depends(get_db), admin=Depends(require_admin)):
     """Faturalar; üzerindeki ad, atandığı müşteri ve ödeyen kişiyle birlikte."""
     return BillListOut(bills=[BillOut(**row) for row in service.describe_bills(db)])
 
@@ -154,7 +154,7 @@ async def list_bills(db: Session = Depends(get_db), admin=Depends(require_admin)
     "/users/{user_id}/accounts",
     summary="Müşterinin para gönderilebilir hesapları",
 )
-async def user_accounts(
+def user_accounts(
     user_id: str, db: Session = Depends(get_db), admin=Depends(require_admin),
 ):
     """Vadesiz, vadeli ve yatırım -- hangisine para yatırılacağı seçilebilsin."""
@@ -166,7 +166,7 @@ async def user_accounts(
 @router.post(
     "/subscriptions", response_model=SubscriptionOut, summary="Abone numarası ata",
 )
-async def assign_subscription(
+def assign_subscription(
     request: AssignSubscriptionRequest,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
@@ -189,7 +189,7 @@ async def assign_subscription(
 @router.get(
     "/subscriptions", response_model=List[SubscriptionOut], summary="Atanmış abone numaraları",
 )
-async def list_subscriptions(
+def list_subscriptions(
     user_id: Optional[str] = None,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
@@ -198,7 +198,7 @@ async def list_subscriptions(
 
 
 @router.delete("/bills/{bill_id}", status_code=204, summary="Faturayı geri çek")
-async def withdraw_bill(
+def withdraw_bill(
     bill_id: str, db: Session = Depends(get_db), admin=Depends(require_admin),
 ):
     try:
@@ -211,7 +211,7 @@ async def withdraw_bill(
 
 
 @router.post("/cards", summary="Kart tanımla")
-async def issue_card(
+def issue_card(
     request: IssueCardRequest,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),
@@ -232,7 +232,7 @@ async def issue_card(
 
 
 @router.post("/loans", summary="Kredi tanımla")
-async def issue_loan(
+def issue_loan(
     request: IssueLoanRequest,
     db: Session = Depends(get_db),
     admin=Depends(require_admin),

@@ -41,7 +41,7 @@ router = APIRouter(tags=["Authentication"])
     status_code=status.HTTP_201_CREATED,
     summary="Yeni bir kullanıcı kaydet"
 )
-async def register(user_in: schemas.RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def register(user_in: schemas.RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Girdilerini doğrulayarak ve şifrelerini güvenli bir şekilde hashleyerek yeni bir kullanıcı kaydeder.
 
@@ -59,7 +59,7 @@ async def register(user_in: schemas.RegisterRequest, background_tasks: Backgroun
     response_model=schemas.TokenResponse,
     summary="Kullanıcıyı doğrula ve JWT token döndür"
 )
-async def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
+def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
     """
     TC ve şifresini doğrulayarak bir kullanıcıyı doğrular ve ardından bir JWT erişim token'ı verir.
 
@@ -78,7 +78,7 @@ async def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)
     response_model=schemas.TokenResponse,
     summary="Yenileme token'ı ile yeni bir access token al",
 )
-async def refresh(payload: schemas.RefreshRequest, db: Session = Depends(get_db)):
+def refresh(payload: schemas.RefreshRequest, db: Session = Depends(get_db)):
     """
     Süresi dolmuş bir access token'ı, uzun ömürlü yenileme token'ıyla tazeler.
 
@@ -96,7 +96,7 @@ async def refresh(payload: schemas.RefreshRequest, db: Session = Depends(get_db)
     status_code=status.HTTP_200_OK,
     summary="E-posta adresini doğrula"
 )
-async def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
+def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
     """
     Kullanıcının e-posta adresini JWT token üzerinden doğrular.
     GÜVENLİK: Sadece geçerli ve süresi dolmamış tokenlar kabul edilir.
@@ -109,7 +109,7 @@ async def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db
     status_code=status.HTTP_200_OK,
     summary="Şifre sıfırlama bağlantısı iste"
 )
-async def forgot_password(payload: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def forgot_password(payload: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Kullanıcıya e-posta yoluyla şifre sıfırlama bağlantısı gönderir.
     GÜVENLİK: TC Kimlik ve E-posta doğrulaması yapılarak yetkisiz erişim önlenir.
@@ -123,7 +123,7 @@ async def forgot_password(payload: ForgotPasswordRequest, background_tasks: Back
     status_code=status.HTTP_200_OK,
     summary="Yeni şifre belirle"
 )
-async def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
     """
     Geçerli bir şifre sıfırlama token'ı ile kullanıcının şifresini yeniler.
     GÜVENLİK: JWT token'ı doğrulanır, şifre bcrypt ile hashlenerek saklanır.
@@ -159,7 +159,7 @@ async def get_current_user(user=Depends(deps.get_current_user)):
     response_model=schemas.UserResponse,
     summary="Mevcut kullanıcının profilini güncelle"
 )
-async def update_profile(
+def update_profile(
     payload: UserUpdateRequest,
     db: Session = Depends(get_db),
     user=Depends(deps.get_current_user)
@@ -176,7 +176,7 @@ async def update_profile(
     status_code=status.HTTP_200_OK,
     summary="Kullanıcının şifresini değiştir"
 )
-async def change_password(
+def change_password(
     payload: ChangePasswordRequest,
     db: Session = Depends(get_db),
     user=Depends(deps.get_current_user)
@@ -216,7 +216,7 @@ async def export_data(
     status_code=status.HTTP_200_OK,
     summary="Kullanıcı hesabını kalıcı olarak kapat (soft delete)"
 )
-async def delete_account(
+def delete_account(
     payload: DeleteAccountRequest,
     db: Session = Depends(get_db),
     user=Depends(deps.get_current_user)

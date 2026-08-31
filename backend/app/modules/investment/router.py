@@ -21,7 +21,7 @@ from .schemas import (
 router = APIRouter(tags=["investment"])
 
 @router.get("/portfolio/summary", response_model=InvestmentBalance)
-async def get_portfolio_summary(
+def get_portfolio_summary(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -68,7 +68,7 @@ async def get_portfolio_summary(
     }
 
 @router.get("/portfolio/chart", response_model=Dict[str, List[CandlestickDataPoint]])
-async def get_portfolio_chart(
+def get_portfolio_chart(
     range: str = Query(default="yil"),
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
@@ -159,7 +159,7 @@ def _confirmed_proposals(db: Session, user_id: Optional[str]) -> list:
 
 
 @router.get("/positions", response_model=List[Position])
-async def get_positions(
+def get_positions(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -211,7 +211,7 @@ def _as_frontend_position(row: dict) -> dict:
 
 
 @router.get("/orders", response_model=List[Order])
-async def get_orders(db: Session = Depends(get_db)):
+def get_orders(db: Session = Depends(get_db)):
     """
     Geçmiş ve bekleyen emirler.
 
@@ -229,7 +229,7 @@ async def get_orders(db: Session = Depends(get_db)):
     response_model=CashStatementOut,
     summary="Yatırım hesabı hareketleri",
 )
-async def cash_statement(
+def cash_statement(
     identifier: str,
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -258,7 +258,7 @@ async def cash_statement(
     return service.cash_statement(db, account, limit=limit)
 
 @router.get("/asset-allocation", response_model=List[AssetAllocationItem])
-async def get_asset_allocation(
+def get_asset_allocation(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -323,7 +323,7 @@ async def get_asset_allocation(
 
 
 @router.get("/watchlist", response_model=Dict[str, List[WatchlistItem]])
-async def get_watchlist(
+def get_watchlist(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
@@ -369,7 +369,7 @@ async def get_watchlist(
 
 
 @router.post("/watchlist/{symbol}", response_model=Dict[str, str])
-async def add_to_watchlist(
+def add_to_watchlist(
     symbol: str,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -382,7 +382,7 @@ async def add_to_watchlist(
 
 
 @router.delete("/watchlist/{symbol}", response_model=Dict[str, str])
-async def remove_from_watchlist(
+def remove_from_watchlist(
     symbol: str,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -394,7 +394,7 @@ async def remove_from_watchlist(
 
 
 @router.get("/top-movers", response_model=Dict[str, List[TopMoverItem]])
-async def get_top_movers(db: Session = Depends(get_db), limit: int = Query(default=5, ge=1, le=20)):
+def get_top_movers(db: Session = Depends(get_db), limit: int = Query(default=5, ge=1, le=20)):
     """
     Günün en çok kazandıran ve kaybettiren hisseleri — "yükselenler/düşenler".
 
@@ -424,7 +424,7 @@ async def get_top_movers(db: Session = Depends(get_db), limit: int = Query(defau
 
 
 @router.get("/sector-allocation", response_model=List[SectorAllocationItem])
-async def get_sector_allocation(
+def get_sector_allocation(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -464,7 +464,7 @@ async def get_sector_allocation(
 
 
 @router.get("/heatmap", response_model=List[HeatmapItem])
-async def get_heatmap(
+def get_heatmap(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -508,7 +508,7 @@ async def get_heatmap(
     response_model=PortfolioPositionsOut,
     summary="Portföy pozisyonları (MCP v2.1 sözleşmesi)",
 )
-async def get_portfolio_positions_for_ai(
+def get_portfolio_positions_for_ai(
     user_id: str,
     db: Session = Depends(get_db),
     account_ids: Optional[List[str]] = Query(default=None),
@@ -564,7 +564,7 @@ async def get_portfolio_positions_for_ai(
     response_model=StageTransactionOut,
     summary="İşlem önerisi hazırla (MCP v2.1 sözleşmesi)",
 )
-async def stage_transaction(
+def stage_transaction(
     request: StageTransactionRequest,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
@@ -758,7 +758,7 @@ def _persist_proposal(
     response_model=Dict[str, str],
     summary="Kullanıcının onayladığı işlem önerisini kesinleştir",
 )
-async def confirm_transaction_proposal(
+def confirm_transaction_proposal(
     proposal_id: str,
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
@@ -928,7 +928,7 @@ def _confirm_transfer(db: Session, proposal, user_id, now) -> Dict[str, str]:
     response_model=List[Dict[str, Optional[str]]],
     summary="Sembol haritası (servisler arası)",
 )
-async def list_products(db: Session = Depends(get_db)):
+def list_products(db: Session = Depends(get_db)):
     """
     `ingestor` servisinin hangi sembolleri çekeceğini öğrendiği uç nokta.
 

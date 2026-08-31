@@ -19,6 +19,7 @@ Design notes worth keeping:
 
 from __future__ import annotations
 
+import anyio
 import asyncio
 import logging
 from typing import Any, Optional
@@ -143,7 +144,12 @@ async def _poll_forever() -> None:
     try:
         while _subscribers:
             try:
-                frame = _reader() if _reader else None
+                # AYRI iş parçacığında. `_reader` 1.011 kotasyonu okuyup
+                # ORM nesnesi kuruyor ve bu senkron bir psycopg2 çağrısı;
+                # doğrudan burada çalıştırıldığında olay döngüsünü 5 saniyede
+                # bir, açık bir sekme olduğu sürece sonsuza kadar donduruyor
+                # -- yani tek bir açık sayfa bütün uygulamayı yavaşlatıyordu.
+                frame = await anyio.to_thread.run_sync(_reader) if _reader else None
                 if frame:
                     quotes = frame.get("quotes", {}) or {}
                     now = asyncio.get_running_loop().time()

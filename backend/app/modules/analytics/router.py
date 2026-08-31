@@ -29,7 +29,7 @@ router = APIRouter(tags=["analytics"])
     response_model=PortfolioAnalysis,
     summary="Portföy analizi (dağılım, trend, performans, işlem geçmişi)",
 )
-async def portfolio_analysis(
+def portfolio_analysis(
     # İki ayrı boyut: `lookback` ÖLÇÜM PENCERESİ (risk ile ortak seçici),
     # `range` ise ÇÖZÜNÜRLÜK (gün içi mi, günlük mü). Tek parametreye
     # sıkıştırmak "son bir yıl" ile "bugünü dakika dakika" arasındaki farkı

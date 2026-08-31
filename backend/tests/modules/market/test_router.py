@@ -427,3 +427,68 @@ class TestTechnicalsEndpoint:
         assert body["signals"]["sma_20"] is not None
         assert body["signals"]["sma_200"] is None
         assert body["signals"]["volume_vs_average"] is None
+
+
+class TestFundamentalsEndpoint:
+    """`GET /api/market/fundamentals` — gelir tablosu ve kârlılık.
+
+    `/instruments`'ten ayrı tutuluyor: o payload dondurulmuş v2.2 sözleşmesi
+    ve bir LİSTE için "bu ne ediyor" sorusunu yanıtlıyor.
+    """
+
+    URL = "/api/market/fundamentals"
+
+    def test_an_unknown_symbol_is_an_empty_record_not_an_error(
+        self, market_client, mocker
+    ):
+        mocker.patch.object(market_service, "resolve_symbol", return_value=None)
+
+        body = market_client.get(self.URL, params={"symbol": "YOKBOYLE"}).json()
+
+        assert body["symbol"] == "YOKBOYLE"
+        assert body["total_revenue"] is None
+
+    def test_an_instrument_with_no_fundamentals_row_still_answers(
+        self, market_client, mocker
+    ):
+        """Enstrüman var ama temel verisi henüz çekilmemiş. "Bu enstrümanın
+        temel verisi yok" bir cevaptır."""
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            return_value=SimpleNamespace(
+                symbol="YENI", name="Yeni A.Ş.", currency_code="TRY"
+            ),
+        )
+        mocker.patch.object(market_service, "fundamentals_for", return_value=None)
+
+        body = market_client.get(self.URL, params={"symbol": "YENI"}).json()
+
+        assert body["symbol"] == "YENI"
+        assert body["name"] == "Yeni A.Ş."
+        assert body["gross_margin"] is None
+
+    def test_it_returns_the_stored_record(self, market_client, mocker):
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            return_value=SimpleNamespace(
+                symbol="THYAO", name="Türk Hava Yolları", currency_code="TRY"
+            ),
+        )
+        mocker.patch.object(
+            market_service, "fundamentals_for",
+            return_value={
+                "symbol": "THYAO", "name": "Türk Hava Yolları", "currency": "TRY",
+                "total_revenue": 26_350_999_552,
+                "revenue_growth": 0.205,
+                "operating_margin": -0.026,
+                "gross_margin": None,
+            },
+        )
+
+        body = market_client.get(self.URL, params={"symbol": "thyao"}).json()
+
+        assert body["total_revenue"] == 26_350_999_552
+        assert body["revenue_growth"] == pytest.approx(0.205)
+        # Zarar korunuyor: negatif bir marj eksik veri değil, olgu.
+        assert body["operating_margin"] == pytest.approx(-0.026)
+        assert body["gross_margin"] is None

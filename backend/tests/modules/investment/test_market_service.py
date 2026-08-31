@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from app.modules.investment import market_service
@@ -304,6 +305,84 @@ class TestUpsertFundamentals:
         db = self._db("THYAO")
         assert market_service.upsert_fundamentals(db, []) == 0
         assert db.execute.called is False
+
+    def test_every_field_is_both_inserted_and_refreshed(self):
+        """The INSERT payload and the ON CONFLICT update set were two
+        separate literal tuples. A field added to one and not the other is
+        written the day an instrument first appears and never updated again
+        -- correct once, stale forever, and silent about it."""
+        db = self._db("THYAO")
+        market_service.upsert_fundamentals(
+            db, [{"symbol": "THYAO", "operating_margin": -0.026}]
+        )
+        statement = db.execute.call_args.args[0]
+        compiled = statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": False},
+        )
+        # The emitted SQL, not SQLAlchemy internals: the internal structure
+        # of an upsert is not the thing this test is about.
+        sql = str(compiled)
+        insert_clause, _, update_clause = sql.partition("DO UPDATE SET")
+
+        for field in market_service.FUNDAMENTAL_FIELDS:
+            assert field in insert_clause, f"{field} is never inserted"
+            assert field in update_clause, f"{field} is inserted but never refreshed"
+
+    def test_a_negative_margin_is_carried_not_treated_as_missing(self):
+        """An operating LOSS is the most informative thing a margin can say."""
+        db = self._db("THYAO")
+        market_service.upsert_fundamentals(
+            db, [{"symbol": "THYAO", "operating_margin": -0.026}]
+        )
+        values = db.execute.call_args.args[0].compile().params
+        assert values["operating_margin_m0"] == -0.026
+
+
+class TestFundamentalsFor:
+    """One instrument's stored fundamentals, for the page and the chat."""
+
+    def _db(self, row):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.side_effect = [
+            product("THYAO"), row,
+        ]
+        return db
+
+    def test_an_unknown_symbol_has_no_record(self):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = None
+        assert market_service.fundamentals_for(db, "YOKBOYLE") is None
+
+    def test_an_instrument_with_no_row_yet_has_no_record(self):
+        assert market_service.fundamentals_for(self._db(None), "THYAO") is None
+
+    def test_decimals_become_floats(self):
+        """`Numeric()` comes back as Decimal, which does not survive JSON."""
+        from decimal import Decimal
+
+        row = SimpleNamespace(
+            updated_at=NOW,
+            **{f: None for f in market_service.FUNDAMENTAL_FIELDS},
+        )
+        row.operating_margin = Decimal("-0.0260")
+        row.total_revenue = 26_350_999_552
+
+        out = market_service.fundamentals_for(self._db(row), "THYAO")
+
+        assert isinstance(out["operating_margin"], float)
+        assert out["operating_margin"] == pytest.approx(-0.026)
+        assert out["total_revenue"] == 26_350_999_552
+
+    def test_a_missing_field_stays_none(self):
+        """A bank has no gross margin. Reporting 0 would state a fact the
+        company never had."""
+        row = SimpleNamespace(
+            updated_at=NOW,
+            **{f: None for f in market_service.FUNDAMENTAL_FIELDS},
+        )
+        out = market_service.fundamentals_for(self._db(row), "THYAO")
+        assert out["gross_margin"] is None
 
 
 class TestListInstruments:

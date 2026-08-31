@@ -25,6 +25,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
     UniqueConstraint,
@@ -194,6 +195,45 @@ class InstrumentFundamentals(Base):
     industry: Mapped[str | None] = mapped_column(String(120), nullable=True)
     week52_high: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
     week52_low: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+
+    # Gelir tablosu ve kârlılık (migration 0027). Sağlayıcıdan zaten gelen ama
+    # atılan alanlar; bunlar olmadan bir hissenin neye DEĞDİĞİ söylenebiliyor,
+    # nasıl GİTTİĞİ söylenemiyordu.
+    #
+    # Oranlar kesir: 0,1287 = %12,87. Yüzdeye çevirmek gösterim katmanının işi.
+    total_revenue: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    revenue_growth: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    gross_margin: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    operating_margin: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    ebitda_margin: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    profit_margin: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    return_on_equity: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    return_on_assets: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    debt_to_equity: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+    current_ratio: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    total_debt: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    total_cash: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    free_cash_flow: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    operating_cash_flow: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    enterprise_value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    beta: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    trailing_eps: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+    forward_eps: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+    forward_pe: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+    earnings_growth: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    payout_ratio: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    dividend_rate: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+
+    # Analist görüşü BAŞKASININ değerlendirmesi. "16 analistin ortalama hedefi
+    # 95,39 TL" aktarılabilir bir olgudur; ürünün kendi görüşü olarak
+    # aktarılması tavsiye olurdu ve prompt bunu ayrıca yasaklıyor.
+    recommendation_key: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    analyst_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_mean_price: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+
+    ex_dividend_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    earnings_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 

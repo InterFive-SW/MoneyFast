@@ -11,6 +11,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Iterable, Optional
 
 from sqlalchemy import false, func, select
@@ -460,6 +461,30 @@ def upsert_quotes(db: Session, rows: list[dict[str, Any]]) -> int:
     return len(payload)
 
 
+#: Every fundamentals column the provider fills, in one place.
+#:
+#: Listed once rather than twice: the INSERT payload and the ON CONFLICT
+#: update set were separate literal tuples, and adding a column to one and
+#: not the other writes the value on first insert and then never refreshes
+#: it -- a field that is correct the day an instrument is added and stale
+#: forever after.
+FUNDAMENTAL_FIELDS = (
+    "pe_ratio", "pb_ratio", "market_cap", "dividend_yield",
+    "sector", "industry", "week52_high", "week52_low",
+    # 0027: income statement and profitability.
+    "total_revenue", "revenue_growth",
+    "gross_margin", "operating_margin", "ebitda_margin", "profit_margin",
+    "return_on_equity", "return_on_assets",
+    "debt_to_equity", "current_ratio",
+    "total_debt", "total_cash", "free_cash_flow", "operating_cash_flow",
+    "enterprise_value", "beta",
+    "trailing_eps", "forward_eps", "forward_pe", "earnings_growth",
+    "payout_ratio", "dividend_rate",
+    "recommendation_key", "analyst_count", "target_mean_price",
+    "ex_dividend_date", "earnings_date",
+)
+
+
 def upsert_fundamentals(db: Session, rows: list[dict[str, Any]]) -> int:
     """Refresh valuation ratios. Missing values are written as NULL.
 
@@ -488,14 +513,7 @@ def upsert_fundamentals(db: Session, rows: list[dict[str, Any]]) -> int:
             {
                 "id": str(uuid.uuid4()),
                 "product_id": product_id,
-                "pe_ratio": row.get("pe_ratio"),
-                "pb_ratio": row.get("pb_ratio"),
-                "market_cap": row.get("market_cap"),
-                "dividend_yield": row.get("dividend_yield"),
-                "sector": row.get("sector"),
-                "industry": row.get("industry"),
-                "week52_high": row.get("week52_high"),
-                "week52_low": row.get("week52_low"),
+                **{field: row.get(field) for field in FUNDAMENTAL_FIELDS},
                 "updated_at": datetime.now(timezone.utc),
             }
         )
@@ -507,8 +525,7 @@ def upsert_fundamentals(db: Session, rows: list[dict[str, Any]]) -> int:
         constraint="uq_instrument_fundamentals_product",
         set_={
             key: getattr(statement.excluded, key)
-            for key in ("pe_ratio", "pb_ratio", "market_cap", "dividend_yield",
-                        "sector", "industry", "week52_high", "week52_low", "updated_at")
+            for key in FUNDAMENTAL_FIELDS + ("updated_at",)
         },
     )
     db.execute(statement)
@@ -635,6 +652,41 @@ def market_heatmap(
         # haritayı olduğundan küçük gösterir ve kimse sebebini bilmez.
         "missing": missing,
     }
+
+def fundamentals_for(db: Session, symbol: str) -> Optional[dict[str, Any]]:
+    """Every stored fundamental for one instrument, or None if unknown.
+
+    Kept OUT of `/market/instruments`: that payload is the frozen v2.2 MCP
+    contract and it answers "what is this worth", once, for a list. These are
+    thirty-odd fields about one company and most screens need none of them --
+    the same reasoning that put the technical signals on their own endpoint.
+
+    Missing stays missing. A bank has no gross margin, and rendering that as
+    0 would report a fact the company never had.
+    """
+    product = get_product(db, symbol)
+    if product is None:
+        return None
+    row = (
+        db.query(InstrumentFundamentals)
+        .filter(InstrumentFundamentals.product_id == product.id)
+        .first()
+    )
+    if row is None:
+        return None
+    out: dict[str, Any] = {
+        "symbol": product.symbol,
+        "name": product.name,
+        "currency": product.currency_code or "TRY",
+        "updated_at": row.updated_at,
+    }
+    for field in FUNDAMENTAL_FIELDS:
+        value = getattr(row, field, None)
+        # Numeric() comes back as Decimal, which is not JSON-serialisable and
+        # would be rendered by Pydantic as a string in some configurations.
+        out[field] = float(value) if isinstance(value, Decimal) else value
+    return out
+
 
 def symbols_without_fundamentals(db: Session) -> list[str]:
     """Temel verisi hiç olmayan enstrümanlar.

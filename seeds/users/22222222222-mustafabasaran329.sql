@@ -9,14 +9,14 @@
 -- Synthetic data only (see CLAUDE.md). Do not hand-edit; re-export.
 
 -- public.users (1)
-INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences") VALUES ('8f703deb-30a0-4082-aa73-bb671a6b5e81', 'mustafabasaran329@gmail.com', '$2b$12$.TzVFjeUL/IqmNcp/t4/TeHTrz.HRfrQia9BrqjJ2MtfTi.5.m0u6', TRUE, '2026-08-25T10:57:40.678752+00:00', '22222222222', 'Mustafa', 'Başaran', '+909053071135', TRUE, '{}', 50000, '{}') ON CONFLICT DO NOTHING;
+INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences", "profile_picture_url") VALUES ('8f703deb-30a0-4082-aa73-bb671a6b5e81', 'mustafabasaran329@gmail.com', '$2b$12$.TzVFjeUL/IqmNcp/t4/TeHTrz.HRfrQia9BrqjJ2MtfTi.5.m0u6', TRUE, '2026-08-25T10:57:40.678752+00:00', '22222222222', 'Mustafa', 'Başaran', '+909053071135', TRUE, '{}', 50000, '{}', NULL) ON CONFLICT DO NOTHING;
 
 -- investment.investment_accounts (1)
 INSERT INTO investment.investment_accounts ("id", "user_id", "account_number", "name", "currency_code", "cash_balance", "status", "created_at", "iban") VALUES ('f0851ef7-444d-48cd-9789-2a82646e8b18', '8f703deb-30a0-4082-aa73-bb671a6b5e81', 'TR-8F703DEB30A0', 'Yatırım Hesabı', 'TRY', 19574.4400, 'active', '2026-08-25T10:57:40.693816+00:00', NULL) ON CONFLICT DO NOTHING;
 
 -- investment.portfolio_positions (2)
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('8584c096-2479-47ba-9f09-62f24b6d6cd9', 'f0851ef7-444d-48cd-9789-2a82646e8b18', (SELECT id FROM investment.investment_products WHERE symbol = 'THYAO'), 2.000000, 308.0000, '2026-08-26T08:00:05.258558+00:00', '2026-08-26T08:00:05.258558+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('72b1bc86-dcf9-4ae6-8b88-c6648e4f6b0a', 'f0851ef7-444d-48cd-9789-2a82646e8b18', (SELECT id FROM investment.investment_products WHERE symbol = 'ASELS'), 12.000000, 400.1786, '2026-08-25T11:05:06.776898+00:00', '2026-08-26T08:00:59.708391+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('8584c096-2479-47ba-9f09-62f24b6d6cd9', 'f0851ef7-444d-48cd-9789-2a82646e8b18', (SELECT id FROM investment.investment_products WHERE symbol = 'THYAO'), 2.000000, 308.0000, '2026-08-26T08:00:05.258558+00:00', '2026-08-26T08:00:05.258558+00:00') ON CONFLICT DO NOTHING;
 
 -- investment.watchlist_items (3)
 INSERT INTO investment.watchlist_items ("id", "user_id", "product_id", "created_at") VALUES ('2e27f69c-0454-4ac1-a82c-490d3183d5d6', '8f703deb-30a0-4082-aa73-bb671a6b5e81', (SELECT id FROM investment.investment_products WHERE symbol = 'AEFES'), '2026-08-25T11:05:26.632957+00:00') ON CONFLICT DO NOTHING;

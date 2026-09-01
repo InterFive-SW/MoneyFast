@@ -86,7 +86,15 @@ function IconSettings({ className }: IconProps) {
   )
 }
 
-/** Portföy analizi — pasta grafiği çağrıştıran ikon */
+function IconFastFinance({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+    </svg>
+  )
+}
+
+/** Portföy analizi — çubuk grafik çağrıştıran ikon */
 function IconAnalytics({ className }: IconProps) {
   return (
     <svg
@@ -99,8 +107,9 @@ function IconAnalytics({ className }: IconProps) {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
-      <path d="M22 12A10 10 0 0 0 12 2v10z" />
+      <line x1="18" y1="20" x2="18" y2="10" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="14" />
     </svg>
   )
 }
@@ -108,13 +117,13 @@ function IconAnalytics({ className }: IconProps) {
 // ─── Navigasyon Yapılandırması ────────────────────────────────────────────────
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/dashboard',     label: 'Ana Sayfa',     icon: <IconDashboard  className="h-[18px] w-[18px] shrink-0" />, end: true },
-  { to: '/hizli-finans',  label: 'Hızlı Finans',  icon: <IconDashboard  className="h-[18px] w-[18px] shrink-0" /> },
-  { to: '/banking',    label: 'Banka İşlemleri',    icon: <IconBanking    className="h-[18px] w-[18px] shrink-0" /> },
-  { to: '/portfolio',  label: 'Portföyüm',          icon: <IconPortfolio  className="h-[18px] w-[18px] shrink-0" /> },
+  { to: '/dashboard',     label: 'Ana Sayfa',     icon: <IconDashboard    className="h-[18px] w-[18px] shrink-0" />, end: true },
+  { to: '/hizli-finans',  label: 'Hızlı Finans',  icon: <IconFastFinance  className="h-[18px] w-[18px] shrink-0" /> },
+  { to: '/banking',       label: 'Banka İşlemleri',icon: <IconBanking      className="h-[18px] w-[18px] shrink-0" /> },
+  { to: '/portfolio',     label: 'Portföyüm',     icon: <IconPortfolio    className="h-[18px] w-[18px] shrink-0" /> },
   // Tek giriş: sayfanın kendi sekme şeridi (Genel Bakış / Risk / Senaryo)
   // zaten üç bölümü veriyor, menüde ikinci bir bölünmeye gerek yok.
-  { to: '/analiz',     label: 'Analiz',             icon: <IconAnalytics  className="h-[18px] w-[18px] shrink-0" /> },
+  { to: '/analiz',        label: 'Analiz',        icon: <IconAnalytics    className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/investment', label: 'Piyasalar',          icon: <IconMarkets    className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/chat',       label: 'Yapay Zeka Asistan', icon: <IconChat       className="h-[18px] w-[18px] shrink-0" /> },
   { to: '/settings',   label: 'Ayarlar',            icon: <IconSettings   className="h-[18px] w-[18px] shrink-0" /> },
@@ -256,9 +265,11 @@ export default function Sidebar() {
       {/* ── Kullanıcı Bilgisi ve Oturum Kapatma ─────────────────────── */}
       <div className="shrink-0 border-t border-white/10 p-4">
         <div className={`flex items-center py-2 ${isCollapsed ? 'justify-center' : 'justify-between px-2'}`}>
-          <div className={`flex items-center ${isCollapsed ? '' : 'gap-3'}`}>
+          <button type="button" onClick={() => navigate('/profile')} className={`flex items-center hover:bg-slate-800/50 p-1.5 rounded-xl transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-brandBlue/50 text-left ${isCollapsed ? '' : 'gap-3'}`}>
             {isLoading ? (
               <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-slate-800" />
+            ) : profile?.profilePictureUrl ? (
+              <img src={`${import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:8000'}${profile.profilePictureUrl}`} alt="Avatar" className="h-10 w-10 rounded-full object-cover shadow-sm" />
             ) : (
               <div
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brandBlue to-primary-500 text-[14px] font-bold text-white shadow-sm"
@@ -280,15 +291,14 @@ export default function Sidebar() {
                   <div className="h-2 w-10 animate-pulse rounded bg-slate-800/50" />
                 </div>
               ) : (
-                <>
+                <div className="flex items-center h-full">
                   <p className="text-[15px] font-bold leading-tight text-white">
                     {profile?.fullName ?? 'Kullanıcı'}
                   </p>
-                  <p className="text-[13px] font-medium text-slate-400">Premium Üye</p>
-                </>
+                </div>
               )}
             </div>
-          </div>
+          </button>
 
           {/* Oturum kapatma — daraltılmış modda gizlenir */}
           {!isCollapsed && (

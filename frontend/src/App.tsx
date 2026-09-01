@@ -57,6 +57,8 @@ import SecuritySettings from './pages/settings/SecuritySettings'
 import NotificationSettings from './pages/settings/NotificationSettings'
 import AppearanceSettings from './pages/settings/AppearanceSettings'
 import PrivacySettings from './pages/settings/PrivacySettings'
+import ProfileDashboard from './pages/ProfileDashboard'
+
 export default function App() {
   return (
     /*
@@ -136,6 +138,7 @@ export default function App() {
                 <Route path="sektorler"      element={<SectorsScreen />} />
                 <Route path="analizler"      element={<AnalysesScreen />} />
               </Route>
+              <Route path="profile" element={<ProfileDashboard />} />
               {/* Eski adresler yer imlerinde ve paylaşılan bağlantılarda
                   duruyor, o yüzden 404 değil yönlendirme.
 

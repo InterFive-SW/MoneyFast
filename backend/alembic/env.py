@@ -14,7 +14,7 @@ import app.modules.investment.models  # noqa: F401
 import app.modules.ai_orchestrator.models  # noqa: F401
 import app.modules.risk.models  # noqa: F401 — registers the risk schema
 import app.modules.market.models  # noqa: F401
-
+import app.modules.notification.models  # noqa: F401
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 

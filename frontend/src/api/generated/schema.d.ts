@@ -338,6 +338,59 @@ export interface paths {
         patch: operations["rename_conversation_api_ai_orchestrator_conversations__thread_id__patch"];
         trace?: never;
     };
+    "/api/ai_orchestrator/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Yüklediğim belgeler
+         * @description Yalnızca çağıranın kendi belgeleri.
+         *
+         *     Anonim çağıran boş liste alır, 401 değil: yüklediği bir şey yoktur ve
+         *     "belgeniz yok" doğru cevaptır.
+         */
+        get: operations["list_documents_api_ai_orchestrator_documents_get"];
+        put?: never;
+        /**
+         * Sohbete belge yükle
+         * @description PDF, Excel, CSV, PowerPoint ya da düz metin.
+         *
+         *     Anonim yükleme YOK. Belgenin bir sahibi olmadan gömülmesi, onu paylaşılan
+         *     derleme koymak demek; sahibi olmayan bir belge de silinemez.
+         */
+        post: operations["upload_document_api_ai_orchestrator_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ai_orchestrator/documents/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Yüklediğim bir belgeyi sil
+         * @description Belgeyi hem listeden hem aramadan kaldırır.
+         *
+         *     Yalnızca birini silmek, kullanıcının sildiğini sandığı ve hâlâ okunan
+         *     bir dosya bırakırdı.
+         */
+        delete: operations["delete_document_api_ai_orchestrator_documents__document_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analytics/portfolio": {
         parameters: {
             query?: never;
@@ -465,6 +518,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/verify-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * E-posta adresini doğrula
+         * @description Kullanıcının e-posta adresini JWT token üzerinden doğrular.
+         *     GÜVENLİK: Sadece geçerli ve süresi dolmamış tokenlar kabul edilir.
+         */
+        post: operations["verify_email_api_auth_verify_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/forgot-password": {
         parameters: {
             query?: never;
@@ -476,9 +550,31 @@ export interface paths {
         put?: never;
         /**
          * Şifre sıfırlama bağlantısı iste
-         * @description Sağlanan e-postaya bir sıfırlama bağlantısı göndererek şifre sıfırlama sürecini başlatır.
+         * @description Kullanıcıya e-posta yoluyla şifre sıfırlama bağlantısı gönderir.
+         *     GÜVENLİK: TC Kimlik ve E-posta doğrulaması yapılarak yetkisiz erişim önlenir.
          */
         post: operations["forgot_password_api_auth_forgot_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Yeni şifre belirle
+         * @description Geçerli bir şifre sıfırlama token'ı ile kullanıcının şifresini yeniler.
+         *     GÜVENLİK: JWT token'ı doğrulanır, şifre bcrypt ile hashlenerek saklanır.
+         */
+        post: operations["reset_password_api_auth_reset_password_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -506,8 +602,77 @@ export interface paths {
          *     konuşmaların bir kullanıcıya bağlanmasını imkânsız kılıyordu.
          */
         get: operations["get_current_user_api_auth_me_get"];
-        put?: never;
+        /**
+         * Mevcut kullanıcının profilini güncelle
+         * @description Kullanıcının kendi profil bilgilerini ve ayarlarını günceller.
+         *     GÜVENLİK: Yalnızca yetkili alanlar (e-posta, telefon, bildirimler vb.) güncellenir.
+         */
+        put: operations["update_profile_api_auth_me_put"];
         post?: never;
+        /**
+         * Kullanıcı hesabını kalıcı olarak kapat (soft delete)
+         * @description Kullanıcı hesabını kalıcı olarak devre dışı bırakır.
+         *
+         *     GÜVENLİK & MİMARİ KARAR:
+         *     Bu endpoint, kullanıcı kaydını veritabanından SILMEZ (hard delete).
+         *     Bunun yerine `is_active=False` yaparak (soft delete) hesabı devre
+         *     dışı bırakır. Bu yaklaşım:
+         *       • MASAK ve finansal düzenleme uyumunu korur (işlem geçmişi saklı kalır).
+         *       • Kullanıcının tekrar giriş yapmasını engeller.
+         *       • Yasal inceleme durumunda verilerin erişilebilir kalmasını sağlar.
+         *
+         *     Frontend'de çok adımlı onay modalı ("KAPAT" yazma zorunluluğu) ile
+         *     korunur; yetkisiz veya kazara tetiklenmesi önlenir.
+         */
+        delete: operations["delete_account_api_auth_me_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/change-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kullanıcının şifresini değiştir
+         * @description Aktif oturumu olan kullanıcının şifresini güvenli bir şekilde değiştirir.
+         *     GÜVENLİK: Mevcut şifrenin uyuştuğu servis katmanında teyit edilir.
+         */
+        post: operations["change_password_api_auth_change_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/export-data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * KVKK/GDPR veri dışa aktarma talebi oluştur
+         * @description Kullanıcının tüm kişisel verilerinin dışa aktarılması talebini alır.
+         *
+         *     KVKK/GDPR UYUM:
+         *     6698 sayılı KVKK ve AB Genel Veri Koruma Tüzüğü (GDPR) kapsamında
+         *     kullanıcılar, platformda saklanan tüm kişisel verilerinin makine
+         *     tarafından okunabilir bir formatta (JSON/CSV/ZIP) kendilerine
+         *     teslim edilmesini talep etme hakkına sahiptir. Bu endpoint o
+         *     talebi başlatır; dosya hazırlandığında kullanıcının kayıtlı
+         *     e-posta adresine gönderilir.
+         */
+        post: operations["export_data_api_auth_export_data_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1450,6 +1615,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market/news/portfolio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portföye dokunan haberler (oturum sahibinin pozisyonları)
+         * @description Kullanıcının tuttuğu hisselere bağlı haberler.
+         *
+         *     Oturum ZORUNLU, demo portföyüne düşülmüyor. Okuma uçlarının çoğu anonim
+         *     çağrıyı demo hesabına düşürüyor ve bu zararsız -- ama "portföyünüze
+         *     dokunan haberler" başlığı altında başkasının portföyünün haberlerini
+         *     göstermek, izleme listesinin eskiden yaptığı hatanın aynısı olurdu:
+         *     kullanıcının seçmediği bir listeyi onunmuş gibi sunmak.
+         *
+         *     Haberler YORUMLANMIYOR. Başlık, kaynak ve tarih veriliyor; bir haberin
+         *     olumlu ya da olumsuz olduğu söylenmiyor, çünkü bu bir piyasa görüşüdür ve
+         *     bu sistemin görüş tutma izni yok.
+         */
+        get: operations["get_portfolio_news_api_market_news_portfolio_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/news/portfolio/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portföye dokunan haberler (MCP sözleşmesi)
+         * @description Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+         *
+         *     `get_portfolio_positions`'ın deseni: MCP araçları kullanıcıyı doğrulanmış
+         *     oturum zarfından alıp yola koyar, bearer token taşımaz. İkisi TEK bir
+         *     yardımcıyı çağırıyor, böylece panel ile sohbetin kullanıcının neye sahip
+         *     olduğu ya da hangi haberin ona dokunduğu konusunda ayrışması mümkün değil.
+         */
+        get: operations["get_portfolio_news_for_ai_api_market_news_portfolio__user_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/market/heatmap": {
         parameters: {
             query?: never;
@@ -1556,6 +1776,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market/calendar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Analist konsensüsü, temettü ve bilanço takvimi
+         * @description "Analizler" ekranının üç listesi.
+         *
+         *     Enstrüman başına ayrı istek yerine tek sorgu: ekran otuz satır gösteriyor
+         *     ve otuz istek atmak, göstereceği şeyden pahalı olurdu.
+         */
+        get: operations["get_calendar_api_market_calendar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/fundamentals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bir enstrümanın temel verisi ve kârlılık oranları
+         * @description Gelir tablosu, marjlar, kârlılık, borç ve analist konsensüsü.
+         *
+         *     Sohbet ile Piyasalar ekranları AYNI uç noktayı okuyor. Bilinmeyen sembol
+         *     ya da henüz çekilmemiş temel veri, boş bir kayıt döndürür -- hata değil:
+         *     "bu enstrümanın temel verisi yok" bir cevaptır ve ekran onu boş
+         *     çizebilir.
+         */
+        get: operations["get_fundamentals_api_market_fundamentals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/technicals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bir enstrümanın teknik göstergeleri ve Türkçe okuması
+         * @description Hareketli ortalamalar, RSI, 52 hafta aralığındaki konum ve eğilim.
+         *
+         *     Sohbet ile hisse detay sayfası AYNI uç noktayı okuyor. Ayrı hesaplasalardı
+         *     ikisi aynı hisse için farklı bir eğilim söyleyebilirdi -- risk ölçümünün
+         *     tek yerde toplanma sebebiyle aynı sebep.
+         *
+         *     `narrative` kullanıcıya gösterilecek cümlenin kendisi. Sayıları modele
+         *     verip "yorumla" demek, aynı göstergelerin her turda biraz farklı
+         *     anlatılması demekti; hangi durumun hangi ifadeye karşılık geldiği kodda.
+         *
+         *     Bilinmeyen sembol boş bir ölçüm döndürür, hata değil.
+         */
+        get: operations["get_technicals_api_market_technicals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/market/stream": {
         parameters: {
             query?: never;
@@ -1595,6 +1893,35 @@ export interface paths {
          * @description `ingestor` servisinin fiyat ve OHLCV verisi yazdığı uç nokta.
          */
         post: operations["ingest_market_data_api_market_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/news/known-ids": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kayıtlı bildirim numaraları (servisler arası)
+         * @description `ingestor`'ın "bunlardan hangileri bende zaten var" diye sorduğu uç.
+         *
+         *     KAP listesi her koşuda iki bin bildirim döndürüyor ve her birinin gövdesi
+         *     ayrı bir sayfada. Sormadan çekmek, aynı iki bin sayfayı on beş dakikada
+         *     bir yeniden istemek olurdu. `candles/coverage` ile aynı desen ve aynı
+         *     sebep: kaynağa neyi zaten aldığımızı sormak yerine ona söylemek.
+         *
+         *     Numara URL'den okunuyor, ayrı bir sütundan değil -- bildirimin adresi
+         *     `.../Bildirim/1656735` ve numara zaten orada. Bunun için şema büyütmek,
+         *     aynı bilgiyi ikinci kez saklamak olurdu.
+         */
+        get: operations["known_news_ids_api_market_news_known_ids_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1813,6 +2140,138 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/risk/profile/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Risk profili özeti (MCP v2.4 sözleşmesi)
+         * @description Sohbet ajanının okuduğu özet: puan, seviye ve beyanla karşılaştırma.
+         *
+         *     `POST /calculate` ham istatistik döner ve puanı üretmez; puan ile bandı
+         *     `profile.py` üretiyor ve buraya kadar ajana hiç ulaşmıyordu. Sonuç, tek
+         *     sisteme sorulan bir soruya iki cevaptı: sayfa 83 puan / "Düşük" derken
+         *     sohbet aynı portföy için yalnızca bir oynaklık yüzdesi söylüyordu.
+         *
+         *     `GET /profile`'ın aksine kullanıcıyı yoldan alır, oturumdan değil —
+         *     `require_service_token` bu yüzden var: bu uç noktanın konusu çağıranın
+         *     kendisi olmak zorunda değil.
+         *
+         *     Sayfanın nakit akışı bloğu burada YOK. Gelir ve gider hiçbir risk
+         *     sorusunu cevaplamıyor, dolayısıyla bir dil modeline gitmesi için de bir
+         *     sebep yok.
+         */
+        get: operations["risk_summary_for_ai_api_risk_profile__user_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/risk/questionnaire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Risk tolerans anketi
+         * @description Anketin kendisi. Kimlik doğrulaması istemez — sorularda kişisel veri yok
+         *     ve formu görmek için giriş yapmak zorunda kalmak, testi doldurma
+         *     ihtimalini düşürmekten başka bir işe yaramaz. Cevap GÖNDERMEK ise
+         *     oturuma bağlıdır.
+         */
+        get: operations["get_questionnaire_api_risk_questionnaire_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/risk/assessment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Anketi gönder ve risk profilini güncelle
+         * @description Cevapları kaydeder ve geçerli risk profilini günceller.
+         *
+         *     Eksik ya da tanınmayan bir cevap 422 ile reddedilir; boşları sıfır sayıp
+         *     puanlamak, yarıda bırakan birine temkinli bir tolerans atfeder ve o
+         *     tolerans sonra portföyüyle karşılaştırılır.
+         */
+        post: operations["submit_assessment_api_risk_assessment_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/risk/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Risk puanının zaman içindeki seyri
+         * @description Kaydedilmiş günlük ölçümler, eskiden yeniye.
+         *
+         *     Noktalar `GET /profile` okundukça birikir; geçmişe dönük bir seri
+         *     üretilmez. Ölçülmemiş bir gün uydurulmuş bir noktadan iyidir — grafik o
+         *     gün için boşluk gösterir, portföyün hiç yaşamadığı bir hareketi değil.
+         */
+        get: operations["risk_history_api_risk_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/risk/simulate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * "Ne olur?" — varsayımsal bir değişikliğin risk etkisi
+         * @description Bir alım/satım yapılsaydı ölçülen risk nasıl değişirdi.
+         *
+         *     Yeni bir matematik yok: `service.calculate` zaten dışarıdan bir pozisyon
+         *     listesi alıyor, burada yapılan tek şey ikinci bir liste üretip motoru iki
+         *     kez çalıştırmak.
+         *
+         *     Bunun bir öneri motoruna dönüşmemesi iki kurala bağlı: **değişikliği
+         *     sunucu önermez**, kullanıcı verir; ve yanıt "daha iyi/daha kötü" demez,
+         *     yalnızca iki ölçümü yan yana koyar. Yorumu okuyan yapar.
+         */
+        post: operations["simulate_api_risk_simulate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/risk/health": {
         parameters: {
             query?: never;
@@ -1930,6 +2389,78 @@ export interface components {
             /** Percentage */
             percentage: number;
         };
+        /**
+         * AnalystRow
+         * @description Bir enstrüman için analist konsensüsü.
+         *
+         *     BAŞKASININ değerlendirmesi. "16 analistin ortalama hedefi 95,39 TL"
+         *     aktarılabilir bir olgudur; ürünün kendi görüşü değildir.
+         */
+        AnalystRow: {
+            /** Symbol */
+            symbol: string;
+            /** Name */
+            name?: string | null;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            /** Recommendation */
+            recommendation: string;
+            /** Analyst Count */
+            analyst_count: number;
+            /** Target Mean Price */
+            target_mean_price?: number | null;
+        };
+        /**
+         * AppliedChangeOut
+         * @description What the server actually did with each requested change.
+         *
+         *     Echoed back because a silently dropped change would leave the user reading
+         *     a comparison of something they did not ask for.
+         */
+        AppliedChangeOut: {
+            /** Symbol */
+            symbol: string;
+            /** Quantity Delta */
+            quantity_delta: number;
+            /** Applied */
+            applied: boolean;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * AssessmentRequest
+         * @description Answers, keyed by question. Every question is required.
+         *
+         *     A partial questionnaire scored with the blanks as zeros would report a
+         *     cautious tolerance for someone who simply stopped halfway -- and that
+         *     answer would then be compared against their portfolio as if they had
+         *     given it.
+         */
+        AssessmentRequest: {
+            /** Answers */
+            answers: {
+                [key: string]: string;
+            };
+        };
+        /** AssessmentResultOut */
+        AssessmentResultOut: {
+            /** Tolerance Level */
+            tolerance_level: string;
+            /** Investment Horizon */
+            investment_horizon: string;
+            /**
+             * Assessed At
+             * Format: date-time
+             */
+            assessed_at: string;
+            /** Questionnaire Version */
+            questionnaire_version: string;
+            /** Raw Score */
+            raw_score: number;
+        };
         /** AssetAllocationItem */
         AssetAllocationItem: {
             /** Assetclass */
@@ -2008,6 +2539,20 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * BenchmarkSeries
+         * @description The index the portfolio is shown against, on the portfolio's own dates.
+         *
+         *     Raw closes, not rescaled: the chart decides how to put two series with
+         *     different units on one axis, and an already-normalised number would leave
+         *     the page unable to say what the index actually did.
+         */
+        BenchmarkSeries: {
+            /** Symbol */
+            symbol: string;
+            /** Points */
+            points?: components["schemas"]["TrendPoint"][];
+        };
         /** BillListOut */
         BillListOut: {
             /** Bills */
@@ -2068,13 +2613,12 @@ export interface components {
              */
             created_at: string;
         };
-        /** Body_forgot_password_api_auth_forgot_password_post */
-        Body_forgot_password_api_auth_forgot_password_post: {
-            /**
-             * Email
-             * Format: email
-             */
-            email: string;
+        /** Body_upload_document_api_ai_orchestrator_documents_post */
+        Body_upload_document_api_ai_orchestrator_documents_post: {
+            /** File */
+            file: string;
+            /** Thread Id */
+            thread_id?: string | null;
         };
         /** CandleIn */
         CandleIn: {
@@ -2294,6 +2838,66 @@ export interface components {
             monthly_expense: number;
             /** Savings Rate */
             savings_rate?: number | null;
+        };
+        /**
+         * ChangePasswordRequest
+         * @description Aktif oturumda şifre değiştirme isteği için şema.
+         *     GÜVENLİK: Hesabın ele geçirilmesini önlemek amacıyla mevcut şifrenin doğrulanması zorunludur.
+         */
+        ChangePasswordRequest: {
+            /**
+             * Current Password
+             * @description Kullanıcının mevcut şifresi
+             */
+            current_password: string;
+            /**
+             * New Password
+             * @description Yeni şifre en az 8 karakter olmalı, 1 büyük harf ve 1 rakam içermelidir
+             */
+            new_password: string;
+        };
+        /** ChatDocumentListOut */
+        ChatDocumentListOut: {
+            /** Documents */
+            documents?: components["schemas"]["ChatDocumentOut"][];
+            /** Accepted */
+            accepted?: string[];
+            /**
+             * Max Bytes
+             * @default 0
+             */
+            max_bytes: number;
+        };
+        /**
+         * ChatDocumentOut
+         * @description Kullanıcının yüklediği bir belge, listede göründüğü hâliyle.
+         *
+         *     Metnin kendisi YOK: bu uç nokta neyin yüklendiğini söyler, ne yazdığını
+         *     değil. İçerik sohbette, kullanıcının sorusuna cevap olarak çıkar.
+         */
+        ChatDocumentOut: {
+            /** Id */
+            id: string;
+            /** Filename */
+            filename: string;
+            /** Kind */
+            kind: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Units */
+            units?: number | null;
+            /** Char Count */
+            char_count?: number | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * ChatRequest
@@ -2538,6 +3142,41 @@ export interface components {
              */
             is_statistically_reliable: boolean;
         };
+        /**
+         * DeclaredProfileOut
+         * @description What the user said, and when they said it.
+         */
+        DeclaredProfileOut: {
+            /** Tolerance Level */
+            tolerance_level: string;
+            /** Investment Horizon */
+            investment_horizon: string;
+            /**
+             * Assessed At
+             * Format: date-time
+             */
+            assessed_at: string;
+            /** Questionnaire Version */
+            questionnaire_version: string;
+        };
+        /**
+         * DeleteAccountRequest
+         * @description Hesap kapatma (soft delete) isteği için şema.
+         *
+         *     KVKK/GDPR UYUM NOTU:
+         *     Hesap kapatma geri dönüşü olmayan (irreversible) kritik bir aksiyondur.
+         *     Frontend'de çok adımlı onay modalı ("KAPAT" yazma zorunluluğu) ile
+         *     korunduğu için bu şemada yalnızca opsiyonel ayrılma nedeni istenir.
+         *     Gerçek silme yerine soft-delete (is_active=False) uygulanır; yasal
+         *     saklama yükümlülükleri gereği kullanıcı kaydı veritabanında kalır.
+         */
+        DeleteAccountRequest: {
+            /**
+             * Reason
+             * @description Kullanıcının opsiyonel ayrılma nedeni
+             */
+            reason?: string | null;
+        };
         /** DeletedConversationOut */
         DeletedConversationOut: {
             /** Thread Id */
@@ -2547,6 +3186,57 @@ export interface components {
              * @default deleted
              */
             status: string;
+        };
+        /** DividendRow */
+        DividendRow: {
+            /** Symbol */
+            symbol: string;
+            /** Name */
+            name?: string | null;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            /** Dividend Yield */
+            dividend_yield?: number | null;
+            /** Dividend Rate */
+            dividend_rate?: number | null;
+            /** Payout Ratio */
+            payout_ratio?: number | null;
+            /** Ex Dividend Date */
+            ex_dividend_date?: string | null;
+        };
+        /** EarningsRow */
+        EarningsRow: {
+            /** Symbol */
+            symbol: string;
+            /** Name */
+            name?: string | null;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            /**
+             * Earnings Date
+             * Format: date-time
+             */
+            earnings_date: string;
+        };
+        /**
+         * ForgotPasswordRequest
+         * @description Şifre sıfırlama isteği için şema.
+         *     GÜVENLİK: Hem T.C. Kimlik hem de e-posta adresinin eşleşmesi gerekir.
+         */
+        ForgotPasswordRequest: {
+            /** Tc No */
+            tc_no: string;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
         };
         /**
          * FundamentalsIn
@@ -2577,11 +3267,161 @@ export interface components {
             week52_high?: number | null;
             /** Week52 Low */
             week52_low?: number | null;
+            /** Total Revenue */
+            total_revenue?: number | null;
+            /** Revenue Growth */
+            revenue_growth?: number | null;
+            /** Gross Margin */
+            gross_margin?: number | null;
+            /** Operating Margin */
+            operating_margin?: number | null;
+            /** Ebitda Margin */
+            ebitda_margin?: number | null;
+            /** Profit Margin */
+            profit_margin?: number | null;
+            /** Return On Equity */
+            return_on_equity?: number | null;
+            /** Return On Assets */
+            return_on_assets?: number | null;
+            /** Debt To Equity */
+            debt_to_equity?: number | null;
+            /** Current Ratio */
+            current_ratio?: number | null;
+            /** Total Debt */
+            total_debt?: number | null;
+            /** Total Cash */
+            total_cash?: number | null;
+            /** Free Cash Flow */
+            free_cash_flow?: number | null;
+            /** Operating Cash Flow */
+            operating_cash_flow?: number | null;
+            /** Enterprise Value */
+            enterprise_value?: number | null;
+            /** Beta */
+            beta?: number | null;
+            /** Trailing Eps */
+            trailing_eps?: number | null;
+            /** Forward Eps */
+            forward_eps?: number | null;
+            /** Forward Pe */
+            forward_pe?: number | null;
+            /** Earnings Growth */
+            earnings_growth?: number | null;
+            /** Payout Ratio */
+            payout_ratio?: number | null;
+            /** Dividend Rate */
+            dividend_rate?: number | null;
+            /** Recommendation Key */
+            recommendation_key?: string | null;
+            /** Analyst Count */
+            analyst_count?: number | null;
+            /** Target Mean Price */
+            target_mean_price?: number | null;
+            /** Ex Dividend Date */
+            ex_dividend_date?: string | null;
+            /** Earnings Date */
+            earnings_date?: string | null;
         };
         /** FundamentalsIngestRequest */
         FundamentalsIngestRequest: {
             /** Items */
             items?: components["schemas"]["FundamentalsIn"][];
+        };
+        /**
+         * FundamentalsOut
+         * @description Bir enstrümanın saklanan tüm temel verisi.
+         *
+         *     `/market/instruments`'ten AYRI: o, dondurulmuş v2.2 sözleşmesi ve bir
+         *     LİSTE için "bu ne ediyor" sorusunu yanıtlıyor. Bunlar tek bir şirket
+         *     hakkında otuz küsur alan ve tarama ekranlarının çoğu hiçbirine
+         *     bakmıyor -- teknik göstergeleri kendi uç noktasına koyan gerekçenin
+         *     aynısı.
+         *
+         *     Her alan Optional ve öyle kalıyor. Bankanın brüt marjı YOKTUR; onu 0
+         *     olarak vermek, şirketin hiç sahip olmadığı bir olguyu bildirmek olur.
+         */
+        FundamentalsOut: {
+            /** Symbol */
+            symbol: string;
+            /** Name */
+            name?: string | null;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Pe Ratio */
+            pe_ratio?: number | null;
+            /** Pb Ratio */
+            pb_ratio?: number | null;
+            /** Market Cap */
+            market_cap?: number | null;
+            /** Dividend Yield */
+            dividend_yield?: number | null;
+            /** Sector */
+            sector?: string | null;
+            /** Industry */
+            industry?: string | null;
+            /** Week52 High */
+            week52_high?: number | null;
+            /** Week52 Low */
+            week52_low?: number | null;
+            /** Total Revenue */
+            total_revenue?: number | null;
+            /** Revenue Growth */
+            revenue_growth?: number | null;
+            /** Gross Margin */
+            gross_margin?: number | null;
+            /** Operating Margin */
+            operating_margin?: number | null;
+            /** Ebitda Margin */
+            ebitda_margin?: number | null;
+            /** Profit Margin */
+            profit_margin?: number | null;
+            /** Return On Equity */
+            return_on_equity?: number | null;
+            /** Return On Assets */
+            return_on_assets?: number | null;
+            /** Debt To Equity */
+            debt_to_equity?: number | null;
+            /** Current Ratio */
+            current_ratio?: number | null;
+            /** Total Debt */
+            total_debt?: number | null;
+            /** Total Cash */
+            total_cash?: number | null;
+            /** Free Cash Flow */
+            free_cash_flow?: number | null;
+            /** Operating Cash Flow */
+            operating_cash_flow?: number | null;
+            /** Enterprise Value */
+            enterprise_value?: number | null;
+            /** Beta */
+            beta?: number | null;
+            /** Trailing Eps */
+            trailing_eps?: number | null;
+            /** Forward Eps */
+            forward_eps?: number | null;
+            /** Forward Pe */
+            forward_pe?: number | null;
+            /** Earnings Growth */
+            earnings_growth?: number | null;
+            /** Payout Ratio */
+            payout_ratio?: number | null;
+            /** Dividend Rate */
+            dividend_rate?: number | null;
+            /** Recommendation Key */
+            recommendation_key?: string | null;
+            /** Analyst Count */
+            analyst_count?: number | null;
+            /** Target Mean Price */
+            target_mean_price?: number | null;
+            /** Ex Dividend Date */
+            ex_dividend_date?: string | null;
+            /** Earnings Date */
+            earnings_date?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2842,6 +3682,18 @@ export interface components {
              * @description Kullanıcının şifresi
              */
             password: string;
+        };
+        /**
+         * MarketCalendarOut
+         * @description "Analizler" ekranının üç listesi, tek çağrıda.
+         */
+        MarketCalendarOut: {
+            /** Analysts */
+            analysts?: components["schemas"]["AnalystRow"][];
+            /** Dividends */
+            dividends?: components["schemas"]["DividendRow"][];
+            /** Earnings */
+            earnings?: components["schemas"]["EarningsRow"][];
         };
         /** MarketHeatmapOut */
         MarketHeatmapOut: {
@@ -3148,12 +4000,76 @@ export interface components {
             sectors?: components["schemas"]["AllocationSlice"][];
             /** Trend */
             trend?: components["schemas"]["TrendPoint"][];
+            benchmark?: components["schemas"]["BenchmarkSeries"] | null;
             performance: components["schemas"]["PerformanceSummary"];
             activity: components["schemas"]["ActivitySummary"];
             /** Excluded Symbols */
             excluded_symbols?: string[];
             /** Warnings */
             warnings?: string[];
+        };
+        /**
+         * PortfolioNewsItem
+         * @description Akış öğesi + haberin hangi pozisyonlara dokunduğu.
+         *
+         *     `relatedSymbols` haberin TÜM etiketlerini taşır; `heldSymbols` bunların
+         *     kullanıcının gerçekten tuttuğu alt kümesi. İkisi ayrı, çünkü "BIST 100
+         *     değer kaybetti" haberi dört şirketi anıyor olabilir ve kullanıcı bunlardan
+         *     yalnızca birine sahiptir -- panelde hangisi yüzünden listelendiği
+         *     okunabilir olmalı.
+         */
+        PortfolioNewsItem: {
+            /** Id */
+            id: string;
+            /** Source */
+            source: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+            /** Time */
+            time: string;
+            /**
+             * Sentiment
+             * @enum {string}
+             */
+            sentiment: "positive" | "negative" | "neutral";
+            /** Relatedsymbols */
+            relatedSymbols: string[];
+            /**
+             * Publishedat
+             * Format: date-time
+             */
+            publishedAt: string;
+            /** Heldsymbols */
+            heldSymbols: string[];
+        };
+        /**
+         * PortfolioNewsOut
+         * @description Portföye dokunan haberler paneli.
+         *
+         *     Haber olmadığında da dönen bir gövde: `symbols` doludur, `items` boştur.
+         *     Sessizce kaybolan bir panel, veri yokluğunu özellik yokluğu gibi gösterir.
+         */
+        PortfolioNewsOut: {
+            /** Symbols */
+            symbols: components["schemas"]["PortfolioNewsSymbol"][];
+            /** Items */
+            items: components["schemas"]["PortfolioNewsItem"][];
+            /** Windowdays */
+            windowDays: number;
+        };
+        /**
+         * PortfolioNewsSymbol
+         * @description Portföydeki bir sembol ve o pencerede ona dokunan haber sayısı.
+         */
+        PortfolioNewsSymbol: {
+            /** Symbol */
+            symbol: string;
+            /** Name */
+            name: string;
+            /** Count */
+            count: number;
         };
         /**
          * PortfolioPositionsOut
@@ -3240,6 +4156,20 @@ export interface components {
             quantity: number;
         };
         /**
+         * PositionChange
+         * @description One hypothetical trade.
+         *
+         *     The DELTA comes from the caller, never from the server. That is what keeps
+         *     this a calculator rather than a recommendation engine: nothing here
+         *     proposes a change, it only measures one the user described.
+         */
+        PositionChange: {
+            /** Symbol */
+            symbol: string;
+            /** Quantity Delta */
+            quantity_delta: number;
+        };
+        /**
          * PositionIn
          * @description One holding. Extra keys are accepted and ignored.
          *
@@ -3261,12 +4191,17 @@ export interface components {
              * Asset Class
              * @default EQUITY
              */
-            asset_class: string;
+            asset_class: string | null;
             /**
              * Instrument Currency
              * @default TRY
              */
-            instrument_currency: string;
+            instrument_currency: string | null;
+            /**
+             * Sector
+             * @default UNCLASSIFIED
+             */
+            sector: string | null;
         };
         /** PositionOut */
         PositionOut: {
@@ -3302,6 +4237,31 @@ export interface components {
             available_quantity: number;
             /** Opened At */
             opened_at: string;
+        };
+        /** QuestionOptionOut */
+        QuestionOptionOut: {
+            /** Value */
+            value: string;
+            /** Label */
+            label: string;
+        };
+        /** QuestionOut */
+        QuestionOut: {
+            /** Key */
+            key: string;
+            /** Prompt */
+            prompt: string;
+            /** Helper */
+            helper?: string | null;
+            /** Options */
+            options: components["schemas"]["QuestionOptionOut"][];
+        };
+        /** QuestionnaireOut */
+        QuestionnaireOut: {
+            /** Version */
+            version: string;
+            /** Questions */
+            questions: components["schemas"]["QuestionOut"][];
         };
         /** QuoteIn */
         QuoteIn: {
@@ -3385,6 +4345,22 @@ export interface components {
             /** Title */
             title: string;
         };
+        /**
+         * ResetPasswordRequest
+         * @description Şifreyi sıfırlamak için şema.
+         */
+        ResetPasswordRequest: {
+            /**
+             * Token
+             * @description E-postadaki JWT sıfırlama token'ı
+             */
+            token: string;
+            /**
+             * New Password
+             * @description Şifre en az 8 karakter olmalı, 1 büyük harf ve 1 rakam içermelidir
+             */
+            new_password: string;
+        };
         /** RiskFinding */
         RiskFinding: {
             /** Id */
@@ -3397,6 +4373,15 @@ export interface components {
             impact: string;
             /** Value */
             value?: number | null;
+        };
+        /** RiskHistoryOut */
+        RiskHistoryOut: {
+            /** Lookback */
+            lookback: string;
+            /** Days */
+            days: number;
+            /** Points */
+            points?: components["schemas"]["SnapshotOut"][];
         };
         /** RiskProfileOut */
         RiskProfileOut: {
@@ -3417,6 +4402,14 @@ export interface components {
             metrics?: {
                 [key: string]: unknown;
             };
+            /** Window */
+            window?: {
+                [key: string]: unknown;
+            };
+            /** Assumptions */
+            assumptions?: {
+                [key: string]: unknown;
+            };
             /**
              * Position Count
              * @default 0
@@ -3424,6 +4417,8 @@ export interface components {
             position_count: number;
             /** Warnings */
             warnings?: string[];
+            declared?: components["schemas"]["DeclaredProfileOut"] | null;
+            suitability?: components["schemas"]["SuitabilityOut"] | null;
         };
         /** RiskRequest */
         RiskRequest: {
@@ -3482,6 +4477,43 @@ export interface components {
             actionLabel: string;
             /** Priority */
             priority: string;
+        };
+        /**
+         * RiskSummaryOut
+         * @description The interpreted layer: a score, a level, and the declared comparison.
+         *
+         *     `POST /calculate` returns raw statistics and nothing else; the score and
+         *     the band are produced here, by `profile.py`. Without this endpoint the
+         *     chat agent had no access to either, so "how risky is my portfolio" was
+         *     answered with a volatility figure while the risk page showed a 0-100
+         *     score -- two answers to one question, from one system.
+         */
+        RiskSummaryOut: {
+            /** As Of */
+            as_of: string;
+            /** Score */
+            score?: number | null;
+            /** Level */
+            level?: string | null;
+            /**
+             * Position Count
+             * @default 0
+             */
+            position_count: number;
+            suitability: components["schemas"]["SuitabilityOut"];
+            declared?: components["schemas"]["DeclaredProfileOut"] | null;
+            /** Metrics */
+            metrics?: {
+                [key: string]: unknown;
+            };
+            /** Findings */
+            findings?: components["schemas"]["RiskFinding"][];
+            /** Data Quality */
+            data_quality?: {
+                [key: string]: unknown;
+            };
+            /** Warnings */
+            warnings?: string[];
         };
         /** SavePayeeRequest */
         SavePayeeRequest: {
@@ -3567,6 +4599,85 @@ export interface components {
             percentage: number;
             /** Color */
             color: string;
+        };
+        /** SimulationOut */
+        SimulationOut: {
+            /** As Of */
+            as_of: string;
+            current: components["schemas"]["SimulationSideOut"];
+            hypothetical: components["schemas"]["SimulationSideOut"];
+            /** Deltas */
+            deltas?: {
+                [key: string]: number | null;
+            };
+            /** Changes */
+            changes?: components["schemas"]["AppliedChangeOut"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /** SimulationRequest */
+        SimulationRequest: {
+            /** Changes */
+            changes: components["schemas"]["PositionChange"][];
+            /**
+             * Lookback
+             * @default 1Y
+             */
+            lookback: string;
+        };
+        /**
+         * SimulationSideOut
+         * @description One side of the comparison. A subset of the metrics on purpose —
+         *     showing all twenty invites diffing numbers the change did not move.
+         */
+        SimulationSideOut: {
+            /** Score */
+            score?: number | null;
+            /** Level */
+            level?: string | null;
+            /** Volatility */
+            volatility?: number | null;
+            /** Hhi */
+            hhi?: number | null;
+            /** Effective N */
+            effective_n?: number | null;
+            /** Max Drawdown */
+            max_drawdown?: number | null;
+            /**
+             * Position Count
+             * @default 0
+             */
+            position_count: number;
+        };
+        /**
+         * SnapshotOut
+         * @description One day's measurement.
+         *
+         *     Every metric is optional: a day on which something could not be measured
+         *     is recorded as unmeasured rather than as zero, and the chart draws a gap
+         *     instead of a crash the portfolio never had.
+         */
+        SnapshotOut: {
+            /**
+             * Captured On
+             * Format: date
+             */
+            captured_on: string;
+            /** Score */
+            score?: number | null;
+            /** Level */
+            level?: string | null;
+            /** Volatility */
+            volatility?: number | null;
+            /** Hhi */
+            hhi?: number | null;
+            /** Max Drawdown */
+            max_drawdown?: number | null;
+            /**
+             * Position Count
+             * @default 0
+             */
+            position_count: number;
         };
         /** SpendingCategoryOut */
         SpendingCategoryOut: {
@@ -3717,6 +4828,97 @@ export interface components {
             subscriber_no: string;
         };
         /**
+         * SuitabilityOut
+         * @description Measurement beside declaration.
+         *
+         *     Both fields carry the SAME three labels (Düşük/Orta/Yüksek) rather than
+         *     two numbers. The measured score is inverted -- 100 means calm -- and the
+         *     questionnaire's raw score is not, so comparing the numbers would be read
+         *     backwards sooner or later.
+         */
+        SuitabilityOut: {
+            /** Measured Level */
+            measured_level?: string | null;
+            /** Declared Tolerance */
+            declared_tolerance?: string | null;
+            /**
+             * Alignment
+             * @default UNKNOWN
+             */
+            alignment: string;
+            /**
+             * Statement
+             * @default
+             */
+            statement: string;
+        };
+        /**
+         * TechnicalSignals
+         * @description Hesaplanan göstergeler.
+         *
+         *     Her alan `Optional`: yeterli bar olmadığında değer YOKTUR. 60 barı olan
+         *     bir enstrümanda `sma_200` boştur, elde olan barlarla hesaplanmış bir
+         *     yaklaşık değil -- "200 günlük ortalama" adını taşıyıp 60 günü ölçen bir
+         *     sayı, okuyanı yanıltır.
+         */
+        TechnicalSignals: {
+            /**
+             * Observations
+             * @default 0
+             */
+            observations: number;
+            /** Last Close */
+            last_close?: number | null;
+            /** Sma 20 */
+            sma_20?: number | null;
+            /** Sma 50 */
+            sma_50?: number | null;
+            /** Sma 200 */
+            sma_200?: number | null;
+            /** Pct From Sma 20 */
+            pct_from_sma_20?: number | null;
+            /** Pct From Sma 50 */
+            pct_from_sma_50?: number | null;
+            /** Pct From Sma 200 */
+            pct_from_sma_200?: number | null;
+            /** Rsi 14 */
+            rsi_14?: number | null;
+            /** Week52 High */
+            week52_high?: number | null;
+            /** Week52 Low */
+            week52_low?: number | null;
+            /** Week52 Position Pct */
+            week52_position_pct?: number | null;
+            /** Up Days Recent */
+            up_days_recent?: number | null;
+            /** Recent Window */
+            recent_window?: number | null;
+            /** Volume Vs Average */
+            volume_vs_average?: number | null;
+            /** Annualised Volatility */
+            annualised_volatility?: number | null;
+            /** Max Drawdown Pct */
+            max_drawdown_pct?: number | null;
+            /**
+             * Trend
+             * @default UNKNOWN
+             */
+            trend: string;
+        };
+        /** TechnicalSignalsOut */
+        TechnicalSignalsOut: {
+            /** Symbol */
+            symbol: string;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            signals: components["schemas"]["TechnicalSignals"];
+            /** Narrative */
+            narrative?: string | null;
+        };
+        /**
          * TokenResponse
          * @description JWT token yanıtı için şema.
          */
@@ -3825,12 +5027,66 @@ export interface components {
             /** Is Active */
             is_active: boolean;
             /**
+             * Notification Preferences
+             * @description Kullanıcının detaylı bildirim tercihleri matrisi
+             */
+            notification_preferences: {
+                [key: string]: {
+                    [key: string]: boolean;
+                };
+            };
+            /**
+             * Transaction Limit
+             * @description Ek doğrulama gerektiren transfer eşiği (₺)
+             */
+            transaction_limit: number;
+            /**
+             * User Preferences
+             * @description Kullanıcıya özgü görünüm ve bölgesel tercihler
+             */
+            user_preferences: {
+                [key: string]: string;
+            };
+            /**
              * Created At
              * Format: date-time
              */
             created_at: string;
             /** Customer No */
             customer_no?: string | null;
+        };
+        /**
+         * UserUpdateRequest
+         * @description Kullanıcı profil güncelleme isteği için şema.
+         *     GÜVENLİK: TC ve Ad-Soyad gibi kritik bilgiler değiştirilemez.
+         *     Yalnızca iletişim ve tercih ayarları güncellenebilir.
+         */
+        UserUpdateRequest: {
+            /** Email */
+            email?: string | null;
+            /** Phone Number */
+            phone_number?: string | null;
+            /**
+             * Notification Preferences
+             * @description Opsiyonel olarak güncellenecek detaylı bildirim matrisi
+             */
+            notification_preferences?: {
+                [key: string]: {
+                    [key: string]: boolean;
+                };
+            } | null;
+            /**
+             * Transaction Limit
+             * @description Ek doğrulama gerektiren transfer eşiği (₺)
+             */
+            transaction_limit?: number | null;
+            /**
+             * User Preferences
+             * @description Kullanıcıya özgü görünüm ve bölgesel tercihler
+             */
+            user_preferences?: {
+                [key: string]: string;
+            } | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -3844,6 +5100,17 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * VerifyEmailRequest
+         * @description E-posta doğrulama için şema.
+         */
+        VerifyEmailRequest: {
+            /**
+             * Token
+             * @description E-postadaki JWT doğrulama token'ı
+             */
+            token: string;
         };
         /** WatchlistItem */
         WatchlistItem: {
@@ -4464,10 +5731,93 @@ export interface operations {
             };
         };
     };
+    list_documents_api_ai_orchestrator_documents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatDocumentListOut"];
+                };
+            };
+        };
+    };
+    upload_document_api_ai_orchestrator_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_document_api_ai_orchestrator_documents_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatDocumentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_document_api_ai_orchestrator_documents__document_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     portfolio_analysis_api_analytics_portfolio_get: {
         parameters: {
             query?: {
                 range?: string;
+                lookback?: string;
             };
             header?: never;
             path?: never;
@@ -4614,6 +5964,39 @@ export interface operations {
             };
         };
     };
+    verify_email_api_auth_verify_email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     forgot_password_api_auth_forgot_password_post: {
         parameters: {
             query?: never;
@@ -4623,7 +6006,40 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Body_forgot_password_api_auth_forgot_password_post"];
+                "application/json": components["schemas"]["ForgotPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_password_api_auth_reset_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
             };
         };
         responses: {
@@ -4663,6 +6079,125 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+        };
+    };
+    update_profile_api_auth_me_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_account_api_auth_me_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_password_api_auth_change_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_data_api_auth_export_data_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
@@ -5828,6 +7363,72 @@ export interface operations {
             };
         };
     };
+    get_portfolio_news_api_market_news_portfolio_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioNewsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_news_for_ai_api_market_news_portfolio__user_id__get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                days?: number;
+            };
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioNewsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     market_heatmap_api_market_heatmap_get: {
         parameters: {
             query?: {
@@ -5962,6 +7563,99 @@ export interface operations {
             };
         };
     };
+    get_calendar_api_market_calendar_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketCalendarOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fundamentals_api_market_fundamentals_get: {
+        parameters: {
+            query: {
+                symbol: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundamentalsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_technicals_api_market_technicals_get: {
+        parameters: {
+            query: {
+                symbol: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TechnicalSignalsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     market_stream_api_market_stream_get: {
         parameters: {
             query?: never;
@@ -6004,6 +7698,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IngestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    known_news_ids_api_market_news_known_ids_get: {
+        parameters: {
+            query: {
+                source: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -6271,6 +7998,158 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RiskProfileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    risk_summary_for_ai_api_risk_profile__user_id__get: {
+        parameters: {
+            query?: {
+                lookback?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_questionnaire_api_risk_questionnaire_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuestionnaireOut"];
+                };
+            };
+        };
+    };
+    submit_assessment_api_risk_assessment_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssessmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentResultOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    risk_history_api_risk_history_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskHistoryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    simulate_api_risk_simulate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimulationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationOut"];
                 };
             };
             /** @description Validation Error */

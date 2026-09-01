@@ -109,6 +109,9 @@ describe('endpoint paths', () => {
     ['getHeatmap', '/api/investment/heatmap'],
     ['getMarketTickers', '/api/market/tickers'],
     ['getMarketNews', '/api/market/news'],
+    // Oturuma bağlı ve demo portföyüne düşmüyor; kullanıcı yoldan değil
+    // token'dan çözülüyor, o yüzden çağrı argümansız.
+    ['getPortfolioNews', '/api/market/news/portfolio'],
     ['getPortfolioAnalysis', '/api/analytics/portfolio'],
     ['getCurrentUser', '/api/auth/me'],
       ['getConversations', '/api/ai_orchestrator/conversations'],

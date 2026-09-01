@@ -3,7 +3,7 @@
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Sequence
 
 import httpx
@@ -120,6 +120,78 @@ def latest_news(db: Session, limit: int = 20) -> list[NewsItem]:
         .order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
         .limit(limit)
         .all()
+    )
+
+
+# ── Portföye dokunan haberler ────────────────────────────────────────────────
+
+#: Panelin baktığı pencere. Sayı ve başlıklar AYNI pencereden okunur:
+#: "AKBNK: 9 haber" yazıp listede o dokuzun dışından bir başlık göstermek,
+#: sayının neyi saydığını okunamaz hâle getirirdi.
+#:
+#: Doksan gün, otuz değil. Sebep eşleştirmenin bilinçli olarak dar olması:
+#: ölçüldü, son otuz günün 1.096 RSS haberinin yalnızca 21'i (%2) bir sembole
+#: bağlanıyor -- bulanık eşleşme olmadığı için. Aynı test portföyünde otuz gün
+#: TEK bir başlık, doksan gün dokuz başlık veriyor. Haberin tarihi zaten her
+#: satırda yazılı, dolayısıyla eski bir başlık yeni gibi görünmüyor; boş bir
+#: panel ise "haber yok" değil "böyle bir şey yok" diye okunuyor.
+#: Eşleşme kapsamı arttığında bu sayı yeniden ölçülüp daraltılabilir.
+NEWS_WINDOW_DAYS = 90
+
+
+def portfolio_news(
+    db: Session,
+    symbols: Sequence[str],
+    limit: int = 20,
+    days: int = NEWS_WINDOW_DAYS,
+) -> tuple[list[NewsItem], dict[str, int]]:
+    """Kullanıcının tuttuğu sembollere bağlı haberler ve sembol başına sayı.
+
+    Tek okuma, iki cevap: pencere içindeki eşleşen satırların tamamı okunur,
+    sembol başına sayılır, sonra `limit` kadarı başlık olarak döner. Sayıyı
+    ayrı bir sorgudan almak, iki sorgunun arasında gelen bir haberin sayıda
+    görünüp listede görünmemesi demekti.
+
+    Haberler ZAMAN SIRASINDA döner, sembole göre paylaştırılmaz. Portföyün
+    bir hissesi haberlerin tamamını doldurabilir ve bu gerçeğin kendisidir;
+    sembol başına sayı zaten dağılımı gösteriyor. Yapay olarak her sembolden
+    bir başlık seçmek, o gün gerçekten ne olduğunu gizlerdi.
+    """
+    wanted = [symbol for symbol in dict.fromkeys(symbols) if symbol]
+    if not wanted:
+        return [], {}
+
+    since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+    rows = (
+        db.query(NewsItem)
+        .filter(
+            NewsItem.published_at >= since,
+            NewsItem.related_symbols.overlap(wanted),
+        )
+        .order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
+        .all()
+    )
+
+    counts = {symbol: 0 for symbol in wanted}
+    for row in rows:
+        for symbol in row.related_symbols or []:
+            if symbol in counts:
+                counts[symbol] += 1
+    return rows[:limit], counts
+
+
+def held_symbols(holdings: Sequence[dict[str, Any]]) -> list[str]:
+    """Pozisyon listesinden semboller, sırası korunarak ve tekilleştirilerek.
+
+    Sıfır adetli bir pozisyon dışarıda kalır: kapanmış bir pozisyonun haberi
+    "portföyünüze dokunan haber" değildir.
+    """
+    return list(
+        dict.fromkeys(
+            holding["symbol"]
+            for holding in holdings
+            if holding.get("symbol") and float(holding.get("quantity") or 0) > 0
+        )
     )
 
 

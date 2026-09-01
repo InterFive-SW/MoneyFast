@@ -442,6 +442,83 @@ class TestPortfolioNode:
         assert out["specialist_output"]["data"] is None
 
 
+class TestPortfolioNewsBranch:
+    """İkinci araç: kullanıcının SAHİP OLDUĞU hisselere dair yayımlananlar.
+
+    Kesişim burada, belge aramasında değil: "portföyümdeki hisselerle ilgili
+    haber" hiçbir şirket adı içermiyor, dolayısıyla aramanın arayacağı bir şey
+    yok -- cevap, tutulanlarla yayımlananların kesişimi.
+    """
+
+    NEWS = {"window_days": 90, "holdings": [{"symbol": "AKBNK", "news_count": 1}],
+            "articles": [{"id": "n1", "title": "Akbank...", "held_symbols": ["AKBNK"]}]}
+
+    @pytest.mark.asyncio
+    async def test_the_plan_can_choose_the_news_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response('{"tool": "get_portfolio_news", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_news"] = self.NEWS
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["tools_used"] == ["get_portfolio_news"]
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_the_user_still_comes_from_state(self, fake_mcp, patched_llm, base_state):
+        """Aynı güvenlik değişmezi: model kimin haberlerinin okunacağını
+        seçemez."""
+        patched_llm.set_response(
+            '{"tool": "get_portfolio_news", "arguments": {"user_id": "u_someone_else"}}'
+        )
+        fake_mcp.responses["get_portfolio_news"] = self.NEWS
+        await orchestrator.portfolio_node(base_state)
+        assert fake_mcp.calls[0][1]["user_id"] == "u_123"
+
+    @pytest.mark.asyncio
+    async def test_no_currency_or_valuation_argument_leaks_into_a_news_call(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """`base_currency` ve `valuation_mode` pozisyon aracının alanları; bu
+        araç onları tanımıyor ve sözleşme fazladan alanı reddediyor."""
+        patched_llm.set_response('{"tool": "get_portfolio_news", "arguments": {"limit": 5}}')
+        fake_mcp.responses["get_portfolio_news"] = self.NEWS
+        await orchestrator.portfolio_node(base_state)
+        assert set(fake_mcp.calls[0][1]) == {"user_id", "limit"}
+
+    @pytest.mark.asyncio
+    async def test_a_named_period_is_forwarded(self, fake_mcp, patched_llm, base_state):
+        patched_llm.set_response(
+            '{"tool": "get_portfolio_news", "arguments": {"days": 7}}'
+        )
+        fake_mcp.responses["get_portfolio_news"] = self.NEWS
+        await orchestrator.portfolio_node(base_state)
+        assert fake_mcp.calls[0][1]["days"] == 7
+
+    @pytest.mark.asyncio
+    async def test_no_matching_article_is_empty_not_an_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Pencerede hiçbir şey eşleşmemiş olması TAM bir cevap. Hata demek,
+        kullanıcıya bir arıza bildirmek olurdu."""
+        patched_llm.set_response('{"tool": "get_portfolio_news", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_news"] = {
+            "window_days": 90, "holdings": [{"symbol": "AKBNK", "news_count": 0}],
+            "articles": [],
+        }
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_a_holdings_plan_still_reaches_the_positions_tool(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """İki araç tek ajanın arkasında; varsayılan yol değişmedi."""
+        patched_llm.set_response('{"tool": "get_portfolio_positions", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["tools_used"] == ["get_portfolio_positions"]
+
+
 class TestMarketResearchNode:
     @pytest.mark.asyncio
     async def test_happy_path(self, fake_mcp, patched_llm, base_state):

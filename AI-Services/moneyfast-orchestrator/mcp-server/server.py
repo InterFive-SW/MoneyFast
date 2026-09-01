@@ -47,6 +47,7 @@ import backend_client
 import compliance_tools
 import market_data_tools
 import market_research_tools
+import news_tools
 import orchestrator_tools
 import portfolio_tools
 import risk_strategy_tools
@@ -67,10 +68,14 @@ SERVER_NAME = "moneyfast"
 #: DEĞİŞMEDİ -- o "şu an ne ediyor" sorusunun cevabı, hareketli ortalama ise
 #: başka bir soru ve başka bir başarısızlık biçimi var (geçmiş ister, ve
 #: geçmiş cevaplayamayacak kadar kısa olabilir).
-CONTRACT_VERSION = "v2.10"
+#: v2.11: `get_portfolio_news`. Sahiplik ile haber etiketinin KESİŞİMİ, bir
+#: arama değil -- `rag_semantic_market_search` genişletilmedi, çünkü o araç
+#: serbest metin sorgusu bekliyor ve "portföyümdeki hisselerle ilgili haber"
+#: sorgusu orada gürültü bandında (~0,39) puanlanıyor.
+CONTRACT_VERSION = "v2.11"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Eleven tools across nine domains.
+MoneyFast tool server. Twelve tools across ten domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -84,6 +89,10 @@ Trend:   get_technical_signals answers "how is it DOING" as opposed to "what
          does it cost". Relay its `narrative` verbatim, caveat included; a
          null field there means the history is too short to compute it, and
          you must not describe an indicator that came back null.
+News:    get_portfolio_news is the ONLY tool that links news to what the
+         user OWNS. It reports a window; state the window whenever you
+         report that nothing was published. It carries no sentiment,
+         importance or ranking, and you must not supply one.
 Empty:   an empty list is a valid, complete answer. Never substitute
          remembered or illustrative data for it.
 Gate:    validate_compliance_rules runs on every user-facing draft that
@@ -105,6 +114,7 @@ DOMAIN_MODULES = (
     ("transaction", transaction_tools),
     ("banking", banking_tools),
     ("technical", technical_tools),
+    ("news", news_tools),
 )
 
 

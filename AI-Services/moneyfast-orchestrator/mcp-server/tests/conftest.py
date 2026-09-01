@@ -98,6 +98,9 @@ ROUTES = {
     "/risk/calculate": "risk",
     "/risk/profile/": "risk_summary",
     "/market/instruments": "instruments",
+    # v2.11. Listed before the bare "/market/" fragments would matter; the
+    # paths do not overlap, but naming it keeps the mapping readable.
+    "/market/news/portfolio": "portfolio_news",
     "/market/technicals": "technicals",
     "/compliance/validate": "compliance",
     # v2.8 banking. `payments/stage` is listed BEFORE the investment stage

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 from typing import List, Literal
 
@@ -25,6 +27,41 @@ class NewsItem(BaseModel):
     relatedSymbols: List[str]
 
 
+class PortfolioNewsSymbol(BaseModel):
+    """Portföydeki bir sembol ve o pencerede ona dokunan haber sayısı."""
+    symbol: str
+    name: str
+    count: int
+
+
+class PortfolioNewsItem(NewsItem):
+    """Akış öğesi + haberin hangi pozisyonlara dokunduğu.
+
+    `relatedSymbols` haberin TÜM etiketlerini taşır; `heldSymbols` bunların
+    kullanıcının gerçekten tuttuğu alt kümesi. İkisi ayrı, çünkü "BIST 100
+    değer kaybetti" haberi dört şirketi anıyor olabilir ve kullanıcı bunlardan
+    yalnızca birine sahiptir -- panelde hangisi yüzünden listelendiği
+    okunabilir olmalı.
+    """
+    publishedAt: datetime
+    heldSymbols: List[str]
+
+
+class PortfolioNewsOut(BaseModel):
+    """Portföye dokunan haberler paneli.
+
+    Haber olmadığında da dönen bir gövde: `symbols` doludur, `items` boştur.
+    Sessizce kaybolan bir panel, veri yokluğunu özellik yokluğu gibi gösterir.
+    """
+    symbols: List[PortfolioNewsSymbol]
+    items: List[PortfolioNewsItem]
+    #: Sayıların ve başlıkların okunduğu pencere. Panel "son 30 günde" diye
+    #: yazabilsin diye dönüyor; sabiti arayüzde ikinci kez yazmak, birinin
+    #: değişip diğerinin kalmasına açık olurdu.
+    windowDays: int
+
+
+
 # ---------------------------------------------------------------------------
 # Service-to-service ingest contracts
 #
@@ -32,7 +69,9 @@ class NewsItem(BaseModel):
 # by the `ingestor` service, not by the React frontend, and the two change for
 # different reasons.
 # ---------------------------------------------------------------------------
-from datetime import datetime  # noqa: E402
+# `datetime` is imported at the top of the file: the read models above now
+# carry a timestamp too, and a second import here would only be a name the
+# linter reports as redefined.
 from typing import Optional  # noqa: E402
 
 from pydantic import Field  # noqa: E402

@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.deps import get_current_user_id
 from app.modules.investment import market_service
 from . import service, stream, technicals
 from .schemas import (
@@ -22,6 +23,7 @@ from .schemas import (
     MarketTicker,
     NewsIngestRequest,
     NewsItem,
+    PortfolioNewsOut,
     QuoteIngestRequest,
     TechnicalSignalsOut,
     FundamentalsOut,
@@ -117,6 +119,85 @@ def get_market_news(
         for row in service.latest_news(db, limit=limit)
     ]
 
+
+
+@router.get(
+    "/news/portfolio",
+    response_model=PortfolioNewsOut,
+    summary="Portföye dokunan haberler (oturum sahibinin pozisyonları)",
+)
+def get_portfolio_news(
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=service.NEWS_WINDOW_DAYS, ge=1, le=365),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Kullanıcının tuttuğu hisselere bağlı haberler.
+
+    Oturum ZORUNLU, demo portföyüne düşülmüyor. Okuma uçlarının çoğu anonim
+    çağrıyı demo hesabına düşürüyor ve bu zararsız -- ama "portföyünüze
+    dokunan haberler" başlığı altında başkasının portföyünün haberlerini
+    göstermek, izleme listesinin eskiden yaptığı hatanın aynısı olurdu:
+    kullanıcının seçmediği bir listeyi onunmuş gibi sunmak.
+
+    Haberler YORUMLANMIYOR. Başlık, kaynak ve tarih veriliyor; bir haberin
+    olumlu ya da olumsuz olduğu söylenmiyor, çünkü bu bir piyasa görüşüdür ve
+    bu sistemin görüş tutma izni yok.
+    """
+    return _portfolio_news_payload(db, user_id, limit=limit, days=days)
+
+
+@router.get(
+    "/news/portfolio/{user_id}",
+    response_model=PortfolioNewsOut,
+    summary="Portföye dokunan haberler (MCP sözleşmesi)",
+)
+def get_portfolio_news_for_ai(
+    user_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=service.NEWS_WINDOW_DAYS, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """
+    Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+
+    `get_portfolio_positions`'ın deseni: MCP araçları kullanıcıyı doğrulanmış
+    oturum zarfından alıp yola koyar, bearer token taşımaz. İkisi TEK bir
+    yardımcıyı çağırıyor, böylece panel ile sohbetin kullanıcının neye sahip
+    olduğu ya da hangi haberin ona dokunduğu konusunda ayrışması mümkün değil.
+    """
+    return _portfolio_news_payload(db, user_id, limit=limit, days=days)
+
+
+def _portfolio_news_payload(db: Session, user_id: str, limit: int, days: int) -> dict:
+    """İki ucun ortak gövdesi."""
+    holdings = market_service.holdings(db, user_id=user_id)
+    symbols = service.held_symbols(holdings)
+    names = {holding["symbol"]: holding.get("name") or holding["symbol"] for holding in holdings}
+    rows, counts = service.portfolio_news(db, symbols, limit=limit, days=days)
+    held = set(symbols)
+    return {
+        "symbols": [
+            {"symbol": symbol, "name": names.get(symbol, symbol), "count": counts.get(symbol, 0)}
+            for symbol in symbols
+        ],
+        "items": [
+            {
+                "id": row.id,
+                "source": row.source,
+                "title": row.title,
+                "url": row.url or "#",
+                "time": _relative_time(row.published_at),
+                "publishedAt": row.published_at,
+                "sentiment": "neutral",
+                "relatedSymbols": list(row.related_symbols or []),
+                "heldSymbols": [s for s in (row.related_symbols or []) if s in held],
+            }
+            for row in rows
+        ],
+        "windowDays": days,
+    }
 
 
 @router.get(

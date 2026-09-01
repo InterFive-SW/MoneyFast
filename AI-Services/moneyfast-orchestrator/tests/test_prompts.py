@@ -364,7 +364,6 @@ def test_every_specialist_is_english_only(agent):
 @pytest.mark.parametrize(
     "agent,tool",
     [
-        ("PORTFOLIO_AGENT", "get_portfolio_positions"),
         ("MARKET_RESEARCH_AGENT", "rag_semantic_market_search"),
         ("RISK_STRATEGY_AGENT", "calculate_portfolio_risk_metrics"),
         ("TRANSACTION_AGENT", "prepare_transaction_proposal"),
@@ -372,6 +371,47 @@ def test_every_specialist_is_english_only(agent):
 )
 def test_tool_binding_names_exactly_one_tool(agent, tool):
     assert f"TOOL BINDING: {tool} only" in prompts.SPECIALIST_PROMPTS[agent]
+
+
+@pytest.mark.parametrize(
+    "agent,tools",
+    [
+        ("MARKET_DATA_AGENT", ("get_market_data", "get_technical_signals")),
+        # v2.11. What the user OWNS and what was PUBLISHED about it are two
+        # questions with two failure modes, and only this agent can read the
+        # holdings that make the second one answerable.
+        ("PORTFOLIO_AGENT", ("get_portfolio_positions", "get_portfolio_news")),
+    ],
+)
+def test_a_two_tool_agent_names_both_and_says_how_to_choose(agent, tools):
+    """A binding that names two tools without a rule for picking between them
+    is how a holdings question reached the news tool and came back empty."""
+    text = prompts.SPECIALIST_PROMPTS[agent]
+    for tool in tools:
+        assert tool in text
+    assert "WHICH TOOL" in text or "for how it is DOING" in text
+
+
+def test_the_portfolio_agent_is_told_not_to_invent_a_news_window():
+    """The backend window is also the Analiz screen's window. A number
+    invented in the plan makes the two disagree about what "no news" covers."""
+    text = flat(prompts.SPECIALIST_PROMPTS["PORTFOLIO_AGENT"])
+    assert "`days` ONLY when the user named a period" in text
+
+
+def test_the_portfolio_agent_may_not_interpret_an_article():
+    """Calling a headline positive or negative is a market view, and this
+    system holds none."""
+    text = flat(prompts.SPECIALIST_PROMPTS["PORTFOLIO_AGENT"])
+    assert "Never call an article positive or negative" in text
+    assert "never rank articles" in text
+
+
+def test_news_about_holdings_routes_to_the_portfolio_agent():
+    """"portföyümdeki hisselerle ilgili haber" names no company, so a document
+    search has nothing to search for."""
+    assert "NEWS about the user's OWN holdings is PORTFOLIO_AGENT" \
+        in prompts.ROUTER_PROMPT
 
 
 @pytest.mark.parametrize(

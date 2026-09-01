@@ -174,6 +174,10 @@ export type MarketInstrument = NonNullable<
     GetResponseType<paths['/api/market/instruments']>['instruments']
 >[0];
 export type NewsItem = GetResponseType<paths['/api/market/news']>[0];
+/** Portföye dokunan haberler paneli. Sayı ve başlıklar aynı pencereden. */
+export type PortfolioNews = GetResponseType<paths['/api/market/news/portfolio']>;
+export type PortfolioNewsItem = PortfolioNews['items'][0];
+export type PortfolioNewsSymbol = PortfolioNews['symbols'][0];
 /** Kullanıcının ankette beyan ettiği tolerans. Anket doldurulmadan `null`. */
 export interface DeclaredRiskProfile {
     tolerance_level: string;
@@ -1042,6 +1046,17 @@ class ApiClient {
 
     getMarketNews() {
         return this.request<NewsItem[]>('/market/news');
+    }
+
+    /**
+     * Kullanıcının tuttuğu hisselere bağlı haberler.
+     *
+     * Oturum zorunlu ve demo portföyüne düşmüyor: "portföyünüze dokunan
+     * haberler" başlığı altında başkasının hisselerinin haberlerini
+     * göstermek, izleme listesinin eskiden yaptığı hatanın aynısı olurdu.
+     */
+    getPortfolioNews() {
+        return this.request<PortfolioNews>('/market/news/portfolio');
     }
 
     // Generic get method for backwards compatibility with UserContext

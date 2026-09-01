@@ -61,7 +61,7 @@ INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key"
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-A2C05B047327DDFC', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'ui-AKBNK-1787756758561', 'CONFIRMED', 'BUY', 'AKBNK', 12.000000, 'TR-1EB1C03EB319', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "AKBNK", "quantity": 12.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-1EB1C03EB319", "destination_account_id": null}, "audit_id": "36bb8938-75c2-4315-add5-57fa9fdfd2bd", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 1.32, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.07, "currency": "TRY"}], "currency": "TRY", "net_amount": 880.99, "gross_amount": 879.6, "price_certainty": "INDICATIVE", "reference_price": 73.3}, "warnings": [], "expires_at": "2026-08-26T15:20:58.678151Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-A2C05B047327DDFC", "missing_fields": [], "confirmation_required": true}', '2026-08-26T15:20:58.678151+00:00', '2026-08-26T15:05:58.698465+00:00', NULL, '36bb8938-75c2-4315-add5-57fa9fdfd2bd', '2026-08-26T15:05:58.681480+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-202495B170ADB94D', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'ui-DOAS-1787904327893', 'CONFIRMED', 'BUY', 'DOAS', 100.000000, 'TR-1EB1C03EB319', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "DOAS", "quantity": 100.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-1EB1C03EB319", "destination_account_id": null}, "audit_id": "b11c8983-c31d-45ec-81dd-af8b5625ab23", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 25.04, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 1.25, "currency": "TRY"}], "currency": "TRY", "net_amount": 16716.29, "gross_amount": 16690.0, "price_certainty": "INDICATIVE", "reference_price": 166.9}, "warnings": [], "expires_at": "2026-08-28T08:20:27.460867Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-202495B170ADB94D", "missing_fields": [], "confirmation_required": true}', '2026-08-28T08:20:27.460867+00:00', '2026-08-28T08:05:27.490225+00:00', NULL, 'b11c8983-c31d-45ec-81dd-af8b5625ab23', '2026-08-28T08:05:27.467293+00:00') ON CONFLICT DO NOTHING;
 
--- ai.conversations (9)
+-- ai.conversations (10)
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('98d2674e-00ed-4724-873f-b18526ceb38f', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', '979a3110-6869-4855-81aa-a0bb1e6a7a37', 'ASELS hissesi ne kadar', 'active', '2026-08-26T07:19:08.898281+00:00', '2026-08-26T07:20:14.266426+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('7255f0b4-d098-415a-9002-d930f8803993', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', '06e7302c-f9c1-40c8-98a7-ca1f9cae7daf', 'THYAO 250 adet alacaktım', 'active', '2026-08-26T07:20:36.697203+00:00', '2026-08-26T07:21:07.462113+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('efe95cd3-0dc4-4357-9fd0-81396b10dee5', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'cb19471b-21ca-4145-951f-750860722bc4', 'THYAO 5 adet almak istiyorum', 'active', '2026-08-26T07:21:28.558087+00:00', '2026-08-26T07:21:48.014915+00:00') ON CONFLICT DO NOTHING;
@@ -71,8 +71,9 @@ INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('3f19dcee-9300-444c-866d-92b736d31c76', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'risk-faz5-final', 'portföyüm ne kadar riskli?', 'active', '2026-08-27T11:52:49.164405+00:00', '2026-08-27T11:52:49.166735+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('3e78cfe3-bf68-4497-a744-b04cb3e6b215', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', '18fa384c-66ec-4e23-8749-f030d0833beb', 'portföyümü analiz et', 'active', '2026-08-27T13:48:40.172372+00:00', '2026-08-27T13:48:40.174024+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('af6214ce-948e-4118-be76-42e2d5cd5f43', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'analiz-faz-son', 'portföyüm ne kadar riskli?', 'active', '2026-08-28T09:28:56.807775+00:00', '2026-08-28T09:28:56.810480+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('81dd8131-0444-480a-9a4e-584b652d3ec7', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'default', 'portföyümdeki hisselerle ilgili haber var mı', 'active', '2026-09-01T14:47:09.377183+00:00', '2026-09-01T14:47:09.381142+00:00') ON CONFLICT DO NOTHING;
 
--- ai.messages (34)
+-- ai.messages (36)
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b887cdd7-ce93-4249-9b8f-5d0db01460ce', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '979a3110-6869-4855-81aa-a0bb1e6a7a37'), 'user', 'ASELS hissesi ne kadar', '{}', '2026-08-26T07:19:08.898889+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('8ef05075-cd15-47e1-99c2-e3692fef2914', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '979a3110-6869-4855-81aa-a0bb1e6a7a37'), 'assistant', 'ASELSAN hissesi şu anda **401,0 TL** seviyesinde işlem görüyor.
 
@@ -334,3 +335,46 @@ Portföyünüzdeki risk ölçümleri aşağıdaki gibidir:
 - Veri kalitesi %100 kapsam ve istatistiksel olarak güvenilir, ancak geçmiş performans geleceği garanti etmez.
 
 Başka bir analiz ya da farklı bir ölçüm görmek isterseniz, söylemeniz yeterli.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-08-28T09:28:56.811480+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('1d6d7c69-cbae-441e-b626-e85d2630cc10', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'portföyümdeki hisselerle ilgili haber var mı', '{}', '2026-09-01T14:47:09.381142+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('326cd73a-fe09-4b0c-9d0e-2adbc67f2e46', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', '**Portföy Haber Özeti**
+
+Portföyümdeki hisseler için son 90 gün içinde çıkan haber sayısını inceledim.
+
+| Hisse | Haber Sayısı |
+|------|--------------:|
+| AEFES | 0 |
+| AKBNK | 12 |
+| DOAS | 0 |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+
+**Öne çıkan gözlemler:**
+- Akbank (AKBNK) için 12 haber bulunmuş, çoğu KAP bildirimleri ve finans haberleri.
+- Anadolu Efes (AEFES) ve Doğuş Otomotiv Servis (DOAS) için haber bulunmamış.
+- Haber sayısı, haberlerin içeriği veya piyasa üzerindeki etkisini yansıtmaz.
+
+**Akbank Haber Başlıkları (ilk 10)**
+
+Portföydeki tek hisse olan Akbank için son 90 günde yayınlanan haber başlıklarını inceledim.
+
+| Başlık | Kaynak | Yayın Tarihi |
+|--------|--------|--------------|
+| AKBANK T.A.Ş. — Pay Dışında Sermaye Piyasası Aracı İşlemlerine İlişkin Bildirim (Faiz İçeren) | KAP | 1 Eylül 2026 16:59 |
+| AKBANK T.A.Ş. — İhraç Belgesi | KAP | 31 Ağustos 2026 17:07 |
+| AKBANK T.A.Ş. — Pay Dışında Sermaye Piyasası Aracı İşlemlerine İlişkin Bildirim (Faiz İçeren) | KAP | 31 Ağustos 2026 17:06 |
+| Zurich Sigorta Genel Müdür Baş Yardımcısı Esra Bozkurt hayatını kaybetti | Patronlar Dünyası - Ekonomi | 15 Ağustos 2026 11:26 |
+| Akbank''tan yılın ilk yarısında ekonomiye 2,9 trilyon lira kredi desteği | Patronlar Dünyası - Finans | 28 Temmuz 2026 17:08 |
+| Akbank ve KGF iş birliğiyle KOBİ’ler, Dijital KGF kredisine Akbank Mobil üzerinden dakikalar içinde ulaşabilecek | Patronlar Dünyası - Finans | 21 Temmuz 2026 09:34 |
+| BIST 100 değer kaybetti, endekse dahil hisselerin 55''i prim yaptı | Patronlar Dünyası - Borsa | 13 Temmuz 2026 16:02 |
+| Akbank 3,26 milyar TL''lik kredi alacağını 514 milyon karşılığında sattı | Patronlar Dünyası - Şirketler | 26 Haziran 2026 12:36 |
+| Akbank, kullanıcılarına 2 milyar TL’nin üzerinde fayda sağlayan Wings’i yapay zeka destekli seyahat asistanı ile güçlendirecek | Patronlar Dünyası - Finans | 18 Haziran 2026 04:46 |
+| Akbank ve MEB işbirliğine imza attı, ileri dönüşüm teknikleri meslek liselerinin eğitim modeline dahil oluyor | Patronlar Dünyası - Şirketler | 9 Haziran 2026 15:23 |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+
+**Öne çıkan gözlemler:**
+- Başlıkların çoğu KAP bildirimleri ve banka faaliyetleriyle ilgili.
+- Haberlerin tarihleri, son iki ayı kapsıyor; daha eski haberler listede yer almıyor.
+- Bu tablo sadece haber başlıklarını ve yayın tarihlerini gösterir; haberlerin içeriği ve piyasa üzerindeki etkisi burada değerlendirilmemiştir.
+
+**Karar sizin.** Başka bir analiz ya da farklı bir zaman dilimi için bilgi isterseniz, yardımcı olabilirim.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez."], "target_agent": "PORTFOLIO_AGENT", "context_topic": null, "primary_intent": "PORTFOLIO_INQUIRY", "compliance_verdict": "REVISE"}', '2026-09-01T14:47:09.382142+00:00') ON CONFLICT DO NOTHING;

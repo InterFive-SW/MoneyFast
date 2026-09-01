@@ -328,6 +328,24 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
     )
     args = plan.get("arguments") or {}
     args["user_id"] = state.get("user_id") or "unknown"
+
+    # Two tools behind one agent, the same split as MARKET_DATA_AGENT: what
+    # the user OWNS, and what was PUBLISHED about it. The intersection lives
+    # here rather than in market research because it is not a search --
+    # "portföyümdeki hisselerle ilgili haber" names no company, so a document
+    # search has nothing to search for, and only this agent can read the
+    # holdings that make the question answerable.
+    if plan.get("tool") == "get_portfolio_news":
+        return await _run_tool(
+            state, "get_portfolio_news",
+            {key: args[key] for key in ("user_id", "limit", "days") if key in args},
+            assumptions=plan.get("assumptions") or [],
+            # An empty article list is a COMPLETE answer -- nothing matched in
+            # the window -- but it must be reported with the window, so the
+            # payload still travels.
+            empty_when=lambda p: not p.get("articles"),
+        )
+
     # Reporting currency follows the session locale, not the model. It is a
     # presentation choice, and letting the model pick means a Turkish user can
     # be shown their portfolio in USD because the plan happened to say so.

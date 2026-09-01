@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 import chunking
 import embeddings
+import corpus_seed
 import store
 
 logging.basicConfig(
@@ -128,6 +129,10 @@ async def lifespan(_: FastAPI):
     # would let it start against a retriever that still needs 30 seconds.
     embeddings.get_model()
     await store.open_pool()
+    # Commit'lenmiş haber derleminin TABANI. Yeni bir klon RSS turunu ve
+    # gömme işini beklemeden aranacak bir şeye sahip oluyor; ingestor üstüne
+    # yazmaya devam ediyor. Açılışı hiçbir koşulda düşürmez.
+    await corpus_seed.load(store.open_pool)
     yield
     await store.close_pool()
 

@@ -113,6 +113,12 @@ services:
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
       RAG_CORPUS_VERSION: ${RAG_CORPUS_VERSION:-market_corpus_v1}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MARKET_SEED_DIR: /seeds/market
+    volumes:
+      # Commit'lenmiş haber derleminin tabanı. Salt okunur: bu servis derlemi
+      # okuyup yükler, dosyayı üretmez -- dışa aktarma `export_corpus.py` ile
+      # elle yapılıyor.
+      - ../seeds/market:/seeds/market:ro
     expose:
       - "8100"
     healthcheck:

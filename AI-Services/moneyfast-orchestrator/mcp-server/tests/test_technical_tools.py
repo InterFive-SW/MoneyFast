@@ -200,3 +200,189 @@ class TestDocstringIsTheContract:
         the docstring is the first line of that defence."""
         doc = self._doc()
         assert "Do NOT name the indicators by their field keys" in doc
+
+
+# ==========================================================================
+# get_portfolio_technicals — contract v2.12
+# ==========================================================================
+"""Aynı okuma, her POZİSYON için, artı tek bir toplam cümlesi.
+
+Korunan asıl ayrım SAYI ile DEĞER. Üç pozisyonun ikisinin ortalamasının
+altında olması ile portföy değerinin %95'inin altında olması farklı iddialar
+ve zıt yönü gösterebilirler; ölçülen test portföyünde tam olarak öyle. Tek bir
+yüzde vermek hangisinin kastedildiğini okunamaz yapardı, toplamı modele
+hesaplatmak ise her turda başka bir sayı üretirdi.
+"""
+
+PORTFOLIO_KEYS = {"base_currency", "positions", "summary", "unconvertible"}
+ROW_KEYS = {"symbol", "name", "currency", "trend", "signals", "narrative"}
+SUMMARY_KEYS = {
+    "position_count", "measured_count", "unmeasured_symbols", "by_trend",
+    "below_sma_50", "above_sma_50", "weight_below_sma_50", "statement",
+}
+
+AGGREGATE_TR = (
+    "3 pozisyonunuzun 2'si 50 günlük ortalamasının altında "
+    "(portföy değerinin %95,1'i); 1'i yükseliş eğiliminde, 2'si düşüş eğiliminde."
+)
+
+
+def portfolio_body(**overrides):
+    payload = {
+        "base_currency": "TRY",
+        "positions": [
+            {"symbol": "AKBNK", "name": "Akbank T.A.Ş.", "currency": "TRY",
+             "signals": body()["signals"], "narrative": NARRATIVE},
+        ],
+        "summary": {
+            "position_count": 3, "measured_count": 3,
+            "unmeasured_symbols": [],
+            "by_trend": {"UPTREND": 1, "DOWNTREND": 2, "SIDEWAYS": 0},
+            "below_sma_50": 2, "above_sma_50": 1,
+            "weight_below_sma_50": 0.9508728745384665,
+            "statement": AGGREGATE_TR,
+        },
+        "unconvertible": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestPortfolioContract:
+    @pytest.mark.asyncio
+    async def test_top_level_keys_match_v212_exactly(self, fake_backend):
+        fake_backend.json("portfolio_technical", portfolio_body())
+        out = await technical_tools.get_portfolio_technicals("u_1")
+        assert set(out) == PORTFOLIO_KEYS
+
+    @pytest.mark.asyncio
+    async def test_row_and_summary_keys_match_v212_exactly(self, fake_backend):
+        fake_backend.json("portfolio_technical", portfolio_body())
+        out = await technical_tools.get_portfolio_technicals("u_1")
+        assert set(out["positions"][0]) == ROW_KEYS
+        assert set(out["summary"]) == SUMMARY_KEYS
+        assert set(out["positions"][0]["signals"]) == SIGNAL_KEYS
+
+    @pytest.mark.asyncio
+    async def test_the_user_travels_in_the_path(self, fake_backend):
+        fake_backend.json("portfolio_technical", portfolio_body())
+        await technical_tools.get_portfolio_technicals("u_42")
+        assert "/market/portfolio/technical/u_42" in str(fake_backend.last.url)
+
+    @pytest.mark.asyncio
+    async def test_count_and_weight_both_survive_and_are_not_merged(self, fake_backend):
+        fake_backend.json("portfolio_technical", portfolio_body())
+        summary = (await technical_tools.get_portfolio_technicals("u_1"))["summary"]
+        assert (summary["below_sma_50"], summary["above_sma_50"]) == (2, 1)
+        assert summary["weight_below_sma_50"] == pytest.approx(0.9509, abs=1e-4)
+
+    @pytest.mark.asyncio
+    async def test_a_missing_summary_is_a_contract_violation(self, fake_backend):
+        """Boş bir özete düşürülmezdi: ajan o zaman ölçülmüş bir portföy için
+        "eğilim çıkarılamadı" derdi."""
+        fake_backend.json("portfolio_technical", {"positions": []})
+        with pytest.raises(ContractViolationError):
+            await technical_tools.get_portfolio_technicals("u_1")
+
+    @pytest.mark.asyncio
+    async def test_a_non_object_summary_is_refused(self, fake_backend):
+        fake_backend.json("portfolio_technical", portfolio_body(summary=["2", "1"]))
+        with pytest.raises(ContractViolationError):
+            await technical_tools.get_portfolio_technicals("u_1")
+
+    @pytest.mark.asyncio
+    async def test_a_non_object_position_is_refused(self, fake_backend):
+        fake_backend.json("portfolio_technical", portfolio_body(positions=["AKBNK"]))
+        with pytest.raises(ContractViolationError):
+            await technical_tools.get_portfolio_technicals("u_1")
+
+    @pytest.mark.asyncio
+    async def test_a_position_without_signals_is_refused(self, fake_backend):
+        fake_backend.json(
+            "portfolio_technical", portfolio_body(positions=[{"symbol": "AKBNK"}])
+        )
+        with pytest.raises(ContractViolationError):
+            await technical_tools.get_portfolio_technicals("u_1")
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_backend_raises_rather_than_inventing_a_posture(
+        self, fake_backend, no_sleep
+    ):
+        fake_backend.fail("portfolio_technical")
+        with pytest.raises(UpstreamUnavailableError):
+            await technical_tools.get_portfolio_technicals("u_1")
+
+
+class TestPortfolioAbsence:
+    @pytest.mark.asyncio
+    async def test_an_unknown_weight_stays_null_rather_than_zero(self, fake_backend):
+        """0.0, "hiçbiri ortalamasının altında değil" diye okunur -- ağırlığın
+        hesaplanamamış olmasının tam tersi."""
+        summary = portfolio_body()["summary"]
+        summary["weight_below_sma_50"] = None
+        fake_backend.json("portfolio_technical", portfolio_body(summary=summary))
+        out = await technical_tools.get_portfolio_technicals("u_1")
+        assert out["summary"]["weight_below_sma_50"] is None
+
+    @pytest.mark.asyncio
+    async def test_an_unmeasured_holding_is_named_and_has_no_trend(self, fake_backend):
+        summary = portfolio_body()["summary"]
+        summary["unmeasured_symbols"] = ["YENI"]
+        row = {"symbol": "YENI", "signals": {"trend": None}, "narrative": None}
+        fake_backend.json(
+            "portfolio_technical", portfolio_body(summary=summary, positions=[row])
+        )
+        out = await technical_tools.get_portfolio_technicals("u_1")
+        assert out["summary"]["unmeasured_symbols"] == ["YENI"]
+        assert out["positions"][0]["trend"] == "UNKNOWN"
+        assert out["positions"][0]["narrative"] is None
+
+    @pytest.mark.asyncio
+    async def test_an_unconvertible_holding_is_carried_not_dropped(self, fake_backend):
+        """Ölçülüyor, yalnızca ağırlığı bilinmiyor. Sessizce düşürmek,
+        portföyün bir kısmını yok saymak olurdu."""
+        fake_backend.json("portfolio_technical", portfolio_body(unconvertible=["AAPL"]))
+        out = await technical_tools.get_portfolio_technicals("u_1")
+        assert out["unconvertible"] == ["AAPL"]
+
+    @pytest.mark.asyncio
+    async def test_a_row_without_a_name_falls_back_to_its_symbol(self, fake_backend):
+        row = {"symbol": "AKBNK", "signals": body()["signals"]}
+        fake_backend.json("portfolio_technical", portfolio_body(positions=[row]))
+        out = await technical_tools.get_portfolio_technicals("u_1")
+        assert out["positions"][0]["name"] == "AKBNK"
+        assert out["positions"][0]["currency"] == "TRY"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_portfolio_is_a_body_not_an_error(self, fake_backend):
+        summary = portfolio_body()["summary"]
+        summary.update({"position_count": 0, "measured_count": 0, "statement": None,
+                        "by_trend": {}, "below_sma_50": 0, "above_sma_50": 0})
+        fake_backend.json(
+            "portfolio_technical", portfolio_body(positions=[], summary=summary)
+        )
+        out = await technical_tools.get_portfolio_technicals("u_1")
+        assert out["positions"] == []
+        assert out["summary"]["statement"] is None
+
+    @pytest.mark.asyncio
+    async def test_missing_counts_default_to_the_measured_shape(self, fake_backend):
+        """Backend bir alanı düşürürse anahtar hayatta kalır: `summary["..."]`
+        okuyan bir tüketici KeyError yerine sayı görür."""
+        fake_backend.json("portfolio_technical", portfolio_body(summary={}))
+        summary = (await technical_tools.get_portfolio_technicals("u_1"))["summary"]
+        assert summary["position_count"] == 1
+        assert summary["by_trend"] == {}
+        assert summary["statement"] is None
+
+
+class TestPortfolioRegistration:
+    def test_both_technical_tools_are_attached(self):
+        registered = []
+        technical_tools.register(
+            type("FakeMCP", (), {"tool": lambda self: registered.append})()
+        )
+        assert registered == [
+            technical_tools.get_technical_signals,
+            technical_tools.get_portfolio_technicals,
+        ]

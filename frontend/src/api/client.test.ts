@@ -112,6 +112,7 @@ describe('endpoint paths', () => {
     // Oturuma bağlı ve demo portföyüne düşmüyor; kullanıcı yoldan değil
     // token'dan çözülüyor, o yüzden çağrı argümansız.
     ['getPortfolioNews', '/api/market/news/portfolio'],
+    ['getPortfolioTechnical', '/api/market/portfolio/technical'],
     ['getPortfolioAnalysis', '/api/analytics/portfolio'],
     ['getCurrentUser', '/api/auth/me'],
       ['getConversations', '/api/ai_orchestrator/conversations'],

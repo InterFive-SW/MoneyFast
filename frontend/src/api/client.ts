@@ -178,6 +178,9 @@ export type NewsItem = GetResponseType<paths['/api/market/news']>[0];
 export type PortfolioNews = GetResponseType<paths['/api/market/news/portfolio']>;
 export type PortfolioNewsItem = PortfolioNews['items'][0];
 export type PortfolioNewsSymbol = PortfolioNews['symbols'][0];
+/** Portföy geneli teknik görünüm: pozisyon başına okuma + toplulaştırma. */
+export type PortfolioTechnical = GetResponseType<paths['/api/market/portfolio/technical']>;
+export type PortfolioTechnicalRow = PortfolioTechnical['positions'][0];
 /** Kullanıcının ankette beyan ettiği tolerans. Anket doldurulmadan `null`. */
 export interface DeclaredRiskProfile {
     tolerance_level: string;
@@ -1057,6 +1060,16 @@ class ApiClient {
      */
     getPortfolioNews() {
         return this.request<PortfolioNews>('/market/news/portfolio');
+    }
+
+    /**
+     * Portföy geneli teknik görünüm.
+     *
+     * Hisse detay sayfasıyla AYNI motoru okuyor: iki yüzeyin aynı hisse için
+     * farklı bir eğilim göstermesi mümkün değil.
+     */
+    getPortfolioTechnical() {
+        return this.request<PortfolioTechnical>('/market/portfolio/technical');
     }
 
     // Generic get method for backwards compatibility with UserContext

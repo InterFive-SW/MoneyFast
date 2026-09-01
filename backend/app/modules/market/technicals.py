@@ -319,3 +319,145 @@ def narrate(symbol: str, signals: dict[str, Any]) -> Optional[str]:
     if outlook:
         body += f" {outlook} — {HEDGE_TR}."
     return body
+
+
+# ── Portföy geneli görünüm ───────────────────────────────────────────────────
+#
+# Motor tek enstrüman için yazılmıştı ve yalnızca hisse detay sayfasında ve
+# sohbette tek sembolle çağrılıyordu. "Portföyümdeki hisseler teknik olarak
+# nerede duruyor" sorusunun cevabı hesaplanabiliyordu ama hiçbir yerde
+# toplanmıyordu.
+#
+# Toplulaştırma burada, uç noktada değil: cümleyi kim üretiyorsa hem ekran hem
+# sohbet ondan okumalı. `narrate` ile aynı sebep -- aynı sayıların iki yüzeyde
+# farklı anlatılması, kullanıcının hangisine güveneceğini bilememesi demek.
+
+
+def _plural_locative(count: int) -> str:
+    """`5` -> `5'i`, `1` -> `1'i`. Sayıdan cümleye geçen ikinci yer.
+
+    `_locative` bulunma hâli üretiyor ("14'ünde"); burada gereken iyelik
+    ("5'i"). Ayrı tablo değil, ayrı ek: aynı okunuşa farklı ek geliyor.
+    """
+    return f"{count}'{_POSSESSIVE_TR.get(count, 'i')}"
+
+
+#: Sayının OKUNUŞUNA göre iyelik eki: "beş" -> "5'i", "altı" -> "6'sı".
+#: Ünlüyle biten okunuşlar araya kaynaştırma alıyor. 0-20 arası yazılı; bir
+#: portföyün pozisyon sayısı bunu aşabilir, o yüzden varsayılan var ve
+#: varsayılan sessizce yanlış olmaktansa en yaygın eki kullanıyor.
+_POSSESSIVE_TR = {
+    0: "ı", 1: "i", 2: "si", 3: "ü", 4: "ü", 5: "i", 6: "sı", 7: "si",
+    8: "i", 9: "u", 10: "u", 11: "i", 12: "si", 13: "ü", 14: "ü", 15: "i",
+    16: "sı", 17: "si", 18: "i", 19: "u", 20: "si",
+}
+
+#: Toplulaştırmada kullanılan ortalama. 50 gün, 20 ya da 200 değil: 20 çok
+#: kısa (her dalgalanmada taraf değiştiriyor), 200 ise evrenin bir kısmında
+#: hiç hesaplanamıyor -- 200 barı olmayan bir enstrüman ölçülemeyen sayılır ve
+#: portföyün yarısı "bilinmiyor" olarak dönerdi.
+AGGREGATE_SMA = 50
+
+
+def aggregate(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """Pozisyonların teknik durumunun portföy geneli özeti.
+
+    `rows`: her biri `symbol`, `signals` ve (varsa) `value` taşıyan pozisyonlar.
+    `value`, taban para birimine ÇEVRİLMİŞ pozisyon değeri; çevrilemeyenlerde
+    None ve o pozisyon ağırlık hesabına girmez (bkz. `ai_service.holding_value`
+    -- kuru olmayan pozisyon toplama katılmaz, 1.0 varsayılmaz).
+
+    SAYI VE DEĞER AYRI RAPORLANIYOR. Sekiz pozisyonun beşinin ortalamasının
+    altında olması ile portföy değerinin %62'sinin altında olması farklı
+    şeyler; büyük tek pozisyonlu bir portföyde ikisi zıt yönü gösterir. Tek
+    bir yüzde vermek, hangisinin kastedildiğini okunamaz yapardı.
+    """
+    counts = {"UPTREND": 0, "DOWNTREND": 0, "SIDEWAYS": 0, "UNKNOWN": 0}
+    unmeasured: list[str] = []
+    below = above = 0
+    value_below = value_total = 0.0
+
+    for row in rows:
+        signals = row.get("signals") or {}
+        trend = signals.get("trend") or "UNKNOWN"
+        counts[trend] = counts.get(trend, 0) + 1
+        if trend == "UNKNOWN":
+            unmeasured.append(row.get("symbol") or "?")
+
+        distance = signals.get(f"pct_from_sma_{AGGREGATE_SMA}")
+        if distance is None:
+            # Ortalaması hesaplanamayan pozisyon hiçbir tarafa sayılmaz.
+            # "Üstünde değil" ile "ölçülemedi" karşıt iddialar.
+            continue
+        value = row.get("value")
+        if value is not None:
+            value_total += float(value)
+        if distance < 0:
+            below += 1
+            if value is not None:
+                value_below += float(value)
+        else:
+            above += 1
+
+    measured = below + above
+    weight_below = (value_below / value_total) if value_total > 0 else None
+    return {
+        "position_count": len(rows),
+        "measured_count": measured,
+        "unmeasured_symbols": unmeasured,
+        "by_trend": {key: counts[key] for key in ("UPTREND", "DOWNTREND", "SIDEWAYS")},
+        f"below_sma_{AGGREGATE_SMA}": below,
+        f"above_sma_{AGGREGATE_SMA}": above,
+        f"weight_below_sma_{AGGREGATE_SMA}": weight_below,
+        "statement": _aggregate_statement(
+            len(rows), below, measured, weight_below, counts, unmeasured
+        ),
+    }
+
+
+#: Portföyde hiç ölçülebilir pozisyon yoksa söylenen. Sayı üretmek yerine
+#: neden üretilemediğini söylüyor.
+NO_MEASURABLE_TR = (
+    "Pozisyonlarınız için teknik bir görünüm çıkaracak kadar fiyat geçmişi yok."
+)
+
+
+def _aggregate_statement(
+    total: int,
+    below: int,
+    measured: int,
+    weight_below: Optional[float],
+    counts: dict[str, int],
+    unmeasured: Sequence[str],
+) -> Optional[str]:
+    """Toplulaştırmanın Türkçe okuması. Ölçülemeyeni gizlemez.
+
+    Cümle "pozisyonunuzun" diyor, "portföyünüzün" değil: ikincisi değerden
+    bahsediyormuş gibi okunur ve sayım değeri değil adedi ölçüyor. Değer
+    payı ayrıca ve açıkça parantez içinde veriliyor.
+    """
+    if measured == 0:
+        return NO_MEASURABLE_TR
+
+    parts = [
+        f"{total} pozisyonunuzun {_plural_locative(below)} "
+        f"{AGGREGATE_SMA} günlük ortalamasının altında"
+    ]
+    if weight_below is not None:
+        parts[0] += f" (portföy değerinin %{_tr(weight_below * 100)}'i)"
+
+    trend_parts = [
+        f"{_plural_locative(counts[key])} {_TREND_TR[key]}"
+        for key in ("UPTREND", "DOWNTREND", "SIDEWAYS")
+        if counts[key]
+    ]
+    if trend_parts:
+        parts.append(", ".join(trend_parts))
+
+    body = "; ".join(parts) + "."
+    if unmeasured:
+        body += (
+            f" {len(unmeasured)} pozisyon için yeterli fiyat geçmişi yok: "
+            + ", ".join(unmeasured) + "."
+        )
+    return body

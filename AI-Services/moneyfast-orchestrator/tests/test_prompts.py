@@ -588,11 +588,29 @@ def test_the_risk_specialist_still_forbids_threshold_judgements():
 
 
 def test_the_risk_specialist_does_not_plan_the_summary_call():
-    """The graph fetches it. A planner that tries to request it produces an
-    argument the tool binding does not accept."""
+    """The graph fetches them. A planner that tries to request either produces
+    an argument the tool binding does not accept."""
     text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-    assert "fetched alongside without your planning it" in text
-    assert "do not request it" in text
+    assert "fetched alongside without your planning them" in text
+    assert "do not request either" in text
+    assert "the risk profile summary" in text
+    assert "technical_posture" in text
+
+
+def test_the_risk_specialist_may_not_merge_the_count_with_the_weight():
+    """Ölçüldü: üç pozisyonun ikisi 50 günlük ortalamasının altında ama değerin
+    %95'i. Sayıyı portföyün yüzdesi diye sunmak, ölçümün söylemediğini
+    söylemek olur."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "Never merge them" in text
+    assert "never call a count a percentage of the portfolio" in text
+
+
+def test_all_holdings_technical_state_routes_to_the_risk_agent():
+    """Tek NAMED enstrüman MARKET_DATA_AGENT'ta kalıyor: o ajanın holdings
+    erişimi yok ve olmaması bilinçli."""
+    assert "The technical state of ALL holdings is RISK_STRATEGY_AGENT" \
+        in prompts.ROUTER_PROMPT
 
 
 def test_the_risk_specialist_names_the_closed_lookback_set():

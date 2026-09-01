@@ -587,26 +587,70 @@ class TestMarketResearchNode:
 
 
 class TestRiskNode:
+    POSTURE = {
+        "base_currency": "TRY",
+        "positions": [{"symbol": "THYAO", "trend": "DOWNTREND"}],
+        "summary": {"below_sma_50": 2, "above_sma_50": 1,
+                    "weight_below_sma_50": 0.951,
+                    "statement": "3 pozisyonunuzun 2'si 50 günlük ortalamasının altında."},
+        "unconvertible": [],
+    }
+
+    @pytest.mark.asyncio
+    async def test_the_technical_posture_travels_inside_the_metrics_payload(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """Kardeş anahtar değil, `data`'nın içinde: synthesis `data`'yı
+        okuyor ve yanına konan bir anahtarı her tüketicinin ayrıca öğrenmesi
+        gerekirdi."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_portfolio_technicals"] = self.POSTURE
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
+        out = await orchestrator.risk_node(base_state)
+        data = out["specialist_output"]["data"]
+        assert data["technical_posture"]["summary"]["weight_below_sma_50"] == 0.951
+        assert "get_portfolio_technicals" in out["tools_used"]
+
+    @pytest.mark.asyncio
+    async def test_a_missing_posture_costs_the_turn_nothing_else(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """Best-effort: teknik görünüm turu zenginleştirir, ayakta tutmaz.
+        Onun yüzünden turu düşürmek, kısmi bir cevabı hiç cevaba çevirirdi."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_portfolio_technicals"] = MCPUnavailable("down")
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "OK"
+        assert "technical_posture" not in out["specialist_output"]["data"]
+        assert "get_portfolio_technicals" not in out["tools_used"]
+
     @pytest.mark.asyncio
     async def test_fetches_positions_before_computing_metrics(
         self, fake_mcp, patched_llm, base_state, positions_payload, risk_summary_payload
     ):
         """The risk tool has no position access by design, so the graph makes
-        three calls in a fixed order: holdings, the profile summary, then the
-        statistics."""
+        four calls in a fixed order: holdings, the profile summary, the
+        technical posture, then the statistics. The middle two are
+        best-effort; only the first and the last can fail the turn."""
         patched_llm.set_response('{"arguments": {"lookback": "3Y"}}')
         fake_mcp.responses["get_portfolio_positions"] = positions_payload
         fake_mcp.responses["get_risk_profile_summary"] = risk_summary_payload
+        fake_mcp.responses["get_portfolio_technicals"] = self.POSTURE
         fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
         out = await orchestrator.risk_node(base_state)
         assert [name for name, _ in fake_mcp.calls] == [
             "get_portfolio_positions",
             "get_risk_profile_summary",
+            "get_portfolio_technicals",
             "calculate_portfolio_risk_metrics",
         ]
         assert out["tools_used"] == [
             "get_portfolio_positions",
             "calculate_portfolio_risk_metrics",
+            "get_portfolio_technicals",
             "get_risk_profile_summary",
         ]
         assert out["specialist_output"]["status"] == "OK"

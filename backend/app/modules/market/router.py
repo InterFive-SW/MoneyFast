@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user_id
-from app.modules.investment import market_service
+from app.modules.investment import ai_service, market_service
 from . import service, stream, technicals
 from .schemas import (
     IngestResult,
@@ -24,6 +24,7 @@ from .schemas import (
     NewsIngestRequest,
     NewsItem,
     PortfolioNewsOut,
+    PortfolioTechnicalOut,
     QuoteIngestRequest,
     TechnicalSignalsOut,
     FundamentalsOut,
@@ -419,6 +420,87 @@ def get_technicals(
         "currency": product.currency_code or "TRY",
         "signals": signals,
         "narrative": technicals.narrate(product.symbol, signals),
+    }
+
+
+
+@router.get(
+    "/portfolio/technical",
+    response_model=PortfolioTechnicalOut,
+    summary="Portföy geneli teknik görünüm",
+)
+def get_portfolio_technical(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Her pozisyonun teknik durumu ve portföy geneli toplulaştırma.
+
+    `market` modülünde, `investment`ta değil. Teknik motor burada ve bu modül
+    zaten `investment.market_service`'i okuyor; uç noktayı investment'a koymak
+    iki modül arasında ÇİFT YÖNLÜ bir bağımlılık açardı (`market.technicals`
+    da `risk.returns`'ü okuyor, yani zincir zaten tek yönlü kurulu). Yolu
+    değil, bağımlılık yönünü korumak önemli.
+
+    Sayfadaki tek hisse görünümüyle aynı `compute`/`narrate` çağrılıyor: iki
+    yüzeyin aynı hisse için farklı bir eğilim söylemesi mümkün değil.
+    """
+    return _portfolio_technical_payload(db, user_id)
+
+
+@router.get(
+    "/portfolio/technical/{user_id}",
+    response_model=PortfolioTechnicalOut,
+    summary="Portföy geneli teknik görünüm (MCP sözleşmesi)",
+)
+def get_portfolio_technical_for_ai(user_id: str, db: Session = Depends(get_db)):
+    """
+    Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+
+    `get_portfolio_positions` ve `news/portfolio` ile aynı desen: MCP araçları
+    kullanıcıyı doğrulanmış oturum zarfından alıp yola koyar. İkisi TEK bir
+    yardımcıyı çağırıyor, böylece panelin ve sohbetin aynı portföy için farklı
+    bir eğilim söylemesi mümkün değil.
+    """
+    return _portfolio_technical_payload(db, user_id)
+
+
+def _portfolio_technical_payload(db: Session, user_id: str) -> dict:
+    """İki ucun ortak gövdesi."""
+    holdings = market_service.holdings(db, user_id=user_id)
+    rates = ai_service.fx_rates(market_service.latest_quotes(db))
+    # `holding_value`'ın varsayılanıyla aynı; ekranın para birimi ürün
+    # genelinde TRY ve ayrı bir sabit tanımlamak, ikisinin ayrışabileceği
+    # bir yer açardı.
+    base = "TRY"
+
+    rows, unconvertible = [], []
+    for holding in holdings:
+        symbol = holding["symbol"]
+        bars = market_service.candle_series(db, symbol, limit=technicals.BARS_NEEDED)
+        signals = technicals.compute(bars)
+        # Değer, taban para birimine çevrilmiş hâliyle. Çevrilemeyen pozisyon
+        # None kalır ve ağırlık hesabına girmez -- kuru olmayan bir pozisyonu
+        # 1.0 ile çevirmek, 15.098 TL'lik bir varlığı 315 TL saymak demekti.
+        value = ai_service.holding_value(holding, rates, base)
+        if value is None:
+            unconvertible.append(symbol)
+        rows.append(
+            {
+                "symbol": symbol,
+                "name": holding.get("name") or symbol,
+                "currency": holding.get("currency") or base,
+                "signals": signals,
+                "narrative": technicals.narrate(symbol, signals),
+                "value": value,
+            }
+        )
+
+    return {
+        "base_currency": base,
+        "positions": rows,
+        "summary": technicals.aggregate(rows),
+        "unconvertible": unconvertible,
     }
 
 

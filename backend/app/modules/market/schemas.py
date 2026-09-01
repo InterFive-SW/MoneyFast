@@ -329,6 +329,42 @@ class TechnicalSignalsOut(BaseModel):
     narrative: Optional[str] = None
 
 
+class PortfolioTechnicalRow(TechnicalSignalsOut):
+    """Bir pozisyonun teknik durumu, portföydeki yeriyle birlikte.
+
+    `TechnicalSignalsOut`'u genişletiyor: tek hisse sayfasıyla portföy paneli
+    aynı alanları okusun ki ikisi aynı hisse için farklı bir eğilim
+    gösteremesin.
+    """
+    name: str
+    #: Taban para birimine çevrilmiş pozisyon değeri. Kuru olmayan bir
+    #: pozisyonda None -- 1.0 varsayılmaz, o pozisyon ağırlık hesabına
+    #: girmez ve `unconvertible` içinde adı geçer.
+    value: Optional[float] = None
+
+
+class PortfolioTechnicalSummary(BaseModel):
+    """Toplulaştırma. Sayı ve değer AYRI, çünkü zıt yönü gösterebilirler."""
+    position_count: int
+    measured_count: int
+    unmeasured_symbols: List[str]
+    by_trend: dict[str, int]
+    below_sma_50: int
+    above_sma_50: int
+    weight_below_sma_50: Optional[float] = None
+    #: Ekranın ve sohbetin AYNI cümlesi. İki yüzeyin aynı ölçümü farklı
+    #: anlatması, kullanıcının hangisine güveneceğini bilememesi demekti.
+    statement: Optional[str] = None
+
+
+class PortfolioTechnicalOut(BaseModel):
+    base_currency: str = "TRY"
+    positions: List[PortfolioTechnicalRow]
+    summary: PortfolioTechnicalSummary
+    #: Para birimi çevrilemediği için ağırlık hesabına girmeyen pozisyonlar.
+    #: Sessizce düşürmek, portföyün bir kısmını yok saymak olurdu.
+    unconvertible: List[str] = []
+
 class FundamentalsOut(BaseModel):
     """Bir enstrümanın saklanan tüm temel verisi.
 

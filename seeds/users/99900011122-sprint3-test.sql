@@ -71,9 +71,9 @@ INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('3f19dcee-9300-444c-866d-92b736d31c76', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'risk-faz5-final', 'portföyüm ne kadar riskli?', 'active', '2026-08-27T11:52:49.164405+00:00', '2026-08-27T11:52:49.166735+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('3e78cfe3-bf68-4497-a744-b04cb3e6b215', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', '18fa384c-66ec-4e23-8749-f030d0833beb', 'portföyümü analiz et', 'active', '2026-08-27T13:48:40.172372+00:00', '2026-08-27T13:48:40.174024+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('af6214ce-948e-4118-be76-42e2d5cd5f43', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'analiz-faz-son', 'portföyüm ne kadar riskli?', 'active', '2026-08-28T09:28:56.807775+00:00', '2026-08-28T09:28:56.810480+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('81dd8131-0444-480a-9a4e-584b652d3ec7', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'default', 'portföyümdeki hisselerle ilgili haber var mı', 'active', '2026-09-01T14:47:09.377183+00:00', '2026-09-01T14:47:09.381142+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('81dd8131-0444-480a-9a4e-584b652d3ec7', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'default', 'portföyümdeki hisselerle ilgili haber var mı', 'active', '2026-09-01T14:47:09.377183+00:00', '2026-09-01T15:19:45.234000+00:00') ON CONFLICT DO NOTHING;
 
--- ai.messages (36)
+-- ai.messages (38)
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b887cdd7-ce93-4249-9b8f-5d0db01460ce', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '979a3110-6869-4855-81aa-a0bb1e6a7a37'), 'user', 'ASELS hissesi ne kadar', '{}', '2026-08-26T07:19:08.898889+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('8ef05075-cd15-47e1-99c2-e3692fef2914', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '979a3110-6869-4855-81aa-a0bb1e6a7a37'), 'assistant', 'ASELSAN hissesi şu anda **401,0 TL** seviyesinde işlem görüyor.
 
@@ -378,3 +378,28 @@ Portföydeki tek hisse olan Akbank için son 90 günde yayınlanan haber başl
 - Bu tablo sadece haber başlıklarını ve yayın tarihlerini gösterir; haberlerin içeriği ve piyasa üzerindeki etkisi burada değerlendirilmemiştir.
 
 **Karar sizin.** Başka bir analiz ya da farklı bir zaman dilimi için bilgi isterseniz, yardımcı olabilirim.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez."], "target_agent": "PORTFOLIO_AGENT", "context_topic": null, "primary_intent": "PORTFOLIO_INQUIRY", "compliance_verdict": "REVISE"}', '2026-09-01T14:47:09.382142+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('020bfac2-11b4-455c-bf33-8aff822a5123', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'hisselerim teknik olarak nasıl duruyor', '{}', '2026-09-01T15:19:45.234000+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b651588f-5778-43d6-9fde-30792396cdc6', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Portföyünüzdeki hisselerin teknik durumu aşağıdaki gibidir.
+
+BIST 100 içinden seçtiğiniz üç hisseye son bir yıllık günlük fiyat verilerini inceledim; hareketli ortalamalar, yüzde sapmalar, RSI ve yıllık volatilite gibi teknik göstergelere baktım.
+
+| Hisse | Trend | Son Kapanış (TRY) | SMA 20 | SMA 50 | SMA 200 | % SMA20''den | % SMA50''den | RSI 14 | Yıllık Volatilite | Max Düşüş % |
+|-------|-------|-------------------|--------|--------|----------|-------------|-------------|--------|-------------------|------------|
+| AEFES | Düşüş | 18,85 | 20,54 | 20,74 | 18,58 | –8,23 | –9,12 | 34,81 | %38,21 | –26,16 |
+| AKBNK | Yükseliş | 72,00 | 67,34 | 71,06 | 71,76 | +6,93 | +1,33 | 61,04 | %42,57 | –31,60 |
+| DOAS | Düşüş | 166,00 | 172,94 | 173,11 | 173,20 | –4,01 | –4,11 | 38,50 | %28,88 | –21,76 |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+
+**Öne çıkan gözlemler:**
+- AEFES ve DOAS, 50 günlük ortalamanın altında ve RSI değerleri 35 civarında, bu da aşırı satım bölgesine yakın bir durum gösteriyor.
+- AKBNK, 20 günlük ortalamanın %7 üzeri ve RSI 61 seviyesinde, momentumun hâlen pozitif olduğunu işaret ediyor.
+- Tüm hisseler için işlem hacmi ortalamaya göre düşük (≈ 0,9‑1,0), bu da likidite riskinin bir miktar olduğunu gösterir.
+- Volatilite değerleri %28‑%43 arasında değişiyor; yüksek volatilite fiyat dalgalanmalarının olası büyüklüğünü yansıtır.
+- Teknik göstergeler sadece geçmiş fiyat hareketine dayanır; gelecekteki fiyat davranışını garanti etmez.
+
+Portföyünüzün yıllıklaştırılmış oynaklığı %28,3, en büyük gerileme %21,9’dur. Risk skoru 100 üzerinden 35,5 puan; bu da **Yüksek** risk seviyesine işaret eder. Ölçülen portföy riskiniz “Yüksek” seviyesinde; ankette belirttiğiniz tolerans “Düşük”. Portföy, beyan ettiğiniz bandın üzerinde ölçülüyor.
+
+**Karar sizin.**
+
+**Fiyatlar 15 dakika gecikmeli; 24 Ağustos 2026 itibarıyla.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-01T15:19:45.235000+00:00') ON CONFLICT DO NOTHING;

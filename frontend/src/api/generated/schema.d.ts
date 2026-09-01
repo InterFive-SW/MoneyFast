@@ -1854,6 +1854,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market/portfolio/technical": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portföy geneli teknik görünüm
+         * @description Her pozisyonun teknik durumu ve portföy geneli toplulaştırma.
+         *
+         *     `market` modülünde, `investment`ta değil. Teknik motor burada ve bu modül
+         *     zaten `investment.market_service`'i okuyor; uç noktayı investment'a koymak
+         *     iki modül arasında ÇİFT YÖNLÜ bir bağımlılık açardı (`market.technicals`
+         *     da `risk.returns`'ü okuyor, yani zincir zaten tek yönlü kurulu). Yolu
+         *     değil, bağımlılık yönünü korumak önemli.
+         *
+         *     Sayfadaki tek hisse görünümüyle aynı `compute`/`narrate` çağrılıyor: iki
+         *     yüzeyin aynı hisse için farklı bir eğilim söylemesi mümkün değil.
+         */
+        get: operations["get_portfolio_technical_api_market_portfolio_technical_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/portfolio/technical/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portföy geneli teknik görünüm (MCP sözleşmesi)
+         * @description Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+         *
+         *     `get_portfolio_positions` ve `news/portfolio` ile aynı desen: MCP araçları
+         *     kullanıcıyı doğrulanmış oturum zarfından alıp yola koyar. İkisi TEK bir
+         *     yardımcıyı çağırıyor, böylece panelin ve sohbetin aynı portföy için farklı
+         *     bir eğilim söylemesi mümkün değil.
+         */
+        get: operations["get_portfolio_technical_for_ai_api_market_portfolio_technical__user_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/market/stream": {
         parameters: {
             query?: never;
@@ -4095,6 +4149,70 @@ export interface components {
             totals: components["schemas"]["PortfolioTotals"];
             /** Warnings */
             warnings?: string[];
+        };
+        /** PortfolioTechnicalOut */
+        PortfolioTechnicalOut: {
+            /**
+             * Base Currency
+             * @default TRY
+             */
+            base_currency: string;
+            /** Positions */
+            positions: components["schemas"]["PortfolioTechnicalRow"][];
+            summary: components["schemas"]["PortfolioTechnicalSummary"];
+            /**
+             * Unconvertible
+             * @default []
+             */
+            unconvertible: string[];
+        };
+        /**
+         * PortfolioTechnicalRow
+         * @description Bir pozisyonun teknik durumu, portföydeki yeriyle birlikte.
+         *
+         *     `TechnicalSignalsOut`'u genişletiyor: tek hisse sayfasıyla portföy paneli
+         *     aynı alanları okusun ki ikisi aynı hisse için farklı bir eğilim
+         *     gösteremesin.
+         */
+        PortfolioTechnicalRow: {
+            /** Symbol */
+            symbol: string;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            signals: components["schemas"]["TechnicalSignals"];
+            /** Narrative */
+            narrative?: string | null;
+            /** Name */
+            name: string;
+            /** Value */
+            value?: number | null;
+        };
+        /**
+         * PortfolioTechnicalSummary
+         * @description Toplulaştırma. Sayı ve değer AYRI, çünkü zıt yönü gösterebilirler.
+         */
+        PortfolioTechnicalSummary: {
+            /** Position Count */
+            position_count: number;
+            /** Measured Count */
+            measured_count: number;
+            /** Unmeasured Symbols */
+            unmeasured_symbols: string[];
+            /** By Trend */
+            by_trend: {
+                [key: string]: number;
+            };
+            /** Below Sma 50 */
+            below_sma_50: number;
+            /** Above Sma 50 */
+            above_sma_50: number;
+            /** Weight Below Sma 50 */
+            weight_below_sma_50?: number | null;
+            /** Statement */
+            statement?: string | null;
         };
         /** PortfolioTotals */
         PortfolioTotals: {
@@ -7643,6 +7761,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TechnicalSignalsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_technical_api_market_portfolio_technical_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioTechnicalOut"];
+                };
+            };
+        };
+    };
+    get_portfolio_technical_for_ai_api_market_portfolio_technical__user_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioTechnicalOut"];
                 };
             };
             /** @description Validation Error */

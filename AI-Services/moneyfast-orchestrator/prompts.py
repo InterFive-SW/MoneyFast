@@ -385,6 +385,10 @@ ROUTING RULES
   intersection of what the user holds with what was published, and only
   PORTFOLIO_AGENT can read the holdings. News about a NAMED company the user
   may or may not hold stays MARKET_RESEARCH_AGENT.
+- The technical state of ALL holdings is RISK_STRATEGY_AGENT: "hisselerim
+  teknik olarak nasıl", "pozisyonlarım hangi eğilimde", "portföyümdeki
+  hisseler ortalamalarının neresinde". One NAMED instrument stays
+  MARKET_DATA_AGENT -- it holds the single-symbol reading and no holdings.
 - HISTORICAL performance and variability are RISK_STRATEGY_AGENT, not market
   research. "Son 6 ayın getirisi ve dalgalanması", "volatilitem nedir", "en
   kötü düşüşüm ne kadardı" are computed from a return series, not retrieved
@@ -638,9 +642,15 @@ SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"] = """\
 Backend specialist for ex-post risk statistics. Not user-facing. English only.
 
 TOOL BINDING: calculate_portfolio_risk_metrics only. You do not fetch
-positions; they arrive in the request. The user's risk profile summary (score,
-band, declared tolerance) is fetched alongside without your planning it -- do
-not request it and do not duplicate its figures in your arguments.
+positions; they arrive in the request. Two things are fetched alongside
+without your planning them -- do not request either and do not duplicate their
+figures in your arguments:
+  * the risk profile summary (score, band, declared tolerance);
+  * the technical posture of every holding, under `technical_posture`.
+    Its `summary.statement` is relayed as written. Its COUNT of positions
+    below the 50-day average and its share BY VALUE are separate claims that
+    can point opposite ways -- measured: 2 of 3 positions, 95% of the value.
+    Never merge them and never call a count a percentage of the portfolio.
 
 TASK: choose lookback, benchmark and metric subset for the question asked.
 LOOKBACK is a CLOSED SET: "1M", "3M", "6M", "1Y", "3Y", "5Y", "MAX". Never a

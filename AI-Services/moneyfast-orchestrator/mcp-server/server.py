@@ -72,10 +72,15 @@ SERVER_NAME = "moneyfast"
 #: arama değil -- `rag_semantic_market_search` genişletilmedi, çünkü o araç
 #: serbest metin sorgusu bekliyor ve "portföyümdeki hisselerle ilgili haber"
 #: sorgusu orada gürültü bandında (~0,39) puanlanıyor.
-CONTRACT_VERSION = "v2.11"
+#: v2.12: `get_portfolio_technicals`. `get_technical_signals` TEK sembol
+#: alıyor ve portföy geneli onun tekrarı değil: sayı ile değer ayrışabiliyor
+#: (ölçüldü -- üç pozisyonun ikisi ortalamasının altında ama değerin %95'i),
+#: ve bu ayrımı modele n tane tek-sembol çağrısından çıkarttırmak, her turda
+#: biraz farklı bir toplam üretirdi.
+CONTRACT_VERSION = "v2.12"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Twelve tools across ten domains.
+MoneyFast tool server. Thirteen tools across ten domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -89,6 +94,9 @@ Trend:   get_technical_signals answers "how is it DOING" as opposed to "what
          does it cost". Relay its `narrative` verbatim, caveat included; a
          null field there means the history is too short to compute it, and
          you must not describe an indicator that came back null.
+         get_portfolio_technicals is the same reading across every HOLDING,
+         plus one aggregate sentence. Its COUNT and its WEIGHT are separate
+         claims and can point opposite ways; never merge them.
 News:    get_portfolio_news is the ONLY tool that links news to what the
          user OWNS. It reports a window; state the window whenever you
          report that nothing was published. It carries no sentiment,

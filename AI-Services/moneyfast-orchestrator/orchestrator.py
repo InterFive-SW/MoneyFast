@@ -599,6 +599,15 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     except (MCPUnavailable, MCPToolError) as exc:
         log.warning("risk profile summary unavailable: %s", exc)
 
+    # Aynı sebeple best-effort: teknik görünüm turu zenginleştirir, ayakta
+    # tutmaz. Buraya bağlı, MARKET_DATA_AGENT'a değil -- o ajanın holdings
+    # erişimi yok ve olmaması bilinçli; portföyün TAMAMINI ölçen tek düğüm bu.
+    posture = None
+    try:
+        posture = await mcp.call("get_portfolio_technicals", {"user_id": user_id})
+    except (MCPUnavailable, MCPToolError) as exc:
+        log.warning("portfolio technicals unavailable: %s", exc)
+
     out = await _run_tool(
         state, "calculate_portfolio_risk_metrics", args,
         assumptions=plan.get("assumptions") or [],
@@ -610,6 +619,13 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     )
     tools = ["get_portfolio_positions"] + (out.get("tools_used") or [])
     data = (out.get("specialist_output") or {}).get("data")
+    if posture and isinstance(data, dict):
+        # Ölçümün yanına, içine değil bir kardeş anahtar olarak da değil:
+        # synthesis `data`'yı okuyor. Volatilite ve düşüş, portföyün kendi
+        # geçmişine göre nerede DURDUĞUNU söylemiyor -- "riskim ne" sorusunun
+        # cevabı iki ölçümün ikisini birden istiyor.
+        data["technical_posture"] = posture
+        tools.append("get_portfolio_technicals")
     if summary and isinstance(data, dict):
         # Carried inside the metrics payload rather than beside it: the
         # synthesis step reads `data`, and a sibling key would need every

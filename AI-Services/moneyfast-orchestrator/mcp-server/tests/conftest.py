@@ -102,6 +102,10 @@ ROUTES = {
     # paths do not overlap, but naming it keeps the mapping readable.
     "/market/news/portfolio": "portfolio_news",
     "/market/technicals": "technicals",
+    # v2.12. `/market/portfolio/technical` ile `/market/technicals` ayrı
+    # yollar; ilki bu satırdan ÖNCE eşleşmeli diye değil, hiç çakışmadıkları
+    # için ayrı yazılı.
+    "/market/portfolio/technical": "portfolio_technical",
     "/compliance/validate": "compliance",
     # v2.8 banking. `payments/stage` is listed BEFORE the investment stage
     # route would ever be consulted for it; the two paths do not overlap, but

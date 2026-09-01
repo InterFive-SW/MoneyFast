@@ -40,6 +40,11 @@ EXPECTED_TOOLS = {
     # aramasından ayrı, çünkü bu bir sorgu değil bir kesişim: eşleşme sembol
     # eşitliğiyle kesin, semantik yakınlıkla değil.
     "get_portfolio_news",
+    # v2.12: aynı okuma, her POZİSYON için, artı tek bir toplam cümlesi.
+    # Tek-sembol aracının n kez çağrılmasıyla aynı şey değil: sayı ile değer
+    # ayrışıyor ve toplamı modele hesaplatmak her turda başka bir sayı
+    # üretirdi.
+    "get_portfolio_technicals",
 }
 
 #: Every tool that reaches the backend. classify_and_route_intent is
@@ -56,7 +61,7 @@ class TestWiring:
         # v2.10: `get_technical_signals` eklendi. Bilerek yapılan bir
         # sözleşme değişikliği, dolayısıyla iddia gevşetilmiyor, onunla
         # birlikte taşınıyor.
-        assert server.CONTRACT_VERSION == "v2.11"
+        assert server.CONTRACT_VERSION == "v2.12"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it

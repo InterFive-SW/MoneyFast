@@ -457,7 +457,18 @@ def test_market_research_specialist_marks_snippets_untrusted():
 #: the trend reading -- so it needs the envelope and the choosing rule for
 #: both. Raised deliberately and by a measured amount, not to whatever the
 #: prompt happens to be.
-PROMPT_BUDGETS = {"TRANSACTION_AGENT": 3200, "MARKET_DATA_AGENT": 3000}
+#: RISK_STRATEGY_AGENT carries FOUR tools since v2.13 -- the measurement, the
+#: factor scenario, the trade simulation and the stress test -- so it needs an
+#: output schema and a choosing rule for each. The three additions all answer
+#: "what if", and the rules keeping them measurements rather than forecasts
+#: (relay the caveat, state the assumptions, never say what a factor will do)
+#: are the part that cannot be trimmed: without them the compliance gate cuts
+#: the answer and the user sees nothing.
+PROMPT_BUDGETS = {
+    "TRANSACTION_AGENT": 3200,
+    "MARKET_DATA_AGENT": 3000,
+    "RISK_STRATEGY_AGENT": 3200,
+}
 DEFAULT_PROMPT_BUDGET = 2500
 
 
@@ -604,6 +615,80 @@ def test_the_risk_specialist_may_not_merge_the_count_with_the_weight():
     text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
     assert "Never merge them" in text
     assert "never call a count a percentage of the portfolio" in text
+
+
+def test_the_risk_specialist_names_all_four_tools_and_how_to_pick():
+    """Dört araç ve aralarında seçim kuralı. Kuralsız bir bağlama, bir ölçüm
+    sorusunun senaryo aracına gitmesi demekti."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "WHICH TOOL" in text
+    for tool in ("calculate_portfolio_risk_metrics", "run_portfolio_scenario",
+                 "simulate_position_change", "get_portfolio_stress_test"):
+        assert tool in text
+
+
+def test_the_risk_specialist_is_told_there_is_no_rate_series():
+    """Ölçülemeyen bir faktörü ölçülebilirmiş gibi sunmak, uydurulmuş bir
+    sayıyı ölçüm diye vermek olur. En sık gelen soru da bu."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "There is NO interest-rate" in text
+    assert "never substitute a currency for a rate question" in text
+
+
+def test_the_risk_specialist_may_not_invent_a_trade():
+    """Değişikliği sunucu önermez; öneri motoruna dönüşmenin ilk adımı bu."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "NEVER invent a symbol or a quantity" in text
+    assert "never propose a trade of your own" in text
+
+
+def test_a_scenario_is_never_labelled_a_forecast():
+    """`GUA-003`'ün çizdiği sınır prompt'ta da yazılı: koşullu okuma serbest,
+    çekincesiz yön iddiası değil."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "says what WOULD have followed, never what WILL happen" in text
+    assert "relay its `statement` with the caveat attached" in text
+
+
+def test_the_scenario_factor_set_is_closed_and_matches_the_tools():
+    """Üç yerde aynı liste: prompt, MCP aracı, backend. Ayrışırlarsa model
+    geçersiz bir faktör üretir ve kullanıcı "ölçemedim" cevabı alır."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    for factor in ("USDTRY", "EURTRY", "XU100", "XAUUSD"):
+        assert f'"{factor}"' in text
+
+
+def test_a_conditional_portfolio_question_routes_to_the_risk_agent():
+    assert "A CONDITIONAL question about the portfolio is RISK_STRATEGY_AGENT" \
+        in prompts.ROUTER_PROMPT
+
+
+def test_synthesis_separates_a_permanent_limit_from_an_outage():
+    """Kural 4 EMPTY'yi "veri yok"a eşliyor ve bu doğru. Ama ölçülemeyen bir
+    faktör boş bir sonuç değil, KALICI bir sınır -- ölçüldü, iki kez kesinti
+    gibi anlatıldı ve bir kez kullanıcıdan verisini yapıştırması istendi."""
+    text = prompts.ORCHESTRATOR_SYSTEM_PROMPT + prompts.SYNTHESIS_TASK_TEMPLATE
+    assert "Status UNSUPPORTED is NOT" in text
+    assert "Relay `user_message_tr`" in text
+    assert 'do NOT offer to try again' in text
+
+
+def test_an_unmeasurable_macro_factor_still_routes_to_the_risk_agent():
+    """Ölçülen hata: "faizler artarsa portföyüm nasıl etkilenir"
+    EDUCATION_AGENT'a gitti, hiçbir araç çalışmadı, ve kullanıcıya veri
+    "alınamadı" dendi -- bir kesinti gibi okunuyor, oysa o veri yapısal
+    olarak yok. Reddi bunu BİLEN ajan vermeli."""
+    assert "This INCLUDES a macro factor this system cannot measure" \
+        in prompts.ROUTER_PROMPT
+    assert "Faizler artarsa" in prompts.ROUTER_PROMPT
+
+
+def test_the_router_never_sends_a_turn_somewhere_that_asks_for_holdings():
+    """Aynı turda kullanıcıdan pozisyonlarını yapıştırması istendi. Sistem
+    pozisyonları kayıt saklayıcısından okuyor ve MCP sözleşmesi bunları
+    kullanıcı beyanından almayı açıkça yasaklıyor."""
+    assert "NEVER route a turn somewhere that will ask the user to supply" \
+        in prompts.ROUTER_PROMPT
 
 
 def test_all_holdings_technical_state_routes_to_the_risk_agent():

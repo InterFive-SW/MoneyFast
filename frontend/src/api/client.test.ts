@@ -113,6 +113,9 @@ describe('endpoint paths', () => {
     // token'dan çözülüyor, o yüzden çağrı argümansız.
     ['getPortfolioNews', '/api/market/news/portfolio'],
     ['getPortfolioTechnical', '/api/market/portfolio/technical'],
+    // Stres testi dönemsiz çağrılabiliyor: hiçbir girdi istemiyor ve zaten
+    // olanı gösteriyor.
+    ['getStressTest', '/api/risk/stress'],
     ['getPortfolioAnalysis', '/api/analytics/portfolio'],
     ['getCurrentUser', '/api/auth/me'],
       ['getConversations', '/api/ai_orchestrator/conversations'],
@@ -120,6 +123,29 @@ describe('endpoint paths', () => {
     const fetchMock = mockFetch({})
     ;(apiClient as never as Record<string, () => void>)[method]()
     expect(calledUrl(fetchMock)).toBe(path)
+  })
+
+  it('senaryo faktörü ve şoku gövdede gider', () => {
+    const fetchMock = mockFetch({})
+    apiClient.runScenario('USDTRY', -10)
+    expect(calledUrl(fetchMock)).toBe('/api/risk/scenario')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      factor: 'USDTRY', shock_pct: -10,
+    })
+  })
+
+  it('dönem yalnızca verildiğinde gönderilir', () => {
+    // Verilmediğinde backend'in penceresi kullanılıyor; buraya bir sayı
+    // gömmek, ekranın ve sohbetin farklı pencerelerden konuşması demekti.
+    const fetchMock = mockFetch({})
+    apiClient.runScenario('XU100', 10, '3M')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).lookback).toBe('3M')
+  })
+
+  it('stres testinde dönem sorgu dizesine kodlanır', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getStressTest('6M')
+    expect(calledUrl(fetchMock)).toBe('/api/risk/stress?lookback=6M')
   })
 
   it('encodes a symbol into the candles path', () => {

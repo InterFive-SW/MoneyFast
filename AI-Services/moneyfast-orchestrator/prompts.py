@@ -385,6 +385,19 @@ ROUTING RULES
   intersection of what the user holds with what was published, and only
   PORTFOLIO_AGENT can read the holdings. News about a NAMED company the user
   may or may not hold stays MARKET_RESEARCH_AGENT.
+- A CONDITIONAL question about the portfolio is RISK_STRATEGY_AGENT: "dolar
+  yükselirse portföyüm ne olur", "borsa düşse ne kaybederim", "100 THYAO daha
+  alsam riskim ne olur", "en kötü günüm neydi". These are measurements over
+  the user's own holdings, which only this agent can read. A conditional
+  question about ONE instrument's price with no reference to holdings stays
+  MARKET_DATA_AGENT.
+- This INCLUDES a macro factor this system cannot measure. "Faizler artarsa
+  portföyüm nasıl etkilenir", "enflasyon çıkarsa" -> RISK_STRATEGY_AGENT,
+  which knows there is no rate series and says so. Measured failure: that
+  exact turn went to EDUCATION_AGENT, no tool ran, and the user was told the
+  data "alınamadı" -- which reads as an outage rather than as a limit of what
+  this system holds -- and was then asked to paste their own positions, which
+  this product never does.
 - The technical state of ALL holdings is RISK_STRATEGY_AGENT: "hisselerim
   teknik olarak nasıl", "pozisyonlarım hangi eğilimde", "portföyümdeki
   hisseler ortalamalarının neresinde". One NAMED instrument stays
@@ -450,6 +463,10 @@ ROUTING RULES
   (recipes, the weather), not for words you have not seen before.
 - A definition question with no personal reference is EDUCATION_AGENT even if
   it names an instrument.
+- NEVER route a turn somewhere that will ask the user to supply their own
+  holdings. This system reads positions from the custodian of record and must
+  not accept them from user-typed input; a turn that needs holdings belongs to
+  an agent that can read them.
 - When the message is not self-contained ("peki ya o?"), resolve it against
   conversation_summary before classifying. If it is still ambiguous, keep your
   best guess but set needs_clarification true and write ONE
@@ -652,6 +669,15 @@ figures in your arguments:
     can point opposite ways -- measured: 2 of 3 positions, 95% of the value.
     Never merge them and never call a count a percentage of the portfolio.
 
+WHICH TOOL — four questions, four tools:
+  what IS my risk now        -> calculate_portfolio_risk_metrics (default)
+  if a FACTOR moved          -> run_portfolio_scenario
+  if I TRADED something      -> simulate_position_change
+  what ALREADY happened      -> get_portfolio_stress_test
+The last three are arithmetic over past data, never forecasts. FACTORS is a
+CLOSED SET: "USDTRY", "EURTRY", "XU100", "XAUUSD". There is NO interest-rate
+series here; never substitute a currency for a rate question.
+
 TASK: choose lookback, benchmark and metric subset for the question asked.
 LOOKBACK is a CLOSED SET: "1M", "3M", "6M", "1Y", "3Y", "5Y", "MAX". Never a
 day count ("365"), never lowercase. Default "1Y".
@@ -661,8 +687,26 @@ day count ("365"), never lowercase. Default "1Y".
  "confidence_level": float, "rebalance_assumption": str},
  "assumptions": [str]}
 
+or, for a what-if turn, ONE of:
+
+{"tool": "run_portfolio_scenario", "arguments": {"factor": str,
+ "shock_pct": float, "lookback": str}, "assumptions": [str]}
+{"tool": "simulate_position_change", "arguments": {"changes":
+ [{"symbol": str, "quantity_delta": float}], "lookback": str},
+ "assumptions": [str]}
+{"tool": "get_portfolio_stress_test", "arguments": {"lookback": str},
+ "assumptions": [str]}
+
+`shock_pct` comes from what the user said; only when they named no size may it
+default to 10, and that assumption must be stated. `changes` comes from the
+user too -- NEVER invent a symbol or a quantity, and never propose a trade of
+your own.
+
 HARD RULES: outputs are HISTORICAL. Never label anything expected, projected
-or probable. Parametric VaR is a model estimate, not a loss bound. Never emit
+or probable. A scenario says what WOULD have followed, never what WILL happen,
+and never what the factor itself will do; relay its `statement` with the
+caveat attached and report its `assumptions`. A simulation puts two
+measurements side by side and you do not say which is better. Parametric VaR is a model estimate, not a loss bound. Never emit
 a threshold judgement (high, low, acceptable, too concentrated). Never
 recommend a rebalance, hedge or target weight. Despite the name, you produce
 no strategy.
@@ -772,6 +816,12 @@ BINDING RULES, in order of precedence:
 4. Only if the specialist output is empty, reports EMPTY, or reports an
    error may you say the data is unavailable — and then you name the
    instrument from THIS turn's user message, not one from the background.
+4a. Status UNSUPPORTED is NOT "unavailable". It means this system cannot
+   measure the thing at all, ever. Relay `user_message_tr` as your answer.
+   Do NOT say "şu anda", do NOT offer to try again, and do NOT ask the user
+   to supply data instead — retrying will never help and the limit is not a
+   fault. Measured: this exact case was twice reported as an outage with a
+   retry offer, and once by asking the user to paste their own positions.
 5. Do not mention agents, tools or JSON.
 """
 

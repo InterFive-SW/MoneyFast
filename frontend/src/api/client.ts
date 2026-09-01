@@ -15,6 +15,21 @@ type GetResponseType<T> = T extends {
     };
 } ? U : never;
 
+/** Aynısı, POST ile cevap veren uçlar için. `GetResponseType` yalnızca `get`
+ *  taşıyan yolları çözüyor ve POST-only bir uçta sessizce `never` veriyor --
+ *  o da alan erişiminde anlaşılmaz bir tip hatasına dönüşüyor. */
+type PostResponseType<T> = T extends {
+    post: {
+        responses: {
+            200: {
+                content: {
+                    'application/json': infer U;
+                };
+            };
+        };
+    };
+} ? U : never;
+
 // Export types based on the OpenAPI schema
 export type InvestmentBalance = GetResponseType<paths['/api/investment/portfolio/summary']>;
 export type PortfolioChartData = GetResponseType<paths['/api/investment/portfolio/chart']>;
@@ -181,6 +196,11 @@ export type PortfolioNewsSymbol = PortfolioNews['symbols'][0];
 /** Portföy geneli teknik görünüm: pozisyon başına okuma + toplulaştırma. */
 export type PortfolioTechnical = GetResponseType<paths['/api/market/portfolio/technical']>;
 export type PortfolioTechnicalRow = PortfolioTechnical['positions'][0];
+/** Koşullu makro senaryo: ölçülen duyarlılık ve şokun yansıması. */
+export type ScenarioResult = PostResponseType<paths['/api/risk/scenario']>;
+/** Stres testi: gerçekten olan günler ve faktörlerin en sert pencereleri. */
+export type StressResult = GetResponseType<paths['/api/risk/stress']>;
+export type ScenarioFactor = 'USDTRY' | 'EURTRY' | 'XU100' | 'XAUUSD';
 /** Kullanıcının ankette beyan ettiği tolerans. Anket doldurulmadan `null`. */
 export interface DeclaredRiskProfile {
     tolerance_level: string;
@@ -1070,6 +1090,25 @@ class ApiClient {
      */
     getPortfolioTechnical() {
         return this.request<PortfolioTechnical>('/market/portfolio/technical');
+    }
+
+    /**
+     * Koşullu senaryo. Bir TAHMİN değil: geçmiş birlikte hareketin
+     * aritmetiği, koşula bağlanmış hâli.
+     */
+    runScenario(factor: ScenarioFactor, shockPct: number, lookback?: string) {
+        return this.post<ScenarioResult>('/api/risk/scenario', {
+            factor,
+            shock_pct: shockPct,
+            ...(lookback ? { lookback } : {}),
+        });
+    }
+
+    /** Stres testi: uydurulmuş bir kayıp senaryosu değil, olan günler. */
+    getStressTest(lookback?: string) {
+        return this.request<StressResult>(
+            `/risk/stress${lookback ? `?lookback=${encodeURIComponent(lookback)}` : ''}`,
+        );
     }
 
     // Generic get method for backwards compatibility with UserContext

@@ -51,6 +51,7 @@ import news_tools
 import orchestrator_tools
 import portfolio_tools
 import risk_strategy_tools
+import scenario_tools
 import banking_tools
 import technical_tools
 import transaction_tools
@@ -77,10 +78,14 @@ SERVER_NAME = "moneyfast"
 #: (ölçüldü -- üç pozisyonun ikisi ortalamasının altında ama değerin %95'i),
 #: ve bu ayrımı modele n tane tek-sembol çağrısından çıkarttırmak, her turda
 #: biraz farklı bir toplam üretirdi.
-CONTRACT_VERSION = "v2.12"
+#: v2.13: koşullu senaryo, stres testi ve pozisyon simülasyonu. Üçü de
+#: ÖLÇÜM: ikisi geçmiş getirilerin aritmetiği, biri gerçekten olan günler.
+#: `simulate_position_change` yeni bir yetenek değil -- `/risk/simulate`
+#: aylardır yazılmış ve testliydi, hiçbir araç onu çağırmıyordu.
+CONTRACT_VERSION = "v2.13"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Thirteen tools across ten domains.
+MoneyFast tool server. Sixteen tools across eleven domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -103,6 +108,13 @@ News:    get_portfolio_news is the ONLY tool that links news to what the
          importance or ranking, and you must not supply one.
 Empty:   an empty list is a valid, complete answer. Never substitute
          remembered or illustrative data for it.
+What-if: run_portfolio_scenario answers "if X moved", simulate_position_change
+         answers "if I traded", get_portfolio_stress_test answers "what
+         already happened". All three are ARITHMETIC OVER PAST DATA, never a
+         forecast. Relay their statement with its caveat, report the
+         assumptions, and never say what a factor will do. There is NO
+         interest-rate series: rate scenarios cannot be measured and must not
+         be approximated with a currency.
 Gate:    validate_compliance_rules runs on every user-facing draft that
          references an instrument, a figure, a market view or a
          transaction. Fail closed.
@@ -123,6 +135,7 @@ DOMAIN_MODULES = (
     ("banking", banking_tools),
     ("technical", technical_tools),
     ("news", news_tools),
+    ("scenario", scenario_tools),
 )
 
 

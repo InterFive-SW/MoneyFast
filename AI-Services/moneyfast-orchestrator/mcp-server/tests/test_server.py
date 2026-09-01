@@ -45,6 +45,11 @@ EXPECTED_TOOLS = {
     # ayrışıyor ve toplamı modele hesaplatmak her turda başka bir sayı
     # üretirdi.
     "get_portfolio_technicals",
+    # v2.13: "ne olurdu" ailesi. Üçü de ölçüm; ikisi geçmiş getirilerin
+    # aritmetiği, biri gerçekten olan günler.
+    "run_portfolio_scenario",
+    "get_portfolio_stress_test",
+    "simulate_position_change",
 }
 
 #: Every tool that reaches the backend. classify_and_route_intent is
@@ -61,7 +66,7 @@ class TestWiring:
         # v2.10: `get_technical_signals` eklendi. Bilerek yapılan bir
         # sözleşme değişikliği, dolayısıyla iddia gevşetilmiyor, onunla
         # birlikte taşınıyor.
-        assert server.CONTRACT_VERSION == "v2.12"
+        assert server.CONTRACT_VERSION == "v2.13"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -77,7 +82,7 @@ class TestWiring:
         assert domains == {
             "orchestrator", "portfolio", "market_data", "market_research",
             "risk_strategy", "compliance", "transaction", "banking",
-            "technical", "news",
+            "technical", "news", "scenario",
         }
 
     def test_every_domain_module_exposes_register(self):

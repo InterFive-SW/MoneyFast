@@ -2298,6 +2298,113 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/risk/scenario": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Koşullu senaryo: bir faktör oynasaydı portföy ne olurdu
+         * @description Ölçülen duyarlılığa göre bir faktör şokunun portföye yansıması.
+         *
+         *     TAHMİN DEĞİL. Faktörün ne yapacağı hakkında hiçbir şey söylenmiyor;
+         *     yalnızca yapsaydı ne olacağı, geçmiş birlikte hareketin aritmetiğiyle.
+         *     Üretilen cümle koşullu kuruluyor ve çekincesi aynı cümlede duruyor --
+         *     ikisini ayırmak, ilk yarıyı tek başına bir beklenti hâline getirirdi.
+         *
+         *     Ölçülemeyen faktör 422 ile reddediliyor. En göze çarpanı FAİZ: sistemde
+         *     faiz SERİSİ yok, `TR_POLICY_RATE` bir sabit. "Faizler artarsa"yı USDTRY
+         *     gibi ölçüyormuş gibi cevaplamak, uydurulmuş bir sayıyı ölçüm diye vermek
+         *     olurdu.
+         */
+        post: operations["run_scenario_api_risk_scenario_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/risk/scenario/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Koşullu senaryo (MCP sözleşmesi)
+         * @description Yukarıdakiyle aynı ölçüm, kullanıcısı yoldan gelen hâli.
+         *
+         *     `GET /profile/{user_id}` ile aynı desen ve aynı sebep: bu uç noktanın
+         *     konusu çağıranın kendisi olmak zorunda değil, MCP araçları kullanıcıyı
+         *     doğrulanmış oturum zarfından alıp yola koyuyor. İkisi TEK bir yardımcıyı
+         *     çağırıyor, böylece ekran ile sohbetin aynı portföy için farklı bir
+         *     duyarlılık söylemesi mümkün değil.
+         */
+        post: operations["run_scenario_for_ai_api_risk_scenario__user_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/risk/stress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stres testi: gerçekten olanlar
+         * @description İki tür stres, ikisi de ölçüm.
+         *
+         *     1. **En kötü günler** — portföyün gerçekten yaşadığı en sert düşüşler,
+         *        tarihleriyle.
+         *     2. **Tarihsel replay** — her faktörün en sert oynadığı pencerede portföyün
+         *        ne yaptığı.
+         *
+         *     Uydurulmuş bir kayıp senaryosu yok. Varsayımsal bir tahminin aksine
+         *     bunların doğrulanabilir bir karşılığı var: o günler oldu.
+         *
+         *     Ölçülemeyen faktör listede YER ALMAZ, sıfırla görünmez -- sıfır bir
+         *     ölçümdür ve "o faktör portföyü hiç etkilemedi" demektir.
+         */
+        get: operations["run_stress_api_risk_stress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/risk/stress/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stres testi (MCP sözleşmesi)
+         * @description Yukarıdakiyle aynı ölçüm, kullanıcısı yoldan gelen hâli.
+         */
+        get: operations["run_stress_for_ai_api_risk_stress__user_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/risk/simulate": {
         parameters: {
             query?: never;
@@ -2320,6 +2427,30 @@ export interface paths {
          *     yalnızca iki ölçümü yan yana koyar. Yorumu okuyan yapar.
          */
         post: operations["simulate_api_risk_simulate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/risk/simulate/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Varsayımsal değişikliğin risk etkisi (MCP sözleşmesi)
+         * @description Yukarıdakiyle aynı karşılaştırma, kullanıcısı yoldan gelen hâli.
+         *
+         *     Bu uç nokta aylardır yazılı ve testliydi; hiçbir MCP aracı onu
+         *     çağırmıyordu. "Şu hisseden alsam riskim ne olur" sorusunun cevabı vardı
+         *     ve sohbetten erişilemiyordu.
+         */
+        post: operations["simulate_for_ai_api_risk_simulate__user_id__post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3546,6 +3677,13 @@ export interface components {
              * @default 0
              */
             fundamentals_written: number;
+            /**
+             * News Symbols
+             * @default {}
+             */
+            news_symbols: {
+                [key: string]: string[];
+            };
         };
         /** Instrument */
         Instrument: {
@@ -4464,6 +4602,30 @@ export interface components {
             title: string;
         };
         /**
+         * ReplayOut
+         * @description Faktörün en sert oynadığı pencere ve portföyün o günlerde yaptığı.
+         *
+         *     Bir model çıktısı değil: o günler gerçekten oldu.
+         */
+        ReplayOut: {
+            /**
+             * Start Date
+             * Format: date-time
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date-time
+             */
+            end_date: string;
+            /** Factor Move Pct */
+            factor_move_pct: number;
+            /** Portfolio Move Pct */
+            portfolio_move_pct: number;
+            /** Trading Days */
+            trading_days: number;
+        };
+        /**
          * ResetPasswordRequest
          * @description Şifreyi sıfırlamak için şema.
          */
@@ -4698,6 +4860,51 @@ export interface components {
             /** Deadline */
             deadline?: string | null;
         };
+        /** ScenarioOut */
+        ScenarioOut: {
+            /** Factor */
+            factor: string;
+            /** Factor Name */
+            factor_name: string;
+            /** Shock Pct */
+            shock_pct: number;
+            /** Lookback */
+            lookback: string;
+            /**
+             * Base Currency
+             * @default TRY
+             */
+            base_currency: string;
+            sensitivity: components["schemas"]["SensitivityOut"];
+            /** Estimated Impact Pct */
+            estimated_impact_pct: number;
+            /** Estimated Impact Value */
+            estimated_impact_value?: number | null;
+            /** Statement */
+            statement: string;
+            /**
+             * Assumptions
+             * @default []
+             */
+            assumptions: string[];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
+        };
+        /** ScenarioRequest */
+        ScenarioRequest: {
+            /** Factor */
+            factor: string;
+            /** Shock Pct */
+            shock_pct: number;
+            /**
+             * Lookback
+             * @default 1Y
+             */
+            lookback: string;
+        };
         /** ScoreComponent */
         ScoreComponent: {
             /** Name */
@@ -4717,6 +4924,26 @@ export interface components {
             percentage: number;
             /** Color */
             color: string;
+        };
+        /**
+         * SensitivityOut
+         * @description Ölçülen duyarlılık. `r_squared` ZORUNLU eşlikçi.
+         *
+         *     Tek başına bir beta, ilişkinin ne kadar gerçek olduğu hakkında hiçbir şey
+         *     söylemiyor: 0,42'lik bir beta, faktör değişkenliğin %3'ünü açıklıyorken de
+         *     çıkar.
+         */
+        SensitivityOut: {
+            /** Beta */
+            beta: number;
+            /** Correlation */
+            correlation?: number | null;
+            /** R Squared */
+            r_squared?: number | null;
+            /** Observation Count */
+            observation_count: number;
+            /** Is Statistically Reliable */
+            is_statistically_reliable: boolean;
         };
         /** SimulationOut */
         SimulationOut: {
@@ -4929,6 +5156,53 @@ export interface components {
             currency_code: string;
             /** Movements */
             movements?: components["schemas"]["MovementOut"][];
+        };
+        /**
+         * StressOut
+         * @description İki tür stres, ikisi de ÖLÇÜM.
+         *
+         *     Uydurulmuş bir kayıp senaryosu yok: biri faktörün en sert oynadığı gerçek
+         *     pencere, diğeri portföyün gerçekten yaşadığı en kötü günler.
+         */
+        StressOut: {
+            /** Lookback */
+            lookback: string;
+            /**
+             * Base Currency
+             * @default TRY
+             */
+            base_currency: string;
+            /** Observation Count */
+            observation_count: number;
+            /**
+             * Worst Days
+             * @default []
+             */
+            worst_days: components["schemas"]["WorstDayOut"][];
+            /**
+             * Replays
+             * @default {}
+             */
+            replays: {
+                [key: string]: components["schemas"]["ReplayOut"];
+            };
+            /**
+             * Factor Names
+             * @default {}
+             */
+            factor_names: {
+                [key: string]: string;
+            };
+            /**
+             * Excluded Symbols
+             * @default []
+             */
+            excluded_symbols: string[];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
         };
         /** SubscriptionOut */
         SubscriptionOut: {
@@ -5256,6 +5530,16 @@ export interface components {
             observation_count: number;
             /** Frequency */
             frequency: string;
+        };
+        /** WorstDayOut */
+        WorstDayOut: {
+            /**
+             * Date
+             * Format: date-time
+             */
+            date: string;
+            /** Return Pct */
+            return_pct: number;
         };
     };
     responses: never;
@@ -8299,11 +8583,184 @@ export interface operations {
             };
         };
     };
+    run_scenario_api_risk_scenario_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_scenario_for_ai_api_risk_scenario__user_id__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_stress_api_risk_stress_get: {
+        parameters: {
+            query?: {
+                lookback?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StressOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_stress_for_ai_api_risk_stress__user_id__get: {
+        parameters: {
+            query?: {
+                lookback?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StressOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     simulate_api_risk_simulate_post: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimulationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SimulationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    simulate_for_ai_api_risk_simulate__user_id__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
             cookie?: never;
         };
         requestBody: {

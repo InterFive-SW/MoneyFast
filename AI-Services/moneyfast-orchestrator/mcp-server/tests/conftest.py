@@ -97,6 +97,10 @@ ROUTES = {
     "/investment/transactions/stage": "stage",
     "/risk/calculate": "risk",
     "/risk/profile/": "risk_summary",
+    # v2.13. Üçü de kullanıcıyı yoldan alıyor, `risk/profile/` gibi.
+    "/risk/scenario": "scenario",
+    "/risk/stress": "stress",
+    "/risk/simulate": "simulate",
     "/market/instruments": "instruments",
     # v2.11. Listed before the bare "/market/" fragments would matter; the
     # paths do not overlap, but naming it keeps the mapping readable.

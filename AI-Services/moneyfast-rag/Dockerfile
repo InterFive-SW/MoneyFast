@@ -21,7 +21,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-COPY app.py embeddings.py store.py chunking.py ./
+COPY app.py embeddings.py store.py chunking.py corpus_seed.py ./
 
 # Bake the ONNX weights into the image. Without this the first request after a
 # cold start would try to reach Hugging Face — and the rag container is not on

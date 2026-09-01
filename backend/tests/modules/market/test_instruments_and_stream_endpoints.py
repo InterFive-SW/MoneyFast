@@ -91,6 +91,12 @@ class TestInstruments:
             "instruments": [], "unresolved": []
         }
 
+    def test_the_whole_universe_fits_in_one_request(self, api):
+        """Süzgeç paneli istemcide çalışıyor; bir SAYFA üzerinde çalıştırmak
+        "F/K'sı 10'un altı" sorgusunu o sayfaya düşen eşleşmelerle
+        sınırlardı. Tavan bu yüzden evrenin tamamını kapsıyor."""
+        assert api.get("/api/market/instruments?limit=1014").status_code == 200
+
     def test_limit_is_bounded(self, api):
         assert api.get("/api/market/instruments?limit=0").status_code == 422
         assert api.get("/api/market/instruments?limit=5000").status_code == 422

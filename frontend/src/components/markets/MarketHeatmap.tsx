@@ -5,6 +5,7 @@ import { apiClient } from '../../api/client'
 import { useMarketStream } from '../../hooks/useMarketStream'
 import { formatWithBase } from '../../lib/money'
 import type { HeatmapTile } from '../../api/client'
+import { LEGEND_STEPS, tileColour, tileTextColour } from '../../lib/heatmapColour'
 
 interface MarketHeatmapProps {
   /** Grid yerleşiminden gelen yükseklik birimi; widget olarak kullanıldığında. */
@@ -17,37 +18,6 @@ const MARKETS = [
   { label: 'S&P 500', value: 'SP500' },
   { label: 'Nasdaq', value: 'NASDAQ' },
 ] as const
-
-/**
- * Renk eşiği: bu yüzdeden büyük hareketler tam doygunlukta.
- *
- * Efsane çubuğu da bu ölçekten üretiliyor, dolayısıyla çubuktaki renkle
- * kutudaki renk aynı kuralın çıktısı -- efsane süs değil, anahtar.
- */
-const FULL_SCALE = 3
-
-/** Efsane basamakları, ekrandaki çubuğun aynısı. */
-const LEGEND_STEPS = [-3, -2, -1, 0, 1, 2, 3]
-
-/**
- * Yüzde değişimi renge çevirir: kazanç yeşil, kayıp kırmızı.
- *
- * Doygunluk hareketin BÜYÜKLÜĞÜYLE artıyor -- %0,2'lik bir kıpırdanma ile
- * %8'lik bir sıçrama aynı renkte olsaydı harita hangi hissenin gerçekten
- * hareket ettiğini söylemezdi. Sıfıra çok yakın değerler nötr gri kalıyor:
- * yuvarlanmış bir sıfırı yeşile boyamak, olmayan bir kazancı göstermek olurdu.
- */
-export function tileColour(changePercent: number): string {
-  if (Math.abs(changePercent) < 0.05) return '#3f4654'
-  const intensity = Math.min(1, Math.abs(changePercent) / FULL_SCALE)
-  // 0,25 taban: en küçük hareket bile nötrden ayırt edilebilsin.
-  const weight = 0.25 + intensity * 0.75
-  const [r, g, b] = changePercent > 0 ? [22, 163, 74] : [220, 38, 38]
-  const base = 46
-  return `rgb(${Math.round(base + (r - base) * weight)}, ${Math.round(
-    base + (g - base) * weight,
-  )}, ${Math.round(base + (b - base) * weight)})`
-}
 
 interface TileProps {
   x?: number
@@ -109,7 +79,7 @@ function Tile({
           x={x + width / 2}
           y={y + height / 2 - (showChange ? 6 : 0)}
           textAnchor="middle"
-          fill="#ffffff"
+          fill={tileTextColour(change)}
           fontSize={Math.min(13, Math.max(9, width / 6))}
           fontWeight={600}
         >
@@ -121,7 +91,7 @@ function Tile({
           x={x + width / 2}
           y={y + height / 2 + 10}
           textAnchor="middle"
-          fill="#ffffff"
+          fill={tileTextColour(change)}
           fontSize={Math.min(11, Math.max(8, width / 8))}
           opacity={0.9}
         >

@@ -8,6 +8,7 @@
  */
 
 import React, { useState } from 'react'
+import { titleFor } from '../../lib/routeTitle'
 import { Outlet, useLocation } from 'react-router-dom'
 import ErrorBoundary from '../ErrorBoundary'
 import Sidebar from './Sidebar'
@@ -22,18 +23,6 @@ import ChatPopup from '../chat/ChatPopup'
  * Yeni korumalı rota eklendiğinde bu tabloya da kayıt eklenmeli,
  * böylece Header doğru başlığı görüntüleyebilir.
  */
-const ROUTE_TITLE_MAP: Record<string, string> = {
-  '/dashboard':  'Gösterge Paneli',
-  '/banking':    'Cüzdan & İşlemler',
-  '/investment': 'Yatırımlar',
-  '/chat':       'AI Finansal Asistan',
-  '/analiz':     'Analiz',
-  '/portfolio':  'Portföy',
-  '/settings':   'Ayarlar',
-}
-
-const FALLBACK_TITLE = 'MoneyFast'
-
 // ─── AI Asistan FAB Alt Bileşeni ──────────────────────────────────────────────
 
 interface AIAssistantFABProps {
@@ -99,7 +88,7 @@ function AIAssistantFAB({ onTogglePopup, isOpen }: AIAssistantFABProps) {
  */
 export default function DashboardLayout() {
   const location  = useLocation()
-  const pageTitle = ROUTE_TITLE_MAP[location.pathname] ?? FALLBACK_TITLE
+  const pageTitle = titleFor(location.pathname)
   const [isChatPopupOpen, setIsChatPopupOpen] = useState(false);
 
   // Balonun gösterildiği tek koşul; hem FAB hem de alt dolgu bunu okuyor,

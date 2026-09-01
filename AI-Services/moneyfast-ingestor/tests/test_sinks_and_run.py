@@ -409,6 +409,11 @@ class TestScheduler:
             # Isı haritası piyasa değerine göre boyutlanıyor; gecelik işi
             # beklemek S&P sekmesinin bir gün boş kalması demek.
             "fundamentals-backfill": "date",
+            # Geri doldurmadan AYRI: o "hiç geçmişi yok"u, bu "geçmişi var
+            # ama eski"yi cevaplıyor. Commit'lenmiş taban verisiyle açılan
+            # bir klonda geri doldurma haklı olarak atlıyor ve bu iş
+            # olmasaydı 19:15 cron'una kadar hiçbir şey çalışmazdı.
+            "candle-topup": "date",
         }
         assert warmed == ["q", "n"]
         assert started == [True]

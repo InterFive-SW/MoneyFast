@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '../api/client'
+import { formatDate } from '../lib/datetime'
 import type { FundamentalsOut, MarketCalendar } from '../api/client'
 
 /**
@@ -87,7 +88,5 @@ export function useMarketCalendar() {
 /** Bir tarihi gün-ay-yıl olarak yazar. Yoksa "—". */
 export function shortDate(value: string | null | undefined): string {
     if (!value) return '—'
-    return new Date(value).toLocaleDateString('tr-TR', {
-        day: '2-digit', month: 'short', year: 'numeric',
-    })
+    return formatDate(value)
 }

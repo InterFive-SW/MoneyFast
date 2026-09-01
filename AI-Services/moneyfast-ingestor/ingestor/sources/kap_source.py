@@ -392,6 +392,14 @@ ARRAY_MARKER = b"\x78\x70"
 
 PDF_MAGIC = b"%PDF-"
 
+#: Üst üste bu kadar pencere okunamazsa tur BIRAKILIR. Ölçüldü: KAP sürekli
+#: listelemeyi bir noktadan sonra kısıtlıyor (tek süreçle bile, ~150 istek
+#: sonrasında bağlantıyı düşürerek). Kısıtlayan bir sunucuya istek atmaya
+#: devam etmek, README'nin tam olarak yapmayacağını söylediği şey; ve
+#: kalanı zaten alınamayacağı için hiçbir şey de kazandırmıyor. Bırakılan
+#: tur eksik olarak RAPORLANIYOR, bir sonraki tur kaldığı yerden devam eder.
+MAX_CONSECUTIVE_FAILURES = 4
+
 #: `78 70` bir sınıf tanımının adının içinde de geçebilir, yani ilk eşleşme
 #: doğru olan olmak zorunda değil. Birkaç kez denenip bırakılıyor.
 MAX_MARKER_ATTEMPTS = 5
@@ -583,9 +591,11 @@ def fetch_all(
     dropped = 0
 
     failures: list = []
+    consecutive = 0
     upper = until
     while upper >= since:
         lower = max(since, upper - timedelta(days=span - 1))
+        before = len(failures)
         for row in enumerate_window(lower, upper, client, failures=failures):
             item = normalise(row, universe)
             if item is None:
@@ -595,6 +605,15 @@ def fetch_all(
                 continue
             seen.add(item["content_hash"])
             items.append(item)
+
+        consecutive = consecutive + 1 if len(failures) > before else 0
+        if consecutive >= MAX_CONSECUTIVE_FAILURES:
+            log.warning(
+                "KAP refused %d windows in a row; abandoning this pass at %s. "
+                "The next run resumes from where this one stopped.",
+                consecutive, lower,
+            )
+            break
         upper = lower - timedelta(days=1)
 
     if failures:

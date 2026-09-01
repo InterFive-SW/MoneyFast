@@ -344,6 +344,50 @@ class TestIncompleteRuns:
         assert len(failures) == 2
 
 
+class TestBackingOff:
+    """A server that is refusing us must not be pushed harder.
+
+    Measured: KAP throttles sustained enumeration — a single-process pass
+    over six months got roughly four and a half months in before every
+    request started returning a dropped connection. Continuing is both
+    impolite and pointless: nothing more comes back.
+    """
+
+    def test_a_run_of_refusals_abandons_the_pass(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_WINDOW_DAYS", "1")
+        monkeypatch.setattr(kap_source, "MAX_CONSECUTIVE_FAILURES", 3)
+        calls = {"n": 0}
+
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(666, text="")
+            calls["n"] += 1
+            return httpx.Response(503, text="down")
+
+        kap_source.fetch_all(UNIVERSE, date(2026, 1, 1), date(2026, 8, 28),
+                             client_for(handler))
+        assert calls["n"] == 3, "it must stop, not walk the whole range"
+        assert kap_source.last_run_failures == 3
+
+    def test_an_isolated_failure_does_not_stop_the_pass(self, monkeypatch):
+        """One dropped window is not a refusal; the counter has to reset."""
+        monkeypatch.setenv("INGESTOR_KAP_WINDOW_DAYS", "1")
+        monkeypatch.setattr(kap_source, "MAX_CONSECUTIVE_FAILURES", 3)
+        calls = {"n": 0}
+
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(666, text="")
+            calls["n"] += 1
+            if calls["n"] % 2 == 0:
+                return httpx.Response(503, text="down")
+            return httpx.Response(200, json=[row(disclosureIndex=calls["n"])])
+
+        items = kap_source.fetch_all(UNIVERSE, date(2026, 8, 22), date(2026, 8, 28),
+                                     client_for(handler))
+        assert calls["n"] == 7, "every window in the range should be attempted"
+        assert len(items) == 4
+
 class TestFetchAll:
     def test_windows_are_walked_newest_first(self, monkeypatch):
         """An interrupted backfill should leave a contiguous RECENT archive,

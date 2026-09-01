@@ -641,9 +641,16 @@ def fundamentals_missing(db: Session = Depends(get_db)):
     dependencies=[Depends(require_service_token)],
 )
 def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db)):
-    written = service.upsert_news(db, [item.model_dump() for item in request.items])
-    log.info("ingested %d new news items of %d offered", written, len(request.items))
-    return {"quotes_written": 0, "candles_written": 0, "news_written": written}
+    written, symbols = service.upsert_news(db, [item.model_dump() for item in request.items])
+    log.info(
+        "ingested %d new news items of %d offered, %d symbol-tagged",
+        written, len(request.items), len(symbols),
+    )
+    # Semboller geri veriliyor: çözümleme evrenin bulunduğu yerde yapılıyor
+    # ve `ingestor` aynı haberi RAG'a da yazıyor. Sonucu geri vermezsek
+    # korpustaki kopya etiketsiz kalır.
+    return {"quotes_written": 0, "candles_written": 0, "news_written": written,
+            "news_symbols": symbols}
 
 
 @router.post(

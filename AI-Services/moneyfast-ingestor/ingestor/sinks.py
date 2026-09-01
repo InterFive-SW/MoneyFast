@@ -186,7 +186,11 @@ def push_news_to_backend(client: httpx.Client, items: list[dict]) -> Optional[di
         return None
 
 
-def push_news_to_rag(client: httpx.Client, items: list[dict]) -> int:
+def push_news_to_rag(
+    client: httpx.Client,
+    items: list[dict],
+    symbols: Optional[dict[str, list[str]]] = None,
+) -> int:
     """Chunk and embed each article into the vector store.
 
     One request per article because `rag /ingest` splits and embeds a single
@@ -196,8 +200,16 @@ def push_news_to_rag(client: httpx.Client, items: list[dict]) -> int:
     Failures are counted, not raised. News that reaches the dashboard but not
     the corpus is a degraded state, not a broken one — the chatbot will simply
     say it found no sources, which is true.
+
+    `symbols` backend'in ÇÖZDÜĞÜ etiketler, hash'e göre. Bu servis enstrüman
+    evrenini tutmuyor ve tutmamalı (kredensiyeli yok), dolayısıyla bir RSS
+    haberinin hangi şirketten bahsettiğini tek bilen backend. Bir dönem sonuç
+    geri alınmıyordu ve korpusa giden kopya beslemenin kendi (boş) etiketiyle
+    yazılıyordu: ölçüldü, 1.970 RSS belgesinin SIFIRINDA ticker vardı ve
+    ajanın `tickers` filtresi yalnızca KAP bildirimlerinde çalışıyordu.
     """
     written = 0
+    resolved = symbols or {}
     for item in items:
         body = {
             "title": item["title"],
@@ -210,7 +222,12 @@ def push_news_to_rag(client: httpx.Client, items: list[dict]) -> int:
             # One ticker per document; the corpus schema carries a single
             # ticker column. Multi-tagged stories keep their first symbol and
             # remain findable by text.
-            "ticker": (item.get("related_symbols") or [None])[0],
+            #
+            # Backend'in çözdüğü etiket ÖNCELİKLİ: evren orada ve eşleştirme
+            # orada yapılıyor. Kaynağın kendi etiketi (KAP `stockCode`) zaten
+            # backend'den aynen geri geliyor, dolayısıyla bu bir üstüne yazma
+            # değil; yalnızca çözülemediğinde elde olana düşülüyor.
+            "ticker": _first_ticker(item, resolved),
             "published_at": item["published_at"],
         }
         try:
@@ -226,6 +243,16 @@ def push_news_to_rag(client: httpx.Client, items: list[dict]) -> int:
             log.warning("rag ingest failed for %r: %s", item["title"][:60], exc)
     return written
 
+
+def _first_ticker(item: dict, resolved: dict[str, list[str]]) -> Optional[str]:
+    """Belgeye yazılacak tek sembol.
+
+    Korpus şeması belge başına TEK ticker taşıyor. Birden fazla şirkete
+    dokunan bir haber ilkini saklar ve gerisi metinden bulunabilir kalır --
+    "BIST 100 değer kaybetti" gibi bir başlık dört şirketi anabiliyor.
+    """
+    candidates = resolved.get(item.get("content_hash") or "") or item.get("related_symbols")
+    return (candidates or [None])[0]
 
 def trigger_interest_accrual(client: httpx.Client) -> dict:
     """Vadeli hesap faizlerini işletmesi için backend'i uyarır.

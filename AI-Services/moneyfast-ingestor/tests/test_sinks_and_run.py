@@ -312,9 +312,10 @@ class TestCycles:
         monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: set())
         monkeypatch.setattr(run.kap_source, "fetch_disclosures", lambda known: [])
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
-        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i: 1)
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 1)
         result = run.run_news(None)
-        assert result == {"fetched": 1, "kap": 0, "embedded": 1, "news_written": 1}
+        assert result == {"fetched": 1, "kap": 0, "embedded": 1, "tagged": 0,
+                          "news_written": 1}
 
     def test_disclosures_ride_the_same_pipeline_as_news(self, monkeypatch):
         """KAP için ikinci bir yol açılmadı: bildirimler de haber öğesi
@@ -332,7 +333,7 @@ class TestCycles:
         )
         monkeypatch.setattr(
             run.sinks, "push_news_to_rag",
-            lambda c, i: pushed.update(rag=list(i)) or 2,
+            lambda c, i, s=None: pushed.update(rag=list(i), symbols=s) or 2,
         )
         result = run.run_news(None)
         assert result["kap"] == 1
@@ -351,7 +352,7 @@ class TestCycles:
             lambda known: seen.update(known=known) or [],
         )
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
-        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i: 0)
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 0)
         run.run_news(None)
         assert seen["known"] == {7, 8}
 
@@ -1023,3 +1024,105 @@ class TestFundamentalsBackfill:
 
     def test_an_empty_reply_is_an_empty_set(self):
         assert sinks.fetch_missing_fundamentals(client_for(recorder(body={}))) == set()
+
+
+class TestSymbolsReachTheCorpus:
+    """RSS haberlerinin korpustaki kopyası bir dönem ETİKETSİZ yazılıyordu.
+
+    Sebep akış sırası değil, sonucun geri alınmamasıydı: eşleştirme enstrüman
+    evreninin bulunduğu yerde -- backend'de -- yapılıyor, bu servisin evreni
+    yok ve olmamalı (veritabanı kredensiyeli taşımıyor). Backend çözüyordu,
+    dönüyordu, ve RAG'a giden kopya beslemenin kendi boş etiketini taşıyordu.
+    Ölçüldü: korpustaki 1.970 RSS belgesinin SIFIRINDA ticker vardı ve ajanın
+    `tickers` filtresi yalnızca KAP bildirimlerinde çalışıyordu -- onlar
+    etiketi kaynağından getirdiği için.
+    """
+
+    ITEM = {"content_hash": "a" * 64, "title": "Akbank'tan rekor", "source": "Dünya",
+            "published_at": "2026-09-01T10:00:00Z", "related_symbols": []}
+
+    def test_the_backend_resolution_reaches_the_document(self):
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(
+            client_for(handler), [dict(self.ITEM)], {"a" * 64: ["AKBNK"]}
+        )
+        assert seen["ticker"] == "AKBNK"
+
+    def test_without_a_resolution_the_feeds_own_tag_is_used(self):
+        """KAP bildirimi etiketini kaynağından getiriyor ve backend onu aynen
+        geri veriyor; harita gelmese de kaybolmamalı."""
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        item = {**self.ITEM, "related_symbols": ["EMVAR"]}
+        sinks.push_news_to_rag(client_for(handler), [item], None)
+        assert seen["ticker"] == "EMVAR"
+
+    def test_a_story_matching_nothing_is_written_without_a_ticker(self):
+        """Uydurma bir etiket, bir şirketin haberini başkasının sayfasına
+        koyardı. Etiketsiz belge metinden bulunabilir kalıyor."""
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(client_for(handler), [dict(self.ITEM)], {})
+        assert seen["ticker"] is None
+
+    def test_a_multi_tagged_story_keeps_its_first_symbol(self):
+        """Korpus şeması belge başına tek ticker taşıyor; gerisi metinden
+        bulunabilir kalıyor."""
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(
+            client_for(handler), [dict(self.ITEM)], {"a" * 64: ["AKBNK", "THYAO"]}
+        )
+        assert seen["ticker"] == "AKBNK"
+
+    def test_the_cycle_hands_the_backend_answer_to_the_corpus(self, monkeypatch):
+        """Turun kendisi: backend ne çözdüyse RAG'a o gidiyor, ve `news_symbols`
+        sonuç sözlüğüne SIZMIYOR -- o bir taşıma detayı, bir sayaç değil."""
+        pushed = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [dict(self.ITEM)])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: set())
+        monkeypatch.setattr(run.kap_source, "fetch_disclosures", lambda known: [])
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: {"news_written": 1, "news_symbols": {"a" * 64: ["AKBNK"]}},
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i, s=None: pushed.update(symbols=s) or 1,
+        )
+        result = run.run_news(None)
+        assert pushed["symbols"] == {"a" * 64: ["AKBNK"]}
+        assert result["tagged"] == 1
+        assert "news_symbols" not in result
+
+    def test_an_older_backend_without_the_field_still_works(self, monkeypatch):
+        """Alan eklenmeden önce yazılmış bir backend'e karşı tur düşmemeli."""
+        pushed = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [dict(self.ITEM)])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: set())
+        monkeypatch.setattr(run.kap_source, "fetch_disclosures", lambda known: [])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i, s=None: pushed.update(symbols=s) or 1,
+        )
+        result = run.run_news(None)
+        assert pushed["symbols"] == {}
+        assert result["tagged"] == 0

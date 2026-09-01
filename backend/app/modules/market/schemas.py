@@ -187,6 +187,12 @@ class IngestResult(BaseModel):
     candles_written: int = 0
     news_written: int = 0
     fundamentals_written: int = 0
+    #: Haber yüklemesinde çözülen semboller, `content_hash` -> semboller.
+    #: `ingestor` bunu RAG'a yazarken kullanıyor: çözümleme evrenin bulunduğu
+    #: yerde, yani BURADA yapılıyor ve sonucu geri vermezsek korpustaki kopya
+    #: etiketsiz kalıyor -- ölçüldü, 1.970 RSS belgesinin sıfırında ticker
+    #: vardı ve ajanın `tickers` filtresi onlarda hiç çalışmıyordu.
+    news_symbols: dict[str, List[str]] = {}
 
 
 class InstrumentOut(BaseModel):

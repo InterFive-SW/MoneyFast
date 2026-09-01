@@ -25,15 +25,28 @@ log = logging.getLogger("moneyfast.market")
 LOCAL_TICKER_MARKETS = {"BIST"}
 
 
-def upsert_news(db: Session, items: list[dict[str, Any]]) -> int:
+def upsert_news(
+    db: Session, items: list[dict[str, Any]]
+) -> tuple[int, dict[str, list[str]]]:
     """Store articles, ignoring ones already held.
 
     Deduplicated on content_hash rather than URL: the same wire story is
     republished under different URLs, and a feed that renumbers its links
     would otherwise re-import its whole history every poll.
+
+    Yazılan satır sayısının YANINDA çözülen semboller de dönüyor, hash'e göre.
+    Çözümleme burada yapılıyor ve bir dönem burada KALIYORDU: `ingestor`
+    haberi önce buraya, sonra RAG'a yazıyor ve RAG'a giden kopya kendi (boş)
+    etiket listesini taşıyordu. Ölçüldü -- korpustaki 1.970 RSS belgesinin
+    SIFIRINDA ticker vardı, yani ajanın `tickers` filtresi yalnızca KAP
+    bildirimlerinde çalışıyordu, çünkü onlar etiketi kaynağından getiriyor.
+
+    Harita, YAZILANLAR için değil TEKLİF EDİLENLER için dönüyor: backend'de
+    zaten duran bir haber RAG'da eksik olabilir (iki yazma ayrı istekler) ve
+    o durumda tek şansı budur.
     """
     if not items:
-        return 0
+        return 0, {}
 
     universe = _tradable_universe(db)
     payload = [
@@ -60,7 +73,12 @@ def upsert_news(db: Session, items: list[dict[str, Any]]) -> int:
     )
     result = db.execute(statement)
     db.commit()
-    return result.rowcount or 0
+    resolved = {
+        row["content_hash"]: row["related_symbols"]
+        for row in payload
+        if row["related_symbols"]
+    }
+    return result.rowcount or 0, resolved
 
 
 def _tradable_universe(db: Session) -> list[InvestmentProduct]:

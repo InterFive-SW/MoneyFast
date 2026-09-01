@@ -365,16 +365,23 @@ def run_news(client: httpx.Client) -> dict:
     disclosures = kap_source.fetch_disclosures(known)
     items = items + disclosures
 
+    # Sıra önemli: backend ÖNCE yazılıyor, çünkü sembolleri o çözüyor
+    # (enstrüman evreni orada, bu serviste değil) ve RAG'a giden kopya o
+    # etiketleri taşımalı. Ters sırada korpus etiketsiz kalırdı -- ölçüldü,
+    # sonuç geri alınmadığı için 1.970 RSS belgesinin sıfırında ticker vardı.
     backend_result = sinks.push_news_to_backend(client, items) or {}
-    embedded = sinks.push_news_to_rag(client, items)
+    symbols = backend_result.pop("news_symbols", None) or {}
+    embedded = sinks.push_news_to_rag(client, items, symbols)
     log.info(
-        "news cycle: %d fetched (%d KAP), %s stored, %d embedded",
-        len(items), len(disclosures), backend_result.get("news_written", 0), embedded,
+        "news cycle: %d fetched (%d KAP), %s stored, %d embedded, %d symbol-tagged",
+        len(items), len(disclosures), backend_result.get("news_written", 0),
+        embedded, len(symbols),
     )
     return {
         "fetched": len(items),
         "kap": len(disclosures),
         "embedded": embedded,
+        "tagged": len(symbols),
         **backend_result,
     }
 

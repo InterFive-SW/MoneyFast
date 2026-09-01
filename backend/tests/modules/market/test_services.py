@@ -148,7 +148,7 @@ class TestFreshness:
 class TestNewsStore:
     def test_empty_batch_makes_no_query(self):
         db = MagicMock(spec=Session)
-        assert news_service.upsert_news(db, []) == 0
+        assert news_service.upsert_news(db, []) == (0, {})
         assert db.execute.called is False
 
     def test_articles_are_deduplicated_on_content_hash(self):
@@ -156,7 +156,7 @@ class TestNewsStore:
         links, and a feed that renumbers would re-import its whole history."""
         db = MagicMock(spec=Session)
         db.execute.return_value = SimpleNamespace(rowcount=1)
-        written = news_service.upsert_news(
+        written, _ = news_service.upsert_news(
             db,
             [
                 {
@@ -173,7 +173,7 @@ class TestNewsStore:
     def test_rowcount_none_reports_zero_rather_than_raising(self):
         db = MagicMock(spec=Session)
         db.execute.return_value = SimpleNamespace(rowcount=None)
-        written = news_service.upsert_news(
+        written, _ = news_service.upsert_news(
             db, [{"content_hash": "b" * 64, "title": "t", "source": "s", "published_at": NOW}]
         )
         assert written == 0

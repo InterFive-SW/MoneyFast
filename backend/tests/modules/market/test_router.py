@@ -204,7 +204,7 @@ class TestIngestWrites:
     def test_news_ingest_reports_only_new_rows(self, client, mocker, monkeypatch):
         """Re-running a feed must be a no-op. The count is what proves it."""
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
-        mocker.patch.object(market_module_service, "upsert_news", return_value=0)
+        mocker.patch.object(market_module_service, "upsert_news", return_value=(0, {}))
         response = client.post(
             "/api/market/news/ingest",
             headers={"Authorization": "Bearer secret"},

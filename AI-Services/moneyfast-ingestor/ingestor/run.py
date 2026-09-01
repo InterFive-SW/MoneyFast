@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from . import config, refresh_server, sinks
-from .sources import rss_source, yfinance_source
+from .sources import kap_source, rss_source, yfinance_source
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -443,6 +443,43 @@ def run_news(client: httpx.Client) -> dict:
     return {"fetched": len(items), "embedded": embedded, **backend_result}
 
 
+def bist_universe(client: httpx.Client) -> set:
+    """Symbols a KAP disclosure could usefully be about.
+
+    Read from the backend rather than configured here, for the reason
+    `fetch_products` already gives: adding an instrument should be one row in
+    the database, not a redeploy. It also means the filter widens by itself
+    when the universe grows.
+    """
+    return {
+        product["symbol"]
+        for product in sinks.fetch_products(client)
+        if product.get("market") == "BIST"
+    }
+
+
+def run_kap(client: httpx.Client, since=None, until=None) -> dict:
+    """Poll KAP for disclosures naming an instrument we carry.
+
+    Pushed through the same news sink as RSS: a disclosure IS market news, it
+    just arrives with an issuer attached and a permanent link.
+    """
+    today = datetime.now(ISTANBUL).date()
+    until = until or today
+    # A window rather than a point: a disclosure filed while the previous
+    # cycle was mid-flight would otherwise fall between two polls, and
+    # re-offering a stored one costs nothing (`ON CONFLICT DO NOTHING`).
+    since = since or (until - timedelta(days=config.kap_window_days() - 1))
+
+    items = kap_source.fetch_all(bist_universe(client), since, until, client)
+    backend_result = sinks.push_news_to_backend(client, items) or {}
+    log.info(
+        "kap cycle %s..%s: %d matched, %s stored",
+        since, until, len(items), backend_result.get("news_written", 0),
+    )
+    return {"fetched": len(items), **backend_result}
+
+
 def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False) -> dict:
     results = {}
     with httpx.Client() as client:
@@ -531,6 +568,16 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # Deliberately NOT gated on market hours, unlike quotes: the disclosures
+    # that move a price most are filed after the close and before the open.
+    scheduler.add_job(
+        _job("kap", run_kap),
+        "interval",
+        minutes=config.kap_interval_minutes(),
+        id="kap",
+        max_instances=1,
+        coalesce=True,
+    )
     # After the close, so the day's final bar is settled.
     scheduler.add_job(
         _job("candles", run_candles),
@@ -552,10 +599,11 @@ def start_scheduler() -> None:
 
     log.info(
         "scheduler started: band every %ds, quotes every %ds (market hours), "
-        "news every %dm, candles daily at %d:15",
+        "news every %dm, kap every %dm, candles daily at %d:15",
         config.band_interval_seconds(),
         config.quote_interval_seconds(),
         config.news_interval_minutes(),
+        config.kap_interval_minutes(),
         config.MARKET_CLOSE_HOUR + 1,
     )
 

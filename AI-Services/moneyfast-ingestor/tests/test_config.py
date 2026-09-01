@@ -159,3 +159,29 @@ class TestBandMembership:
         provider that will rate limit and then block us."""
         monkeypatch.setenv("INGESTOR_QUOTE_INTERVAL_SECONDS", "0")
         assert config.quote_interval_seconds() == 5
+
+
+class TestKap:
+    def test_defaults(self):
+        assert config.kap_base_url() == "https://www.kap.org.tr"
+        assert config.kap_interval_minutes() == 20
+        # Ölçüldü: bir hafta 1101 satır, altmış gün tam 2000 (tavan). Üç gün
+        # ~470 satır demek, yani olağan durumda pencere hiç bölünmüyor.
+        assert config.kap_window_days() == 3
+        assert config.kap_backfill_days() == 183
+
+    def test_overrides_are_honoured_and_a_trailing_slash_is_dropped(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_BASE_URL", "https://example.test/")
+        monkeypatch.setenv("INGESTOR_KAP_INTERVAL_MINUTES", "5")
+        monkeypatch.setenv("INGESTOR_KAP_WINDOW_DAYS", "7")
+        monkeypatch.setenv("INGESTOR_KAP_BACKFILL_DAYS", "30")
+        assert config.kap_base_url() == "https://example.test"
+        assert config.kap_interval_minutes() == 5
+        assert config.kap_window_days() == 7
+        assert config.kap_backfill_days() == 30
+
+    def test_nonsense_values_fall_back_rather_than_crashing_the_service(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_INTERVAL_MINUTES", "soon")
+        monkeypatch.setenv("INGESTOR_KAP_WINDOW_DAYS", "0")
+        assert config.kap_interval_minutes() == 20
+        assert config.kap_window_days() == 1

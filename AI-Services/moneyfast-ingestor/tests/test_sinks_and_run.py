@@ -286,6 +286,63 @@ class TestCycles:
         result = run.run_news(None)
         assert result == {"fetched": 1, "embedded": 1, "news_written": 1}
 
+    def test_kap_cycle_pushes_matched_disclosures_to_the_backend(self, monkeypatch):
+        """Same sink as RSS: a disclosure IS market news, it just arrives with
+        an issuer attached and a permanent link."""
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "THYAO", "market": "BIST"},
+            {"symbol": "AAPL", "market": "NASDAQ"},
+        ])
+        seen = {}
+
+        def fake_fetch(universe, since, until, client):
+            seen["universe"] = universe
+            seen["span"] = (since, until)
+            return [{"title": "THYAO — bir şey"}]
+
+        monkeypatch.setattr(run.kap_source, "fetch_all", fake_fetch)
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
+
+        assert run.run_kap(None) == {"fetched": 1, "news_written": 1}
+        assert seen["universe"] == {"THYAO"}, "only BIST instruments can appear on KAP"
+
+    def test_the_kap_poll_looks_back_over_a_window_not_a_point(self, monkeypatch):
+        """A disclosure filed while the previous cycle was mid-flight would
+        otherwise fall between two polls. Re-offering a stored one is free."""
+        monkeypatch.setenv("INGESTOR_KAP_WINDOW_DAYS", "3")
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        span = {}
+
+        def fake_fetch(universe, since, until, client):
+            span["days"] = (until - since).days
+            return []
+
+        monkeypatch.setattr(run.kap_source, "fetch_all", fake_fetch)
+        run.run_kap(None)
+        assert span["days"] == 2
+
+    def test_an_explicit_range_overrides_the_window(self, monkeypatch):
+        from datetime import date
+
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        span = {}
+
+        def fake_fetch(universe, since, until, client):
+            span["range"] = (since, until)
+            return []
+
+        monkeypatch.setattr(run.kap_source, "fetch_all", fake_fetch)
+        run.run_kap(None, since=date(2026, 3, 1), until=date(2026, 3, 10))
+        assert span["range"] == (date(2026, 3, 1), date(2026, 3, 10))
+
+    def test_a_kap_push_failure_still_reports_what_was_fetched(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: [{"title": "x"}])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: None)
+        assert run.run_kap(None) == {"fetched": 1}
+
     def test_candle_cycle_reports_new_bars(self, monkeypatch):
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
         monkeypatch.setattr(run.yfinance_source, "fetch_candles", lambda p, days: [1, 2, 3])
@@ -414,6 +471,9 @@ class TestScheduler:
             # bir klonda geri doldurma haklı olarak atlıyor ve bu iş
             # olmasaydı 19:15 cron'una kadar hiçbir şey çalışmazdı.
             "candle-topup": "date",
+            # Piyasa saatlerine bağlı DEĞİL: fiyatı en çok etkileyen
+            # bildirimler kapanıştan sonra ve açılıştan önce yayımlanıyor.
+            "kap": "interval",
         }
         assert warmed == ["q", "n"]
         assert started == [True]

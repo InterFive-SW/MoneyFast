@@ -193,6 +193,12 @@ services:
       # İki yıllık günlük geçmiş; performans grafiği o kadar geriye gidiyor.
       INGESTOR_HISTORY_DAYS: ${INGESTOR_HISTORY_DAYS:-730}
       INGESTOR_REFRESH_PORT: ${INGESTOR_REFRESH_PORT:-8200}
+      # KAP bildirimleri. Piyasa saatlerine bağlı DEĞİL: fiyata en çok etki
+      # eden açıklamalar 18:00 kapanışından sonra ve açılıştan önce geliyor.
+      INGESTOR_KAP_INTERVAL_MINUTES: ${INGESTOR_KAP_INTERVAL_MINUTES:-20}
+      # Tek sorgunun kapsadığı gün. Ölçüldü: bir hafta 1101 satır, altmış gün
+      # tam 2000 -- yani tavan. Üç gün tavanın çok altında kalıyor.
+      INGESTOR_KAP_WINDOW_DAYS: ${INGESTOR_KAP_WINDOW_DAYS:-3}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       backend:

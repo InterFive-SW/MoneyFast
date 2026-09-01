@@ -404,6 +404,29 @@ def ingest_market_data(request: QuoteIngestRequest, db: Session = Depends(get_db
 
 
 @router.get(
+    "/news/known-ids",
+    summary="Kayıtlı bildirim numaraları (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def known_news_ids(
+    source: str = Query(..., min_length=2, max_length=40),
+    db: Session = Depends(get_db),
+):
+    """`ingestor`'ın "bunlardan hangileri bende zaten var" diye sorduğu uç.
+
+    KAP listesi her koşuda iki bin bildirim döndürüyor ve her birinin gövdesi
+    ayrı bir sayfada. Sormadan çekmek, aynı iki bin sayfayı on beş dakikada
+    bir yeniden istemek olurdu. `candles/coverage` ile aynı desen ve aynı
+    sebep: kaynağa neyi zaten aldığımızı sormak yerine ona söylemek.
+
+    Numara URL'den okunuyor, ayrı bir sütundan değil -- bildirimin adresi
+    `.../Bildirim/1656735` ve numara zaten orada. Bunun için şema büyütmek,
+    aynı bilgiyi ikinci kez saklamak olurdu.
+    """
+    return {"source": source, "ids": service.known_news_ids(db, source)}
+
+
+@router.get(
     "/candles/coverage",
     summary="Mum verisi kapsaması (servisler arası)",
     dependencies=[Depends(require_service_token)],

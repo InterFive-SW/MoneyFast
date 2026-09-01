@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
@@ -180,3 +181,28 @@ def refresh_quotes(symbols: Sequence[str]) -> bool:
     written = (response.json() or {}).get("refreshed", 0)
     log.info("refreshed %s quote(s) for %s", written, ", ".join(wanted[:5]))
     return bool(written)
+
+
+#: Bildirim adresinin sonundaki numarayı yakalar: `.../Bildirim/1656735`.
+_TRAILING_ID = re.compile(r"/(\d{3,12})/?$")
+
+
+def known_news_ids(db: Session, source: str) -> list[int]:
+    """Bu kaynaktan kayıtlı haberlerin adreslerindeki numaralar.
+
+    `ingestor` bunu, hangi bildirimlerin gövdesini çekmeye gerek olmadığını
+    bilmek için soruyor. Numara URL'den okunuyor: bildirimin adresi zaten
+    `.../Bildirim/1656735` ve aynı bilgiyi ikinci bir sütunda saklamak,
+    ikisinin ayrışabileceği bir yer açardı.
+    """
+    rows = (
+        db.query(NewsItem.url)
+        .filter(NewsItem.source == source, NewsItem.url.isnot(None))
+        .all()
+    )
+    found = []
+    for (url,) in rows:
+        match = _TRAILING_ID.search(url or "")
+        if match:
+            found.append(int(match.group(1)))
+    return sorted(set(found))

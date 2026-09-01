@@ -140,6 +140,34 @@ class TestNewsPush:
         assert sinks.push_news_to_rag(client_for(handler), items) == 1
 
 
+class TestKnownNewsIds:
+    """`ingestor` backend'e "bunlardan hangileri sende var" diye soruyor.
+
+    KAP listesi her koşuda iki bin bildirim döndürüyor ve her birinin gövdesi
+    ayrı bir sayfada. Sormadan çekmek, aynı iki bin sayfayı on beş dakikada
+    bir yeniden istemek olurdu.
+    """
+
+    def test_ids_come_back_as_a_set_of_numbers(self):
+        handler = recorder(body={"source": "KAP", "ids": [1, 2, 3]})
+        assert sinks.fetch_known_news_ids(client_for(handler), "KAP") == {1, 2, 3}
+
+    def test_the_source_is_passed_as_a_filter(self):
+        handler = recorder(body={"ids": []})
+        sinks.fetch_known_news_ids(client_for(handler), "KAP")
+        assert "source=KAP" in str(handler.calls[0].url)
+        assert handler.calls[0].url.path.endswith("/market/news/known-ids")
+
+    def test_a_failure_reads_as_nothing_stored(self):
+        """Boş küme "hiçbiri bende yok" demek ve koşu başına ayrıntı sınırı
+        bunun bir akına dönüşmesini engelliyor."""
+        assert sinks.fetch_known_news_ids(client_for(recorder(status=500)), "KAP") == set()
+
+    def test_a_missing_key_is_not_a_crash(self):
+        handler = recorder(body={"source": "KAP"})
+        assert sinks.fetch_known_news_ids(client_for(handler), "KAP") == set()
+
+
 class TestProductFetch:
     def test_symbol_map_comes_from_the_backend(self):
         """Asked for rather than configured here, so adding an instrument is a
@@ -281,10 +309,51 @@ class TestCli:
 class TestCycles:
     def test_news_cycle_reports_both_destinations(self, monkeypatch):
         monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [{"title": "x"}])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: set())
+        monkeypatch.setattr(run.kap_source, "fetch_disclosures", lambda known: [])
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
         monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i: 1)
         result = run.run_news(None)
-        assert result == {"fetched": 1, "embedded": 1, "news_written": 1}
+        assert result == {"fetched": 1, "kap": 0, "embedded": 1, "news_written": 1}
+
+    def test_disclosures_ride_the_same_pipeline_as_news(self, monkeypatch):
+        """KAP için ikinci bir yol açılmadı: bildirimler de haber öğesi
+        biçiminde çıkıyor ve aynı lavaboya akıyor. Ayrı bir yol, backend'in
+        ve RAG'ın iki farklı biçim tanıması demekti."""
+        pushed = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [{"title": "haber"}])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: {1, 2})
+        monkeypatch.setattr(
+            run.kap_source, "fetch_disclosures", lambda known: [{"title": "bildirim"}]
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: pushed.update(backend=list(i)) or {"news_written": 2},
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i: pushed.update(rag=list(i)) or 2,
+        )
+        result = run.run_news(None)
+        assert result["kap"] == 1
+        assert [x["title"] for x in pushed["backend"]] == ["haber", "bildirim"]
+        # Aynı liste ikisine de gidiyor.
+        assert pushed["rag"] == pushed["backend"]
+
+    def test_the_backend_is_asked_what_it_already_has(self, monkeypatch):
+        """Sormadan çekmek, aynı iki bin sayfayı on beş dakikada bir yeniden
+        istemek olurdu."""
+        seen = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: {7, 8})
+        monkeypatch.setattr(
+            run.kap_source, "fetch_disclosures",
+            lambda known: seen.update(known=known) or [],
+        )
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i: 0)
+        run.run_news(None)
+        assert seen["known"] == {7, 8}
 
     def test_candle_cycle_reports_new_bars(self, monkeypatch):
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])

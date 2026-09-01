@@ -100,6 +100,31 @@ def fetch_candle_coverage(client: httpx.Client) -> dict[str, dict]:
         return {}
 
 
+def fetch_known_news_ids(client: httpx.Client, source: str) -> set[int]:
+    """Which disclosures the backend already holds, by their own numbering.
+
+    Asked before the KAP cycle so only unseen disclosures cost a detail
+    request. The list endpoint returns two thousand records every run and each
+    body is a separate page; fetching without asking would mean re-requesting
+    the same two thousand pages every fifteen minutes.
+
+    A failure is not fatal -- an empty set reads as "nothing is stored", and
+    the per-run detail cap keeps that from becoming a stampede.
+    """
+    try:
+        response = client.get(
+            f"{config.backend_url()}/market/news/known-ids",
+            params={"source": source},
+            headers=_headers(),
+            timeout=config.request_timeout(),
+        )
+        response.raise_for_status()
+        return {int(x) for x in (response.json().get("ids") or [])}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("known news ids unavailable for %s, assuming none: %s", source, exc)
+        return set()
+
+
 def reset_products_cache() -> None:
     """For tests, and for a forced refresh after a universe change."""
     global _products_cache, _products_fetched_at

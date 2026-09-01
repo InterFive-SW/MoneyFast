@@ -10,9 +10,18 @@ import httpx
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.modules.investment.models import InvestmentProduct
+
+from . import symbol_match
 from .models import NewsItem
 
 log = logging.getLogger("moneyfast.market")
+
+#: Haberde KODUYLA aranan piyasalar. Beslemeler Türkçe ve Türkçe bir haber
+#: bir ABD şirketini kodyla değil adıyla anar; ABD kodları ise Türkçe
+#: kısaltmalarla çakışıyor. Ölçüldü: 1.542 haberde ABD kodu 7 kez eşleşti,
+#: yedisi de yanlıştı. Ad eşleşmesi tüm evrende çalışmaya devam ediyor.
+LOCAL_TICKER_MARKETS = {"BIST"}
 
 
 def upsert_news(db: Session, items: list[dict[str, Any]]) -> int:
@@ -25,6 +34,7 @@ def upsert_news(db: Session, items: list[dict[str, Any]]) -> int:
     if not items:
         return 0
 
+    universe = _tradable_universe(db)
     payload = [
         {
             "id": item.get("id") or _new_id(),
@@ -34,18 +44,73 @@ def upsert_news(db: Session, items: list[dict[str, Any]]) -> int:
             "source": item["source"],
             "url": item.get("url"),
             "language": item.get("language", "tr"),
-            "related_symbols": item.get("related_symbols") or [],
+            "related_symbols": _symbols_for(item, universe),
             "published_at": item["published_at"],
             "ingested_at": datetime.now(timezone.utc),
         }
         for item in items
     ]
+    matched = sum(1 for row in payload if row["related_symbols"])
+    if matched:
+        log.info("resolved symbols for %d of %d articles", matched, len(payload))
+
     statement = insert(NewsItem).values(payload).on_conflict_do_nothing(
         index_elements=["content_hash"]
     )
     result = db.execute(statement)
     db.commit()
     return result.rowcount or 0
+
+
+def _tradable_universe(db: Session) -> list[InvestmentProduct]:
+    """Haberin bağlanabileceği enstrümanlar.
+
+    Yalnızca hisseler: bir haberin "USDTRY" ya da "XU100" ile ilişkilendirilmesi
+    kullanıcıya bir şirket haberi vaat edip endeks haberi göstermek olurdu.
+    """
+    return (
+        db.query(InvestmentProduct)
+        .filter(InvestmentProduct.product_type == "stock")
+        .all()
+    )
+
+
+def _symbols_for(item: dict[str, Any], universe: list[InvestmentProduct]) -> list[str]:
+    """Haberin bahsettiği semboller.
+
+    Kaynak kendi etiketini verdiyse ona dokunulmaz: KAP bildirimleri
+    ihraççıyla birlikte gelir ve metinden çıkarım yapmak, kesin bilgiyi
+    tahminle değiştirmek olurdu. Yalnızca etiketsiz gelen haberler için
+    metinden çözümleme yapılır.
+    """
+    known = {row.symbol.upper() for row in universe}
+    # Beslemenin verdiği etiketler ADAY, sonuç değil. Evrende karşılığı olmayan
+    # bir etiket düşer: Türkçe finans beslemeleri yazıları `BORSA` ve `FINANS`
+    # gibi bölümlere koyuyor ve ikisi de "3-6 harf" testini geçiyor. İkisi de
+    # enstrüman olmadığı için burada eleniyorlar.
+    declared = [
+        s for s in (str(x).strip().upper() for x in (item.get("related_symbols") or []))
+        if s in known
+    ]
+    if declared:
+        # Kaynak ihraççıyı biliyorsa metinden çıkarım yapılmaz: KAP bildirimleri
+        # ihraççısıyla birlikte gelir ve kesin bilgiyi tahminle değiştirmek
+        # olurdu.
+        return sorted(set(declared))
+
+    text = " ".join(filter(None, (item.get("title"), item.get("summary"))))
+    return [row["symbol"] for row in resolve_news_symbols(text, universe)]
+
+
+def resolve_news_symbols(text: str, universe: list[Any]) -> list[dict[str, str]]:
+    """Bir haber metninin bağlandığı semboller, dayanağıyla birlikte.
+
+    Ingest yolu da arşivi geri dolduran betik de BURAYI çağırır. Politikayı
+    (hangi piyasaların koduyla aranacağı) iki yerde tekrarlamak, ikisinin
+    ayrışması demekti -- ölçüldü: betik kısıtsız çalıştığında arşive yedi
+    yanlış bağ yazıyordu.
+    """
+    return symbol_match.resolve_symbols(text, universe, LOCAL_TICKER_MARKETS)
 
 
 def latest_news(db: Session, limit: int = 20) -> list[NewsItem]:

@@ -115,10 +115,17 @@ def _published(entry: Any) -> datetime:
 
 
 def _tickers(entry: Any) -> list[str]:
-    """Symbols the FEED tagged. Never inferred from the headline.
+    """Ticker CANDIDATES the feed tagged. Never inferred from the headline.
 
-    Guessing a ticker from text would put one company's news on another
-    company's page, and the retrieval contract lets the model filter on these.
+    Guessing a ticker from prose would put one company's news on another
+    company's page. These are candidates, not conclusions: the backend checks
+    each one against the instrument universe before storing it, because the
+    universe lives there and this process holds no database credentials.
+
+    That check is what makes the loose shape test below safe. Turkish finance
+    feeds file articles under sections like `BORSA` and `FINANS`, both of
+    which pass "3-6 letters" and would otherwise be recorded as though they
+    were listed companies. Neither is an instrument, so neither survives.
     """
     tags = getattr(entry, "tags", None) or []
     out = []

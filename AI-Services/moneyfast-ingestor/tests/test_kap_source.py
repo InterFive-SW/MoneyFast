@@ -286,6 +286,64 @@ class TestFailuresAreQuiet:
                                            client_for(handler)) == []
 
 
+class TestIncompleteRuns:
+    """A window that failed is not a window with nothing in it.
+
+    Measured once for real: a throttled pass returned 14.589 disclosures
+    where an unthrottled one over the same six months returned 28.508 — and
+    the log said "disclosures for instruments we hold" both times, with no
+    hint that half the archive had been skipped.
+    """
+
+    def test_a_failed_window_is_recorded_not_read_as_empty(self):
+        failures = []
+        kap_source.enumerate_window(
+            date(2026, 8, 28), date(2026, 8, 28),
+            client_for(serving(None, status=429, body="slow down")),
+            failures=failures,
+        )
+        assert failures == [(date(2026, 8, 28), date(2026, 8, 28))]
+
+    def test_fetch_all_counts_unread_windows(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_WINDOW_DAYS", "1")
+        calls = {"n": 0}
+
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(666, text="")
+            calls["n"] += 1
+            if calls["n"] == 2:
+                return httpx.Response(503, text="down")
+            return httpx.Response(200, json=[row()])
+
+        kap_source.fetch_all(UNIVERSE, date(2026, 8, 26), date(2026, 8, 28),
+                             client_for(handler))
+        assert kap_source.last_run_failures == 1
+
+    def test_a_clean_pass_reports_no_failures(self):
+        kap_source.fetch_all(UNIVERSE, date(2026, 8, 28), date(2026, 8, 28),
+                             client_for(serving([row()])))
+        assert kap_source.last_run_failures == 0
+
+    def test_a_bisected_window_propagates_its_failures(self, monkeypatch):
+        """The recursive half must report upward, or a truncated-then-failed
+        window looks clean."""
+        calls = {"n": 0}
+
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(666, text="")
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(200, json=[row(disclosureIndex=i) for i in range(2000)])
+            return httpx.Response(503, text="down")
+
+        failures = []
+        kap_source.enumerate_window(date(2026, 8, 1), date(2026, 8, 31),
+                                    client_for(handler), failures=failures)
+        assert len(failures) == 2
+
+
 class TestFetchAll:
     def test_windows_are_walked_newest_first(self, monkeypatch):
         """An interrupted backfill should leave a contiguous RECENT archive,

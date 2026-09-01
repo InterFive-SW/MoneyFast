@@ -494,11 +494,19 @@ def run_kap(client: httpx.Client, since=None, until=None, bodies: bool = True) -
     backend_result = sinks.push_news_to_backend(client, items) or {}
     embedded = sinks.push_disclosures_to_rag(client, _with_bodies(fresh, client))
 
+    unread = kap_source.last_run_failures
     log.info(
-        "kap cycle %s..%s: %d matched, %s stored, %d bodies embedded",
+        "kap cycle %s..%s: %d matched, %s stored, %d bodies embedded%s",
         since, until, len(items), backend_result.get("news_written", 0), embedded,
+        f" -- INCOMPLETE, {unread} windows unread" if unread else "",
     )
-    return {"fetched": len(items), "embedded": embedded, **backend_result}
+    result = {"fetched": len(items), "embedded": embedded, **backend_result}
+    if unread:
+        # Yüzeye çıkıyor, çünkü bir sonraki turun aynı pencereyi yeniden
+        # sunması yalnızca yoklama penceresi için doğru; geri doldurmada
+        # kaçırılan pencere, kimsenin fark etmediği bir boşluk demek.
+        result["windows_unread"] = unread
+    return result
 
 
 #: Su seviyesinin gerisine ne kadar bakılacağı. Örtüşme bedava

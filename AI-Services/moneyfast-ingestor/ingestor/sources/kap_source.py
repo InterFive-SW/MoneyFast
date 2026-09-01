@@ -163,7 +163,8 @@ def _post_criteria(
 
 
 def enumerate_window(
-    from_date: date, to_date: date, client: httpx.Client, depth: int = 0
+    from_date: date, to_date: date, client: httpx.Client, depth: int = 0,
+    failures: Optional[list] = None,
 ) -> list[dict[str, Any]]:
     """Every disclosure in a date range, halving the range when truncated.
 
@@ -173,6 +174,13 @@ def enumerate_window(
     """
     rows = _post_criteria(from_date, to_date, client)
     if rows is None:
+        # A window that failed is NOT a window with nothing in it. Recording
+        # it is what stops a rate-limited run from reporting a smaller number
+        # as though it were the whole answer -- measured once: a throttled
+        # pass returned 14.589 where an unthrottled one returned 28.508, and
+        # the log said "disclosures for instruments we hold" both times.
+        if failures is not None:
+            failures.append((from_date, to_date))
         return []
     if len(rows) < DISCLOSURE_CAP:
         return rows
@@ -187,8 +195,10 @@ def enumerate_window(
 
     midpoint = from_date + (to_date - from_date) / 2
     log.info("KAP window %s..%s hit the cap, halving at %s", from_date, to_date, midpoint)
-    return enumerate_window(from_date, midpoint, client, depth + 1) + enumerate_window(
-        midpoint + timedelta(days=1), to_date, client, depth + 1
+    return enumerate_window(
+        from_date, midpoint, client, depth + 1, failures
+    ) + enumerate_window(
+        midpoint + timedelta(days=1), to_date, client, depth + 1, failures
     )
 
 
@@ -408,12 +418,17 @@ unwrap_failures = 0
 #: tutuluyor: bu bir bozulma değil, kaynaktaki bir kalite sorunu.
 unreadable_attachments = 0
 
+#: Son `fetch_all` çağrısında okunamayan pencere sayısı. Sıfır değilse o tur
+#: EKSİKTİR ve raporladığı sayı gerçeğin altındadır.
+last_run_failures = 0
+
 
 def reset_counters() -> None:
     """For tests."""
-    global unwrap_failures, unreadable_attachments
+    global unwrap_failures, unreadable_attachments, last_run_failures
     unwrap_failures = 0
     unreadable_attachments = 0
+    last_run_failures = 0
 
 
 def unwrap_java_bytes(payload: bytes) -> Optional[bytes]:
@@ -567,10 +582,11 @@ def fetch_all(
     seen: set[str] = set()
     dropped = 0
 
+    failures: list = []
     upper = until
     while upper >= since:
         lower = max(since, upper - timedelta(days=span - 1))
-        for row in enumerate_window(lower, upper, client):
+        for row in enumerate_window(lower, upper, client, failures=failures):
             item = normalise(row, universe)
             if item is None:
                 dropped += 1
@@ -581,8 +597,17 @@ def fetch_all(
             items.append(item)
         upper = lower - timedelta(days=1)
 
+    if failures:
+        log.warning(
+            "KAP %s..%s: %d of the date windows could not be read (%s ...); "
+            "this pass is INCOMPLETE and the counts below understate it",
+            since, until, len(failures), failures[0][0],
+        )
     log.info(
-        "KAP %s..%s: %d disclosures for instruments we hold (%d not ours)",
+        "KAP %s..%s: %d disclosures for instruments we hold (%d not ours%s)",
         since, until, len(items), dropped,
+        f", {len(failures)} windows unread" if failures else "",
     )
+    last_run_failures = len(failures)
+    globals()["last_run_failures"] = last_run_failures
     return items

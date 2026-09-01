@@ -552,6 +552,17 @@ class TestCycles:
         assert run.run_kap(None)["embedded"] == 1
         assert read == ["2"], "the already-held disclosure must not be re-read"
 
+    def test_an_incomplete_pass_says_so_in_its_result(self, monkeypatch):
+        """A throttled enumeration returns fewer disclosures and no error.
+        Without this the cycle reports a smaller number as if it were the
+        whole answer — measured for real at 14.589 against 28.508."""
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: [])
+        monkeypatch.setattr(run.kap_source, "last_run_failures", 7)
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: 0)
+        assert run.run_kap(None, bodies=False)["windows_unread"] == 7
+
     def test_the_body_pass_is_budgeted(self, monkeypatch):
         """One request per body at two seconds a host. Unbounded, a first run
         would spend hours before anything else got a turn."""

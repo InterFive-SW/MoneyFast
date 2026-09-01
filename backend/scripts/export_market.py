@@ -104,12 +104,53 @@ def export_candles(db) -> int:
     )
 
 
+#: Kaç aylık KAP bildirimi dışa aktarılır.
+NEWS_MONTHS = int(os.getenv("SEED_NEWS_MONTHS", "6"))
+
+#: Dışa aktarılan haber kaynakları. Yalnızca KAP: RSS haberleri kısa ömürlü
+#: ve besleme listesi kurulumdan kuruluma değişebiliyor, dolayısıyla bir
+#: klonun "haber" diye altı ay önceki manşetleri göstermesi doğru olmaz.
+#: Bildirim ise tarihli bir kayıttır ve eskimez.
+NEWS_SOURCES = ("KAP",)
+
+
+def export_news(db) -> int:
+    """Bildirim BAŞLIKLARI -- gövdeler değil.
+
+    Gövdeler ve ekleri kasten dışarıda. Ölçülen: altı ay ~28.900 bildirim;
+    gövdeleriyle ve gömme vektörleriyle birlikte bu, git'e onlarca megabayt
+    demek. Başlık, ihraççı, tarih ve kalıcı bağlantı ise sıkıştırıldığında
+    birkaç megabayt ve klonun ilk açılışında ANLAMLI olan tam da o: Piyasa
+    Haberleri dolu geliyor, her satırın hisse etiketi ve çalışan bir
+    `kap.org.tr` bağlantısı oluyor.
+
+    Gövdeler ingestor tarafından çalışma anında indiriliyor. Bu bir eksiklik
+    değil, iş bölümü: pano tarihsel bir kayıt istiyor, korpus ise okunacak
+    metin -- ve ikincisi git'te taşınacak şey değil.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=30 * NEWS_MONTHS)
+    rows = db.execute(text("""
+        SELECT content_hash, title, summary, source, url, language,
+               array_to_string(related_symbols, ' '), published_at
+        FROM market.news_items
+        WHERE source = ANY(:sources) AND published_at >= :since
+        ORDER BY published_at, content_hash
+    """), {"sources": list(NEWS_SOURCES), "since": since}).all()
+    return _write(
+        OUT_DIR / "news.csv.gz",
+        ("content_hash", "title", "summary", "source", "url", "language",
+         "related_symbols", "published_at"),
+        rows,
+    )
+
+
 def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     db = SessionLocal()
     try:
         funds = export_fundamentals(db)
         candles = export_candles(db)
+        news = export_news(db)
     finally:
         db.close()
 
@@ -119,13 +160,15 @@ def main() -> int:
     # hiçbir şey yazmadan atıyordu -- ölçülen 30 saniye, her açılışta,
     # tamamen boşuna. Beklenen satır sayısını dışa aktaran biliyor.
     (OUT_DIR / "manifest.json").write_text(
-        json.dumps({"fundamentals": funds, "candles": candles}, indent=2) + "\n",
+        json.dumps(
+            {"fundamentals": funds, "candles": candles, "news": news}, indent=2
+        ) + "\n",
         encoding="utf-8",
     )
-    for name in ("fundamentals.csv.gz", "candles.csv.gz"):
+    for name in ("fundamentals.csv.gz", "candles.csv.gz", "news.csv.gz"):
         size = (OUT_DIR / name).stat().st_size
         print(f"  {name:22s} {size / 1024 / 1024:6.2f} MB")
-    print(f"  temel veri {funds} satır, mum {candles} satır")
+    print(f"  temel veri {funds} satır, mum {candles} satır, bildirim {news} satır")
     return 0
 
 

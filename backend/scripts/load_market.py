@@ -204,6 +204,63 @@ def load_candles(db, ids: dict[str, str], expected: int = 0) -> int:
     return count
 
 
+def load_news(db, expected: int = 0) -> int:
+    """Bildirim başlıklarını yükle.
+
+    Mumlarla aynı yol -- geçici tabloya COPY, sonra tek ifadeyle aktarım --
+    ve aynı gerekçeyle: ~28.900 satırı tek tek INSERT etmek, backend'in
+    açılmasını bekleten saniyeler demek.
+
+    Sembol çözümlemesi YOK, mumların aksine. Haberler enstrümana foreign key
+    ile bağlı değil; `related_symbols` bir metin dizisi. Dolayısıyla bu
+    klonun evreninde olmayan bir sembol taşıyan bir bildirim de yüklenebilir
+    ve yüklenmeli: bildirim yine de okunur ve bağlantısı yine de çalışır.
+    """
+    path = SEED_DIR / "news.csv.gz"
+    if not path.exists():
+        return 0
+    if _already_loaded(db, "market.news_items", expected, "WHERE source = 'KAP'"):
+        return 0
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    count = 0
+    for row in _rows(path):
+        symbols = (row.get("related_symbols") or "").split()
+        writer.writerow([
+            row["content_hash"], row["title"], row.get("summary") or "",
+            row["source"], row.get("url") or "", row.get("language") or "tr",
+            "{" + ",".join(symbols) + "}", row["published_at"],
+        ])
+        count += 1
+    if not count:
+        return 0
+
+    buffer.seek(0)
+    raw = db.connection().connection
+    with raw.cursor() as cursor:
+        cursor.execute("""
+            CREATE TEMP TABLE _seed_news (
+                content_hash VARCHAR(64), title TEXT, summary TEXT,
+                source TEXT, url TEXT, language VARCHAR(10),
+                related_symbols VARCHAR(32)[], published_at TIMESTAMPTZ
+            ) ON COMMIT DROP
+        """)
+        cursor.copy_expert("COPY _seed_news FROM STDIN WITH (FORMAT csv)", buffer)
+        cursor.execute("""
+            INSERT INTO market.news_items
+                (id, content_hash, title, summary, source, url, language,
+                 related_symbols, published_at, ingested_at)
+            SELECT gen_random_uuid()::text, content_hash,
+                   title, nullif(summary, ''), source, nullif(url, ''),
+                   language, related_symbols, published_at, now()
+            FROM _seed_news
+            ON CONFLICT (content_hash) DO NOTHING
+        """)
+    db.commit()
+    return count
+
+
 def main() -> int:
     if not SEED_DIR.exists():
         log.info("market seed directory not found at %s; nothing to load", SEED_DIR)
@@ -218,10 +275,14 @@ def main() -> int:
         expected = _expected()
         funds = load_fundamentals(db, ids, expected.get("fundamentals", 0))
         candles = load_candles(db, ids, expected.get("candles", 0))
+        news = load_news(db, expected.get("news", 0))
     finally:
         db.close()
 
-    log.info("market seed offered: %d fundamentals, %d candles", funds, candles)
+    log.info(
+        "market seed offered: %d fundamentals, %d candles, %d disclosures",
+        funds, candles, news,
+    )
     return 0
 
 

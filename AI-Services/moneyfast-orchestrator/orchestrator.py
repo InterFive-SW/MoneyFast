@@ -944,6 +944,43 @@ async def handoff_node(state: MoneyFastState) -> dict[str, Any]:
     }
 
 
+#: Sentez istemine giren serileştirilmiş uzman çıktısının üst sınırı.
+SYNTHESIS_JSON_LIMIT = 12_000
+
+#: Tek bir arama sonucundan alınacak en fazla metin. Sekiz sonuç x 700, üstteki
+#: bütçenin epey altında kalıyor ve HER sonucun bağlantısı sağ kalıyor.
+MAX_SNIPPET_CHARS = 700
+
+
+def _trimmed_for_synthesis(payload: dict) -> dict:
+    """Uzun pasajları kısalt, ama sonuç DÜŞÜRME.
+
+    Bütçe eskiden serileştirilmiş gövdenin tamamına uygulanıyordu ve kesme
+    bir sonucun ortasına düştüğünde o sonucun metni kalıp `url`'i gidiyordu;
+    prompt da bu durumda modele "bağlantı yoksa yayıncının adını yaz"
+    diyor. Görünen sonuç, sonraki kaynakların tıklanabilir atıflarını
+    sessizce kaybetmesiydi. KAP gövdeleri haber özetlerinden uzun olduğu
+    için bu, sınırda değil sürekli olacaktı.
+
+    Sonuç başına kırpmak, kesmenin metne mal olmasını sağlıyor -- atfa değil.
+    """
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return payload
+    results = data.get("results")
+    if not isinstance(results, list):
+        return payload
+
+    trimmed = []
+    for result in results:
+        if isinstance(result, dict) and isinstance(result.get("snippet"), str):
+            snippet = result["snippet"]
+            if len(snippet) > MAX_SNIPPET_CHARS:
+                result = {**result, "snippet": snippet[:MAX_SNIPPET_CHARS] + "…"}
+        trimmed.append(result)
+    return {**payload, "data": {**data, "results": trimmed}}
+
+
 async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
     """Turn the internal envelope into the Turkish user-facing draft."""
     revision = int(state.get("revision_count") or 0)
@@ -965,8 +1002,10 @@ async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
                 primary_intent=state.get("primary_intent") or "UNKNOWN",
                 target_agent=state.get("target_agent") or "EDUCATION_AGENT",
                 specialist_json=json.dumps(
-                    state.get("specialist_output") or {}, ensure_ascii=False, indent=2
-                )[:12000],
+                    _trimmed_for_synthesis(state.get("specialist_output") or {}),
+                    ensure_ascii=False,
+                    indent=2,
+                )[:SYNTHESIS_JSON_LIMIT],
             )
         draft = await _llm_text(ORCHESTRATOR_SYSTEM_PROMPT, task)
     except Exception as exc:  # LLM outage

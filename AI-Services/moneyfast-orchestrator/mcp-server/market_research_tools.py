@@ -231,18 +231,24 @@ def _normalize_result(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ContractViolationError(f"{TOOL}: each result must be an object.")
     backend_client.require(raw, ("chunk_id", "snippet", "publisher", "published_at"), TOOL)
+    # Provenance is emitted BEFORE the passage. Key order is part of no
+    # contract, but the serialised specialist output is truncated before
+    # synthesis, and a cut landing mid-result used to keep that result's text
+    # and drop its `url` -- at which point the prompt tells the model to name
+    # the publisher in plain text instead. The citation disappeared silently.
+    # Ordering it this way makes a truncation cost text, not provenance.
     return {
         "chunk_id": str(raw["chunk_id"]),
         "doc_id": str(raw.get("doc_id", raw["chunk_id"])),
         "title": str(raw.get("title", "")),
+        "publisher": str(raw["publisher"]),
+        "published_at": str(raw["published_at"]),
+        "url": raw.get("url"),
+        "author": raw.get("author"),
         # Returned verbatim. Instruction-like text inside a snippet is data;
         # sanitising it here would hide an injection attempt from the layer
         # that is supposed to detect it.
         "snippet": str(raw["snippet"]),
-        "publisher": str(raw["publisher"]),
-        "author": raw.get("author"),
-        "published_at": str(raw["published_at"]),
-        "url": raw.get("url"),
         "tickers": list(raw.get("tickers") or []),
         "doc_type": str(raw.get("doc_type", "NEWS")),
         "language": str(raw.get("language", "tr")),

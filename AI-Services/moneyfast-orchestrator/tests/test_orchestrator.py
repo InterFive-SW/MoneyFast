@@ -996,6 +996,80 @@ class TestKeepCrisis:
 # ==========================================================================
 # synthesis_node
 # ==========================================================================
+class TestSynthesisTrimming:
+    """A truncation must cost text, never a citation.
+
+    The budget used to apply to the whole serialised payload, so a cut
+    landing mid-result kept that result's passage and dropped its `url` --
+    and `prompts.py` then tells the model to name the publisher in plain text
+    instead. Later sources silently lost their clickable citations. KAP
+    bodies are long enough to make that the normal case rather than an edge.
+    """
+
+    def _payload(self, count=8, length=4000):
+        return {
+            "status": "OK",
+            "data": {
+                "results": [
+                    {
+                        "chunk_id": f"c{i}",
+                        "publisher": "KAP",
+                        "published_at": "2026-08-28",
+                        "url": f"https://www.kap.org.tr/tr/Bildirim/{i}",
+                        "snippet": "ş" * length,
+                    }
+                    for i in range(count)
+                ]
+            },
+        }
+
+    def test_every_result_keeps_its_url(self):
+        import json
+
+        trimmed = orchestrator._trimmed_for_synthesis(self._payload())
+        rendered = json.dumps(trimmed, ensure_ascii=False, indent=2)
+        assert len(rendered) < orchestrator.SYNTHESIS_JSON_LIMIT
+        for i in range(8):
+            assert f"/Bildirim/{i}" in rendered
+
+    def test_no_result_is_dropped(self):
+        trimmed = orchestrator._trimmed_for_synthesis(self._payload())
+        assert len(trimmed["data"]["results"]) == 8
+
+    def test_a_long_passage_is_marked_as_shortened(self):
+        trimmed = orchestrator._trimmed_for_synthesis(self._payload(count=1))
+        snippet = trimmed["data"]["results"][0]["snippet"]
+        assert len(snippet) == orchestrator.MAX_SNIPPET_CHARS + 1
+        assert snippet.endswith("…")
+
+    def test_a_short_passage_is_untouched(self):
+        payload = self._payload(count=1, length=10)
+        assert orchestrator._trimmed_for_synthesis(payload)["data"]["results"][0][
+            "snippet"
+        ] == "ş" * 10
+
+    def test_the_original_payload_is_not_mutated(self):
+        payload = self._payload(count=1)
+        orchestrator._trimmed_for_synthesis(payload)
+        assert len(payload["data"]["results"][0]["snippet"]) == 4000
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {},
+            {"data": "not a dict"},
+            {"data": {}},
+            {"data": {"results": "not a list"}},
+            {"data": {"results": [None, "junk"]}},
+            {"data": {"results": [{"snippet": 42}]}},
+        ],
+    )
+    def test_a_payload_without_results_passes_through_unchanged(self, payload):
+        """Every other specialist returns a different shape; this must not
+        care."""
+        assert orchestrator._trimmed_for_synthesis(payload) == payload
+
+
 class TestSynthesisNode:
     @pytest.mark.asyncio
     async def test_produces_a_draft_from_specialist_output(self, patched_llm, base_state):

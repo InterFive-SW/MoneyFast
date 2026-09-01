@@ -340,7 +340,11 @@ AGENTS
                         şirketler", 52-week ranges, P/E, P/B, market cap,
                         sector lists. Also "AKBNK'ı yorumlar mısın", "THYAO
                         nasıl gidiyor", "ASELS ne durumda" -- an open
-                        question about a NAMED instrument.
+                        question about a NAMED instrument. NOT what the
+                        company itself has PUBLISHED: "son bilançosu", "KAP
+                        açıklaması", "ne açıkladı", "finansal raporu" name a
+                        filed document, and this agent holds no filings --
+                        those go to MARKET_RESEARCH_AGENT.
   MARKET_RESEARCH_AGENT qualitative questions about a company, sector or
                         macro event: "why did X move", "latest on Y", "what
                         are analysts saying", news, filings, commentary.
@@ -350,6 +354,16 @@ AGENTS
                         agent that reads the document store; sending such a
                         turn anywhere else answers it with no access to the
                         file the user is asking about.
+                        ALSO a company's own PUBLISHED DISCLOSURES on KAP:
+                        "TUPRS'ın son bilançosu", "ASELS KAP açıklaması",
+                        "şirket ne açıkladı", "bildirim var mı", "özel durum
+                        açıklaması", "finansal rapor", "faaliyet raporu".
+                        A published statement is a DOCUMENT, not a ratio:
+                        MARKET_DATA_AGENT holds the computed F/K and piyasa
+                        değeri, this agent holds what the company actually
+                        filed. "Bilanço" is only a MARKET_DATA question when
+                        the user asks for a NUMBER that agent already
+                        carries.
   RISK_STRATEGY_AGENT   measurement of risk on holdings: volatility,
                         drawdown, beta, correlation, concentration, VaR,
                         "how risky am I", "am I too concentrated".

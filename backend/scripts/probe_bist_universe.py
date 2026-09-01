@@ -43,13 +43,27 @@ UA = os.getenv(
     "MoneyFastBot/1.0 (+https://github.com/InterFive-SW/moneyfast; internship project)",
 )
 WINDOW_DAYS = 3
-LOOKBACK_DAYS = int(os.getenv("PROBE_LOOKBACK_DAYS", "183"))
+
+#: Kadro için geriye bakılan gün. 45, bilerek altı ay DEĞİL: KAP sürekli
+#: listelemeyi bir noktadan sonra kısıtlıyor (ölçüldü, tek süreçle bile) ve
+#: kadro için altı aya gerek yok -- bir şirket altı haftada neredeyse kesin
+#: en az bir bildirim veriyor. Uzatmak isteyen `PROBE_LOOKBACK_DAYS` ile
+#: uzatabilir, ama kısıtlanırsa betik eksik bir kadro döndürür ve bu, hiç
+#: döndürmemekten daha tehlikelidir: eksik kadro, var olan bir şirketin
+#: evrene hiç girmemesi demek. Bu yüzden okunamayan pencere sayısı da basılır.
+LOOKBACK_DAYS = int(os.getenv("PROBE_LOOKBACK_DAYS", "45"))
 CODE = re.compile(r"^[A-Z0-9]{2,6}$")
 
 
-def roster(client: httpx.Client) -> dict[str, str]:
-    """Every issuer code KAP has seen, mapped to its registered title."""
+def roster(client: httpx.Client) -> tuple[dict[str, str], int]:
+    """Every issuer code KAP has seen, mapped to its registered title.
+
+    Also returns how many windows could not be read, because an incomplete
+    roster is worse than none: a company that filed only inside a missed
+    window simply never enters the universe.
+    """
     names: dict[str, str] = {}
+    unread = 0
     until = date.today()
     floor = until - timedelta(days=LOOKBACK_DAYS)
     while until >= floor:
@@ -77,6 +91,8 @@ def roster(client: httpx.Client) -> dict[str, str]:
                 # ihraççı altı ayda birçok kez bildirim veriyor.
                 print(f"  {since}..{until} attempt {attempt + 1}: {exc}", file=sys.stderr)
                 time.sleep(5 * (attempt + 1))
+        if not rows:
+            unread += 1
         for row in rows:
             title = (row.get("kapTitle") or "").strip()
             for field in ("stockCodes", "relatedStocks"):
@@ -87,7 +103,7 @@ def roster(client: httpx.Client) -> dict[str, str]:
                         names.setdefault(token, title if field == "stockCodes" else "")
         until = since - timedelta(days=1)
         time.sleep(2)  # the same per-host courtesy the ingestor observes
-    return names
+    return names, unread
 
 
 def held(client: httpx.Client) -> set[str]:
@@ -120,10 +136,17 @@ def priced(symbols: list[str]) -> dict[str, float]:
 
 def main() -> int:
     with httpx.Client(follow_redirects=True) as client:
-        names = roster(client)
+        names, unread = roster(client)
         ours = held(client)
 
     missing = sorted(set(names) - ours)
+    if unread:
+        print(
+            f"WARNING: {unread} date windows could not be read. The roster below "
+            f"is INCOMPLETE -- a company that only filed inside those windows is "
+            f"missing from it. Re-run later rather than seeding from this.",
+            file=sys.stderr,
+        )
     print(f"KAP roster: {len(names)} codes over {LOOKBACK_DAYS} days", file=sys.stderr)
     print(f"already held: {len(ours)} | missing: {len(missing)}", file=sys.stderr)
 
@@ -138,6 +161,7 @@ def main() -> int:
     print(json.dumps(
         {
             "generated": date.today().isoformat(),
+            "windows_unread": unread,
             "seedable": [[s, names.get(s) or s] for s in seedable],
             "unpriceable": [s for s in missing if s not in quotes],
         },

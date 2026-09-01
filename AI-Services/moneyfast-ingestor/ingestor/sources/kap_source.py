@@ -373,6 +373,178 @@ def pdf_attachments(detail: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+#: Java `ObjectOutputStream` başlığı. Uç nokta `Content-Type: application/pdf`
+#: diyor ve BU YALAN: gövde serileştirilmiş bir Java bayt dizisi.
+JAVA_MAGIC = b"\xac\xed\x00\x05"
+
+#: `TC_ENDBLOCKDATA TC_NULL` -- dizi verisinin başladığı yerin işareti.
+ARRAY_MARKER = b"\x78\x70"
+
+PDF_MAGIC = b"%PDF-"
+
+#: `78 70` bir sınıf tanımının adının içinde de geçebilir, yani ilk eşleşme
+#: doğru olan olmak zorunda değil. Birkaç kez denenip bırakılıyor.
+MAX_MARKER_ATTEMPTS = 5
+
+#: Sınırsız indirme yok. Ekli bir dosya ne kadar büyük olabileceğini
+#: söylemiyor ve bir bildirim yüzünden belleği tüketmenin anlamı yok.
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+#: Bir bildirimden en fazla kaç ek okunur.
+MAX_ATTACHMENTS = 3
+
+#: Ekten çıkarılan metnin üst sınırı. Backend'in kullanıcı yüklemeleri için
+#: kullandığı 400.000'in bir mertebe altında, ve bu bilerek: orada belge tek
+#: bir sohbete giriyor, burada PAYLAŞILAN korpusa. Parçalama 1.200 karakter,
+#: yani 400.000 karakterlik bir faaliyet raporu ~330 parça demek ve o tek
+#: bildirim, ilgili hissenin bütün arama yuvalarını kalıcı olarak sahiplenir.
+MAX_PDF_CHARS = 40_000
+
+#: Çözülemeyen ek sayısı. Bu, sürüm numarası olmadan değişebilecek,
+#: belgelenmemiş bir uca dayanıyor: sayaç, bozulmayı görünür kılan tek şey.
+unwrap_failures = 0
+
+#: Çözülüp de okunamayan (yazı tipi eşlemesi olmayan) ek sayısı. Ayrı
+#: tutuluyor: bu bir bozulma değil, kaynaktaki bir kalite sorunu.
+unreadable_attachments = 0
+
+
+def reset_counters() -> None:
+    """For tests."""
+    global unwrap_failures, unreadable_attachments
+    unwrap_failures = 0
+    unreadable_attachments = 0
+
+
+def unwrap_java_bytes(payload: bytes) -> Optional[bytes]:
+    """Serileştirilmiş Java bayt dizisinden PDF'i çıkar.
+
+    İki koruma bütün işi yapıyor ve ikisi de testte değil KODDA olmalı:
+
+    1. **Çözdükten sonra `%PDF-` doğrulanır.** İşaret baytları bir sınıf
+       tanımının adının içinde de geçebileceği için ilk eşleşme yanlış
+       olabilir; sihirli sayı kontrolü, yanlış bir konumu korpusa çöp
+       yazmak yerine `None`'a çeviren şey.
+    2. **Uzunluk kalan tampona karşı denetlenir**, yoksa bozuk bir uzunluk
+       gelişigüzel dilimler.
+    """
+    global unwrap_failures
+
+    if payload.startswith(PDF_MAGIC):
+        # Sağlayıcı fikrini değiştirirse diye: ham PDF de kabul.
+        return payload
+    if not payload.startswith(JAVA_MAGIC):
+        unwrap_failures += 1
+        return None
+
+    marker = payload.find(ARRAY_MARKER)
+    for _ in range(MAX_MARKER_ATTEMPTS):
+        if marker < 0:
+            break
+        start = marker + 6
+        length = int.from_bytes(payload[marker + 2 : start], "big")
+        if 0 < length <= len(payload) - start:
+            body = payload[start : start + length]
+            if body.startswith(PDF_MAGIC):
+                return body
+        marker = payload.find(ARRAY_MARKER, marker + 1)
+
+    unwrap_failures += 1
+    log.warning("could not unwrap an attachment; KAP's envelope may have changed")
+    return None
+
+
+#: Düz Türkçe metinde pratikte hiç görünmeyen, ama gömülü alt-küme
+#: yazı tipleri yanlış çözüldüğünde her yere serpilen karakterler.
+_JUNK_CHARS = frozenset("{}[]\\|~^`§$*<>@#±¶©®™«»†‡•")
+
+#: Bunun üstü, metnin çözülmüş değil bozulmuş olduğu anlamına gelir.
+#: ÖLÇÜLDÜ: bozuk bir ek 0,0617; okunabilen beş ekin hepsi 0,0000-0,0001 --
+#: aralarında, kelimesi az ama metni sağlam olan sayısal fiyat bültenleri de
+#: var. İki mertebe fark, eşiğe geniş bir pay bırakıyor.
+MAX_JUNK_RATIO = 0.01
+
+
+def looks_extractable(text: str) -> bool:
+    """Çıkarılan metin okunabilir mi, yoksa yazı tipi mi çözülememiş?
+
+    KAP eklerinin bir kısmı, `ToUnicode` eşlemesi olmayan gömülü alt-küme
+    yazı tipleriyle üretiliyor. `pypdf` bunlarda HATA VERMİYOR: geçerli
+    görünen ama anlamsız bir metin döndürüyor
+    (`§işlıııııi*ı, §ıın,'I'iı:.,,l.Ş.`). Korpusa böyle bir metin yazmak,
+    hiç yazmamaktan kötü: aranabilir çöp, cevapsız kalmaktan daha zararlı.
+    """
+    if not text:
+        return False
+    return sum(1 for ch in text if ch in _JUNK_CHARS) / len(text) <= MAX_JUNK_RATIO
+
+
+def pdf_text(payload: bytes) -> str:
+    """PDF baytlarından metin. Aynı biçim `backend/.../documents.py:_read_pdf`.
+
+    Kopyalandı, paylaşılmadı: backend ile ingestor arasında ortak bir paket
+    yok ve on iki satır için beşinci bir dağıtılabilir birim yaratmak,
+    çözdüğünden fazla sorun açardı.
+    """
+    from io import BytesIO
+
+    from pypdf import PdfReader
+
+    try:
+        reader = PdfReader(BytesIO(payload))
+        pages = [page.extract_text() or "" for page in reader.pages]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not read an attachment PDF: %s", exc)
+        return ""
+    text = "\n".join(part.strip() for part in pages if part.strip())
+    if not looks_extractable(text):
+        global unreadable_attachments
+        unreadable_attachments += 1
+        log.info("an attachment's fonts could not be decoded; skipping its text")
+        return ""
+    return text[:MAX_PDF_CHARS]
+
+
+def fetch_attachment_text(obj_id: str, client: httpx.Client) -> str:
+    """One attachment, downloaded, unwrapped and flattened. "" on any failure."""
+    url = f"{config.kap_base_url()}/tr/api/file/download/{obj_id}"
+    if not courtesy.may_fetch(url, client):
+        return ""
+
+    courtesy.wait_for_host(url)
+    try:
+        response = client.get(
+            url,
+            headers={"User-Agent": config.user_agent()},
+            timeout=config.request_timeout() * 3,
+        )
+        response.raise_for_status()
+        payload = response.content
+    except Exception as exc:  # noqa: BLE001
+        log.warning("attachment %s unreachable: %s", obj_id, exc)
+        return ""
+
+    if len(payload) > MAX_ATTACHMENT_BYTES:
+        log.warning("attachment %s is %d bytes, over the cap; skipped", obj_id, len(payload))
+        return ""
+
+    unwrapped = unwrap_java_bytes(payload)
+    if unwrapped is None:
+        return ""
+    return pdf_text(unwrapped)
+
+
+def attachment_text(detail: dict[str, Any], client: httpx.Client) -> str:
+    """Every readable PDF attached to one disclosure, joined."""
+    parts = []
+    for attachment in pdf_attachments(detail)[:MAX_ATTACHMENTS]:
+        text = fetch_attachment_text(attachment["objId"], client)
+        if text:
+            name = (attachment.get("fileName") or "").strip()
+            parts.append(f"[{name}]\n{text}" if name else text)
+    return "\n\n".join(parts)
+
+
 def fetch_all(
     universe: set[str],
     since: date,

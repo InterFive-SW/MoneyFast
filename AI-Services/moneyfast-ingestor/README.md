@@ -84,6 +84,41 @@ adding an instrument is a database row, not a redeploy of this service.
 drawdown, VaR, beta and Sharpe have nothing to compute from without OHLCV
 bars; the nightly candle job is what fills that gap.
 
+## KAP attachments, and why they are the fragile part
+
+A financial report's substance is in its attached PDF, not its disclosure
+body, so attachments are downloaded and read. Two things about that endpoint
+are worth knowing before touching it.
+
+**The response is not a PDF, whatever the header says.** `Content-Type` is
+`application/pdf` and the body is a serialized Java byte array:
+`ac ed 00 05 ... 78 70 <4-byte big-endian length> %PDF-1.4`. The unwrap
+looks for the marker, reads the length, slices — and then **checks for
+`%PDF-`**, because `78 70` can also occur inside a class descriptor, so the
+first match is not guaranteed to be the right one. A wrong offset becomes
+`None` rather than garbage in the corpus, and unwrap failures are counted:
+this is an undocumented, unversioned interface, and the counter is the only
+way its breaking becomes visible.
+
+**Some PDFs cannot be read at all, and `pypdf` will not say so.** They embed
+subset fonts with no `ToUnicode` map, and extraction returns plausible-looking
+nonsense — `§işlıııııi*ı, §ıın,'I'iı:.,,l.Ş.` — rather than raising. Text like
+that in a shared corpus is worse than no text: it is searchable garbage, and
+it competes for the retrieval slots of the company it is filed under.
+
+The discriminator is the density of symbol characters that ordinary Turkish
+prose never contains. Measured across six attachments: a mangled one scored
+**0.0617**, and every readable one scored **0.0000–0.0001** — including
+numeric price bulletins, which a word-frequency test would have thrown away
+(they scored as low as 0.0056 on that measure, against 0.0025 for the mangled
+text — far too close to separate on). The threshold sits at 0.01, two orders
+of magnitude clear of both ends.
+
+Attachments are read only for disclosures inside `INGESTOR_KAP_PDF_WINDOW_DAYS`
+(30). Each one is a second request on top of the body; opening the window
+across a six-month backfill would spend a third of its wall clock on old
+filings nobody will ask about.
+
 ## Idempotency
 
 Every job can be run twice with no second effect, which is what makes a missed

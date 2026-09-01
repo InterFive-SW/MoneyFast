@@ -517,3 +517,205 @@ class TestBodyAndAttachments:
     @pytest.mark.parametrize("attachments", [None, [], [{}], [{"objId": ""}], ["junk"]])
     def test_nothing_downloadable_yields_nothing(self, attachments):
         assert kap_source.pdf_attachments({"attachments": attachments}) == []
+
+
+def java_wrapped(pdf: bytes, junk: bytes = b"\x75\x72\x00\x02\x5b\x42") -> bytes:
+    """The envelope KAP actually returns, byte for byte.
+
+    Measured: ac ed 00 05 75 72 00 02 5b 42 ... 78 70 | 00 10 9a 07 | %PDF-1.4
+    """
+    return (
+        kap_source.JAVA_MAGIC
+        + junk
+        + kap_source.ARRAY_MARKER
+        + len(pdf).to_bytes(4, "big")
+        + pdf
+    )
+
+
+@pytest.fixture(autouse=True)
+def _counters():
+    kap_source.reset_counters()
+    yield
+    kap_source.reset_counters()
+
+
+class TestJavaUnwrap:
+    def test_the_real_envelope_is_unwrapped(self):
+        pdf = b"%PDF-1.4\nbody"
+        assert kap_source.unwrap_java_bytes(java_wrapped(pdf)) == pdf
+
+    def test_a_raw_pdf_passes_through(self):
+        """If the provider ever stops wrapping, that must not look broken."""
+        assert kap_source.unwrap_java_bytes(b"%PDF-1.7\nx") == b"%PDF-1.7\nx"
+
+    def test_something_that_is_neither_is_refused_and_counted(self):
+        assert kap_source.unwrap_java_bytes(b"<html>nope</html>") is None
+        assert kap_source.unwrap_failures == 1
+
+    def test_the_marker_missing_is_refused(self):
+        assert kap_source.unwrap_java_bytes(kap_source.JAVA_MAGIC + b"no marker here") is None
+        assert kap_source.unwrap_failures == 1
+
+    def test_a_length_longer_than_the_buffer_is_refused(self):
+        payload = kap_source.JAVA_MAGIC + kap_source.ARRAY_MARKER + (99999).to_bytes(4, "big") + b"%PDF-"
+        assert kap_source.unwrap_java_bytes(payload) is None
+
+    def test_a_zero_length_is_refused(self):
+        payload = kap_source.JAVA_MAGIC + kap_source.ARRAY_MARKER + (0).to_bytes(4, "big") + b"%PDF-"
+        assert kap_source.unwrap_java_bytes(payload) is None
+
+    def test_bytes_that_unwrap_to_something_that_is_not_a_pdf_are_refused(self):
+        """The magic check is what turns a wrong offset into None instead of
+        garbage in the corpus."""
+        assert kap_source.unwrap_java_bytes(java_wrapped(b"NOTAPDF-really")) is None
+        assert kap_source.unwrap_failures == 1
+
+    def test_a_marker_inside_a_class_descriptor_is_skipped_for_the_real_one(self):
+        """0x7870 can occur inside a class name, so the first hit is not
+        guaranteed to be the right one."""
+        pdf = b"%PDF-1.4\nreal"
+        decoy = kap_source.ARRAY_MARKER + (7).to_bytes(4, "big") + b"NOTPDF!"
+        assert kap_source.unwrap_java_bytes(java_wrapped(pdf, junk=decoy)) == pdf
+        assert kap_source.unwrap_failures == 0
+
+    def test_the_retry_ceiling_is_bounded(self, monkeypatch):
+        monkeypatch.setattr(kap_source, "MAX_MARKER_ATTEMPTS", 1)
+        decoy = kap_source.ARRAY_MARKER + (7).to_bytes(4, "big") + b"NOTPDF!"
+        assert kap_source.unwrap_java_bytes(java_wrapped(b"%PDF-1.4\nx", junk=decoy)) is None
+
+
+class TestExtractableText:
+    def test_ordinary_turkish_prose_is_kept(self):
+        assert kap_source.looks_extractable(
+            "Şirketimizin kayıtlı sermaye tavanının geçerlilik süresi uzatılmıştır."
+        )
+
+    def test_a_numeric_price_bulletin_is_kept(self):
+        """Measured at 0.0000 junk: few words, but the text is sound. A
+        word-frequency test would have thrown this away."""
+        assert kap_source.looks_extractable(
+            "KIYMET KODU VALÖR VADE EN DÜŞÜK EN YÜKSEK\n1,2345 2,3456 3,4567"
+        )
+
+    def test_mangled_font_output_is_refused(self):
+        """pypdf does not raise on a subset font with no ToUnicode map; it
+        returns plausible-looking nonsense. Searchable garbage in a shared
+        corpus is worse than nothing."""
+        assert not kap_source.looks_extractable(
+            "()ııçııstııı $nlıoiıı.jii* §işlıııııi*ı, §ıın,'I'iı:.,,l.Ş. "
+            "[{;\\ i}ü}. ö\" Şiıiıı,ı. il'K hiiki]iıultıiııt"
+        )
+
+    def test_empty_text_is_not_extractable(self):
+        assert not kap_source.looks_extractable("")
+
+
+class TestPdfText:
+    def test_unreadable_pdf_bytes_yield_nothing(self):
+        assert kap_source.pdf_text(b"not a pdf at all") == ""
+
+    def test_mangled_extraction_is_dropped_and_counted(self, monkeypatch):
+        class FakePage:
+            def extract_text(self):
+                return "§ıın,'I'iı: [{;\\ i}ü}. $nlıoiıı.jii* §işlıı*ı ~^`|<>@#"
+
+        import sys, types
+        module = types.ModuleType("pypdf")
+        module.PdfReader = lambda _stream: types.SimpleNamespace(pages=[FakePage()])
+        monkeypatch.setitem(sys.modules, "pypdf", module)
+        assert kap_source.pdf_text(b"%PDF-1.4") == ""
+        assert kap_source.unreadable_attachments == 1
+
+    def test_readable_pages_are_joined_and_capped(self, monkeypatch):
+        import sys, types
+
+        class Page:
+            def __init__(self, text):
+                self._t = text
+
+            def extract_text(self):
+                return self._t
+
+        module = types.ModuleType("pypdf")
+        module.PdfReader = lambda _stream: types.SimpleNamespace(
+            pages=[Page("  Şirket kararı  "), Page(""), Page("İkinci sayfa"), Page(None)]
+        )
+        monkeypatch.setitem(sys.modules, "pypdf", module)
+        monkeypatch.setattr(kap_source, "MAX_PDF_CHARS", 20)
+        assert kap_source.pdf_text(b"%PDF-1.4") == "Şirket kararı\nİkinci"
+
+
+class TestFetchAttachment:
+    def _serving(self, payload, status=200):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/robots.txt":
+                return httpx.Response(666, text="")
+            return httpx.Response(status, content=payload)
+
+        return handler
+
+    def test_an_oversized_attachment_is_refused_without_parsing(self, monkeypatch):
+        monkeypatch.setattr(kap_source, "MAX_ATTACHMENT_BYTES", 8)
+        assert kap_source.fetch_attachment_text(
+            "x", client_for(self._serving(java_wrapped(b"%PDF-1.4\nlong body")))
+        ) == ""
+
+    def test_a_wrapped_pdf_is_downloaded_unwrapped_and_read(self, monkeypatch):
+        monkeypatch.setattr(kap_source, "pdf_text", lambda payload: f"okundu:{len(payload)}")
+        got = kap_source.fetch_attachment_text(
+            "x", client_for(self._serving(java_wrapped(b"%PDF-1.4\nbody")))
+        )
+        assert got == "okundu:13"
+
+    def test_a_failed_download_yields_nothing(self):
+        assert kap_source.fetch_attachment_text(
+            "x", client_for(self._serving(b"", status=500))
+        ) == ""
+
+    def test_an_unwrappable_payload_yields_nothing(self):
+        assert kap_source.fetch_attachment_text(
+            "x", client_for(self._serving(b"<html>challenge</html>"))
+        ) == ""
+
+    def test_an_unreachable_host_yields_nothing(self):
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(666, text="")
+            raise httpx.ConnectError("boom")
+
+        assert kap_source.fetch_attachment_text("x", client_for(handler)) == ""
+
+    def test_robots_disallow_stops_the_download(self):
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(200, text="User-agent: *\nDisallow: /")
+            pytest.fail("robots.txt disallowed this host")
+
+        assert kap_source.fetch_attachment_text("x", client_for(handler)) == ""
+
+
+class TestAttachmentText:
+    def test_each_readable_pdf_is_labelled_with_its_filename(self, monkeypatch):
+        monkeypatch.setattr(
+            kap_source, "fetch_attachment_text", lambda obj_id, client: f"metin-{obj_id}"
+        )
+        detail = {"attachments": [
+            {"objId": "a", "fileName": "Bilanço.pdf", "fileExtension": "pdf"},
+            {"objId": "b", "fileName": "", "fileExtension": "pdf"},
+        ]}
+        out = kap_source.attachment_text(detail, None)
+        assert out == "[Bilanço.pdf]\nmetin-a\n\nmetin-b"
+
+    def test_attachments_are_capped(self, monkeypatch):
+        monkeypatch.setattr(kap_source, "MAX_ATTACHMENTS", 1)
+        monkeypatch.setattr(kap_source, "fetch_attachment_text", lambda o, c: "x")
+        detail = {"attachments": [
+            {"objId": str(i), "fileExtension": "pdf", "fileName": ""} for i in range(4)
+        ]}
+        assert kap_source.attachment_text(detail, None) == "x"
+
+    def test_an_unreadable_attachment_is_simply_absent(self, monkeypatch):
+        monkeypatch.setattr(kap_source, "fetch_attachment_text", lambda o, c: "")
+        detail = {"attachments": [{"objId": "a", "fileExtension": "pdf", "fileName": "x.pdf"}]}
+        assert kap_source.attachment_text(detail, None) == ""

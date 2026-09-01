@@ -278,3 +278,14 @@ def kap_window_days() -> int:
 def kap_backfill_days() -> int:
     """Geçmişe dönük tarama derinliği. 183 = altı ay."""
     return max(1, _int("INGESTOR_KAP_BACKFILL_DAYS", 183))
+
+
+def kap_pdf_window_days() -> int:
+    """Ekli PDF'lerin okunacağı geriye dönük pencere, gün.
+
+    Ekler gövdeden pahalı: ek başına bir indirme daha, artı ayrıştırma.
+    Altı aylık taramanın tamamında açık bırakmak, sürenin üçte birini
+    kimsenin sormayacağı eski bilanço eklerine harcamak olurdu. Güncel
+    bildirimlerde açık, derin taramada kapalı.
+    """
+    return max(0, _int("INGESTOR_KAP_PDF_WINDOW_DAYS", 30))

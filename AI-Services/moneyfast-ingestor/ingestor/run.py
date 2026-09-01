@@ -501,6 +501,20 @@ def run_kap(client: httpx.Client, since=None, until=None, bodies: bool = True) -
     return {"fetched": len(items), "embedded": embedded, **backend_result}
 
 
+def _within_pdf_window(published_at) -> bool:
+    """Ekleri yalnızca güncel bildirimler için oku.
+
+    Bir bildirimin gövdesi tek istek; ekleri her biri bir istek daha.
+    Altı aylık taramada hepsini açmak, süreyi katlayıp bunu eski
+    eklere harcamak demek.
+    """
+    window = config.kap_pdf_window_days()
+    if window <= 0:
+        return False
+    age = datetime.now(timezone.utc) - published_at
+    return age <= timedelta(days=window)
+
+
 def _with_bodies(items: list, client: httpx.Client) -> list:
     """Read each disclosure's body and prepend the issuers it names.
 
@@ -517,6 +531,10 @@ def _with_bodies(items: list, client: httpx.Client) -> list:
         text = kap_source.body_text(detail)
         if not text:
             continue
+        if _within_pdf_window(item["published_at"]):
+            attachments = kap_source.attachment_text(detail, client)
+            if attachments:
+                text = f"{text}\n\n{attachments}"
         symbols = item.get("related_symbols") or []
         header = f"İlgili şirketler: {', '.join(symbols)}" if symbols else ""
         documents.append({

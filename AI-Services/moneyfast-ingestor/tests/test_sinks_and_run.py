@@ -8,7 +8,7 @@ single failing destination can take the run down with it.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import httpx
 import pytest
@@ -500,6 +500,64 @@ class TestCycles:
         )
         assert docs[0]["text"].startswith("İlgili şirketler: ASELS, TUPRS")
         assert "gövde" in docs[0]["text"]
+
+    def test_a_recent_disclosure_gets_its_attachments_read(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
+        monkeypatch.setattr(
+            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+        )
+        monkeypatch.setattr(run.kap_source, "attachment_text", lambda d, c: "[Rapor.pdf]\nek metni")
+        docs = run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": datetime.now(timezone.utc),
+              "related_symbols": []}],
+            None,
+        )
+        assert "ek metni" in docs[0]["text"]
+
+    def test_an_old_disclosure_does_not_pay_for_its_attachments(self, monkeypatch):
+        """One request per attachment. Over a six-month backfill that would
+        be a third of the wall clock spent on filings nobody will ask about."""
+        monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
+        monkeypatch.setattr(
+            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+        )
+
+        def refuse(detail, client):
+            pytest.fail("an old disclosure must not download attachments")
+
+        monkeypatch.setattr(run.kap_source, "attachment_text", refuse)
+        old = datetime.now(timezone.utc) - timedelta(days=200)
+        docs = run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": old, "related_symbols": []}], None
+        )
+        assert docs[0]["text"].endswith("gövde")
+
+    def test_attachments_can_be_switched_off_entirely(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "0")
+        monkeypatch.setattr(
+            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>g</p>"]}
+        )
+
+        def refuse(detail, client):
+            pytest.fail("the window is closed")
+
+        monkeypatch.setattr(run.kap_source, "attachment_text", refuse)
+        assert run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": datetime.now(timezone.utc),
+              "related_symbols": []}], None
+        )
+
+    def test_a_disclosure_with_no_readable_attachment_keeps_its_body(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
+        monkeypatch.setattr(
+            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+        )
+        monkeypatch.setattr(run.kap_source, "attachment_text", lambda d, c: "")
+        docs = run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": datetime.now(timezone.utc),
+              "related_symbols": []}], None
+        )
+        assert docs[0]["text"].endswith("gövde")
 
     def test_a_disclosure_whose_body_is_unreadable_is_skipped(self, monkeypatch):
         monkeypatch.setattr(run.kap_source, "fetch_detail", lambda index, client: None)

@@ -235,6 +235,22 @@ class TestIngestWrites:
         assert response.status_code == 200
         assert response.json() == {"known": ["a" * 64]}
 
+    def test_news_coverage_answers_where_to_resume(self, client, mocker, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        mocker.patch.object(
+            market_module_service, "news_coverage",
+            return_value={"KAP": {"items": 390, "last": "2026-08-28", "last_index": 1655982}},
+        )
+        response = client.get(
+            "/api/market/news/coverage", headers={"Authorization": "Bearer secret"}
+        )
+        assert response.status_code == 200
+        assert response.json()["KAP"]["last_index"] == 1655982
+
+    def test_news_coverage_is_guarded(self, client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.get("/api/market/news/coverage").status_code == 401
+
     def test_known_hashes_is_guarded(self, client, monkeypatch):
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
         assert client.post(

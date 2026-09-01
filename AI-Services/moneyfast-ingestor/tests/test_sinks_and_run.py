@@ -8,7 +8,7 @@ single failing destination can take the run down with it.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 import httpx
 import pytest
@@ -276,6 +276,104 @@ class TestCli:
         monkeypatch.setattr(run, "start_scheduler", lambda: started.append(True))
         assert run.main([]) == 0
         assert started == [True]
+
+
+class TestNewsChunking:
+    def test_a_large_batch_is_split(self):
+        """Measured once already on candles: a single oversized POST timed
+        out, the sink returned None, and the cycle reported '0 written' with
+        no error anywhere. A six-month KAP backfill is ~15.000 rows."""
+        sizes = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sizes.append(len(json.loads(request.content)["items"]))
+            return httpx.Response(200, json={"news_written": 1})
+
+        items = [
+            {"content_hash": str(i) * 64, "title": "t", "source": "KAP", "published_at": NOW}
+            for i in range(1100)
+        ]
+        result = sinks.push_news_to_backend(client_for(handler), items)
+        assert sizes == [500, 500, 100]
+        assert result["news_written"] == 3
+
+    def test_one_failed_batch_does_not_lose_the_others(self):
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(503, json={})
+            return httpx.Response(200, json={"news_written": 2})
+
+        items = [
+            {"content_hash": str(i) * 64, "title": "t", "source": "KAP", "published_at": NOW}
+            for i in range(600)
+        ]
+        assert sinks.push_news_to_backend(client_for(handler), items)["news_written"] == 2
+
+    def test_every_batch_failing_reports_nothing_delivered(self):
+        items = [{"content_hash": "a" * 64, "title": "t", "source": "s", "published_at": NOW}]
+        assert sinks.push_news_to_backend(client_for(recorder(status=503)), items) is None
+
+
+class TestKapCatchUp:
+    def test_coverage_is_read_from_the_backend(self):
+        handler = recorder(body={"KAP": {"items": 5, "last": "2026-08-20", "last_index": 99}})
+        got = sinks.fetch_news_coverage(client_for(handler))
+        assert got["KAP"]["last_index"] == 99
+        assert handler.calls[0].url.path.endswith("/market/news/coverage")
+
+    def test_unavailable_coverage_reads_as_nothing_covered(self):
+        """The safe direction: the caller then does the complete thing."""
+        assert sinks.fetch_news_coverage(client_for(recorder(status=503))) == {}
+
+    def test_top_up_catches_the_gap_since_the_newest_held(self, monkeypatch):
+        monkeypatch.setattr(
+            run.sinks, "fetch_news_coverage",
+            lambda c: {"KAP": {"items": 10, "last": "2026-08-20", "last_index": 5}},
+        )
+        span = {}
+        monkeypatch.setattr(
+            run, "run_kap",
+            lambda client, since=None, until=None: span.update(since=since, until=until) or {},
+        )
+        run.topup_kap(None)
+        # A margin behind the watermark: overlap is free, a gap is not.
+        assert span["since"] == date(2026, 8, 20) - timedelta(days=run.KAP_TOPUP_MARGIN_DAYS)
+
+    def test_an_empty_store_is_the_backfill_s_question_not_the_top_up_s(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_news_coverage", lambda c: {})
+        assert run.topup_kap(None) == {"skipped": True}
+
+    def test_coverage_without_a_date_is_skipped(self, monkeypatch):
+        monkeypatch.setattr(
+            run.sinks, "fetch_news_coverage", lambda c: {"KAP": {"items": 3, "last": None}}
+        )
+        assert run.topup_kap(None) == {"skipped": True}
+
+    def test_an_already_current_store_fetches_nothing(self, monkeypatch):
+        today = datetime.now(run.ISTANBUL).date()
+        monkeypatch.setattr(
+            run.sinks, "fetch_news_coverage",
+            lambda c: {"KAP": {"items": 10, "last": (today + timedelta(days=5)).isoformat()}},
+        )
+
+        def refuse(*a, **k):
+            pytest.fail("nothing to catch up on")
+
+        monkeypatch.setattr(run, "run_kap", refuse)
+        assert run.topup_kap(None) == {"fetched": 0}
+
+    def test_the_backfill_reaches_back_the_configured_depth(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_BACKFILL_DAYS", "183")
+        span = {}
+        monkeypatch.setattr(
+            run, "run_kap",
+            lambda client, since=None, until=None: span.update(days=(until - since).days) or {},
+        )
+        run.backfill_kap(None)
+        assert span["days"] == 183
 
 
 class TestKnownHashes:
@@ -630,7 +728,9 @@ class TestBackendNewsPush:
     def test_articles_are_posted_to_the_backend(self):
         handler = recorder(body={"news_written": 2})
         items = [{"content_hash": "a" * 64, "title": "T", "source": "D", "published_at": NOW}]
-        assert sinks.push_news_to_backend(client_for(handler), items) == {"news_written": 2}
+        assert sinks.push_news_to_backend(client_for(handler), items) == {
+            "quotes_written": 0, "candles_written": 0, "news_written": 2
+        }
         assert handler.calls[0].url.path.endswith("/market/news/ingest")
 
     def test_backend_failure_is_swallowed(self):
@@ -702,6 +802,10 @@ class TestScheduler:
             # Piyasa saatlerine bağlı DEĞİL: fiyatı en çok etkileyen
             # bildirimler kapanıştan sonra ve açılıştan önce yayımlanıyor.
             "kap": "interval",
+            # Mum ikilisiyle aynı ayrım: biri "hiç arşiv var mı", diğeri
+            # "elimizdeki en yeni bildirim eski mi" sorusunu cevaplıyor.
+            "kap-topup": "date",
+            "kap-backfill": "date",
         }
         assert warmed == ["q", "n"]
         assert started == [True]

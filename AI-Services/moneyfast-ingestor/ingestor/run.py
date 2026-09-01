@@ -501,6 +501,52 @@ def run_kap(client: httpx.Client, since=None, until=None, bodies: bool = True) -
     return {"fetched": len(items), "embedded": embedded, **backend_result}
 
 
+#: Su seviyesinin gerisine ne kadar bakılacağı. Örtüşme bedava
+#: (`ON CONFLICT DO NOTHING`), boşluk değil.
+KAP_TOPUP_MARGIN_DAYS = 3
+
+
+def topup_kap(client: httpx.Client) -> dict:
+    """Kapalı kalınan aralığı kapat.
+
+    `topup_candles` ile aynı soru, aynı ayrım: geri doldurma "hiç yok"u,
+    bu "var ama eski"yi cevaplıyor. Yoklama üç günlük bir pencereye
+    bakıyor; on gün kapalı kalmış bir kurulumda o pencere yetmez.
+    """
+    coverage = sinks.fetch_news_coverage(client).get("KAP") or {}
+    if not coverage.get("items") or not coverage.get("last"):
+        # Hiçbir şey yoksa bu geri doldurmanın sorusu, bunun değil.
+        return {"skipped": True}
+
+    last = date.fromisoformat(coverage["last"])
+    since = last - timedelta(days=KAP_TOPUP_MARGIN_DAYS)
+    until = datetime.now(ISTANBUL).date()
+    if since >= until:
+        return {"fetched": 0}
+    log.info("kap top-up: newest held is %s, catching up from %s", last, since)
+    return run_kap(client, since=since, until=until)
+
+
+def backfill_kap(client: httpx.Client) -> dict:
+    """Altı aylık arşivi, yeniden başlatmalar boyunca doldur.
+
+    Üç şey bunu makul kılıyor:
+
+    * **Yeniden başlatılabilir.** Listeleme ucuz (pencere başına tek istek)
+      ve `known-hashes` elde olanı gövde harcamadan eliyor, dolayısıyla
+      yeniden başlayan bir süreç kaldığı yerden devam ediyor. Bu olmasaydı
+      her açılış sıfırdan başlar ve arşiv hiç tamamlanmazdı.
+    * **Yeniden en yeniden.** `fetch_all` pencereleri bugünden geriye
+      yürüyor, yani yarıda kesilen bir tarama rastgele bir serpinti değil,
+      BİTİŞİK ve GÜNCEL bir arşiv bırakıyor.
+    * **Tur başına bütçeli.** Tek bir açılışın sınırlı bir dilim alması,
+      "on beş saatlik bir iş başlat ve dua et"ten iyi.
+    """
+    until = datetime.now(ISTANBUL).date()
+    since = until - timedelta(days=config.kap_backfill_days())
+    return run_kap(client, since=since, until=until)
+
+
 def _within_pdf_window(published_at) -> bool:
     """Ekleri yalnızca güncel bildirimler için oku.
 
@@ -646,6 +692,25 @@ def start_scheduler() -> None:
         id="kap",
         max_instances=1,
         coalesce=True,
+    )
+    # Aynı ikili, aynı gerekçe: `kap-topup` "elimizdeki en yeni bildirim
+    # eski mi", `kap-backfill` "hiç arşiv var mı" sorusunu cevaplıyor.
+    # `misfire_grace_time=None` zorunlu: run_date scheduler başlamadan
+    # hesaplanıyor ve satır içi ısınma ~80 saniye sürüyor.
+    scheduler.add_job(
+        _job("kap-topup", topup_kap),
+        "date",
+        run_date=datetime.now(ISTANBUL),
+        id="kap-topup",
+        misfire_grace_time=None,
+    )
+    scheduler.add_job(
+        _job("kap-backfill", backfill_kap),
+        "date",
+        run_date=datetime.now(ISTANBUL),
+        id="kap-backfill",
+        max_instances=1,
+        misfire_grace_time=None,
     )
     # After the close, so the day's final bar is settled.
     scheduler.add_job(

@@ -469,6 +469,20 @@ def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db)):
     return {"quotes_written": 0, "candles_written": 0, "news_written": written}
 
 
+@router.get(
+    "/news/coverage",
+    summary="Kaynak başına haber kapsaması (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def news_coverage(db: Session = Depends(get_db)):
+    """`ingestor`'ın "nereden devam edeyim" sorusu.
+
+    `candles/coverage` ile aynı desen. KAP bildirim numarası monoton
+    olduğu için en yüksek numara, bir tarihten daha kesin bir su seviyesi.
+    """
+    return service.news_coverage(db)
+
+
 @router.post(
     "/news/known-hashes",
     response_model=KnownHashesOut,

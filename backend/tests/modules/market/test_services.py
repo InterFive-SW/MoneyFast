@@ -179,6 +179,43 @@ class TestNewsStore:
         assert written == 0
 
 
+class TestNewsCoverage:
+    def _db(self, rows):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = rows
+        return db
+
+    def test_the_disclosure_number_is_read_out_of_the_permalink(self):
+        """No column for it, and none needed: the link we store for citation
+        already carries the number."""
+        db = self._db([
+            SimpleNamespace(source="KAP", items=390, last=NOW, last_index=1655982),
+        ])
+        assert news_service.news_coverage(db)["KAP"]["last_index"] == 1655982
+
+    def test_a_source_without_numbered_links_has_no_watermark(self):
+        """RSS URLs must not be cast to bigint; that is what the regex guard
+        in the query prevents."""
+        db = self._db([SimpleNamespace(source="Dünya", items=12, last=NOW, last_index=None)])
+        assert news_service.news_coverage(db)["Dünya"]["last_index"] is None
+
+    def test_a_source_with_no_dated_rows_reports_no_date(self):
+        db = self._db([SimpleNamespace(source="KAP", items=0, last=None, last_index=None)])
+        assert news_service.news_coverage(db)["KAP"]["last"] is None
+
+    def test_an_empty_table_covers_nothing(self):
+        assert news_service.news_coverage(self._db([])) == {}
+
+    def test_the_query_guards_the_cast_with_a_pattern_match(self):
+        """Without it the ::bigint cast meets an RSS link and the endpoint
+        500s for every caller."""
+        db = self._db([])
+        news_service.news_coverage(db)
+        statement = str(db.execute.call_args.args[0])
+        assert "/Bildirim/[0-9]+$" in statement
+        assert "::bigint" in statement
+
+
 class TestKnownHashes:
     def test_an_empty_list_makes_no_query(self):
         db = MagicMock(spec=Session)

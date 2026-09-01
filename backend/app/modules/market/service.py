@@ -7,6 +7,7 @@ from typing import Any, Sequence
 
 import httpx
 
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -46,6 +47,46 @@ def upsert_news(db: Session, items: list[dict[str, Any]]) -> int:
     result = db.execute(statement)
     db.commit()
     return result.rowcount or 0
+
+
+def news_coverage(db: Session) -> dict[str, dict]:
+    """Kaynak başına: kaç haber var, en yenisi ne zaman, en yüksek numara.
+
+    `candle_coverage` ile aynı soru, haberler için. Ama bir fark var:
+    KAP bildirim numarası MONOTON artıyor, dolayısıyla "elimizdeki en yüksek
+    numara" bir tarihten hem daha ucuz hem daha kesin bir su seviyesi.
+
+    Numara için ayrı bir sütun YOK ve gerekmiyor: kalıcı bağlantının kendisi
+    numarayı taşıyor (`/tr/Bildirim/1655982`) ve o bağlantı atıf için zaten
+    saklanıyor.
+
+    **Bu bir su seviyesi, tamlık kanıtı değil.** Yarıda kesilmiş bir tur,
+    en yüksek numaranın ALTINDA boşluk bırakır; onu `known-hashes` yakalar.
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT source,
+                   count(*)                    AS items,
+                   max(published_at)           AS last,
+                   max(CASE WHEN url ~ '/Bildirim/[0-9]+$'
+                            THEN substring(url from '/Bildirim/([0-9]+)$')::bigint
+                       END)                    AS last_index
+            FROM market.news_items
+            GROUP BY source
+            """
+        )
+    ).all()
+    return {
+        row.source: {
+            "items": row.items,
+            # `~` koruması taşıyıcı: onsuz `::bigint` dönüşümü RSS
+            # bağlantılarını da görür ve uç nokta 500 döner.
+            "last": row.last.date().isoformat() if row.last else None,
+            "last_index": int(row.last_index) if row.last_index is not None else None,
+        }
+        for row in rows
+    }
 
 
 #: Bir istekte sorulabilecek en fazla hash. Sınırsız bir liste, indeksli

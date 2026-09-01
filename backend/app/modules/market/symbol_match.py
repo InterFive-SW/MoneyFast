@@ -13,6 +13,7 @@ Bu yüzden burada bulanık eşleşme, kısmi ad eşleşmesi ve tahmin YOK.
 
 from __future__ import annotations
 
+import html
 import re
 from typing import Any, Iterable, Optional
 
@@ -47,9 +48,6 @@ _NON_WORD = re.compile(r"[^a-z0-9]+")
 #: Technology'ye (ALGN) bağlanıyor ve 1.540 haberin 563'ü, konusuyla hiç
 #: ilgisi olmayan bir NASDAQ şirketine iliştiriliyordu.
 _HTML_TAG = re.compile(r"<[^>]*>")
-#: `&#039;` ve `&amp;` gibi varlıklar. Metne karışan `amp`, `quot`, `nbsp`
-#: sözcükleri de eşleştirmeye girmemeli.
-_HTML_ENTITY = re.compile(r"&[#a-zA-Z0-9]{2,8};")
 
 #: Ticker eşleşmesinin alt sınırı. Üç harfli bir kod ("ODA", "TAV") sıradan
 #: metinde tesadüfen geçebilir; dört harf BIST kodlarının da normu.
@@ -83,14 +81,29 @@ MIN_NAME_LENGTH = 5
 
 
 def strip_markup(text: str) -> str:
-    """HTML etiketlerini ve varlıklarını atar.
+    """HTML etiketlerini atar, varlıkları çözer.
 
     Haber özetleri beslemeden işaretlemeyle geliyor. Etiketin İÇİ değil
     KENDİSİ atılıyor: `<img align="right" src="...">` tamamen gider, çünkü
     öznitelik adları ve URL'ler haberin metni değildir.
+
+    Varlıklar SİLİNMİYOR, çözülüyor: "Türkiye&#039;nin" -> "Türkiye'nin".
+    Silinseydi "Türkiye nin" kalırdı ve bu metin yalnızca eşleştirmeye değil
+    ekrana da gidiyor. İki geçiş, çünkü beslemeler çift kaçışlı gönderiyor
+    (`LPG&amp;#039;nin`); kararlı hâle gelince duruyor.
+
+    `ingestor/sources/rss_source.py:clean_summary` ile aynı davranış. Kopya,
+    çünkü iki ayrı servis ve aralarında paylaşılan kod yok. Kaynak orada
+    temizlendiği için buradaki asıl işlev arşiv: düzeltmeden önce toplanmış
+    1.548 haberin 922'si hâlâ işaretleme taşıyor.
     """
-    without_tags = _HTML_TAG.sub(" ", text or "")
-    return _HTML_ENTITY.sub(" ", without_tags)
+    text = _HTML_TAG.sub(" ", text or "")
+    for _ in range(2):
+        unescaped = html.unescape(text)
+        if unescaped == text:
+            break
+        text = unescaped
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def fold(text: str) -> str:

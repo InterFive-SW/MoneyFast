@@ -26,6 +26,47 @@ UNIVERSE = [
 ]
 
 
+class TestStripMarkup:
+    """Haber özetleri beslemeden işaretlemeyle geliyor.
+
+    Bu metin hem eşleştirmeye hem ekrana gidiyor, ve daha önemlisi ingestor
+    onu RAG'a `content` olarak gönderiyor -- ölçüldü, korpustaki 1.533
+    parçanın 917'si işaretleme taşıyordu, yani gömme vektörleri haberin metni
+    yerine HTML gürültüsünü de temsil ediyordu.
+    """
+
+    def test_a_tag_is_removed_whole(self):
+        """Etiketin İÇİ değil KENDİSİ gider: `align` bir öznitelik adı ve
+        temizlenmediğinde Align Technology'ye (ALGN) eşleşiyordu."""
+        assert symbol_match.strip_markup(
+            '<img align="right" src="https://img.example.com/a.jpg" />Zam geldi.'
+        ) == "Zam geldi."
+
+    def test_entities_are_decoded_not_deleted(self):
+        """Silinseydi "Türkiye nin" kalırdı."""
+        assert symbol_match.strip_markup("Türkiye&#039;nin ihracatı") == (
+            "Türkiye'nin ihracatı"
+        )
+
+    def test_a_double_escaped_entity_needs_the_second_pass(self):
+        """Ölçülen veride `LPG&amp;#039;nin` var: besleme çift kaçışlı
+        gönderiyor ve tek geçiş `&#039;`de bırakıyor."""
+        assert symbol_match.strip_markup("LPG&amp;#039;nin") == "LPG'nin"
+
+    def test_the_passes_stop_at_two(self):
+        """Üç kat kaçışlı bir metin iki geçişte tam çözülmez ve bu KASITLI:
+        döngü sabit sayıda, çünkü "kararlı hâle gelene kadar çöz" kuralı
+        metnin içindeki gerçek bir `&amp;` dizisini de eritirdi."""
+        assert symbol_match.strip_markup("&amp;amp;#039;") == "&#039;"
+
+    def test_whitespace_is_collapsed(self):
+        assert symbol_match.strip_markup("bir\n\n  iki") == "bir iki"
+
+    def test_empty_input_is_safe(self):
+        assert symbol_match.strip_markup("") == ""
+        assert symbol_match.strip_markup(None) == ""
+
+
 class TestFold:
     def test_turkish_letters_collapse_to_ascii(self):
         """Aynı isim üç farklı yazımla gelir: TÜPRAŞ, Tüpraş, TUPRAS."""

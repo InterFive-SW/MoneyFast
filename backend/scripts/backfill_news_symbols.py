@@ -1,4 +1,4 @@
-"""Bağlanmamış haberleri enstrüman evrenine bağlar.
+"""Haber arşivini onarır: işaretlemeyi temizler ve sembollere bağlar.
 
 Tek seferlik. Sembol çözümlemesi `market/service.py:upsert_news` içinde, yani
 bundan sonra gelen her haber yazılırken bağlanıyor -- bu betik yalnızca o
@@ -12,6 +12,13 @@ hiçbiri kategori etiketi yayımlamıyor.
 Yalnızca BOŞ olanlara dokunur. Kaynağın kendi verdiği bir etiket -- ileride
 KAP bildirimleri böyle gelecek -- metinden çıkarımla ezilmez.
 
+Aynı koşuda özetlerdeki HTML de temizleniyor. RSS özetleri işaretlemeyi
+olduğu gibi taşıyor ve bu metin hem eşleştirmeye hem ekrana gidiyor;
+ölçüldü, 1.548 haberin 922'sinde `<img align="right" ...>` benzeri içerik
+vardı. Kaynak `rss_source.clean_summary` içinde düzeltildi, bu betik arşiv
+için. `content_hash` DEĞİŞMİYOR: kimlik ham metinden hesaplanıyor ve onu
+değiştirmek arşivin tamamını "yeni" saydırırdı.
+
     docker compose exec backend python -m scripts.backfill_news_symbols
     docker compose exec backend python -m scripts.backfill_news_symbols --dry-run
 """
@@ -24,7 +31,7 @@ import sys
 
 from app.core.database import SessionLocal
 from app.modules.investment.models import InvestmentProduct
-from app.modules.market import service as news_service
+from app.modules.market import service as news_service, symbol_match
 from app.modules.market.models import NewsItem
 
 log = logging.getLogger("moneyfast.backfill")
@@ -46,6 +53,20 @@ def run(dry_run: bool = False) -> int:
             .all()
         )
         print(f"evren: {len(universe)} hisse | bağlanmamış haber: {len(rows)}")
+
+        # Önce TÜM satırlarda işaretleme temizliği: bağlanmamış olanlarla
+        # sınırlı kalsaydı, bağlı bir haberin özeti ekranda HTML olarak
+        # kalırdı.
+        cleaned_count = 0
+        for row in session.query(NewsItem).all():
+            if not row.summary:
+                continue
+            cleaned = symbol_match.strip_markup(row.summary)
+            if cleaned and cleaned != row.summary:
+                if not dry_run:
+                    row.summary = cleaned
+                cleaned_count += 1
+        print(f"işaretlemesi temizlenen özet: {cleaned_count}")
 
         linked = 0
         for row in rows:

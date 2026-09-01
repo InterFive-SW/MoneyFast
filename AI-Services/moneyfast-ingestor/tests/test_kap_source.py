@@ -360,3 +360,160 @@ class TestCourtesy:
     def test_permalink_follows_the_configured_base(self, monkeypatch):
         monkeypatch.setenv("INGESTOR_KAP_BASE_URL", "https://example.test/")
         assert kap_source.permalink(7) == "https://example.test/tr/Bildirim/7"
+
+
+DETAIL = {
+    "disclosure": {"disclosureBasic": {"disclosureIndex": 1655988}},
+    "disclosureBody": ["<p>Özet Bilgi</p>"],
+    "attachments": [{"objId": "abc", "fileName": "Esas.pdf", "fileExtension": "pdf"}],
+}
+
+
+def detail_serving(payload, status=200):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(666, text="")
+        if isinstance(payload, str):
+            return httpx.Response(status, text=payload)
+        return httpx.Response(status, json=payload)
+
+    return handler
+
+
+class TestHtmlToText:
+    def test_cells_stay_on_one_line_separated_by_a_tab(self):
+        """A disclosure body IS a table: label in one cell, number in the
+        next. Losing the separator turns a balance sheet into a column of
+        unlabelled numbers."""
+        out = kap_source.html_to_text(
+            ["<table><tr><td>Net Dönem Kârı</td><td>1.234.567,89</td></tr></table>"]
+        )
+        assert out.split("\n")[0] == "Net Dönem Kârı\t1.234.567,89"
+
+    def test_rows_are_separated(self):
+        out = kap_source.html_to_text(
+            ["<table><tr><td>A</td></tr><tr><td>B</td></tr></table>"]
+        )
+        assert out.splitlines() == ["A", "B"]
+
+    def test_script_and_style_content_is_dropped(self):
+        """Markup, not prose — it would be read into the corpus as text."""
+        out = kap_source.html_to_text(
+            ["<p>Görünür</p><script>var gizli = 1;</script><style>.a{color:red}</style>"]
+        )
+        assert out == "Görünür"
+
+    def test_inline_tags_do_not_split_a_line(self):
+        """KAP wraps labels in <span>/<b>. Treating every closing tag as a
+        break would put the label and its value on separate lines."""
+        out = kap_source.html_to_text(
+            ["<td><b>Net Kâr</b> <span>(TL)</span></td><td>1.234</td>"]
+        )
+        assert out == "Net Kâr (TL)\t1.234"
+
+    def test_entities_are_decoded(self):
+        assert kap_source.html_to_text(["<p>T&uuml;rkiye &amp; Co &#252;</p>"]) == (
+            "Türkiye & Co ü"
+        )
+
+    def test_line_breaks_become_newlines(self):
+        assert kap_source.html_to_text(["bir<br>iki"]).splitlines() == ["bir", "iki"]
+
+    def test_the_body_is_a_list_of_fragments(self):
+        """Measured: `disclosureBody` comes back as a LIST, not a string."""
+        assert kap_source.html_to_text(["<p>bir</p>", "<p>iki</p>"]).splitlines() == [
+            "bir", "iki",
+        ]
+
+    def test_a_bare_string_is_accepted_too(self):
+        assert kap_source.html_to_text("<p>tek</p>") == "tek"
+
+    @pytest.mark.parametrize("payload", [None, 42, [], [""], ["   "], [None]])
+    def test_nothing_readable_yields_an_empty_string(self, payload):
+        assert kap_source.html_to_text(payload) == ""
+
+    def test_blank_lines_are_collapsed(self):
+        out = kap_source.html_to_text(["<div><p></p><p>  bir  </p><p></p></div>"])
+        assert out == "bir"
+
+    def test_a_fragment_that_will_not_parse_does_not_lose_the_others(self, monkeypatch):
+        calls = {"n": 0}
+        real = kap_source._Text.feed
+
+        def flaky(self, data):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ValueError("bozuk")
+            return real(self, data)
+
+        monkeypatch.setattr(kap_source._Text, "feed", flaky)
+        assert kap_source.html_to_text(["<p>bozuk</p>", "<p>sağlam</p>"]) == "sağlam"
+
+
+class TestFetchDetail:
+    def test_the_single_element_array_is_unwrapped(self):
+        """Measured shape: a one-element list, consistently."""
+        got = kap_source.fetch_detail(1655988, client_for(detail_serving([DETAIL])))
+        assert got["disclosureBody"] == ["<p>Özet Bilgi</p>"]
+
+    def test_a_bare_object_is_accepted(self):
+        assert kap_source.fetch_detail(1, client_for(detail_serving(DETAIL))) is not None
+
+    def test_the_index_is_in_the_path(self):
+        seen = []
+
+        def handler(request):
+            seen.append(request.url.path)
+            if request.url.path == "/robots.txt":
+                return httpx.Response(666, text="")
+            return httpx.Response(200, json=[DETAIL])
+
+        kap_source.fetch_detail(1655988, client_for(handler))
+        assert "/tr/api/notification/attachment-detail/1655988" in seen
+
+    @pytest.mark.parametrize(
+        "payload,status",
+        [([], 200), ("not json", 200), ({"x": 1}, 404), (None, 500), (42, 200)],
+    )
+    def test_an_unreadable_disclosure_costs_the_body_not_the_cycle(self, payload, status):
+        """The listing row is already stored, so the dashboard entry and its
+        link survive a body we could not read."""
+        assert kap_source.fetch_detail(1, client_for(detail_serving(payload, status))) is None
+
+    def test_an_unreachable_host_yields_none(self):
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(666, text="")
+            raise httpx.ConnectError("boom")
+
+        assert kap_source.fetch_detail(1, client_for(handler)) is None
+
+    def test_robots_disallow_stops_the_fetch(self):
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(200, text="User-agent: *\nDisallow: /")
+            pytest.fail("robots.txt disallowed this host")
+
+        assert kap_source.fetch_detail(1, client_for(handler)) is None
+
+
+class TestBodyAndAttachments:
+    def test_body_text_flattens_the_body(self):
+        assert kap_source.body_text(DETAIL) == "Özet Bilgi"
+
+    def test_a_detail_without_a_body_is_empty_not_an_error(self):
+        assert kap_source.body_text({}) == ""
+
+    def test_only_pdf_attachments_are_offered(self):
+        """`fileExtension` is in the listing, so a non-PDF is skipped without
+        spending a download on it."""
+        detail = {"attachments": [
+            {"objId": "a", "fileName": "rapor.pdf", "fileExtension": "pdf"},
+            {"objId": "b", "fileName": "tablo.xlsx", "fileExtension": "xlsx"},
+            {"objId": "c", "fileName": "EKRAN.PDF", "fileExtension": None},
+        ]}
+        assert [a["objId"] for a in kap_source.pdf_attachments(detail)] == ["a", "c"]
+
+    @pytest.mark.parametrize("attachments", [None, [], [{}], [{"objId": ""}], ["junk"]])
+    def test_nothing_downloadable_yields_nothing(self, attachments):
+        assert kap_source.pdf_attachments({"attachments": attachments}) == []

@@ -48,6 +48,32 @@ def upsert_news(db: Session, items: list[dict[str, Any]]) -> int:
     return result.rowcount or 0
 
 
+#: Bir istekte sorulabilecek en fazla hash. Sınırsız bir liste, indeksli
+#: sorguyu tablo taramasına çevirmenin en kolay yolu olurdu.
+MAX_HASH_QUERY = 5_000
+
+
+def known_hashes(db: Session, hashes: Sequence[str]) -> list[str]:
+    """Verilen hash'lerden hangileri zaten kayıtlı.
+
+    `ingestor`'ın gövde indirmeden ÖNCE sorduğu soru. KAP bildiriminin
+    tekilleştirme anahtarı bildirim numarasından türetiliyor, yani listeleme
+    yanıtından hesaplanabiliyor; dolayısıyla hangi bildirimin gövdesini
+    çekmeye değeceği, hiçbir gövde indirilmeden bilinebiliyor.
+
+    Bu olmadan altı aylık tarama yeniden başlatılabilir olmazdı: her açılış
+    sıfırdan başlar ve arşiv hiç tamamlanmazdı.
+    """
+    if not hashes:
+        return []
+    rows = (
+        db.query(NewsItem.content_hash)
+        .filter(NewsItem.content_hash.in_(list(hashes)))
+        .all()
+    )
+    return [row[0] for row in rows]
+
+
 def latest_news(db: Session, limit: int = 20) -> list[NewsItem]:
     return (
         db.query(NewsItem)

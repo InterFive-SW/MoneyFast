@@ -221,6 +221,36 @@ class TestIngestWrites:
         )
         assert response.json()["news_written"] == 0
 
+    def test_known_hashes_answers_which_are_already_held(self, client, mocker, monkeypatch):
+        """Asked by the ingestor BEFORE it downloads a disclosure body. The
+        KAP key is derived from the disclosure number, so it is computable
+        from a listing alone — which is what makes a backfill resumable."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        mocker.patch.object(market_module_service, "known_hashes", return_value=["a" * 64])
+        response = client.post(
+            "/api/market/news/known-hashes",
+            headers={"Authorization": "Bearer secret"},
+            json={"hashes": ["a" * 64, "b" * 64]},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"known": ["a" * 64]}
+
+    def test_known_hashes_is_guarded(self, client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.post(
+            "/api/market/news/known-hashes", json={"hashes": []}
+        ).status_code == 401
+
+    def test_an_unbounded_hash_list_is_refused(self, client, monkeypatch):
+        """Without a cap this indexed lookup becomes a table scan on demand."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        response = client.post(
+            "/api/market/news/known-hashes",
+            headers={"Authorization": "Bearer secret"},
+            json={"hashes": ["a" * 64] * 5001},
+        )
+        assert response.status_code == 422
+
     def test_short_content_hash_is_rejected(self, client, monkeypatch):
         """The hash is the deduplication key shared with the rag service; a
         truncated one would silently stop matching."""

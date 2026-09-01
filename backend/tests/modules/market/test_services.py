@@ -179,6 +179,20 @@ class TestNewsStore:
         assert written == 0
 
 
+class TestKnownHashes:
+    def test_an_empty_list_makes_no_query(self):
+        db = MagicMock(spec=Session)
+        assert news_service.known_hashes(db, []) == []
+        assert db.query.called is False
+
+    def test_it_returns_only_the_hashes_already_stored(self):
+        """The question the ingestor asks before spending a request on each
+        disclosure body."""
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.all.return_value = [("a" * 64,)]
+        assert news_service.known_hashes(db, ["a" * 64, "b" * 64]) == ["a" * 64]
+
+
 class TestProductLookups:
     def test_get_product_filters_by_symbol(self):
         db = MagicMock(spec=Session)

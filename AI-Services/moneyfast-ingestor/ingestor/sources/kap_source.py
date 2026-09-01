@@ -29,7 +29,9 @@ Reading `stockCodes` alone silently loses more than a third of the coverage.
 from __future__ import annotations
 
 import hashlib
+import html
 import logging
+from html.parser import HTMLParser
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -234,6 +236,141 @@ def normalise(row: dict[str, Any], universe: set[str]) -> Optional[dict[str, Any
         "related_symbols": symbols,
         "published_at": published,
     }
+
+
+class _Text(HTMLParser):
+    """HTML to plain text, with the standard library and nothing else.
+
+    KAP bodies are machine-generated, template-driven label/value tables —
+    not arbitrary pages. There is no malformed-markup recovery problem here,
+    which is the entire reason a parser like BeautifulSoup exists, so pulling
+    one in (plus a C extension) to strip tags off a known template would be
+    weight for a problem this module does not have. If the markup ever turns
+    hostile, that is a reason to reconsider the source, not to escalate the
+    parser.
+
+    **Cells are separated by a tab, and that is load-bearing.** A disclosure's
+    body IS a table: "Net Dönem Kârı" in one cell and the number in the next.
+    Dropping the separator runs the label into the value and a balance sheet
+    becomes a column of unlabelled numbers inside one chunk.
+    """
+
+    #: Their content is markup, not prose, and would otherwise be read out
+    #: into the corpus as if it were text.
+    _SILENT = {"script", "style"}
+
+    #: Anything that ends a line when a human looks at the rendered page.
+    _BREAKS = {
+        "p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+        "table", "section", "article",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._muted = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SILENT:
+            self._muted += 1
+        elif tag == "br":
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in self._SILENT:
+            self._muted = max(0, self._muted - 1)
+        elif tag in ("td", "th"):
+            self._parts.append("\t")
+        elif tag in self._BREAKS:
+            self._parts.append("\n")
+
+    def handle_data(self, data):
+        if not self._muted:
+            self._parts.append(data)
+
+    def text(self) -> str:
+        raw = "".join(self._parts)
+        lines = []
+        for line in raw.split("\n"):
+            # Tabs survive inside a line; runs of spaces around them do not.
+            cleaned = "\t".join(cell.strip() for cell in line.split("\t")).strip("\t ")
+            if cleaned:
+                lines.append(" ".join(cleaned.split(" ")).strip())
+        return "\n".join(lines).strip()
+
+
+def html_to_text(fragments) -> str:
+    """Join a disclosure body and flatten it.
+
+    `disclosureBody` comes back as a LIST of HTML strings, not one string.
+    """
+    if isinstance(fragments, str):
+        fragments = [fragments]
+    if not isinstance(fragments, list):
+        return ""
+
+    parser = _Text()
+    for fragment in fragments:
+        if isinstance(fragment, str) and fragment.strip():
+            try:
+                parser.feed(fragment)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("could not parse a disclosure body fragment: %s", exc)
+    return html.unescape(parser.text())
+
+
+def fetch_detail(disclosure_index, client: httpx.Client) -> Optional[dict[str, Any]]:
+    """One disclosure's body and attachment list, or None.
+
+    None on any failure rather than raising: a single unreadable disclosure
+    must not cost the cycle, and the listing row is already stored — the
+    dashboard entry and its link survive a body we could not read.
+    """
+    url = f"{config.kap_base_url()}/tr/api/notification/attachment-detail/{disclosure_index}"
+    if not courtesy.may_fetch(url, client):
+        return None
+
+    courtesy.wait_for_host(url)
+    try:
+        response = client.get(
+            url,
+            headers={"User-Agent": config.user_agent()},
+            timeout=config.request_timeout(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not read disclosure %s: %s", disclosure_index, exc)
+        return None
+
+    # A single-element array, consistently. Measured, not documented.
+    if isinstance(payload, list):
+        payload = payload[0] if payload else None
+    if not isinstance(payload, dict):
+        log.warning("disclosure %s came back in an unexpected shape", disclosure_index)
+        return None
+    return payload
+
+
+def body_text(detail: dict[str, Any]) -> str:
+    return html_to_text(detail.get("disclosureBody"))
+
+
+def pdf_attachments(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    """Attachments worth downloading.
+
+    The listing carries `fileExtension`, so a non-PDF is skipped without
+    spending a request on it.
+    """
+    out = []
+    for attachment in detail.get("attachments") or []:
+        if not isinstance(attachment, dict) or not attachment.get("objId"):
+            continue
+        extension = (attachment.get("fileExtension") or "").strip().lower()
+        name = (attachment.get("fileName") or "").strip().lower()
+        if extension == "pdf" or name.endswith(".pdf"):
+            out.append(attachment)
+    return out
 
 
 def fetch_all(

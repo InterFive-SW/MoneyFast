@@ -84,6 +84,14 @@ class NewsIngestRequest(BaseModel):
     items: List[NewsItemIn] = Field(default_factory=list)
 
 
+class KnownHashesRequest(BaseModel):
+    hashes: List[str] = Field(default_factory=list, max_length=5_000)
+
+
+class KnownHashesOut(BaseModel):
+    known: List[str] = Field(default_factory=list)
+
+
 class FundamentalsIn(BaseModel):
     """One instrument's ratios.
 

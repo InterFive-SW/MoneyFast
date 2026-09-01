@@ -278,6 +278,92 @@ class TestCli:
         assert started == [True]
 
 
+class TestKnownHashes:
+    def test_the_backend_is_asked_which_are_already_held(self):
+        handler = recorder(body={"known": ["a" * 64]})
+        got = sinks.fetch_known_hashes(client_for(handler), ["a" * 64, "b" * 64])
+        assert got == {"a" * 64}
+        assert handler.calls[0].url.path.endswith("/market/news/known-hashes")
+
+    def test_an_empty_list_asks_nothing(self):
+        def handler(request):
+            pytest.fail("nothing to ask about; do not call the backend")
+
+        assert sinks.fetch_known_hashes(client_for(handler), []) == set()
+
+    def test_a_failed_lookup_assumes_nothing_is_held(self):
+        """The safe direction: the caller then does the complete thing rather
+        than skipping work it should have done."""
+        assert sinks.fetch_known_hashes(client_for(recorder(status=503)), ["a" * 64]) == set()
+
+    def test_a_malformed_answer_assumes_nothing_is_held(self):
+        assert sinks.fetch_known_hashes(client_for(recorder(body={})), ["a" * 64]) == set()
+
+
+class TestDisclosureCorpusPush:
+    def _doc(self, **over):
+        doc = {
+            "title": "THYAO — Bir şey",
+            "url": "https://www.kap.org.tr/tr/Bildirim/1",
+            "published_at": NOW,
+            "related_symbols": ["THYAO"],
+            "text": "İlgili şirketler: THYAO\nGövde metni",
+        }
+        doc.update(over)
+        return doc
+
+    def test_a_disclosure_is_filed_under_the_contract_s_own_enum(self):
+        """FILING is already in the frozen doc_types enum, so the model can
+        filter on it without the contract being reopened."""
+        handler = recorder(body={"status": "ingested"})
+        assert sinks.push_disclosures_to_rag(client_for(handler), [self._doc()]) == 1
+        body = json.loads(handler.calls[0].content)
+        assert body["document_type"] == "FILING"
+        assert body["category"] == "kap-disclosure"
+        assert body["source"] == "KAP"
+        assert body["ticker"] == "THYAO"
+        assert body["source_url"].endswith("/Bildirim/1")
+
+    def test_a_duplicate_is_not_counted_as_written(self):
+        handler = recorder(body={"status": "duplicate"})
+        assert sinks.push_disclosures_to_rag(client_for(handler), [self._doc()]) == 0
+
+    def test_the_primary_filer_takes_the_single_ticker_column(self):
+        handler = recorder(body={"status": "ingested"})
+        sinks.push_disclosures_to_rag(
+            client_for(handler), [self._doc(related_symbols=["ASELS", "TUPRS"])]
+        )
+        assert json.loads(handler.calls[0].content)["ticker"] == "ASELS"
+
+    def test_an_index_wide_notice_is_kept_out_of_the_corpus(self):
+        """A document tagged to forty companies is about none of them, and
+        would compete for every one of their retrieval slots."""
+        def handler(request):
+            pytest.fail("too many issuers; this must not be embedded")
+
+        assert sinks.push_disclosures_to_rag(
+            client_for(handler), [self._doc(related_symbols=[f"S{i}" for i in range(9)])]
+        ) == 0
+
+    def test_a_disclosure_with_no_body_is_not_embedded(self):
+        def handler(request):
+            pytest.fail("nothing to embed")
+
+        assert sinks.push_disclosures_to_rag(client_for(handler), [self._doc(text="  ")]) == 0
+
+    def test_a_rag_outage_is_degraded_not_broken(self):
+        """The disclosure still reached the dashboard; the chatbot will
+        simply say it found no sources, which is true."""
+        assert sinks.push_disclosures_to_rag(client_for(recorder(status=503)), [self._doc()]) == 0
+
+    def test_a_disclosure_naming_no_issuer_still_embeds(self):
+        handler = recorder(body={"status": "ingested"})
+        assert sinks.push_disclosures_to_rag(
+            client_for(handler), [self._doc(related_symbols=[])]
+        ) == 1
+        assert json.loads(handler.calls[0].content)["ticker"] is None
+
+
 class TestCycles:
     def test_news_cycle_reports_both_destinations(self, monkeypatch):
         monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [{"title": "x"}])
@@ -303,7 +389,9 @@ class TestCycles:
         monkeypatch.setattr(run.kap_source, "fetch_all", fake_fetch)
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
 
-        assert run.run_kap(None) == {"fetched": 1, "news_written": 1}
+        assert run.run_kap(None, bodies=False) == {
+            "fetched": 1, "embedded": 0, "news_written": 1
+        }
         assert seen["universe"] == {"THYAO"}, "only BIST instruments can appear on KAP"
 
     def test_the_kap_poll_looks_back_over_a_window_not_a_point(self, monkeypatch):
@@ -319,7 +407,7 @@ class TestCycles:
             return []
 
         monkeypatch.setattr(run.kap_source, "fetch_all", fake_fetch)
-        run.run_kap(None)
+        run.run_kap(None, bodies=False)
         assert span["days"] == 2
 
     def test_an_explicit_range_overrides_the_window(self, monkeypatch):
@@ -334,14 +422,96 @@ class TestCycles:
             return []
 
         monkeypatch.setattr(run.kap_source, "fetch_all", fake_fetch)
-        run.run_kap(None, since=date(2026, 3, 1), until=date(2026, 3, 10))
+        run.run_kap(None, since=date(2026, 3, 1), until=date(2026, 3, 10), bodies=False)
         assert span["range"] == (date(2026, 3, 1), date(2026, 3, 10))
 
     def test_a_kap_push_failure_still_reports_what_was_fetched(self, monkeypatch):
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
         monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: [{"title": "x"}])
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: None)
-        assert run.run_kap(None) == {"fetched": 1}
+        assert run.run_kap(None, bodies=False) == {"fetched": 1, "embedded": 0}
+
+    def test_only_disclosures_the_backend_lacks_get_their_body_read(self, monkeypatch):
+        """The expensive pass is per-disclosure; in steady state almost
+        everything in the window is already held."""
+        items = [
+            {"content_hash": "a" * 64, "url": ".../1", "title": "t",
+             "published_at": NOW, "related_symbols": ["THYAO"]},
+            {"content_hash": "b" * 64, "url": ".../2", "title": "t",
+             "published_at": NOW, "related_symbols": ["THYAO"]},
+        ]
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: items)
+        monkeypatch.setattr(run.sinks, "fetch_known_hashes", lambda c, h: {"a" * 64})
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
+        read = []
+        monkeypatch.setattr(
+            run.kap_source, "fetch_detail",
+            lambda index, client: read.append(index) or {"disclosureBody": ["<p>x</p>"]},
+        )
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+
+        assert run.run_kap(None)["embedded"] == 1
+        assert read == ["2"], "the already-held disclosure must not be re-read"
+
+    def test_the_body_pass_is_budgeted(self, monkeypatch):
+        """One request per body at two seconds a host. Unbounded, a first run
+        would spend hours before anything else got a turn."""
+        monkeypatch.setattr(run, "KAP_BODY_BUDGET", 2)
+        items = [
+            {"content_hash": str(i) * 64, "url": f".../{i}", "title": "t",
+             "published_at": NOW, "related_symbols": []}
+            for i in range(5)
+        ]
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: items)
+        monkeypatch.setattr(run.sinks, "fetch_known_hashes", lambda c, h: set())
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        monkeypatch.setattr(
+            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>x</p>"]}
+        )
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+        assert run.run_kap(None)["embedded"] == 2
+
+    def test_bodies_can_be_switched_off_for_a_listing_only_pass(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: [
+            {"content_hash": "a" * 64, "url": ".../1", "title": "t",
+             "published_at": NOW, "related_symbols": []}])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+
+        def refuse(*a, **k):
+            pytest.fail("bodies were switched off")
+
+        monkeypatch.setattr(run.sinks, "fetch_known_hashes", refuse)
+        assert run.run_kap(None, bodies=False)["embedded"] == 0
+
+    def test_every_issuer_is_named_in_the_text(self, monkeypatch):
+        """rag.documents.ticker is one column, so a two-company notice can
+        only be FILTERED by one of them. Naming both keeps it findable."""
+        monkeypatch.setattr(
+            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+        )
+        docs = run._with_bodies(
+            [{"url": ".../7", "title": "ASELS — birleşme", "published_at": NOW,
+              "related_symbols": ["ASELS", "TUPRS"]}],
+            None,
+        )
+        assert docs[0]["text"].startswith("İlgili şirketler: ASELS, TUPRS")
+        assert "gövde" in docs[0]["text"]
+
+    def test_a_disclosure_whose_body_is_unreadable_is_skipped(self, monkeypatch):
+        monkeypatch.setattr(run.kap_source, "fetch_detail", lambda index, client: None)
+        assert run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": NOW, "related_symbols": []}], None
+        ) == []
+
+    def test_an_empty_body_is_skipped(self, monkeypatch):
+        monkeypatch.setattr(run.kap_source, "fetch_detail", lambda index, client: {})
+        assert run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": NOW, "related_symbols": []}], None
+        ) == []
 
     def test_candle_cycle_reports_new_bars(self, monkeypatch):
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])

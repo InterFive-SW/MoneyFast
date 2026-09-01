@@ -13,6 +13,8 @@ from app.core.database import get_db
 from app.modules.investment import market_service
 from . import service, stream, technicals
 from .schemas import (
+    KnownHashesOut,
+    KnownHashesRequest,
     IngestResult,
     FundamentalsIngestRequest,
     CandleSeriesOut,
@@ -465,6 +467,23 @@ def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db)):
     written = service.upsert_news(db, [item.model_dump() for item in request.items])
     log.info("ingested %d new news items of %d offered", written, len(request.items))
     return {"quotes_written": 0, "candles_written": 0, "news_written": written}
+
+
+@router.post(
+    "/news/known-hashes",
+    response_model=KnownHashesOut,
+    summary="Bu haberlerden hangileri zaten kayıtlı (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def news_known_hashes(request: KnownHashesRequest, db: Session = Depends(get_db)):
+    """Gövde indirmeden önce sorulan soru.
+
+    KAP bildirimlerinin anahtarı bildirim numarasından türetildiği için
+    listeleme yanıtından hesaplanabiliyor: hangi bildirimin gövdesini
+    çekmeye değeceği, tek bir gövde indirilmeden bilinebiliyor. Geçmişe
+    dönük taramayı yeniden başlatılabilir kılan şey bu.
+    """
+    return {"known": service.known_hashes(db, request.hashes)}
 
 
 @router.post(

@@ -202,6 +202,82 @@ def push_news_to_rag(client: httpx.Client, items: list[dict]) -> int:
     return written
 
 
+#: Bir bildirimin kaç ihraççıya kadar korpusa yazılacağı. Bunun üstü,
+#: endeks geneli ya da idari bir duyurudur: kırk şirkete etiketlenmiş bir
+#: belge hiçbiri hakkında değildir ve hepsinin arama sonuçlarını kirletir.
+MAX_ISSUERS_FOR_CORPUS = 5
+
+
+def fetch_known_hashes(client: httpx.Client, hashes: list[str]) -> set[str]:
+    """Which of these does the backend already hold?
+
+    Asked BEFORE any body is downloaded. Failure returns an empty set, which
+    reads as "nothing is held" and makes the caller do the complete — and
+    therefore safe — thing rather than skipping work it should have done.
+    """
+    if not hashes:
+        return set()
+    try:
+        response = client.post(
+            f"{config.backend_url()}/market/news/known-hashes",
+            json={"hashes": hashes},
+            headers=_headers(),
+            timeout=config.request_timeout(),
+        )
+        response.raise_for_status()
+        return set(response.json().get("known") or [])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("known-hash lookup failed, assuming none are held: %s", exc)
+        return set()
+
+
+def push_disclosures_to_rag(client: httpx.Client, documents: list[dict]) -> int:
+    """Embed KAP disclosure bodies into the corpus.
+
+    `document_type` is **FILING**, a value the MCP contract's `doc_types` enum
+    already carries. Inventing a KAP-specific type would mean reopening a
+    frozen contract to add a value the model could never filter on, because
+    it would not be in the enum the tool documents. `category` and `source`
+    give two more filters for free, both already in `ALLOWED_FILTERS`.
+    """
+    written = 0
+    for document in documents:
+        symbols = document.get("related_symbols") or []
+        if len(symbols) > MAX_ISSUERS_FOR_CORPUS:
+            continue
+        text = (document.get("text") or "").strip()
+        if not text:
+            continue
+
+        body = {
+            "title": document["title"],
+            "source": "KAP",
+            "category": "kap-disclosure",
+            "document_type": "FILING",
+            "content": text,
+            "source_url": document.get("url"),
+            "language": "tr",
+            # The corpus carries ONE ticker column, so the primary filer wins
+            # the filterable slot. Every issuer is named in the first line of
+            # the text instead, which keeps a two-company merger notice
+            # findable for both by semantic search.
+            "ticker": symbols[0] if symbols else None,
+            "published_at": document["published_at"],
+        }
+        try:
+            response = client.post(
+                f"{config.rag_url()}/ingest",
+                json=_serialise(body),
+                timeout=config.request_timeout() * 3,
+            )
+            response.raise_for_status()
+            if response.json().get("status") == "ingested":
+                written += 1
+        except Exception as exc:  # noqa: BLE001
+            log.warning("rag ingest failed for %r: %s", document["title"][:60], exc)
+    return written
+
+
 def trigger_interest_accrual(client: httpx.Client) -> dict:
     """Vadeli hesap faizlerini işletmesi için backend'i uyarır.
 

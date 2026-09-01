@@ -458,8 +458,19 @@ def bist_universe(client: httpx.Client) -> set:
     }
 
 
-def run_kap(client: httpx.Client, since=None, until=None) -> dict:
+#: Bir turda kaç yeni bildirimin gövdesi çekilir. Gövde başına bir istek ve
+#: host başına iki saniye var; sınırsız bırakmak, ilk turun saatlerce
+#: sürmesi ve bu arada başka hiçbir bildirimin panoya düşmemesi demekti.
+KAP_BODY_BUDGET = 60
+
+
+def run_kap(client: httpx.Client, since=None, until=None, bodies: bool = True) -> dict:
     """Poll KAP for disclosures naming an instrument we carry.
+
+    Two passes, and the order matters. The listing is one request for a whole
+    window, so every matched disclosure reaches the dashboard immediately. Only
+    then do we ask the backend which of them are NEW and spend a request each
+    on their bodies — in steady state a handful, not four hundred.
 
     Pushed through the same news sink as RSS: a disclosure IS market news, it
     just arrives with an issuer attached and a permanent link.
@@ -472,12 +483,52 @@ def run_kap(client: httpx.Client, since=None, until=None) -> dict:
     since = since or (until - timedelta(days=config.kap_window_days() - 1))
 
     items = kap_source.fetch_all(bist_universe(client), since, until, client)
+
+    # Which bodies to read is decided BEFORE the listing is stored, because
+    # storing it is what would make them all look already-known.
+    fresh = []
+    if bodies and items:
+        known = sinks.fetch_known_hashes(client, [i["content_hash"] for i in items])
+        fresh = [i for i in items if i["content_hash"] not in known][:KAP_BODY_BUDGET]
+
     backend_result = sinks.push_news_to_backend(client, items) or {}
+    embedded = sinks.push_disclosures_to_rag(client, _with_bodies(fresh, client))
+
     log.info(
-        "kap cycle %s..%s: %d matched, %s stored",
-        since, until, len(items), backend_result.get("news_written", 0),
+        "kap cycle %s..%s: %d matched, %s stored, %d bodies embedded",
+        since, until, len(items), backend_result.get("news_written", 0), embedded,
     )
-    return {"fetched": len(items), **backend_result}
+    return {"fetched": len(items), "embedded": embedded, **backend_result}
+
+
+def _with_bodies(items: list, client: httpx.Client) -> list:
+    """Read each disclosure's body and prepend the issuers it names.
+
+    The issuer line exists because `rag.documents.ticker` is a single column:
+    a merger notice naming two companies can only be FILTERED by one of them,
+    so naming both in the text is what keeps it findable for the other.
+    """
+    documents = []
+    for item in items:
+        index = item["url"].rsplit("/", 1)[-1]
+        detail = kap_source.fetch_detail(index, client)
+        if detail is None:
+            continue
+        text = kap_source.body_text(detail)
+        if not text:
+            continue
+        symbols = item.get("related_symbols") or []
+        header = f"İlgili şirketler: {', '.join(symbols)}" if symbols else ""
+        documents.append({
+            "title": item["title"],
+            "url": item["url"],
+            "published_at": item["published_at"],
+            "related_symbols": symbols,
+            "text": f"{header}\n{item['title']}\n\n{text}".strip(),
+        })
+    return documents
+
+
 
 
 def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False) -> dict:

@@ -1126,3 +1126,45 @@ class TestSymbolsReachTheCorpus:
         result = run.run_news(None)
         assert pushed["symbols"] == {}
         assert result["tagged"] == 0
+
+
+class TestDisclosuresAreTypedAsFilings:
+    """KAP bildirimi bir HABER değil, ihraççının kendi beyanı.
+
+    Ayrım ajanın işine yarıyor ve korpus şeması onu zaten taşıyor: arama
+    `doc_types` ile süzebiliyor ve sözleşmenin donuk kümesinde `FILING`
+    hazır duruyordu -- yeni bir tür icat etmek, dondurulmuş bir alana
+    belgelenmemiş bir değer koymak olurdu.
+
+    Ölçülen durum: korpustaki 858 KAP belgesinin tamamı `NEWS` yazıyordu, yani
+    "şirket şunu bildirdi" ile "bir gazete şunu yazdı" ayırt edilemiyordu.
+    """
+
+    def _typed(self, item):
+        seen = {}
+
+        def handler(request):
+            seen["type"] = json.loads(request.content)["document_type"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(client_for(handler), [item])
+        return seen["type"]
+
+    BASE = {"content_hash": "a" * 64, "title": "Başlık",
+            "published_at": "2026-09-01T10:00:00Z", "related_symbols": []}
+
+    def test_a_kap_disclosure_is_a_filing(self):
+        assert self._typed({**self.BASE, "source": "KAP"}) == "FILING"
+
+    def test_a_press_article_stays_news(self):
+        assert self._typed({**self.BASE, "source": "Patronlar Dünyası"}) == "NEWS"
+
+    def test_a_source_that_is_missing_does_not_become_a_filing(self):
+        """Kaynağı bilinmeyen bir öğeyi birincil kaynak saymak, ona
+        hak etmediği bir güvenilirlik vermek olurdu."""
+        item = dict(self.BASE)
+        item["source"] = None
+        assert self._typed(item) == "NEWS"
+
+    def test_the_filing_sources_are_named_not_guessed(self):
+        assert "KAP" in sinks.FILING_SOURCES

@@ -50,6 +50,15 @@ log = logging.getLogger("moneyfast.ingestor.kap")
 
 #: Haber kaydının `source` alanı. Backend "hangileri bende var" sorusunu
 #: bununla süzüyor.
+#: `robots.txt` ÇEKİLEMİYOR: KAP o yola 666 döndürüyor (ölçüldü). Dolayısıyla
+#: uygulanacak bir direktif yok ve `rss_source._may_fetch`'in zaten uyguladığı
+#: kural geçerli -- "robots.txt yoksa bu, gelenek gereği izindir, hata
+#: değildir". Buraya yazılı, çünkü ileride biri "robots'u kontrol ettik mi"
+#: diye sorduğunda cevabın kodda durması gerekiyor.
+#:
+#: Bildirim sayfası, adını söyleyen ve ÇEREZSİZ bir GET'e 200 dönüyor; tarayıcı
+#: taklidi yapılmıyor, engel aşılmıyor. README'deki veri erişim politikasıyla
+#: hiçbir çatışma yok.
 SOURCE = "KAP"
 
 HOST = "https://www.kap.org.tr"

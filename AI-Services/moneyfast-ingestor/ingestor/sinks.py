@@ -215,7 +215,15 @@ def push_news_to_rag(
             "title": item["title"],
             "source": item["source"],
             "category": "market-news",
-            "document_type": "NEWS",
+            # KAP bildirimi bir HABER değil, ihraççının kendi beyanı --
+            # birincil kaynak. Sözleşmenin donuk `doc_types` kümesinde bunun
+            # karşılığı zaten var (`FILING`); yeni bir tür icat etmek,
+            # dondurulmuş bir alana belgelenmemiş bir değer koymak olurdu.
+            #
+            # Ayrım ajanın işine yarıyor: "şirket şunu bildirdi" ile "bir
+            # gazete şunu yazdı" farklı güvenilirlikte ve arama artık ikisini
+            # süzebiliyor.
+            "document_type": _document_type(item),
             "content": item.get("summary") or item["title"],
             "source_url": item.get("url"),
             "language": item.get("language", "tr"),
@@ -243,6 +251,15 @@ def push_news_to_rag(
             log.warning("rag ingest failed for %r: %s", item["title"][:60], exc)
     return written
 
+
+#: Kaynağı bildirim yayımlayan yerler. Şimdilik tek üye; liste, ikincisi
+#: geldiğinde `if source == "KAP"` yazmaktan daha okunabilir olsun diye.
+FILING_SOURCES = frozenset({"KAP"})
+
+
+def _document_type(item: dict) -> str:
+    """Korpusa yazılacak belge türü."""
+    return "FILING" if item.get("source") in FILING_SOURCES else "NEWS"
 
 def _first_ticker(item: dict, resolved: dict[str, list[str]]) -> Optional[str]:
     """Belgeye yazılacak tek sembol.

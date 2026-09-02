@@ -66,6 +66,15 @@ def _iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+#: Piyasa -> ISO 10383 işlem yeri kodu. Yalnızca gerçekten bir borsada işlem
+#: gören enstrümanlar için: döviz paritelerinin ve altının merkezî bir işlem
+#: yeri yok, dolayısıyla burada karşılıkları da yok.
+#:
+#: Eşleşmeyen piyasa NONE döner, "XIST" DEĞİL. Varsayılan "XIST"ti ve USDTRY
+#: ile XAUUSD ajana "Borsa İstanbul'da işlem görüyor" diye gidiyordu -- MCP
+#: sözleşmesinin kendisi bu alan için "provider has not classified the
+#: instrument" durumunda None bekliyor. Bilinmeyeni bir olguya çevirmek,
+#: kurun yokluğunda 1.0 varsaymakla aynı hata.
 _EXCHANGE_BY_MARKET = {"BIST": "XIST", "NASDAQ": "XNAS", "NYSE": "XNYS"}
 
 #: Product type to the contract's asset_class vocabulary.
@@ -227,7 +236,7 @@ def build_portfolio(
                 # every portfolio as 100% UNCLASSIFIED while this was absent.
                 "sector": holding.get("sector"),
                 "market": holding.get("market"),
-                "exchange": _EXCHANGE_BY_MARKET.get(holding.get("market") or "", "XIST"),
+                "exchange": _EXCHANGE_BY_MARKET.get(holding.get("market") or ""),
                 "quantity": quantity,
                 "avg_cost": avg_cost,
                 "instrument_currency": currency,

@@ -554,8 +554,25 @@ class TestAssetAllocationCurrency:
         )
         body = client.get("/api/investment/asset-allocation").json()
         assert all(b["assetClass"] != "ABD Hisse" for b in body)
-        commodity = next(b for b in body if b["assetClass"] == "Emtia / Döviz")
-        assert commodity["amount"] == pytest.approx(2 * 4000 * 40.0)
+        gold = next(b for b in body if b["assetClass"] == "Altın")
+        assert gold["amount"] == pytest.approx(2 * 4000 * 40.0)
+
+    def test_gold_and_currency_are_separate_slices(self, client, mocker):
+        """Doküman üçünü adıyla ayırıyor: "hisse, altın ve döviz". Tek bir
+        "Emtia / Döviz" dilimi, ikisini birden tutan birine hangisinin ne
+        kadar olduğunu söyleyemiyordu."""
+        self._client(
+            mocker,
+            [self._row("XAUUSD", "USD", "COMEX", 1, 4000.0),
+             self._row("USDTRY", "TRY", "FX", 100, 48.0)],
+            {"USDTRY": {"price": 40.0}},
+        )
+        body = client.get("/api/investment/asset-allocation").json()
+        gold = next(b for b in body if b["assetClass"] == "Altın")
+        fx = next(b for b in body if b["assetClass"] == "Döviz")
+        assert gold["amount"] == pytest.approx(4000 * 40.0)
+        assert fx["amount"] == pytest.approx(4800.0)
+        assert gold["color"] != fx["color"]
 
     def test_a_lira_holding_lands_in_the_domestic_bucket(self, client, mocker):
         self._client(

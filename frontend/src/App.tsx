@@ -41,6 +41,7 @@ import NewCardWizard        from './components/banking/NewCardWizard'
 import Investment           from './pages/Investment'
 import StocksScreen         from './pages/markets/StocksScreen'
 import StockDetail          from './pages/markets/StockDetail'
+import CurrencyGoldScreen  from './pages/markets/CurrencyGoldScreen'
 import FundsScreen          from './pages/markets/FundsScreen'
 import FundDetail           from './pages/markets/FundDetail'
 import IndicesScreen        from './pages/markets/IndicesScreen'
@@ -132,6 +133,7 @@ export default function App() {
                 <Route index                element={<Navigate to="hisseler" replace />} />
                 <Route path="hisseler"       element={<StocksScreen />}  />
                 <Route path="hisseler/:symbol" element={<StockDetail />} />
+                <Route path="doviz-altin"    element={<CurrencyGoldScreen />} />
                 <Route path="fonlar"         element={<FundsScreen />}   />
                 <Route path="fonlar/:code"   element={<FundDetail />}    />
                 <Route path="endeksler"      element={<IndicesScreen />} />

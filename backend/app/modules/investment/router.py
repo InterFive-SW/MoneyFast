@@ -281,19 +281,26 @@ def get_asset_allocation(
     #: Venue to bucket. Anything unlisted falls to "Diğer" rather than being
     #: dropped: a holding that disappears from an allocation chart is far
     #: harder to notice than one in a catch-all slice.
+    #: Altın ve döviz AYRI kovalar. Bir dönem ikisi "Emtia / Döviz" olarak
+    #: birlikteydi ve proje dokümanı tam da bu üçlüyü adıyla ayırıyor:
+    #: "Kullanıcının hisse, altın ve döviz varlıkları analiz edilir." İkisini
+    #: tek dilimde toplamak, dokümanın istediği kırılımı okunamaz kılıyordu --
+    #: hem altın hem dolar tutan biri tek bir sayı görüyor ve hangisinin ne
+    #: kadar olduğunu söyleyemiyordu.
     by_market = {
         "BIST": "BIST Hisse",
         "NASDAQ": "ABD Hisse",
         "NYSE": "ABD Hisse",
-        "COMEX": "Emtia / Döviz",
-        "FX": "Emtia / Döviz",
+        "COMEX": "Altın",
+        "FX": "Döviz",
     }
 
     buckets = {
         "Nakit (TRY)": float(account.cash_balance) if account else 0.0,
         "BIST Hisse": 0.0,
         "ABD Hisse": 0.0,
-        "Emtia / Döviz": 0.0,
+        "Altın": 0.0,
+        "Döviz": 0.0,
         "Diğer": 0.0,
     }
     for row in rows:
@@ -306,7 +313,9 @@ def get_asset_allocation(
         "Nakit (TRY)": "#64748b",
         "BIST Hisse": "#0ea5e9",
         "ABD Hisse": "#22c55e",
-        "Emtia / Döviz": "#f59e0b",
+        # Altın sarı, döviz camgöbeği: pastada birbirinden ayırt edilebilsin.
+        "Altın": "#f59e0b",
+        "Döviz": "#06b6d4",
         "Diğer": "#a855f7",
     }
     # An empty bucket is noise on a pie chart; cash is kept even at zero

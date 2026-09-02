@@ -18,11 +18,19 @@ import { apiClient, type MarketInstrument as ApiInstrument } from '../api/client
 import type { MarketInstrument } from '../data/mockData';
 import { useLiveRows } from './useLiveRows';
 
-/** Upstream exchange codes to the market labels the screens filter on. */
+/**
+ * Upstream exchange codes to the market labels the screens filter on.
+ *
+ * FX and COMEX are here because the project document names their instruments
+ * explicitly -- "hisse, altın ve döviz" -- and they were the two the map did
+ * not cover.
+ */
 const MARKET_LABELS: Record<string, MarketInstrument['market']> = {
   BIST: 'BIST',
   NASDAQ: 'ABD',
   NYSE: 'ABD',
+  FX: 'Döviz',
+  COMEX: 'Altın',
 };
 
 const CURRENCY_UNITS: Record<string, string> = { TRY: '₺', USD: '$', EUR: '€' };
@@ -31,7 +39,12 @@ export function adaptInstrument(row: ApiInstrument): MarketInstrument {
   return {
     symbol: row.symbol,
     name: row.name,
-    market: MARKET_LABELS[row.market ?? ''] ?? 'BIST',
+    // Eşleşmeyen piyasa 'Diğer', 'BIST' DEĞİL. Varsayılan 'BIST'ti ve USDTRY
+    // ile XAUUSD ekranda Borsa İstanbul enstrümanı gibi görünüyordu --
+    // backend'in `exchange` alanına "XIST" yazmasının aynısı. Satır yine
+    // düşürülmüyor: dağılım grafiğindeki "Diğer" kovasıyla aynı gerekçe,
+    // kaybolan bir satır yanlış etiketlenmiş bir satırdan zor fark edilir.
+    market: MARKET_LABELS[row.market ?? ''] ?? 'Diğer',
     price: row.price,
     unit: CURRENCY_UNITS[row.currency] ?? row.currency,
     changePercent: row.change_percent ?? 0,

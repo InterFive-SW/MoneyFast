@@ -2,6 +2,7 @@ import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 
 import { useState, useCallback, useRef, useEffect } from 'react'
+import DetayliRaporModal from '../components/portfolio/DetayliRaporModal'
 import GridLayout from 'react-grid-layout'
 import type { Layout } from 'react-grid-layout'
 
@@ -224,6 +225,7 @@ export default function Dashboard() {
     };
   })
   const [isEditMode, setIsEditMode] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
   const [, setIsPoolOpen] = useState(false)
   const [customLayouts, setCustomLayouts] = useState<CustomLayoutState[]>(loadCustomLayouts)
 
@@ -426,6 +428,18 @@ export default function Dashboard() {
             onChange={handleTemplateChange}
             disabled={isEditMode}
           />
+
+          {!isEditMode && (
+            /* Dokümanın "Dinamik Butonlar" kartında adıyla istenen iki
+               düğmeden biri: tek tıkla kapsamlı analiz raporu. */
+            <button
+              onClick={() => setReportOpen(true)}
+              className="flex items-center gap-2 rounded-xl border border-brandBlue/40 bg-brandBlue/10 px-3.5 py-2 text-sm font-medium text-brandBlue shadow-sm backdrop-blur-sm transition hover:bg-brandBlue/20"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M16 13H8" /><path d="M16 17H8" /></svg>
+              Detaylı Rapor Oluştur
+            </button>
+          )}
 
           {!isEditMode ? (
             <button
@@ -686,6 +700,8 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {reportOpen && <DetayliRaporModal onClose={() => setReportOpen(false)} />}
     </div>
   )
 }

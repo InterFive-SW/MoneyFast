@@ -1,6 +1,9 @@
 """Request-level guards for the analytics module."""
 
-from fastapi import HTTPException, Query
+import os
+from typing import Optional
+
+from fastapi import Header, HTTPException, Query
 
 from app.modules.risk import returns as risk_returns
 
@@ -30,3 +33,30 @@ def lookback_param(lookback: str = Query("1Y")) -> str:
             ),
         )
     return upper
+
+
+def require_service_token(
+    authorization: Optional[str] = Header(default=None),
+) -> None:
+    """Guard for `GET /report/{user_id}`, which names its subject in the path.
+
+    The report carries positions, cash balance, salary and rent in one
+    document -- the sum of surfaces that are each guarded separately. Without
+    this, one unauthenticated request would hand over more than any of them.
+
+    An unset BACKEND_API_KEY refuses rather than waves requests through.
+
+    This is the fourth verbatim copy (market/router.py, risk/deps.py,
+    investment/deps.py). The honest fix is one copy in `core/`, which is a
+    shared file and therefore a team decision; importing another module's
+    helper would build exactly the cross-module dependency the module rules
+    exist to prevent. Flagged, not taken.
+    """
+    expected = os.getenv("BACKEND_API_KEY")
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="Service endpoint is not configured (BACKEND_API_KEY unset).",
+        )
+    if authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="Invalid service credentials.")

@@ -17,9 +17,9 @@ from app.core.deps import get_optional_user_id
 from app.modules.investment import ai_service, market_service
 from app.modules.investment.models import TransactionProposal
 
-from . import service
-from .deps import lookback_param
-from .schemas import PortfolioAnalysis
+from . import report, service
+from .deps import lookback_param, require_service_token
+from .schemas import PortfolioAnalysis, PortfolioReport
 
 router = APIRouter(tags=["analytics"])
 
@@ -111,3 +111,40 @@ async def health_check():
     Sistemin ayakta olup olmadığını ve doğru modüle ulaşıldığını doğrulamak için kullanılır.
     """
     return {"status": "ok", "module": "analytics"}
+
+
+@router.get(
+    "/report",
+    response_model=PortfolioReport,
+    summary="Detaylı rapor (tek çağrı)",
+)
+def portfolio_report(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    "Detaylı Rapor Oluştur" düğmesinin tek çağrısı.
+
+    Proje dokümanı bu düğmeyi adıyla istiyor: tek tıkla kapsamlı analiz
+    raporu. Yeni bir ölçüm yapmıyor -- her bölüm zaten var olan bir servisten
+    okuyor ve cümleler `report.py`'de bir kez kuruluyor, ekran ile PDF ile
+    sohbet aynı metni okusun diye.
+    """
+    return report.build_report(db, user_id)
+
+
+@router.get(
+    "/report/{user_id}",
+    response_model=PortfolioReport,
+    dependencies=[Depends(require_service_token)],
+    summary="Detaylı rapor (MCP sözleşmesi)",
+)
+def portfolio_report_for_ai(user_id: str, db: Session = Depends(get_db)):
+    """
+    Yukarıdakiyle aynı rapor, kullanıcısı yoldan gelen hâli.
+
+    Konusunu YOLDA adlandırıyor, dolayısıyla servis token'ı istiyor: rapor
+    pozisyonları, bakiyeyi, maaşı ve kira giderini bir arada taşıyor ve bu,
+    ayrı ayrı korunan uçların hepsinin toplamı.
+    """
+    return report.build_report(db, user_id)

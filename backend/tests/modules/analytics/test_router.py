@@ -12,6 +12,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
+from app.modules.analytics import report
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -128,3 +130,72 @@ class TestLookback:
         response = analytics_client.get(URL, params={"lookback": "3Yil"})
         assert response.status_code == 422
         assert "3Yil" in response.json()["detail"]
+
+
+REPORT_URL = "/api/analytics/report"
+REPORT_TOKEN = "TEST-service-key"
+
+
+@pytest.fixture()
+def report_auth(monkeypatch):
+    monkeypatch.setenv("BACKEND_API_KEY", REPORT_TOKEN)
+    return {"Authorization": f"Bearer {REPORT_TOKEN}"}
+
+
+class TestReportEndpoints:
+    """İki uç, aynı rapor: biri oturumdan, biri yoldan.
+
+    Yoldan adlandıran sürüm servis token'ı istiyor ve bu, ayrı ayrı korunan
+    yüzeylerin TOPLAMI olduğu için: rapor pozisyonları, bakiyeyi, maaşı ve
+    kira giderini tek belgede taşıyor.
+    """
+
+    SECTIONS = {
+        "generated_at": "2026-09-03T08:00:00Z", "currency_code": "TRY",
+        "as_of": "2026-09-03T07:42:00Z", "is_delayed": True, "delay_minutes": 18,
+        "sections": [{"key": "overview", "title": "Genel bakış",
+                      "summary": "Toplam varlığınız 1,00 TRY.",
+                      "lines": ["a"], "rows": []}],
+    }
+
+    def test_the_session_endpoint_needs_no_service_token(self, analytics_client, mocker):
+        mocker.patch.object(report, "build_report", return_value=self.SECTIONS)
+        response = analytics_client.get(REPORT_URL)
+        assert response.status_code == 200
+        assert response.json()["sections"][0]["key"] == "overview"
+
+    def test_the_path_scoped_endpoint_is_guarded(self, analytics_client, report_auth):
+        assert analytics_client.get(f"{REPORT_URL}/user-9").status_code == 401
+
+    def test_a_wrong_token_is_refused(self, analytics_client, report_auth):
+        response = analytics_client.get(
+            f"{REPORT_URL}/user-9", headers={"Authorization": "Bearer nope"}
+        )
+        assert response.status_code == 401
+
+    def test_an_unconfigured_key_refuses_rather_than_opens(
+        self, analytics_client, monkeypatch
+    ):
+        monkeypatch.delenv("BACKEND_API_KEY", raising=False)
+        response = analytics_client.get(
+            f"{REPORT_URL}/user-9", headers={"Authorization": "Bearer x"}
+        )
+        assert response.status_code == 503
+
+    def test_the_guarded_endpoint_answers_for_the_named_user(
+        self, analytics_client, report_auth, mocker
+    ):
+        spy = mocker.patch.object(report, "build_report", return_value=self.SECTIONS)
+        response = analytics_client.get(f"{REPORT_URL}/user-9", headers=report_auth)
+        assert response.status_code == 200
+        assert spy.call_args.args[1] == "user-9"
+
+    def test_both_endpoints_answer_from_the_same_builder(
+        self, analytics_client, report_auth, mocker
+    ):
+        """Sohbet ile ekranın rapor konusunda ayrışması mümkün olmamalı."""
+        mocker.patch.object(report, "build_report", return_value=self.SECTIONS)
+        assert (
+            analytics_client.get(REPORT_URL).json()
+            == analytics_client.get(f"{REPORT_URL}/user-9", headers=report_auth).json()
+        )

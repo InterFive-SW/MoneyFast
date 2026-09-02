@@ -465,6 +465,18 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
     # ajanda duruyor çünkü köprü burada kuruluyor -- "bu alımı kaldırabilir
     # miyim" sorusu hem pozisyonları hem aylık artanı gerektiriyor ve iki
     # ayrı ajan bunu tek turda birleştiremez.
+    # Dördüncü araç: TEK TEK değil, hepsi birden. Diğer üçü bir soruyu
+    # cevaplıyor; bu, "portföyümün genel durumu" gibi hiçbirinin tek başına
+    # cevaplayamadığı soruyu.
+    if plan.get("tool") == "get_portfolio_report":
+        return await _run_tool(
+            state, "get_portfolio_report", {"user_id": args["user_id"]},
+            assumptions=plan.get("assumptions") or [],
+            # Bölümü olmayan bir rapor EKSİK değil, üretilememiş demektir --
+            # veri yoksa bölüm yine geliyor ve yokluğunu kendisi söylüyor.
+            empty_when=lambda p: not p.get("sections"),
+        )
+
     if plan.get("tool") == "get_cash_flow_summary":
         return await _run_tool(
             state, "get_cash_flow_summary",

@@ -477,7 +477,12 @@ def test_market_research_specialist_marks_snippets_untrusted():
 #: aylık ortalama eksik kalıyor -- iki maaş 90 güne bölününce kişinin
 #: kazandığının üçte bir altına düşüyor ve sayı verilmezse geliri sanılıyor.
 PROMPT_BUDGETS = {
-    "PORTFOLIO_AGENT": 3700,
+    #: v2.18 ile dördüncü araç: `get_portfolio_report`. Diğer üçü birer soruyu
+    #: cevaplıyor, bu ise hiçbirinin tek başına cevaplayamadığını -- "genel
+    #: durum". Bütçeyi aşan kısım kısaltılınca kaybolan kural: bölüm
+    #: cümlelerinin YENİDEN YAZILMAMASI. O cümleler backend'de bir kez
+    #: kuruluyor çünkü ekran, PDF ve sohbet aynı metni okumalı.
+    "PORTFOLIO_AGENT": 4400,
     "TRANSACTION_AGENT": 3200,
     "MARKET_DATA_AGENT": 4100,
     #: v2.17 ile iki karşılaştırma daha yanında geliyor: ürün grubu beyanı ve

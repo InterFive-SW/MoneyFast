@@ -46,6 +46,7 @@ from mcp.server.fastmcp import FastMCP
 import backend_client
 import compliance_tools
 import cash_flow_tools
+import report_tools
 import fundamentals_tools
 import market_data_tools
 import market_research_tools
@@ -94,10 +95,10 @@ SERVER_NAME = "moneyfast"
 #: saklıyor ve "son çeyrek kârı" sorusunu cevaplayabilen tek yol. Sağlayıcı
 #: çeyrek atlıyor -- 40 hissenin 3'ünde 2025Q3 yok -- dolayısıyla bitişiklik
 #: bayrak olarak taşınıyor ve karşılaştırma ona bağlı.
-CONTRACT_VERSION = "v2.16"
+CONTRACT_VERSION = "v2.18"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Nineteen tools across thirteen domains.
+MoneyFast tool server. Twenty tools across fourteen domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -164,6 +165,7 @@ DOMAIN_MODULES = (
     ("scenario", scenario_tools),
     ("fundamentals", fundamentals_tools),
     ("cash_flow", cash_flow_tools),
+    ("report", report_tools),
 )
 
 

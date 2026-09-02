@@ -4118,3 +4118,54 @@ class TestSynthesisPayloadFits:
         posture = out["specialist_output"]["data"]["technical_posture"]
         assert "signals" not in posture["positions"][0]
         assert posture["summary"]["statement"] == "3 pozisyonunuzun 2'si..."
+
+
+class TestReportBranch:
+    """Dördüncü araç: hepsi birden.
+
+    Diğer üçü birer soruyu cevaplıyor; bu, "portföyümün genel durumu" gibi
+    hiçbirinin tek başına cevaplayamadığını.
+    """
+
+    PAYLOAD = {
+        "generated_at": "2026-09-03T08:00:00Z", "currency_code": "TRY",
+        "sections": [
+            {"key": "overview", "title": "Genel bakış",
+             "summary": "Toplam varlığınız 24.404,97 TRY."},
+            {"key": "drift", "title": "Hedef dağılımdan sapma",
+             "summary": "En büyük fark BIST Hisse kovasında."},
+        ],
+    }
+
+    @pytest.mark.asyncio
+    async def test_a_report_request_reaches_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response('{"tool": "get_portfolio_report", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_report"] = self.PAYLOAD
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["tools_used"] == ["get_portfolio_report"]
+        assert fake_mcp.calls[0][1] == {"user_id": base_state["user_id"]}
+
+    @pytest.mark.asyncio
+    async def test_the_position_tools_arguments_are_not_forced_onto_it(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """`base_currency` ve `valuation_mode` pozisyon aracının alanları."""
+        patched_llm.set_response('{"tool": "get_portfolio_report", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_report"] = self.PAYLOAD
+        await orchestrator.portfolio_node(base_state)
+        assert set(fake_mcp.calls[0][1]) == {"user_id"}
+
+    @pytest.mark.asyncio
+    async def test_a_report_with_no_sections_is_empty(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Bölümü olmayan bir rapor eksik değil, üretilememiş demektir: veri
+        yoksa bölüm yine geliyor ve yokluğunu kendisi söylüyor."""
+        patched_llm.set_response('{"tool": "get_portfolio_report", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_report"] = {
+            **self.PAYLOAD, "sections": []
+        }
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"

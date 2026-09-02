@@ -615,6 +615,146 @@ class TestFundamentalsBranch:
         assert out["specialist_output"]["status"] == "EMPTY"
 
 
+class TestPromptBudgetArithmetic:
+    """Üç tavan aynı anda dolduğunda sağlayıcının sınırını aşmamalı.
+
+    Ölçüldü: geçmiş tavanı 8.000 karakterken (~2.000 token) gövde bütçesine
+    SIĞAN bir tur bile 8.871 token istedi ve 8.000'lik sınıra takıldı.
+    `SYNTHESIS_PAYLOAD_CHARS`'ın yazılı hesabı geçmiş için ~1.500 token
+    ayırıyor; iki sayı birbirini tutmuyordu.
+    """
+
+    #: Sabit maliyet, `SYNTHESIS_PAYLOAD_CHARS`'ın yorumunda ölçülmüş hâliyle.
+    FIXED_CHARS = 17_903
+    #: Sağlayıcının istek başına sınırı, karaktere çevrilmiş (~4 karakter/token).
+    REQUEST_LIMIT_CHARS = 8_000 * 4
+
+    def test_the_three_caps_fit_inside_one_request(self):
+        worst_case = (
+            self.FIXED_CHARS
+            + orchestrator.HISTORY_MAX_CHARS
+            + orchestrator.SYNTHESIS_PAYLOAD_CHARS
+        )
+        assert worst_case <= self.REQUEST_LIMIT_CHARS, (
+            f"en kötü durum {worst_case} karakter, sınır "
+            f"{self.REQUEST_LIMIT_CHARS}"
+        )
+
+
+class TestPayloadFormatting:
+    """Girinti bütçenin üçte birini yiyordu.
+
+    Ölçüldü: aynı risk turu sıkıştırılmış hâlde 6.388, `indent=2` ile 8.707
+    karakter. Sekiz pozisyonlu bir portföyde tur bu yüzden sığmıyordu --
+    `main`'de de, bu daldaki eklemelerden bağımsız olarak.
+    """
+
+    PAYLOAD = {"a": {"b": [1, 2, 3], "c": "x"}, "d": [{"e": 1}, {"e": 2}]}
+
+    def test_the_payload_carries_no_indentation(self):
+        assert "\n" not in orchestrator._fit_payload(self.PAYLOAD)
+        assert ", " not in orchestrator._fit_payload(self.PAYLOAD)
+
+    def test_it_is_still_valid_json(self):
+        import json
+
+        assert json.loads(orchestrator._fit_payload(self.PAYLOAD)) == self.PAYLOAD
+
+    def test_turkish_characters_are_not_escaped(self):
+        """Kaçırılmış bir karakter hem gövdeyi büyütür hem de yazarın
+        okuduğu metni bozar."""
+        assert "Türkçe" in orchestrator._fit_payload({"k": "Türkçe"})
+
+    def test_an_oversized_payload_is_still_truncated(self):
+        big = {"k": "x" * (orchestrator.SYNTHESIS_PAYLOAD_CHARS + 500)}
+        assert len(orchestrator._fit_payload(big)) == orchestrator.SYNTHESIS_PAYLOAD_CHARS
+
+
+class TestSlimSummary:
+    """`_slim_posture` ile aynı gerekçe: yazarın ihtiyacı hazır cümleler,
+    ekranın ihtiyacı tam satırlar.
+
+    Ölçülen gerileme: v2.17 ile özete iki karşılaştırma daha eklendi ve
+    toplam sağlayıcının tek istek sınırını aştı -- "hedef dağılımımdan ne
+    kadar saptım" her seferinde "tek seferde işleyebileceğimden büyük çıktı"
+    cevabı veriyordu.
+    """
+
+    SUMMARY = {
+        "score": 83.4, "level": "Düşük",
+        "group_exposure": {
+            "assessed": True, "total_value": 100.0,
+            "groups": [{
+                "group": "equity", "label": "Ortaklık Payı (Hisse Senedi), "
+                "Eurobond, Dövizli Tahviller", "value": 95.0,
+                "share_percent": 95.0, "status": "COVERED", "eligible": True,
+                "reason": "Beyan ettiğiniz bilgi ve tecrübe bu grup için yeterli.",
+                "statement": "Portföyünüzün %95 kadarı bu grupta.",
+            }],
+        },
+        "allocation_drift": {
+            "has_target": True, "total_value": 100.0,
+            "statement": "En büyük fark BIST Hisse kovasında.",
+            "buckets": [
+                {"bucket": "bist_equity", "label": "BIST Hisse", "amount": 95.0,
+                 "current_percent": 95.0, "target_percent": 60.0,
+                 "gap_points": 35.0, "gap_amount": 35.0},
+                {"bucket": "gold", "label": "Altın", "amount": 0.0,
+                 "current_percent": 0.0, "target_percent": None,
+                 "gap_points": None, "gap_amount": None},
+            ],
+        },
+    }
+
+    def test_the_ready_sentences_survive(self):
+        slim = orchestrator._slim_summary(self.SUMMARY)
+        assert slim["allocation_drift"]["statement"].startswith("En büyük fark")
+        assert slim["group_exposure"]["statements"][0]
+
+    def test_only_the_sentences_travel(self):
+        """Satırlar EKRANIN ihtiyacı. Onları da göndermek denendi ve yetmedi:
+        sekiz pozisyonlu bir portföyde gövde 9.744'e çıkıp kırpıldı, istek
+        yine 8.128 token ile 8.000'lik sınırı aştı."""
+        slim = orchestrator._slim_summary(self.SUMMARY)
+        assert "buckets" not in slim["allocation_drift"]
+        assert "groups" not in slim["group_exposure"]
+        assert slim["group_exposure"]["statements"] == [
+            "Portföyünüzün %95 kadarı bu grupta."
+        ]
+
+    def test_the_duplicated_blocks_are_dropped(self):
+        """`metrics` ve `data_quality` aynı turda ölçüm aracının kendi
+        çıktısında da var ve istatistiklerin yetkili kaynağı o."""
+        slim = orchestrator._slim_summary(
+            {**self.SUMMARY, "metrics": {"hhi": 1}, "data_quality": {"ok": True}}
+        )
+        assert "metrics" not in slim and "data_quality" not in slim
+
+    def test_whether_a_target_exists_still_travels(self):
+        """`has_target` false, sıfır sapma DEĞİL: ölçülecek bir şey yok.
+        Cümle bunu söylüyor ama bayrak da gidiyor, çünkü ajanın sözleşmesi
+        onu adıyla okuyor."""
+        slim = orchestrator._slim_summary(self.SUMMARY)
+        assert slim["allocation_drift"]["has_target"] is True
+
+    def test_it_actually_gets_smaller(self):
+        import json
+
+        before = len(json.dumps(self.SUMMARY, ensure_ascii=False))
+        after = len(json.dumps(orchestrator._slim_summary(self.SUMMARY),
+                               ensure_ascii=False))
+        assert after < before
+
+    def test_a_summary_without_the_new_blocks_passes_through(self):
+        """Sözleşme yalnızca ekleyerek değişti; iki bloğu taşımayan bir yanıt
+        hâlâ geçerli."""
+        assert orchestrator._slim_summary({"score": 1.0}) == {"score": 1.0}
+
+    def test_non_object_blocks_are_left_alone(self):
+        payload = {"group_exposure": None, "allocation_drift": None}
+        assert orchestrator._slim_summary(payload) == payload
+
+
 class TestCashFlowBranch:
     """Üçüncü araç: neye sahip olduğu değil, ne kazanıp ne harcadığı.
 
@@ -1593,7 +1733,9 @@ class TestSynthesisNode:
             {**base_state, "specialist_output": {"status": "EMPTY", "tool": "x"}}
         )
         user = patched_llm.calls[0][1].content
-        assert '"status": "EMPTY"' in user
+        # Girintisiz: gövde artık boşluksuz yazılıyor, bkz.
+        # TestPayloadFormatting -- bütçenin üçte biri girintiye gidiyordu.
+        assert '"status":"EMPTY"' in user
 
     @pytest.mark.asyncio
     async def test_oversized_payload_is_truncated(self, patched_llm, base_state):
@@ -3952,7 +4094,7 @@ class TestSynthesisPayloadFits:
         import json as _json
         payload = {"status": "OK", "data": {"x": 1}}
         assert orchestrator._fit_payload(payload) == _json.dumps(
-            payload, ensure_ascii=False, indent=2
+            payload, ensure_ascii=False, separators=(",", ":")
         )
 
     def test_an_oversized_payload_is_cut_and_the_cut_is_logged(self, caplog):

@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_user_id
 from app.modules.banking import service as banking_service
-from app.modules.investment import ai_service, market_service
+from app.modules.investment import ai_service, allocation, market_service
+from app.modules.investment import service as investment_service
 from . import profile, questionnaire_v2 as questionnaire, scenario, service, store
 from . import returns as risk_returns
 from .deps import lookback_param, require_service_token
@@ -112,6 +113,10 @@ def _current_positions(db: Session, user_id: str):
                 # by_asset_class report {"EQUITY": 1.0} for every portfolio,
                 # including one holding nothing but gold.
                 "asset_class": row.get("product_type") or "EQUITY",
+                # Kova eşlemesi İŞLEM YERİNDEN okunuyor (`allocation.py`),
+                # para biriminden değil: altın dolarla fiyatlanıyor ama
+                # yabancı hisse değil.
+                "market": row.get("market"),
                 "sector": row.get("sector") or "UNCLASSIFIED",
                 # The key the risk engine actually reads.
                 "instrument_currency": row.get("currency") or "TRY",
@@ -165,6 +170,9 @@ def _measure(db: Session, user_id: str, lookback: str) -> dict:
     # yazar: o gün sayfa hiç açılmasa bile ölçüm gerçekten yapılmıştır.
     store.record_snapshot(db, user_id, lookback, scored, metrics, len(positions))
     declared = store.latest_profile(db, user_id)
+    # Nakit, kova dağılımının bir parçası: hedefini "%15 nakit" diye koyan
+    # birine nakdi saymadan sapma göstermek, o hedefi hiç ölçmemek olurdu.
+    account = market_service.account(db, user_id=user_id)
 
     return {
         "positions": positions,
@@ -181,6 +189,17 @@ def _measure(db: Session, user_id: str, lookback: str) -> dict:
         # tutulan ağırlığı o grup için verilen bilgi/tecrübe beyanıyla.
         "group_exposure": profile.group_exposure(
             positions, getattr(declared, "product_groups", None)
+        ),
+        # Üçüncü karşılaştırma, aynı ailenin üçüncü üyesi: ölçülen KOVA
+        # ağırlıkları ile kullanıcının kendi girdiği hedef. Sayfada zaten
+        # vardı ve sohbete hiç ulaşmıyordu -- `suitability` ile aynı gerekçe:
+        # iki yüzey aynı şekli okumazsa ayrışır.
+        "allocation_drift": allocation.drift(
+            allocation.current_amounts(
+                [(row, float(row["market_value"])) for row in positions],
+                float(account.cash_balance) if account else 0.0,
+            ),
+            investment_service.allocation_targets(db, user_id),
         ),
         "warnings": warnings,
     }
@@ -294,6 +313,8 @@ def risk_summary_for_ai(
         level=measured["scored"]["level"],
         position_count=len(measured["positions"]),
         suitability=measured["suitability"],
+        group_exposure=measured["group_exposure"],
+        allocation_drift=measured["allocation_drift"],
         declared=_declared_payload(measured["declared"]),
         metrics=service.summarise_for_agent(measured["metrics"]),
         findings=profile.findings_from(

@@ -23,6 +23,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from .models import (
+    AllocationTarget,
     CashMovement,
     InvestmentAccount,
     InvestmentProduct,
@@ -562,3 +563,19 @@ def rollback_funds(db: Session, proposal, account: InvestmentAccount) -> None:
             position.updated_at = now
         log.info("ROLLED BACK SELL shares for %s", proposal.id)
 
+
+def allocation_targets(db: Session, user_id: Optional[str]) -> dict[str, float]:
+    """Kullanıcının kendi belirlediği hedef ağırlıklar, kova -> yüzde.
+
+    Burada, router'da değil: risk modülü de bunu okuyor ve modüller
+    birbirinin ORM sınıfını import etmiyor (bkz. CLAUDE.md shared/ kuralı).
+    Tabloyu sahibi olan modül okur, çağıran düz bir sözlük alır.
+    """
+    if not user_id:
+        return {}
+    rows = (
+        db.query(AllocationTarget)
+        .filter(AllocationTarget.user_id == user_id)
+        .all()
+    )
+    return {row.bucket: float(row.target_percent) for row in rows}

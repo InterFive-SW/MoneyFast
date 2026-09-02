@@ -227,6 +227,39 @@ class TestEndpoint:
         assert client.get(URL).status_code == 401
 
 
+SERVICE_TOKEN = "TEST-service-key"
+
+
+@pytest.fixture()
+def service_auth(monkeypatch):
+    """MCP yolu konusunu YOLDA adlandırıyor, dolayısıyla imza istiyor."""
+    monkeypatch.setenv("BACKEND_API_KEY", SERVICE_TOKEN)
+    return {"Authorization": f"Bearer {SERVICE_TOKEN}"}
+
+
+class TestAgentEndpointGuard:
+    """Korumasızken bir kullanıcı id'si bilen herkes o kişinin TUTTUĞU
+    SEMBOLLERİ okuyabiliyordu -- token göndermeden, 200 ile.
+
+    Oturum kapsamlı ikizi etkilenmiyor: o kullanıcıyı token'dan çözer ve
+    yalnızca çağıranın kendi verisini döndürebilir. Bu döndüremez.
+    """
+
+    def test_an_unsigned_request_is_refused(self, client, service_auth):
+        assert client.get(f"{URL}/user-42").status_code == 401
+
+    def test_a_wrong_token_is_refused(self, client, service_auth):
+        response = client.get(f"{URL}/user-42", headers={"Authorization": "Bearer nope"})
+        assert response.status_code == 401
+
+    def test_an_unconfigured_key_refuses_rather_than_opens(self, client, monkeypatch):
+        """503 rather than 401: nothing is wrong with the caller's
+        credentials, the deployment never configured any."""
+        monkeypatch.delenv("BACKEND_API_KEY", raising=False)
+        response = client.get(f"{URL}/user-42", headers={"Authorization": "Bearer x"})
+        assert response.status_code == 503
+
+
 class TestAgentEndpoint:
     """MCP yolu: kullanıcı doğrulanmış oturum zarfından gelip yola konuyor."""
 
@@ -236,7 +269,7 @@ class TestAgentEndpoint:
         mocker.patch.object(ai_service, "fx_rates", return_value={"TRY": 1.0})
         mocker.patch.object(market_service, "candle_series", return_value=[])
 
-    def test_the_user_comes_from_the_path(self, client, mocker):
+    def test_the_user_comes_from_the_path(self, client, mocker, service_auth):
         from unittest.mock import MagicMock
 
         from app.core.database import get_db
@@ -244,13 +277,15 @@ class TestAgentEndpoint:
         holdings = mocker.patch.object(market_service, "holdings", return_value=[])
         app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
         try:
-            response = client.get(f"{URL}/user-42")
+            response = client.get(f"{URL}/user-42", headers=service_auth)
         finally:
             app.dependency_overrides.pop(get_db, None)
         assert response.status_code == 200
         assert holdings.call_args.kwargs["user_id"] == "user-42"
 
-    def test_both_endpoints_answer_from_the_same_helper(self, as_user, mocker):
+    def test_both_endpoints_answer_from_the_same_helper(
+        self, as_user, mocker, service_auth
+    ):
         """Panelin ve sohbetin aynı portföy için farklı bir eğilim söylemesi
         mümkün olmamalı."""
         mocker.patch.object(
@@ -259,4 +294,12 @@ class TestAgentEndpoint:
                            "quantity": 1, "price": 1.0}],
         )
         mocker.patch.object(ai_service, "holding_value", return_value=1.0)
-        assert as_user.get(URL).json() == as_user.get(f"{URL}/user-1").json()
+        # İki uç iki farklı kimlikle açılıyor: oturum ucu token'dan
+        # kullanıcıyı çözüyor, MCP ucu servis imzası istiyor. Oturum
+        # token'ı ikincisini AÇMAZ -- "benim portföyüm" ile "bu
+        # kullanıcının portföyü" farklı sorular ve yalnızca ikincisinin
+        # kimin verisini adlandırdığı konusunda güvenilmesi gerekiyor.
+        assert (
+            as_user.get(URL).json()
+            == as_user.get(f"{URL}/user-1", headers=service_auth).json()
+        )

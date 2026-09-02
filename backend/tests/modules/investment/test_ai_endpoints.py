@@ -24,6 +24,8 @@ from app.main import app
 from app.modules.investment import ai_service, market_service
 
 PORTFOLIO_URL = "/api/investment/portfolio/TEST-USER-1/positions"
+SERVICE_TOKEN = "TEST-service-key"
+SERVICE_AUTH = {"Authorization": f"Bearer {SERVICE_TOKEN}"}
 STAGE_URL = "/api/investment/transactions/stage"
 
 NOW = datetime.now(timezone.utc)
@@ -80,7 +82,7 @@ def cash() -> float:
 
 
 @pytest.fixture
-def ai_client(mocker, holdings, quotes, resolved, cash):
+def ai_client(mocker, holdings, quotes, resolved, cash, monkeypatch):
     from fastapi.testclient import TestClient
 
     mocker.patch.object(market_service, "holdings", return_value=holdings)
@@ -90,8 +92,12 @@ def ai_client(mocker, holdings, quotes, resolved, cash):
         market_service, "account", return_value=SimpleNamespace(id="acct-1", cash_balance=cash, currency_code="TRY", account_number="TR-TEST-0001")
     )
     app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
+    # `/portfolio/{user_id}/positions` konusunu YOLDA adlandırıyor, dolayısıyla
+    # servis token'ı istiyor. Testlerin çoğu sözleşmenin gövdesiyle ilgili;
+    # imzayı burada bir kez atmak, her testin başına eklemekten okunaklı.
+    monkeypatch.setenv("BACKEND_API_KEY", SERVICE_TOKEN)
     try:
-        with TestClient(app) as client:
+        with TestClient(app, headers=SERVICE_AUTH) as client:
             yield client
     finally:
         app.dependency_overrides.pop(get_db, None)
@@ -132,6 +138,32 @@ def stage_body(**overrides):
     }
     body.update(overrides)
     return body
+
+
+class TestServiceGuard:
+    """Ölçüldü, koruma eklenmeden önce: imzasız bir GET başka bir kullanıcının
+    on bir pozisyonunu ve 1.083.211,99 TL'lik toplam piyasa değerini döndü.
+
+    `/investment/positions` etkilenmiyor -- o farklı bir tüketici için farklı
+    bir uç ve kullanıcısını token'dan çözüyor, dolayısıyla ancak çağıranın
+    kendi verisini döndürebiliyor. Bu döndüremez, bu yüzden kimin verisini
+    adlandırdığı konusunda güvenilmesi gerekiyor.
+    """
+
+    def test_an_unsigned_request_is_refused(self, ai_client):
+        assert ai_client.get(PORTFOLIO_URL, headers={"Authorization": ""}).status_code == 401
+
+    def test_a_wrong_token_is_refused(self, ai_client):
+        response = ai_client.get(
+            PORTFOLIO_URL, headers={"Authorization": "Bearer nope"}
+        )
+        assert response.status_code == 401
+
+    def test_an_unconfigured_key_refuses_rather_than_opens(self, ai_client, monkeypatch):
+        """503 rather than 401: nothing is wrong with the caller's
+        credentials, the deployment never configured any."""
+        monkeypatch.delenv("BACKEND_API_KEY", raising=False)
+        assert ai_client.get(PORTFOLIO_URL).status_code == 503
 
 
 class TestPortfolioContract:

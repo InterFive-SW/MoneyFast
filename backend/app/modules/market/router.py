@@ -155,6 +155,11 @@ def get_portfolio_news(
     "/news/portfolio/{user_id}",
     response_model=PortfolioNewsOut,
     summary="Portföye dokunan haberler (MCP sözleşmesi)",
+    # Konusunu YOLDA adlandıran her uç gibi korunuyor. Oturum kapsamlı ikizi
+    # (`/news/portfolio`) kullanıcıyı token'dan çözer ve yalnızca çağıranın
+    # kendi verisini döndürebilir; bu döndüremez. Korumasızken bir kullanıcı
+    # id'si bilen herkes o kişinin TUTTUĞU SEMBOLLERİ okuyabiliyordu.
+    dependencies=[Depends(require_service_token)],
 )
 def get_portfolio_news_for_ai(
     user_id: str,
@@ -461,6 +466,7 @@ def get_portfolio_technical(
     "/portfolio/technical/{user_id}",
     response_model=PortfolioTechnicalOut,
     summary="Portföy geneli teknik görünüm (MCP sözleşmesi)",
+    dependencies=[Depends(require_service_token)],
 )
 def get_portfolio_technical_for_ai(user_id: str, db: Session = Depends(get_db)):
     """

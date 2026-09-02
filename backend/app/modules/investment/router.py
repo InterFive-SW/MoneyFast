@@ -13,6 +13,7 @@ from app.core.email import send_transaction_email, send_transaction_request_emai
 from app.modules.notification.models import Notification
 from . import ai_service, market_service, service
 from app.modules.analytics import service as analytics_service
+from .deps import require_service_token
 from .models import TransactionProposal
 from .ai_schemas import (
     PortfolioPositionsOut, StageTransactionRequest, StageTransactionOut,
@@ -521,6 +522,7 @@ def get_heatmap(
     "/portfolio/{user_id}/positions",
     response_model=PortfolioPositionsOut,
     summary="Portföy pozisyonları (MCP v2.1 sözleşmesi)",
+    dependencies=[Depends(require_service_token)],
 )
 def get_portfolio_positions_for_ai(
     user_id: str,

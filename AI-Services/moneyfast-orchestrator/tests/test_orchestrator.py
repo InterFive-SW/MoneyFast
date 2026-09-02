@@ -621,6 +621,45 @@ class TestRiskNode:
         assert out["specialist_output"]["status"] == "OK"
 
     @pytest.mark.asyncio
+    async def test_an_unmeasurable_factor_turn_never_reaches_a_plan(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """ÖLÇÜLDÜ: reddi yalnızca senaryo dalına bağlamak yetmedi. Model
+        bunun yerine `get_portfolio_stress_test`'i seçti, araç düzgün çalıştı,
+        ve model döviz ile altın replaylerini FAİZ İÇİN VEKİL kullanıp "faiz
+        artışıyla ilişkili olası TL güçlenmesi..." diye bir okuma kurdu. Araç
+        sözleşmesi bunu yasaklıyordu ve yasak tutmadı."""
+        patched_llm.set_response(
+            '{"tool": "get_portfolio_stress_test", "arguments": {}}'
+        )
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_portfolio_stress_test"] = {
+            "worst_days": [{"date": "2026-03-01", "return_pct": -7.5}],
+            "replays": {"USDTRY": {"factor_move_pct": 0.89}},
+        }
+        out = await orchestrator.risk_node(
+            {**base_state, "user_message": "faizler artarsa portföyüm nasıl etkilenir"}
+        )
+        assert out["specialist_output"]["status"] == "UNSUPPORTED"
+        assert out["specialist_output"]["data"] is None
+        # Stres testi HİÇ çağrılmadı: çağrılsaydı verisi modele ulaşırdı.
+        assert "get_portfolio_stress_test" not in [n for n, _ in fake_mcp.calls]
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_risk_question_is_not_short_circuited(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """"Portföyüm ne kadar riskli" bir faktör sorusu değil; kesilseydi
+        çalışan bir yol kaybolurdu."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
+        out = await orchestrator.risk_node(
+            {**base_state, "user_message": "portföyüm ne kadar riskli"}
+        )
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
     async def test_an_unmeasurable_factor_is_refused_before_the_call(
         self, fake_mcp, patched_llm, base_state, positions_payload
     ):
@@ -1335,10 +1374,10 @@ class TestSynthesisNode:
         await orchestrator.synthesis_node({**base_state, "specialist_output": huge})
         user = patched_llm.calls[0][1].content
         embedded = user.split("Specialist output", 1)[1]
-        # 12.000 karakterlik JSON dilimi + şablonun kendi bağlayıcı kuralları.
-        # Sınırlanan şey JSON; şablon bir kural eklendiğinde büyüyor ve payı
-        # burada açıkça ayrılmış -- testin ölçtüğü, gövdenin kırpıldığı.
-        assert len(embedded) < 12000 + 2000
+        # JSON dilimi + şablonun kendi bağlayıcı kuralları. Sınırlanan şey
+        # JSON; şablon bir kural eklendiğinde büyüyor ve payı burada açıkça
+        # ayrılmış -- testin ölçtüğü, gövdenin kırpıldığı.
+        assert len(embedded) < orchestrator.SYNTHESIS_PAYLOAD_CHARS + 2000
 
     @pytest.mark.asyncio
     async def test_the_writer_is_given_the_conversation(self, patched_llm, base_state):
@@ -3588,3 +3627,120 @@ class TestUnmeasurableFactorRouting:
             "user_message": "faizler yüzünden portföyüm bitti, yaşamak istemiyorum",
         })
         assert out["target_agent"] == "HUMAN_HANDOFF"
+
+
+class TestProviderErrorsAreNamedCorrectly:
+    """Kalıcı bir hatayı geçici diye anlatmak, kullanıcıyı hiç sonuçlanmayacak
+    bir döngüde tutar.
+
+    Kullanıcı bunu bizden önce fark etti: "faizler artarsa portföyüm nasıl
+    etkilenir" her seferinde "yoğunluk sınırına takıldım, birkaç dakika sonra
+    deneyin" cevabı veriyordu, ama aynı oturumda sorulan başka sorular ANINDA
+    cevaplanıyordu. Sağlayıcı kaydı sebebi söylüyordu: 413, 8.393 token
+    istendi, sınır 8.000 -- yani beklemek hiçbir zaman işe yaramayacaktı.
+    """
+
+    def test_a_too_large_request_is_not_called_a_quota_problem(self):
+        exc = Exception(
+            "Error code: 413 - {'error': {'message': 'Request too large for model "
+            "`openai/gpt-oss-120b` ... on tokens per minute (TPM): Limit 8000, "
+            "Requested 8393, please reduce your message size and try again', "
+            "'code': 'rate_limit_exceeded'}}"
+        )
+        message = orchestrator._failure_message(exc)
+        assert message == orchestrator.TOO_LARGE_TR
+        assert message != orchestrator.RATE_LIMITED_TR
+
+    def test_the_size_message_does_not_tell_the_user_to_wait(self):
+        """Beklemek düzeltmiyor; "birkaç dakika sonra deneyin" demek yanlış."""
+        assert "Beklemek bunu değiştirmez" in orchestrator.TOO_LARGE_TR
+        assert "birkaç dakika" not in orchestrator.TOO_LARGE_TR
+
+    def test_a_real_quota_refusal_still_says_waiting_helps(self):
+        """Gerçek kota gerçekten geçici; o cümle kaybolmamalı."""
+        exc = Exception("Error code: 429 - rate limit reached, please try again")
+        assert orchestrator._failure_message(exc) == orchestrator.RATE_LIMITED_TR
+
+    def test_an_unrelated_failure_stays_generic(self):
+        assert orchestrator._failure_message(
+            Exception("connection reset by peer")
+        ) == orchestrator.GENERIC_FAILURE_TR
+
+    @pytest.mark.parametrize("text", [
+        "context length exceeded", "maximum context length is 8192",
+        "Request too large", "please reduce your message size",
+    ])
+    def test_every_size_wording_is_recognised(self, text):
+        assert orchestrator._failure_message(Exception(text)) == orchestrator.TOO_LARGE_TR
+
+
+class TestSynthesisPayloadFits:
+    """Gövde, sağlayıcının tek istek bütçesine sığmak zorunda.
+
+    `technical_posture` eklendiğinde risk turunun gövdesi 3.269 karakter
+    büyüdü ve toplam sınırı aştı. Bu bir GERİLEME düzeltmesi.
+    """
+
+    POSTURE = {
+        "base_currency": "TRY",
+        "summary": {"below_sma_50": 2, "statement": "3 pozisyonunuzun 2'si..."},
+        "positions": [
+            {"symbol": "AKBNK", "name": "Akbank", "currency": "TRY",
+             "trend": "UPTREND", "narrative": "AKBNK, 50 günlük...",
+             "signals": {f"f{i}": i for i in range(20)}},
+        ],
+        "unconvertible": ["AAPL"],
+    }
+
+    def test_the_writer_gets_the_sentences_not_the_indicator_block(self):
+        """Yirmi alanlık `signals` bloğu EKRANIN ihtiyacı. Yazara alan
+        adlarını göndermek, onları anmayı yasaklayan kuralın önüne yem
+        koymak."""
+        slim = orchestrator._slim_posture(self.POSTURE)
+        assert "signals" not in slim["positions"][0]
+        assert slim["positions"][0]["narrative"] == "AKBNK, 50 günlük..."
+        assert slim["summary"]["statement"] == "3 pozisyonunuzun 2'si..."
+
+    def test_the_trim_actually_shrinks_the_payload(self):
+        import json as _json
+        full = len(_json.dumps(self.POSTURE, ensure_ascii=False))
+        slim = len(_json.dumps(orchestrator._slim_posture(self.POSTURE), ensure_ascii=False))
+        assert slim < full
+
+    def test_holdings_left_out_of_the_weight_survive_the_trim(self):
+        """Kırpma, portföyün bir kısmını yok saymamalı."""
+        assert orchestrator._slim_posture(self.POSTURE)["unconvertible"] == ["AAPL"]
+
+    def test_an_empty_posture_does_not_crash_the_trim(self):
+        assert orchestrator._slim_posture({}) == {
+            "summary": {}, "positions": [], "unconvertible": [],
+        }
+
+    def test_a_payload_within_budget_is_untouched(self):
+        import json as _json
+        payload = {"status": "OK", "data": {"x": 1}}
+        assert orchestrator._fit_payload(payload) == _json.dumps(
+            payload, ensure_ascii=False, indent=2
+        )
+
+    def test_an_oversized_payload_is_cut_and_the_cut_is_logged(self, caplog):
+        """Sessiz kırpma, modele bozuk bir gövde verip sebebini gizlemek
+        olurdu."""
+        payload = {"rows": ["x" * 200 for _ in range(200)]}
+        with caplog.at_level("WARNING"):
+            out = orchestrator._fit_payload(payload)
+        assert len(out) == orchestrator.SYNTHESIS_PAYLOAD_CHARS
+        assert any("truncated" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_the_risk_turn_carries_the_slim_posture(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_portfolio_technicals"] = self.POSTURE
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
+        out = await orchestrator.risk_node(base_state)
+        posture = out["specialist_output"]["data"]["technical_posture"]
+        assert "signals" not in posture["positions"][0]
+        assert posture["summary"]["statement"] == "3 pozisyonunuzun 2'si..."

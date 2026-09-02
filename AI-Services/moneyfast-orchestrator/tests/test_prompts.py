@@ -667,10 +667,16 @@ def test_synthesis_separates_a_permanent_limit_from_an_outage():
     """Kural 4 EMPTY'yi "veri yok"a eşliyor ve bu doğru. Ama ölçülemeyen bir
     faktör boş bir sonuç değil, KALICI bir sınır -- ölçüldü, iki kez kesinti
     gibi anlatıldı ve bir kez kullanıcıdan verisini yapıştırması istendi."""
-    text = prompts.ORCHESTRATOR_SYSTEM_PROMPT + prompts.SYNTHESIS_TASK_TEMPLATE
+    # `flat`: kural metni satır sonlarıyla sarılıyor ve ham birleştirme,
+    # yalnızca sarma değiştiğinde kırılan bir test yapardı.
+    text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT + prompts.SYNTHESIS_TASK_TEMPLATE)
     assert "Status UNSUPPORTED is NOT" in text
     assert "Relay `user_message_tr`" in text
-    assert 'do NOT offer to try again' in text
+    assert "do NOT offer to try again" in text
+    # Ölçüldü: model faizi ölçemeyince döviz ve altın replaylerini vekil
+    # olarak kullandı. Bir kur, bir faizin yerine geçmez.
+    assert "do NOT reach for" in text
+    assert "not a proxy for a rate" in text
 
 
 def test_an_unmeasurable_macro_factor_still_routes_to_the_risk_agent():

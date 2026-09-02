@@ -92,14 +92,47 @@ RATE_LIMITED_TR = (
     "ederiz."
 )
 
+#: İstek, modelin tek seferde alabileceğinden BÜYÜK. Sağlayıcı bunu 413 ile
+#: ve `rate_limit_exceeded` koduyla döndürüyor, dolayısıyla aşağıdaki kota
+#: işaretlerine de takılıyor -- ama ikisi karşıt durumlar: kota beklemekle
+#: geçer, bu geçmez. Bir dakika sonra aynı istek yine aynı boyutta.
+#:
+#: ÖLÇÜLDÜ ve kullanıcı bildirdi: "faizler artarsa portföyüm nasıl etkilenir"
+#: her seferinde "yoğunluk sınırına takıldım, birkaç dakika sonra deneyin"
+#: cevabı veriyordu; aynı oturumda sorulan başka sorular anında cevaplanıyordu.
+#: Beklemek hiçbir zaman işe yaramayacaktı. Sağlayıcı kaydı: 8.393 token
+#: istendi, sınır 8.000.
+_TOO_LARGE_MARKERS = (
+    "request too large", "reduce your message size", "413",
+    "context length", "maximum context",
+)
+
 #: Substrings that mark a provider quota/rate-limit refusal. Matched on the
 #: exception text because the LLM client wraps the provider's 429 rather than
 #: raising a typed error.
 _RATE_LIMIT_MARKERS = ("rate limit", "rate_limit", "429", "quota", "too many requests")
 
+#: Boyut hatası kullanıcıya beklemesini SÖYLEMEZ. Beklemek düzeltmiyor ve
+#: "birkaç dakika sonra deneyin" demek, kullanıcıyı hiç sonuçlanmayacak bir
+#: döngüde tutmak olur -- kullanıcı bunu bizden önce fark etti.
+TOO_LARGE_TR = (
+    "Bu sorunun yanıtı için toplanan veri tek seferde işleyebileceğimden "
+    "büyük çıktı, bu yüzden yanıtı hazırlayamadım. Beklemek bunu değiştirmez; "
+    "soruyu daha dar sorarsanız (örneğin tek bir konuya odaklanarak) "
+    "yanıtlayabilirim."
+)
+
 
 def _failure_message(exc: Exception) -> str:
+    """Sağlayıcı hatasını kullanıcıya doğru cümleyle anlatır.
+
+    Boyut kontrolü kota kontrolünden ÖNCE: Groq'un 413'ü `rate_limit_exceeded`
+    kodunu taşıyor ve sıra ters olsaydı kalıcı bir hata geçici diye
+    anlatılırdı -- ki tam olarak bu oldu.
+    """
     text = str(exc).casefold()
+    if any(m in text for m in _TOO_LARGE_MARKERS):
+        return TOO_LARGE_TR
     return RATE_LIMITED_TR if any(m in text for m in _RATE_LIMIT_MARKERS) else GENERIC_FAILURE_TR
 
 
@@ -229,6 +262,17 @@ _OWNERSHIP_WORD = re.compile(
 )
 
 
+def _is_unmeasurable_factor_turn(message: str) -> bool:
+    """Ölçülemeyen bir makro faktör + kullanıcının KENDİ portföyü.
+
+    İkisi birden gerekiyor: "faiz nedir" bir tanım sorusu, "faizler artarsa
+    portföyüm ne olur" bir ölçüm talebi ve ölçüm yapılamaz.
+    """
+    return bool(
+        _UNMEASURABLE_FACTOR.search(message) and _OWNERSHIP_WORD.search(message)
+    )
+
+
 def _forced_agent(message: str) -> Optional[str]:
     """Ölçülemeyen bir makro faktör + kullanıcının kendi portföyü.
 
@@ -250,9 +294,7 @@ def _forced_agent(message: str) -> Optional[str]:
     Güvenlik kararlarını EZMEZ: çağıran bunu DISTRESS_SIGNAL kontrolünden
     ÖNCE uyguluyor, dolayısıyla güvenlik her zaman üstte kalıyor.
     """
-    if not (_UNMEASURABLE_FACTOR.search(message) and _OWNERSHIP_WORD.search(message)):
-        return None
-    return "RISK_STRATEGY_AGENT"
+    return "RISK_STRATEGY_AGENT" if _is_unmeasurable_factor_turn(message) else None
 
 
 async def router_node(state: MoneyFastState) -> dict[str, Any]:
@@ -641,6 +683,28 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
             "tools_used": (state.get("tools_used") or []) + ["get_portfolio_positions"],
         }
 
+    # Ölçülemeyen faktör turu, PLAN SORULMADAN kesiliyor.
+    #
+    # Reddi `_scenario_branch`'e bırakmak yetmiyordu: o yalnızca model
+    # `run_portfolio_scenario` seçtiğinde çalışıyor. ÖLÇÜLDÜ -- model bunun
+    # yerine `get_portfolio_stress_test`'i seçti, araç düzgün çalıştı ve model
+    # döviz ile altın replaylerini FAİZ İÇİN VEKİL olarak kullanıp "faiz
+    # artışıyla ilişkili olası TL güçlenmesi..." diye bir okuma kurdu. Araç
+    # sözleşmesi bunu açıkça yasaklıyor ve yasak tutmadı.
+    #
+    # Koşul, yönlendirmeyi zorlayan koşulun AYNISI: tek bir doğru, iki yerde
+    # uygulanıyor. Bir LLM çağrısı da tasarruf ediliyor.
+    if _is_unmeasurable_factor_turn(state["user_message"]):
+        return {
+            "specialist_output": {
+                "agent": "RISK_STRATEGY_AGENT",
+                "status": "UNSUPPORTED",
+                "user_message_tr": UNSUPPORTED_FACTOR_TR,
+                "data": None,
+            },
+            "tools_used": (state.get("tools_used") or []) + ["get_portfolio_positions"],
+        }
+
     plan = await _llm_json(
         SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"], _specialist_task(state), fast=True
     )
@@ -698,7 +762,7 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
         # synthesis `data`'yı okuyor. Volatilite ve düşüş, portföyün kendi
         # geçmişine göre nerede DURDUĞUNU söylemiyor -- "riskim ne" sorusunun
         # cevabı iki ölçümün ikisini birden istiyor.
-        data["technical_posture"] = posture
+        data["technical_posture"] = _slim_posture(posture)
         tools.append("get_portfolio_technicals")
     if summary and isinstance(data, dict):
         # Carried inside the metrics payload rather than beside it: the
@@ -822,6 +886,40 @@ _WHAT_IF_TOOLS = {
     "get_portfolio_stress_test": _stress_branch,
     "simulate_position_change": _simulate_branch,
 }
+
+
+def _slim_posture(posture: dict[str, Any]) -> dict[str, Any]:
+    """Teknik görünümün YAZARA giden hâli: cümleler, ham gösterge blokları değil.
+
+    Pozisyon başına yirmi alanlık `signals` bloğu EKRANIN ihtiyacı -- tablo
+    onu çiziyor. Yazarın ihtiyacı `summary.statement` ve satır başına
+    `narrative`; araç sözleşmesi zaten "cümleleri olduğu gibi aktar" diyor ve
+    göstergeleri alan adlarıyla anmayı YASAKLIYOR. Alan adlarını yazara
+    göndermek hem israf hem de o yasağın önüne yem koymak.
+
+    Ölçüldü ve bu bir GERİLEME düzeltmesi: `technical_posture` eklendiğinde
+    risk turunun sentez gövdesi 3.269 karakter büyüdü ve toplam, sağlayıcının
+    tek istek sınırını aştı (8.393 token istendi, sınır 8.000). Sonuç,
+    kullanıcının bildirdiği davranıştı: aynı soru her seferinde "yoğunluk
+    sınırına takıldım" cevabı veriyor, aynı oturumdaki başka sorular anında
+    cevaplanıyordu. Kırpma bu bloğu 3.269'dan ~1.440'a indiriyor.
+
+    Sayılar kaybolmuyor, YOLU değişiyor: ekran aynı uç noktadan tam hâlini
+    okumaya devam ediyor.
+    """
+    positions = posture.get("positions") or []
+    return {
+        "summary": posture.get("summary") or {},
+        "positions": [
+            {
+                "symbol": row.get("symbol"),
+                "trend": row.get("trend"),
+                "narrative": row.get("narrative"),
+            }
+            for row in positions
+        ],
+        "unconvertible": posture.get("unconvertible") or [],
+    }
 
 async def _verify_named_instrument(
     state: MoneyFastState, plan: dict[str, Any]
@@ -1165,6 +1263,39 @@ async def handoff_node(state: MoneyFastState) -> dict[str, Any]:
     }
 
 
+
+#: Sentez gövdesinin karakter tavanı, TAHMİN DEĞİL ÖLÇÜM.
+#:
+#: Sağlayıcının istek başına sınırı 8.000 token. Sabit maliyet ölçüldü:
+#: sistem prompt'u 15.874 + şablon 2.029 = 17.903 karakter (~4.475 token).
+#: Sohbet geçmişi ölçülen turlarda ~1.500 token tutuyor. Geriye kalan
+#: ~2.000 token ≈ 8.000 karakter.
+#:
+#: Önceki değer 12.000'di ve nereden geldiği yazılı değildi; `technical_posture`
+#: eklenince toplam sınırı aştı ve kullanıcı bunu üründe gördü.
+SYNTHESIS_PAYLOAD_CHARS = 8000
+
+
+def _fit_payload(payload: dict[str, Any]) -> str:
+    """Uzman çıktısını sentez bütçesine sığdırır ve kırptığında SÖYLER.
+
+    Kırpma son çare: JSON'u ortasından kesmek modele bozuk bir gövde vermek
+    demek ve bu gövdeden okunan bir sayı yanlış olabilir. Bu yüzden asıl iş
+    kırpmak değil, gövdeyi baştan küçük tutmak (`_slim_posture`); burası
+    yalnızca öngörülmemiş bir büyümenin turu bir sağlayıcı hatasına
+    çevirmesini engelliyor.
+
+    Sessizce kırpmıyor: bir uyarı satırı, gövdenin neden eksik göründüğünü
+    log'da aranabilir kılıyor.
+    """
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    if len(text) <= SYNTHESIS_PAYLOAD_CHARS:
+        return text
+    log.warning(
+        "synthesis payload truncated: %d -> %d chars", len(text), SYNTHESIS_PAYLOAD_CHARS
+    )
+    return text[:SYNTHESIS_PAYLOAD_CHARS]
+
 async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
     """Turn the internal envelope into the Turkish user-facing draft."""
     revision = int(state.get("revision_count") or 0)
@@ -1185,9 +1316,7 @@ async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
                 conversation_summary=_history_summary(state) or "(none)",
                 primary_intent=state.get("primary_intent") or "UNKNOWN",
                 target_agent=state.get("target_agent") or "EDUCATION_AGENT",
-                specialist_json=json.dumps(
-                    state.get("specialist_output") or {}, ensure_ascii=False, indent=2
-                )[:12000],
+                specialist_json=_fit_payload(state.get("specialist_output") or {}),
             )
         draft = await _llm_text(ORCHESTRATOR_SYSTEM_PROMPT, task)
     except Exception as exc:  # LLM outage

@@ -817,11 +817,15 @@ BINDING RULES, in order of precedence:
    error may you say the data is unavailable — and then you name the
    instrument from THIS turn's user message, not one from the background.
 4a. Status UNSUPPORTED is NOT "unavailable". It means this system cannot
-   measure the thing at all, ever. Relay `user_message_tr` as your answer.
-   Do NOT say "şu anda", do NOT offer to try again, and do NOT ask the user
-   to supply data instead — retrying will never help and the limit is not a
-   fault. Measured: this exact case was twice reported as an outage with a
-   retry offer, and once by asking the user to paste their own positions.
+   measure the thing at all, ever. Relay `user_message_tr` as your answer and
+   write NOTHING ELSE about the factor. Do NOT say "şu anda", do NOT offer to
+   try again, do NOT ask the user to supply data instead, and do NOT reach for
+   a different measurement as a stand-in — a currency or an index is not a
+   proxy for a rate, and presenting one as an answer to a rate question makes
+   up a reading the data does not contain. Measured: this exact case was twice
+   reported as an outage with a retry offer, once by asking the user to paste
+   their own positions, and once by answering with currency and gold episodes
+   under the heading "faiz artışıyla ilişkili".
 5. Do not mention agents, tools or JSON.
 """
 

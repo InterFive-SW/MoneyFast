@@ -468,7 +468,16 @@ def test_market_research_specialist_marks_snippets_untrusted():
 #: (relay the caveat, state the assumptions, never say what a factor will do)
 #: are the part that cannot be trimmed: without them the compliance gate cuts
 #: the answer and the user sees nothing.
+#: PORTFOLIO_AGENT üç araç taşıyor (v2.16): pozisyonlar, portföy haberleri ve
+#: nakit akışı. Üçüncüsü bütçeyi 2500'ün üstüne çıkardı ve gerekçesi ölçüldü:
+#: sıfır gelirin "bu pencerede maaş yatmadı" mı yoksa "geliri yok" mu demek
+#: olduğunu ayıran kural ile `monthly_net`'in tavsiye edilen yatırım tutarı
+#: OLMADIĞI kuralı, ikisi de kısaltılınca kaybolan uyumluluk kuralları. Üçüncü
+#: kural aynı aileden ve ayrıca ölçüldü: `income_events` ay sayısından azken
+#: aylık ortalama eksik kalıyor -- iki maaş 90 güne bölününce kişinin
+#: kazandığının üçte bir altına düşüyor ve sayı verilmezse geliri sanılıyor.
 PROMPT_BUDGETS = {
+    "PORTFOLIO_AGENT": 3700,
     "TRANSACTION_AGENT": 3200,
     "MARKET_DATA_AGENT": 4100,
     "RISK_STRATEGY_AGENT": 3200,

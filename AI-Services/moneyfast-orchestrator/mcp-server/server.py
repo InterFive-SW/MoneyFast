@@ -45,6 +45,7 @@ from mcp.server.fastmcp import FastMCP
 
 import backend_client
 import compliance_tools
+import cash_flow_tools
 import fundamentals_tools
 import market_data_tools
 import market_research_tools
@@ -93,10 +94,10 @@ SERVER_NAME = "moneyfast"
 #: saklıyor ve "son çeyrek kârı" sorusunu cevaplayabilen tek yol. Sağlayıcı
 #: çeyrek atlıyor -- 40 hissenin 3'ünde 2025Q3 yok -- dolayısıyla bitişiklik
 #: bayrak olarak taşınıyor ve karşılaştırma ona bağlı.
-CONTRACT_VERSION = "v2.15"
+CONTRACT_VERSION = "v2.16"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Eighteen tools across twelve domains.
+MoneyFast tool server. Nineteen tools across thirteen domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -134,6 +135,12 @@ What-if: run_portfolio_scenario answers "if X moved", simulate_position_change
          assumptions, and never say what a factor will do. There is NO
          interest-rate series: rate scenarios cannot be measured and must not
          be approximated with a currency.
+Budget:  get_cash_flow_summary is what someone EARNS and SPENDS, which is a
+         different question from what they OWN. Read `income_events` before
+         reporting a zero income -- monthly salary means a short window can
+         contain none, and "you have no income" is a false statement about
+         someone's salary. `monthly_net` is a measured leftover, never a
+         recommended investment amount.
 Gate:    validate_compliance_rules runs on every user-facing draft that
          references an instrument, a figure, a market view or a
          transaction. Fail closed.
@@ -156,6 +163,7 @@ DOMAIN_MODULES = (
     ("news", news_tools),
     ("scenario", scenario_tools),
     ("fundamentals", fundamentals_tools),
+    ("cash_flow", cash_flow_tools),
 )
 
 

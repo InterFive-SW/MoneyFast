@@ -245,3 +245,51 @@ class CardSettingsRequest(BaseModel):
     screen that sends one switch does not clear the others."""
 
     settings: dict = Field(default_factory=dict)
+
+
+class CashFlowCategoryOut(BaseModel):
+    """Bir harcama kategorisi, pencere toplamı ve aylık ortalamasıyla."""
+
+    category: str
+    amount: float
+    monthly_amount: float
+    #: Toplam GİDERİN yüzdesi, gelirin değil. Gider sıfırken None: sıfıra
+    #: bölmek yerine "pay hesaplanamıyor" demek.
+    share_percent: Optional[float] = None
+
+
+class CashFlowOut(BaseModel):
+    """Kullanıcının nakit akışı — MCP sözleşme yüzeyi.
+
+    İki alan bu şemanın var olma sebebi.
+
+    `has_data` -- ölçüldü, 23 kullanıcının yalnızca 3'ünde bankacılık
+    hareketi var. Verisi olmayan için sıfır döndürmek "hiç kazanmıyor ve hiç
+    harcamıyor" tespiti olurdu; kayıt yokluğu tespit değildir. Bu yüzden
+    tutarlar da sıfır değil None.
+
+    `income_events` -- sıfır gelir iki farklı şey olabilir: "bu pencerede
+    maaş yatmadı" ya da "bu kişinin geliri yok". Olay sayısı olmadan ikisi
+    ayırt edilemez. Ölçüldü: üç aylık maaş geçmişi olan bir kullanıcıda 30
+    günlük pencere sıfır maaş içeriyordu.
+    """
+
+    has_data: bool
+    #: Aylık ortalamanın neden eksik kalabildiğini söyleyen hazır cümle, ya da
+    #: None. BACKEND ÜRETİYOR: kural prompt'a yazıldığında model onu
+    #: uygulamadı, ve gelirin üçte bir eksik okunması prompt'a bırakılacak bir
+    #: şey değil.
+    coverage_note: Optional[str] = None
+    period_days: int
+    months_observed: float
+    currency_code: str = "TRY"
+    income_total: Optional[float] = None
+    income_events: int = 0
+    expense_total: Optional[float] = None
+    net_total: Optional[float] = None
+    monthly_income: Optional[float] = None
+    monthly_expense: Optional[float] = None
+    monthly_net: Optional[float] = None
+    categories: List[CashFlowCategoryOut] = Field(default_factory=list)
+    first_transaction_at: Optional[datetime] = None
+    last_transaction_at: Optional[datetime] = None

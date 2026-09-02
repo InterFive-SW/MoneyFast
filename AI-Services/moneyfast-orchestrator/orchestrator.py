@@ -452,6 +452,20 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
             empty_when=lambda p: not p.get("articles"),
         )
 
+    # Üçüncü araç: neye SAHİP olduğu değil, ne KAZANIP ne HARCADIĞI. Aynı
+    # ajanda duruyor çünkü köprü burada kuruluyor -- "bu alımı kaldırabilir
+    # miyim" sorusu hem pozisyonları hem aylık artanı gerektiriyor ve iki
+    # ayrı ajan bunu tek turda birleştiremez.
+    if plan.get("tool") == "get_cash_flow_summary":
+        return await _run_tool(
+            state, "get_cash_flow_summary",
+            {key: args[key] for key in ("user_id", "days") if key in args},
+            assumptions=plan.get("assumptions") or [],
+            # `has_data: false` EKSİK değil, tam bir cevap: sistemde bu kişiye
+            # ait bankacılık kaydı yok. Boş sayılırsa ajan "veriye
+            # ulaşamadım" der ve bu, kaydın olmadığını söylemekten farklı.
+        )
+
     # Reporting currency follows the session locale, not the model. It is a
     # presentation choice, and letting the model pick means a Turkish user can
     # be shown their portfolio in USD because the plan happened to say so.

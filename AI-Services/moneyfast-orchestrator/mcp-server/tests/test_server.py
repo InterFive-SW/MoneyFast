@@ -55,6 +55,9 @@ EXPECTED_TOOLS = {
     "get_company_fundamentals",
     # v2.15: tek SERİ taşıyan araç. Anlık görüntünün cevaplayamadığı soru.
     "get_quarterly_financials",
+    # v2.16: neye SAHİP olduğu değil, ne kazanıp ne harcadığı. Portföyle
+    # bütçe arasındaki köprü; hesaplama zaten vardı, ajan göremiyordu.
+    "get_cash_flow_summary",
 }
 
 #: Every tool that reaches the backend. classify_and_route_intent is
@@ -71,7 +74,7 @@ class TestWiring:
         # v2.10: `get_technical_signals` eklendi. Bilerek yapılan bir
         # sözleşme değişikliği, dolayısıyla iddia gevşetilmiyor, onunla
         # birlikte taşınıyor.
-        assert server.CONTRACT_VERSION == "v2.15"
+        assert server.CONTRACT_VERSION == "v2.16"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -87,7 +90,7 @@ class TestWiring:
         assert domains == {
             "orchestrator", "portfolio", "market_data", "market_research",
             "risk_strategy", "compliance", "transaction", "banking",
-            "technical", "news", "scenario", "fundamentals",
+            "technical", "news", "scenario", "fundamentals", "cash_flow",
         }
 
     def test_every_domain_module_exposes_register(self):

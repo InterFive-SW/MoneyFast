@@ -21,19 +21,9 @@ class Settings(BaseSettings):
     # --- SMTP -------------------------------------------------------------
     #
     # E-posta gönderimi `core/email.py` içinde ve değerleri `os.getenv` ile
-    # okuyor; bu alanlar yine de BURADA tanımlı olmak zorunda. Sebebi
-    # pydantic-settings'in varsayılanı: `.env` dosyasındaki TANIMSIZ bir
-    # anahtar `extra_forbidden` ile patlıyor ve uygulama hiç açılmıyor.
-    #
-    # Konteynerde görünmüyor -- orada `/app/.env` yok, değerler compose'un
-    # `env_file` ayarıyla gerçek ortam değişkeni olarak geliyor. Ama testler
-    # depoyu bağlıyor ve dosya orada. Sonuç: `.env.example`'ı BELGELENDİĞİ
-    # GİBİ doldurmak backend testlerinin tamamını düşürüyordu ve hatanın
-    # metni ("Extra inputs are not permitted") sebebi hiç göstermiyordu.
-    #
-    # `extra="ignore"` de çözerdi ama `SECRET_KEYY=` gibi bir yazım hatasını
-    # sessizce yutardı; alanları tanımlamak hem dosyayı hem modeli tek
-    # doğruda tutuyor.
+    # okuyor. Bu alanlar yine de burada TANIMLI, çünkü tanımlı bir alan
+    # tiplenmiş ve varsayılanı görünür oluyor: `SMTP_PORT` bir `int` ve
+    # `.env`'de "beşyüzseksenyedi" yazan biri açılışta öğreniyor.
     #
     # Varsayılanlar `.env.example` ile aynı. Kimlik bilgileri BOŞ: gerçek bir
     # parolayı depoya varsayılan olarak koymak, onu depoya koymaktır.
@@ -43,7 +33,21 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = "noreply@moneyfast.com"
 
-    model_config = {"env_file": ".env"}
-
+    # `extra: ignore` main'den geliyor ve KALIYOR. İkimiz de aynı duvara
+    # çarptık: pydantic-settings varsayılanı `.env` dosyasındaki tanımsız bir
+    # anahtarı `extra_forbidden` ile reddediyor, yani `.env.example`'ı
+    # belgelendiği gibi doldurmak uygulamayı hiç açtırmıyordu -- hatanın metni
+    # ("Extra inputs are not permitted") sebebi de göstermiyordu.
+    #
+    # Konteynerde görünmüyor: orada `/app/.env` yok, değerler compose'un
+    # `env_file` ayarıyla gerçek ortam değişkeni olarak geliyor. Testler ise
+    # depoyu bağlıyor ve dosya orada.
+    #
+    # Bedeli, `SECRET_KEYY=` gibi bir yazım hatasının sessizce yutulması. Buna
+    # karşılık `.env` kişi başına bir dosya ve başka bir yerde `os.getenv` ile
+    # okunan değişkenleri de taşıyabiliyor; `forbid` bırakmak, birinin kendi
+    # dosyasına eklediği ilgisiz bir satırın herkesin uygulamasını açılmaz
+    # yapması demekti.
+    model_config = {"env_file": ".env", "extra": "ignore"}
 
 settings = Settings()

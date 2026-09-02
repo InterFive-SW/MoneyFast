@@ -14,8 +14,13 @@ olurdu.
 
 Geri alınabilir: kolon düşer, hiçbir eski satır etkilenmez.
 
-Revision ID: 0029
-Revises: 0028
+0029 DEĞİL 0031: bu dal 0029'u kullanmıştı, ama main aynı gün 0029
+(bildirimler) ve 0030 (profil fotoğrafı) ekledi. İki ayrı 0029'un ikisi de
+0028'i işaret ediyordu ve alembic bunu çözemez. CLAUDE.md'nin uyardığı tek
+gerçek çakışma noktası bu; numara birleştirmede zincirin sonuna taşındı.
+
+Revision ID: 0031
+Revises: 0030
 Create Date: 2026-09-02 12:40:00.000000
 
 """
@@ -25,8 +30,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0029"
-down_revision: Union[str, None] = "0028"
+revision: str = "0031"
+down_revision: Union[str, None] = "0030"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

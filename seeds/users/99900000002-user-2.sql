@@ -9,7 +9,4 @@
 -- Synthetic data only (see CLAUDE.md). Do not hand-edit; re-export.
 
 -- public.users (1)
-INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences") VALUES ('158d98b2-5c39-462b-8166-1f7949780ec4', 'user.2@dummy.moneyfast.local', '$2b$12$59402.pDpbKpaq/PUTEIO.rEGi7XEQqNLUXUwjvPEQr7A9xljf4MK', TRUE, '2026-08-25T11:41:16.671568+00:00', '99900000002', 'Fatma', 'Öztürk', '+905550000002', TRUE, '{}', 50000, '{}') ON CONFLICT DO NOTHING;
-
--- banking.accounts (1)
-INSERT INTO banking.accounts ("id", "user_id", "account_number", "iban", "account_type", "currency_code", "balance", "status", "created_at", "updated_at", "interest_rate", "term_days", "last_accrued_at") VALUES ('c7426c53-0191-46ba-8711-f4a388dace9e', '158d98b2-5c39-462b-8166-1f7949780ec4', '2120466909631', 'TR000000000002120466909631', 'vadeli', 'TRY', 0.0000, 'active', '2026-09-01T10:48:32.406935+00:00', '2026-09-01T10:48:32.406935+00:00', 38.000, 1, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences", "profile_picture_url") VALUES ('158d98b2-5c39-462b-8166-1f7949780ec4', 'user.2@dummy.moneyfast.local', '$2b$12$59402.pDpbKpaq/PUTEIO.rEGi7XEQqNLUXUwjvPEQr7A9xljf4MK', TRUE, '2026-08-25T11:41:16.671568+00:00', '99900000002', 'Fatma', 'Öztürk', '+905550000002', FALSE, '{}', 50000, '{}', NULL) ON CONFLICT DO NOTHING;

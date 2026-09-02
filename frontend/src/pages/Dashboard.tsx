@@ -67,13 +67,7 @@ const generateDefaultLayout = (template: DashboardTemplate): Layout => {
   return template.widgets.map((w) => ({ i: w.id, x: w.x, y: w.y, w: w.w, h: w.h, type: w.type } as any))
 }
 
-function loadLayoutState(): DashboardLayoutState {
-  try {
-    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as DashboardLayoutState
-  } catch { }
-  return { activeTemplateId: DEFAULT_TEMPLATE_ID }
-}
+// loadLayoutState kaldırıldı çünkü Single Source of Truth olarak profil kullanılıyor.
 
 function loadCustomLayouts(): CustomLayoutState[] {
   try {
@@ -204,8 +198,12 @@ function TemplateSelector({
   )
 }
 
+import { useUser } from '../contexts/UserContext'
+import { api } from '../api/client'
+
 // ─── Ana Sayfa Bileşeni ───────────────────────────────────────────────────────
 export default function Dashboard() {
+  const { profile, refetch } = useUser()
   const dragTypeRef = useRef<WidgetType | null>(null);
   // Sürükleme sırasında mouse'un üzerine geldiği grid hücresi
   const dropPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: Infinity });
@@ -215,7 +213,16 @@ export default function Dashboard() {
   const lastPreviewUpdate = useRef<number>(0);
   // Yalnızca react-grid-layout'a setter üzerinden verilir; okunmaz.
   const [, setDroppingItem] = useState<{ i: string; w: number; h: number }>({ i: '__dropping-elem__', w: 4, h: 3 });
-  const [layoutState, setLayoutState] = useState<DashboardLayoutState>(loadLayoutState)
+  
+  const [layoutState, setLayoutState] = useState<DashboardLayoutState>(() => {
+    // KRİTİK DÜZELTME: localStorage'ı tamamen iptal ediyoruz.
+    // Tek kaynak (Single Source of Truth) profil verisidir.
+    const fromProfile = profile?.userPreferences?.default_template;
+    return { 
+      activeTemplateId: fromProfile || DEFAULT_TEMPLATE_ID, 
+      lastModified: new Date().toISOString() 
+    };
+  })
   const [isEditMode, setIsEditMode] = useState(false)
   const [, setIsPoolOpen] = useState(false)
   const [customLayouts, setCustomLayouts] = useState<CustomLayoutState[]>(loadCustomLayouts)
@@ -241,7 +248,16 @@ export default function Dashboard() {
   const [gridLayout, setGridLayout] = useState<GridLayoutItem[]>(getActiveLayoutItems)
   const [originalLayout, setOriginalLayout] = useState<GridLayoutItem[]>([])
 
-  function handleTemplateChange(templateId: string) {
+  // Eğer ayarlardan başlangıç görünümü değişirse (profile.userPreferences.default_template),
+  // Hızlı Finans bunu algılayıp şablonu güncellemeli.
+  useEffect(() => {
+    const fromProfile = profile?.userPreferences?.default_template;
+    if (fromProfile && fromProfile !== layoutState.activeTemplateId) {
+      handleTemplateChange(fromProfile, false)
+    }
+  }, [profile?.userPreferences?.default_template, layoutState.activeTemplateId])
+
+  function handleTemplateChange(templateId: string, syncToBackend = true) {
     const nextState: DashboardLayoutState = {
       ...layoutState,
       activeTemplateId: templateId,
@@ -249,6 +265,16 @@ export default function Dashboard() {
     }
     setLayoutState(nextState)
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(nextState))
+
+    if (syncToBackend) {
+      // Backend'deki user_preferences JSONB kolonunu da güncelle
+      api.updateProfile({ 
+        user_preferences: { 
+          ...(profile?.userPreferences || {}),
+          default_template: templateId 
+        } 
+      }).then(() => refetch()).catch(console.error)
+    }
 
     const custom = customLayouts.find(c => c.id === templateId)
     if (custom) {
@@ -503,6 +529,7 @@ export default function Dashboard() {
         }}
       >
         <AnyGridLayout
+          key={layoutState.activeTemplateId}
           className={`layout ${isEditMode ? 'border-2 border-dashed border-brandBlue/50 min-h-[400px] rounded-xl' : ''}`}
           layout={[
             ...gridLayout,

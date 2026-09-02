@@ -197,3 +197,222 @@ async def send_data_export_email(email: str, user_data: dict, portfolio_summary:
                 logger.info(f"Geçici PDF dosyası başarıyla silindi: {file_path}")
             except OSError as cleanup_error:
                 logger.error(f"Geçici PDF silinirken hata oluştu: {str(cleanup_error)}")
+
+
+async def send_transaction_request_email(
+    email_to: str, 
+    transaction_type: str, 
+    asset_symbol: str, 
+    quantity: float, 
+    price: float, 
+    total_amount: float, 
+    transaction_date: datetime
+) -> None:
+    """
+    Kullanıcıya finansal işlem (Alım/Satım) talebinin alındığını ve sıraya girdiğini bildirir.
+    
+    KURUMSAL İŞ MANTIĞI:
+    İşlemlerin piyasa koşulları gereği anında gerçekleşmemesi veya bir onay sürecinden
+    (bekleme süresi) geçmesi durumunda, kullanıcıya "paran bloke edildi ve talebin alındı"
+    bilgisini vermek finansal şeffaflık açısından kritik öneme sahiptir.
+    Bu e-posta, kullanıcının emir iletiminin başarılı olduğunu doğrular.
+    """
+    formatted_date = transaction_date.strftime("%d.%m.%Y %H:%M")
+    transaction_type_tr = "Alım" if transaction_type.upper() == "BUY" else ("Satım" if transaction_type.upper() == "SELL" else transaction_type)
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #0b0f19; font-family: 'Inter', Helvetica, Arial, sans-serif; color: #ffffff;">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b0f19; padding: 40px 0;">
+            <tr>
+                <td align="center">
+                    <table width="600" border="0" cellspacing="0" cellpadding="0" style="background-color: #1a1f2e; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                        <tr>
+                            <td align="center" style="padding: 30px 40px; border-bottom: 1px solid #2a3142;">
+                                <h2 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600;">İşlem Talebiniz Alındı</h2>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 40px;">
+                                <h3 style="margin-top: 0; color: #ffffff; font-size: 20px; font-weight: 500;">Talebiniz İşleme Konuldu</h3>
+                                <p style="color: #a0aec0; font-size: 16px; line-height: 1.6; margin-bottom: 30px;">
+                                    MoneyFast hesabınız üzerinden {asset_symbol} için verdiğiniz {transaction_type_tr} emri başarıyla sıraya alınmıştır. İşleminiz yaklaşık 3 dakika içerisinde piyasa koşullarına göre gerçekleştirilecektir. İlgili tutar bakiyenizde bloke edilmiştir.
+                                </p>
+                                
+                                <!-- İşlem Detayları Tablosu -->
+                                <table width="100%" border="0" cellspacing="0" cellpadding="15" style="background-color: #121620; border-radius: 8px; border: 1px solid #2a3142;">
+                                    <tr>
+                                        <td style="color: #a0aec0; border-bottom: 1px solid #2a3142; font-size: 15px;">İşlem Tipi</td>
+                                        <td align="right" style="color: #ffffff; border-bottom: 1px solid #2a3142; font-weight: 600; font-size: 15px;">{transaction_type_tr} Emri</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #a0aec0; border-bottom: 1px solid #2a3142; font-size: 15px;">Varlık (Sembol)</td>
+                                        <td align="right" style="color: #4b7be5; border-bottom: 1px solid #2a3142; font-weight: 600; font-size: 15px;">{asset_symbol}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #a0aec0; border-bottom: 1px solid #2a3142; font-size: 15px;">Miktar</td>
+                                        <td align="right" style="color: #ffffff; border-bottom: 1px solid #2a3142; font-weight: 600; font-size: 15px;">{quantity:,.2f}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #a0aec0; border-bottom: 1px solid #2a3142; font-size: 15px;">İşlem Fiyatı</td>
+                                        <td align="right" style="color: #ffffff; border-bottom: 1px solid #2a3142; font-weight: 600; font-size: 15px;">{price:,.2f} ₺</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #a0aec0; border-bottom: 1px solid #2a3142; font-size: 15px;">Bloke Edilen Tutar</td>
+                                        <td align="right" style="color: #ffffff; border-bottom: 1px solid #2a3142; font-weight: 600; font-size: 15px;">{total_amount:,.2f} ₺</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #a0aec0; font-size: 15px;">Emir Tarihi</td>
+                                        <td align="right" style="color: #ffffff; font-weight: 600; font-size: 15px;">{formatted_date}</td>
+                                    </tr>
+                                </table>
+                                
+                                <p style="color: #a0aec0; font-size: 14px; line-height: 1.6; margin-top: 30px; margin-bottom: 0;">
+                                    İşleminiz gerçekleştiğinde size tekrar bilgi vereceğiz.<br>
+                                    Güvenli yatırımlar dileriz.
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td align="center" style="padding: 20px; background-color: #121620; border-top: 1px solid #2a3142;">
+                                <p style="margin: 0; color: #718096; font-size: 13px;">
+                                    Bu e-posta otomatik olarak oluşturulmuştur. Lütfen yanıtlamayınız.
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+    message = MessageSchema(
+        subject=f"MoneyFast - {transaction_type_tr} Talebiniz Alındı ({asset_symbol})",
+        recipients=[email_to],
+        body=html_content,
+        subtype=MessageType.html
+    )
+    
+    try:
+        if 'fm' in globals():
+            await fm.send_message(message)
+            logger.info(f"Transaction request email sent to {email_to} for {asset_symbol}")
+    except Exception as e:
+        logger.error(f"E-posta gönderilirken (Transaction Request) hata oluştu: {str(e)}")
+
+async def send_transaction_email(
+    email_to: str, 
+    transaction_type: str, 
+    asset_symbol: str, 
+    quantity: float, 
+    price: float, 
+    total_amount: float, 
+    transaction_date: datetime
+) -> None:
+    """
+    Kullanıcıya finansal işlem (Alım/Satım) dekontunu asenkron olarak gönderir.
+
+    MİMARİ KARAR (ARCHITECTURE DECISION):
+    Finansal işlemlerin (trade) HTTP request/response döngüsünü bloklamaması kritik 
+    önem taşır. Bu nedenle, I/O darboğazı oluşturabilecek e-posta gönderim işlemi 
+    FastAPI 'BackgroundTasks' altyapısı kullanılarak tamamen asenkron (non-blocking)
+    yürütülmektedir. Hata fırlatılmaz; oluşan SMTP veya ağ hataları sadece 
+    loglanarak (logger.error) sessizce tolere edilir, böylece ana finansal akış bozulmaz.
+    """
+    formatted_date = transaction_date.strftime("%d.%m.%Y %H:%M")
+    
+    # Translate transaction_type for the email display
+    transaction_type_tr = "Alım" if transaction_type.upper() == "BUY" else ("Satım" if transaction_type.upper() == "SELL" else transaction_type)
+    
+    # Premium Dark Mode Table Template
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #0b0f19; font-family: 'Inter', Helvetica, Arial, sans-serif; color: #ffffff;">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b0f19; padding: 40px 0;">
+            <tr>
+                <td align="center">
+                    <table width="600" border="0" cellspacing="0" cellpadding="0" style="background-color: #1a1f2e; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                        <tr>
+                            <td align="center" style="padding: 30px 40px; border-bottom: 1px solid #2a3142;">
+                                <h2 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600;">MoneyFast İşlem Özeti</h2>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 40px;">
+                                <h3 style="margin-top: 0; color: #ffffff; font-size: 20px; font-weight: 500;">İşleminiz Başarıyla Gerçekleşti</h3>
+                                <p style="color: #a0aec0; font-size: 16px; line-height: 1.6; margin-bottom: 30px;">
+                                    MoneyFast hesabınız üzerinden gerçekleştirilen işlem detaylarına aşağıdan ulaşabilirsiniz.
+                                </p>
+                                
+                                <!-- İşlem Detayları Tablosu -->
+                                <table width="100%" border="0" cellspacing="0" cellpadding="15" style="background-color: #121620; border-radius: 8px; border: 1px solid #2a3142;">
+                                    <tr>
+                                        <td style="color: #a0aec0; border-bottom: 1px solid #2a3142; font-size: 15px;">İşlem Tipi</td>
+                                        <td align="right" style="color: #ffffff; border-bottom: 1px solid #2a3142; font-weight: 600; font-size: 15px;">{transaction_type_tr}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #a0aec0; border-bottom: 1px solid #2a3142; font-size: 15px;">Varlık (Sembol)</td>
+                                        <td align="right" style="color: #4b7be5; border-bottom: 1px solid #2a3142; font-weight: 600; font-size: 15px;">{asset_symbol}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #a0aec0; border-bottom: 1px solid #2a3142; font-size: 15px;">Miktar</td>
+                                        <td align="right" style="color: #ffffff; border-bottom: 1px solid #2a3142; font-weight: 600; font-size: 15px;">{quantity:,.2f}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #a0aec0; border-bottom: 1px solid #2a3142; font-size: 15px;">İşlem Fiyatı</td>
+                                        <td align="right" style="color: #ffffff; border-bottom: 1px solid #2a3142; font-weight: 600; font-size: 15px;">{price:,.2f} ₺</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="color: #ffffff; font-size: 16px; font-weight: 700;">Toplam Tutar</td>
+                                        <td align="right" style="color: #ffffff; font-size: 16px; font-weight: 700;">{total_amount:,.2f} ₺</td>
+                                    </tr>
+                                </table>
+                                
+                                <p style="color: #718096; font-size: 14px; line-height: 1.5; margin-top: 30px;">
+                                    İşlem Tarihi: {formatted_date}<br>
+                                    Bu e-posta sadece bilgilendirme amaçlıdır.
+                                </p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td align="center" style="padding: 20px; background-color: #121620; border-top: 1px solid #2a3142;">
+                                <p style="margin: 0; color: #718096; font-size: 12px;">
+                                    &copy; {datetime.now().year} MoneyFast. Tüm hakları saklıdır.
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+    message = MessageSchema(
+        subject=f"MoneyFast - {transaction_type_tr} İşlemi Özeti ({asset_symbol})",
+        recipients=[email_to],
+        body=html_content,
+        subtype=MessageType.html
+    )
+
+    try:
+        if 'fm' in globals():
+            await fm.send_message(message)
+            logger.info(f"Transaction email sent to {email_to} for {asset_symbol}")
+        else:
+            logger.warning("SMTP yapılandırması eksik, işlem e-postası gönderilemedi.")
+    except Exception as e:
+        logger.error(f"E-posta gönderilirken (Transaction) beklenmeyen bir hata oluştu: {str(e)}")

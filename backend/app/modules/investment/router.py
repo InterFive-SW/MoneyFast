@@ -1,11 +1,16 @@
 from datetime import datetime, timezone
+import asyncio
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 
-from app.core.database import get_db
+from app.core.database import get_db, SessionLocal
 from app.core.deps import get_current_user_id, get_optional_user_id
+from app.modules.auth.models import User
+from app.core.email import send_transaction_email, send_transaction_request_email
+from app.modules.notification.models import Notification
 from . import ai_service, market_service, service
 from app.modules.analytics import service as analytics_service
 from .models import TransactionProposal
@@ -753,6 +758,78 @@ def _persist_proposal(
     db.commit()
 
 
+async def process_pending_transaction(proposal_id: str, email_to: str):
+    """
+    3 dakika bekleyip, işlemi finalize eden background task.
+    """
+    await asyncio.sleep(180)  # 3 minutes delay
+    
+    with SessionLocal() as db:
+        proposal = db.get(TransactionProposal, proposal_id)
+        if not proposal or proposal.status != "PENDING":
+            return
+            
+        owner = market_service.account(db, user_id=proposal.user_id)
+        if owner is None:
+            return
+            
+        try:
+            service.finalize_settlement(db, proposal, owner)
+            proposal.status = "CONFIRMED"
+            proposal.confirmed_at = datetime.now(timezone.utc)
+            
+            # --- In-App Notification Entegrasyonu ---
+            # Kullanıcıya işlemin başarıyla gerçekleştiğine dair gerçek zamanlı bildirim ekliyoruz.
+            quantity = float(proposal.quantity or 0)
+            db.add(Notification(
+                user_id=proposal.user_id,
+                title="İşlem Gerçekleşti",
+                description=f"{quantity} lot {proposal.symbol} {proposal.transaction_type.lower()} işleminiz başarıyla tamamlandı.",
+                type="SUCCESS",
+                link_url="/portfolio"
+            ))
+            # ----------------------------------------
+            
+            db.commit()
+            
+            if email_to:
+                quantity = float(proposal.quantity or 0)
+                estimate = (proposal.payload or {}).get("estimate") or {}
+                total_amount = abs(float(estimate.get("net_amount", 0)))
+                price = (total_amount / quantity) if quantity > 0 else 0.0
+                await send_transaction_email(
+                    email_to=email_to,
+                    transaction_type=proposal.transaction_type,
+                    asset_symbol=proposal.symbol,
+                    quantity=quantity,
+                    price=price,
+                    total_amount=total_amount,
+                    transaction_date=proposal.confirmed_at
+                )
+        except Exception as e:
+            db.rollback()
+            logging.getLogger(__name__).error("Failed to finalize transaction %s: %s", proposal_id, e)
+            try:
+                service.rollback_funds(db, proposal, owner)
+                proposal.status = "FAILED"
+                
+                # --- In-App Notification Entegrasyonu ---
+                # Hata durumunda (fiyat değişimi vb.) para iadesi sonrası hata bildirimi oluşturuyoruz.
+                db.add(Notification(
+                    user_id=proposal.user_id,
+                    title="İşlem Başarısız",
+                    description=f"{proposal.symbol} {proposal.transaction_type.lower()} işleminiz teknik bir nedenden ötürü gerçekleştirilemedi. Bakiyeniz iade edildi.",
+                    type="ERROR",
+                    link_url="/portfolio"
+                ))
+                # ----------------------------------------
+                
+                db.commit()
+            except Exception as rb_e:
+                db.rollback()
+                logging.getLogger(__name__).error("Failed to rollback transaction %s: %s", proposal_id, rb_e)
+
+
 @router.post(
     "/transactions/{proposal_id}/confirm",
     response_model=Dict[str, str],
@@ -760,41 +837,28 @@ def _persist_proposal(
 )
 def confirm_transaction_proposal(
     proposal_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
     """
     Sohbetteki onay düğmesinin çağırdığı uç nokta.
-
-    Onay **yalnızca burada**, kullanıcının kendi eylemiyle verilir. Ajan
-    hiçbir koşulda onay veremez; sohbet içindeki "evet", "onaylıyorum" gibi
-    ifadeler onay sayılmaz. Bu ayrım MCP sözleşmesinin en sert kuralı ve bu
-    uç nokta onun karşılığı.
-
-    Önerinin gerçekten var olduğu, süresinin dolmadığı ve onu isteyen
-    kullanıcıya ait olduğu doğrulanır; aksi halde reddedilir.
     """
     proposal = db.get(TransactionProposal, proposal_id)
     if proposal is None:
         raise HTTPException(status_code=404, detail="Böyle bir işlem önerisi bulunamadı.")
 
-    # Ownership check before anything else: a 403 that leaked "this exists but
-    # is not yours" would already be more than the caller should learn, so an
-    # unowned proposal is indistinguishable from a missing one.
     if proposal.user_id and proposal.user_id != user_id:
         raise HTTPException(status_code=404, detail="Böyle bir işlem önerisi bulunamadı.")
 
     if proposal.cancelled_at is not None:
         raise HTTPException(status_code=409, detail="Bu öneri iptal edilmiş.")
 
-    if proposal.confirmed_at is not None:
-        # Idempotent: pressing confirm twice reports the same outcome rather
-        # than raising, because the user cannot tell whether the first press
-        # registered.
+    if proposal.confirmed_at is not None or proposal.status == "PENDING":
         return {
             "proposal_id": proposal.id,
-            "status": "confirmed",
-            "message": f"İşlem zaten onaylanmıştı (Öneri No: {proposal.id}).",
+            "status": proposal.status.lower(),
+            "message": f"İşlem zaten işleme alınmıştı (Öneri No: {proposal.id}).",
         }
 
     now = datetime.now(timezone.utc)
@@ -807,16 +871,9 @@ def confirm_transaction_proposal(
             detail="Bu önerinin süresi doldu. Lütfen işlemi yeniden hazırlatın.",
         )
 
-    # A transfer settles against the BANKING ledger, not the investment
-    # account. Routing it through securities settlement is what produced a
-    # "Satım" with a blank ticker.
     if (proposal.transaction_type or "").upper() in ai_service.TRANSFER_TYPES:
         return _confirm_transfer(db, proposal, user_id, now)
 
-    # Settle before flipping the status, in ONE transaction. Marking a trade
-    # confirmed and then failing to move the money would leave the order list
-    # saying "Gerçekleşti" over an unchanged portfolio — the inconsistency this
-    # whole path exists to remove.
     owner = market_service.account(db, user_id=proposal.user_id or user_id)
     if owner is None:
         raise HTTPException(
@@ -825,22 +882,64 @@ def confirm_transaction_proposal(
         )
 
     try:
-        applied = service.settle(db, proposal, owner)
+        applied = service.block_funds(db, proposal, owner)
     except service.SettlementError as exc:
         db.rollback()
-        # 409, not 400: the request was well-formed and was valid when staged;
-        # the account state changed underneath it.
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    proposal.confirmed_at = now
-    proposal.status = "CONFIRMED"
+    proposal.status = "PENDING"
+    
+    # --- In-App Notification Entegrasyonu ---
+    # Alım/Satım talebi alındığında kullanıcıya hemen beklemede olduğunu bildiren bir bildirim atıyoruz.
+    quantity = float(proposal.quantity or 0)
+    db.add(Notification(
+        user_id=proposal.user_id or user_id,
+        title="Talebiniz Alındı",
+        description=f"{quantity} lot {proposal.symbol} {proposal.transaction_type.lower()} talebiniz sıraya alındı.",
+        type="INFO",
+        link_url="/portfolio"
+    ))
+    # ----------------------------------------
+    
     db.commit()
+
+    trade_owner_id = proposal.user_id or user_id
+    user_obj = db.get(User, trade_owner_id)
+    
+    email_to = ""
+    if user_obj and user_obj.email:
+        prefs = getattr(user_obj, "notification_preferences", {}) or {}
+        should_send_email = prefs.get("transactions", {}).get("email", True)
+        if should_send_email:
+            email_to = user_obj.email
+            total_amount = abs(applied.get("cash_delta", 0.0))
+            quantity = float(proposal.quantity or 0)
+            price = (total_amount / quantity) if quantity > 0 else 0.0
+            
+            # Request received (PENDING) email
+            background_tasks.add_task(
+                send_transaction_request_email,
+                email_to=email_to,
+                transaction_type=proposal.transaction_type,
+                asset_symbol=proposal.symbol,
+                quantity=quantity,
+                price=price, 
+                total_amount=total_amount,
+                transaction_date=now
+            )
+
+    # Add background task for settlement after 3 minutes
+    background_tasks.add_task(
+        process_pending_transaction,
+        proposal_id=proposal.id,
+        email_to=email_to
+    )
 
     return {
         "proposal_id": proposal.id,
-        "status": "confirmed",
+        "status": "pending",
         "message": (
-            f"İşlem onaylandı (Öneri No: {proposal.id}). "
+            f"İşlem sıraya alındı (Öneri No: {proposal.id}). "
             f"Kalan bakiye: {applied['cash_after']:,.2f} TL."
         ),
     }

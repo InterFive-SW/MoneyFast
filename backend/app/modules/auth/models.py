@@ -79,6 +79,10 @@ class User(Base):
         nullable=False
     )
 
+    # Kullanıcının profil fotoğrafının statik sunucu (/uploads/avatars/...)
+    # üzerindeki yolunu tutar. Eğer None ise önyüzde baş harfler gösterilir.
+    profile_picture_url: Mapped[str] = mapped_column(String, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

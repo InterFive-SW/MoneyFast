@@ -113,10 +113,36 @@ export interface BillLookup {
     found: boolean
     id?: string | null
     institution?: string | null
-    bill_type?: string | null
-    subscriber_no?: string | null
+    customer_no?: string | null
+    name?: string | null
     amount?: number | null
-    due_day?: number | null
+    due_date?: string | null
+    subscriber_no?: string | null
+    due_day?: string | null
+}
+
+// --- Notifications -----------------------------------------------------------
+
+/**
+ * REST polling tabanlı bildirim mimarisi için temel bildirim arayüzü.
+ * Backend'deki NotificationResponse şemasını temsil eder.
+ */
+export interface Notification {
+    id: string;
+    title: string;
+    description: string;
+    type: string;
+    link_url?: string | null;
+    is_read: boolean;
+    created_at: string;
+}
+
+/**
+ * Sayfalandırılmış veya sınırlanmış bildirim listesini ve okunmamış bildirim sayısını tutar.
+ */
+export interface NotificationListResponse {
+    unread_count: number;
+    items: Notification[];
 }
 
 export interface StagePaymentRequest {
@@ -836,11 +862,16 @@ class ApiClient {
      * Onay yalnızca burada, kullanıcının kendi eylemiyle verilir. Ajan bu uç
      * noktaya erişemez ve sohbette "evet" demek onay sayılmaz.
      */
-    confirmProposal(proposalId: string) {
-        return this.post<Record<string, string>>(
+    async confirmProposal(proposalId: string) {
+        const response = await this.post<Record<string, string>>(
             `/investment/transactions/${encodeURIComponent(proposalId)}/confirm`,
-            {},
+            {}
         );
+        // Trigger a notification refresh immediately so the user sees the PENDING transaction notification
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event("refreshNotifications"));
+        }
+        return response;
     }
 
     // Market endpoints
@@ -1222,6 +1253,24 @@ class ApiClient {
         }
     }
 
+    async postForm<T>(url: string, data: FormData): Promise<T> {
+        const normalizedUrl = url.startsWith('/api') ? url.substring(4) : url;
+        const fullUrl = url.startsWith('http') ? url : `${this.baseUrl}${normalizedUrl}`;
+        try {
+            const response = await this.authedFetch(fullUrl, {
+                method: 'POST',
+                body: data, // no JSON.stringify, and no Content-Type header (browser sets it automatically with boundary)
+            });
+            if (!response.ok) {
+                throw new Error(await describeError(response));
+            }
+            return await response.json();
+        } catch (error) {
+            console.error(`[API Ağ Hatası] POST ${fullUrl} isteği başarısız oldu:`, error);
+            throw error;
+        }
+    }
+
     // Generic put method
     async put<T>(url: string, data?: any): Promise<T> {
         const normalizedUrl = url.startsWith('/api') ? url.substring(4) : url;
@@ -1301,6 +1350,33 @@ class ApiClient {
             throw new Error(await describeError(response));
         }
         return await response.json();
+    }
+
+    // ============================================================================
+    // Notifications
+    // ============================================================================
+    
+    /**
+     * Kullanıcının okunmamış veya tüm bildirimlerini sayfalandırılmış şekilde getirir.
+     * Bu fonksiyon, Header.tsx içerisinde tanımlanan setInterval ile periyodik (polling)
+     * olarak çağrılacak şekilde tasarlanmıştır.
+     */
+    async getNotifications(limit: number = 50): Promise<NotificationListResponse> {
+        return this.request<NotificationListResponse>(`/notification/me/notifications?limit=${limit}`);
+    }
+
+    /**
+     * Kullanıcının tıkladığı belirli bir bildirimi okundu olarak işaretler.
+     */
+    async markNotificationAsRead(id: string): Promise<Notification> {
+        return this.put<Notification>(`/notification/me/notifications/${id}/read`);
+    }
+
+    /**
+     * Okunmamış tüm bildirimleri tek seferde (batch) okundu olarak işaretler.
+     */
+    async markAllNotificationsAsRead(): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/notification/me/notifications/mark-all-read');
     }
 }
 

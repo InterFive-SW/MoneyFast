@@ -18,7 +18,6 @@ class Settings(BaseSettings):
     #: tek bileşen, dolayısıyla yükleme de arama gibi HTTP üzerinden gidiyor.
     RAG_URL: str = "http://rag:8100"
 
-    model_config = {"env_file": ".env"}
-
+    model_config = {"env_file": ".env", "extra": "ignore"}
 
 settings = Settings()

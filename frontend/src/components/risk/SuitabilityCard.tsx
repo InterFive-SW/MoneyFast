@@ -66,16 +66,22 @@ export default function SuitabilityCard({
         return (
             <div className={shell}>
                 <h3 className="text-base font-semibold text-white">
-                    Ölçümünüzü kendi toleransınızla karşılaştırın
+                    Uygunluk testini doldurun
                 </h3>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">
                     Portföyünüzün riskini ölçebiliyoruz, ama bu riskin sizin için ne ifade
-                    ettiğini yalnızca siz söyleyebilirsiniz. Altı soruluk anket, ölçülen
-                    seviyenin yanına kendi beyanınızı koyuyor.
+                    ettiğini yalnızca siz söyleyebilirsiniz. Test, ölçülen seviyenin yanına
+                    kendi beyanınızı koyuyor ve hangi ürün gruplarının size sunulabileceğini
+                    belirliyor.
                 </p>
+                {/* Bu metin eskiden "bu bir uygunluk değerlendirmesi DEĞİLDİR"
+                    diyordu ve v1 için doğruydu: o anket yalnızca tolerans
+                    ölçüyordu. v2 bir uygunluk testi ve ürün grubu kararı
+                    üretiyor -- eski cümle olduğu yerde bırakılsaydı ekran,
+                    yaptığı şeyin tersini söylüyor olurdu. */}
                 <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                    Bu bir uygunluk değerlendirmesi değildir; hiçbir ürünün size uygun olup
-                    olmadığına karar verilmez.
+                    Sonuç yalnızca sizin beyanınıza dayanır ve yatırım tavsiyesi değildir.
+                    Cevaplarınızı istediğiniz zaman güncelleyebilirsiniz.
                 </p>
                 <div className="mt-4">
                     <button
@@ -83,7 +89,7 @@ export default function SuitabilityCard({
                         onClick={onStart}
                         className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-600"
                     >
-                        Ankete başla
+                        Teste başla
                     </button>
                 </div>
             </div>
@@ -102,7 +108,7 @@ export default function SuitabilityCard({
                     onClick={onStart}
                     className="shrink-0 text-xs font-medium text-brandBlue transition-colors hover:text-blue-400"
                 >
-                    Anketi güncelle
+                    Testi güncelle
                 </button>
             </div>
 

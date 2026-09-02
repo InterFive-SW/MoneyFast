@@ -316,14 +316,14 @@ describe('alignmentBadge', () => {
         /* UNKNOWN bir uyuşmazlık DEĞİL: taraflardan biri henüz yok.
            Kırmızı bir "bilinmiyor" doldurulmamış formu sorun gibi okutur. */
         const badge = alignmentBadge('UNKNOWN')
-        expect(badge.label).toBe('Anket bekliyor')
+        expect(badge.label).toBe('Test bekliyor')
         expect(badge.tone).not.toContain('rose')
     })
 
     it('tanınmayan ve eksik değerler beklemeye düşer', () => {
-        expect(alignmentBadge(undefined).label).toBe('Anket bekliyor')
-        expect(alignmentBadge(null).label).toBe('Anket bekliyor')
-        expect(alignmentBadge('MOSTLY_FINE').label).toBe('Anket bekliyor')
+        expect(alignmentBadge(undefined).label).toBe('Test bekliyor')
+        expect(alignmentBadge(null).label).toBe('Test bekliyor')
+        expect(alignmentBadge('MOSTLY_FINE').label).toBe('Test bekliyor')
     })
 })
 

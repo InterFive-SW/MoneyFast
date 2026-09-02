@@ -2235,11 +2235,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Risk tolerans anketi
-         * @description Anketin kendisi. Kimlik doğrulaması istemez — sorularda kişisel veri yok
-         *     ve formu görmek için giriş yapmak zorunda kalmak, testi doldurma
-         *     ihtimalini düşürmekten başka bir işe yaramaz. Cevap GÖNDERMEK ise
-         *     oturuma bağlıdır.
+         * Uygunluk testi
+         * @description Testin kendisi, bölümlenmiş hâliyle.
+         *
+         *     Kimlik doğrulaması istemez — sorularda kişisel veri yok ve formu görmek
+         *     için giriş yapmak zorunda kalmak, testi doldurma ihtimalini düşürmekten
+         *     başka bir işe yaramaz. Cevap GÖNDERMEK ise oturuma bağlıdır.
+         *
+         *     Yürürlükteki sürüm dönüyor. Eski bir cevabı olan kullanıcı da bunu görür:
+         *     v1 cevabı kaydında ve puanıyla duruyor, ama yeniden dolduracaksa
+         *     dolduracağı test bu.
          */
         get: operations["get_questionnaire_api_risk_questionnaire_get"];
         put?: never;
@@ -2260,7 +2265,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Anketi gönder ve risk profilini güncelle
+         * Uygunluk testini gönder ve risk profilini güncelle
          * @description Cevapları kaydeder ve geçerli risk profilini günceller.
          *
          *     Eksik ya da tanınmayan bir cevap 422 ile reddedilir; boşları sıfır sayıp
@@ -2645,6 +2650,11 @@ export interface components {
             questionnaire_version: string;
             /** Raw Score */
             raw_score: number;
+            /**
+             * Product Groups
+             * @default []
+             */
+            product_groups: components["schemas"]["ProductGroupOut"][];
         };
         /** AssetAllocationItem */
         AssetAllocationItem: {
@@ -4494,6 +4504,52 @@ export interface components {
             /** Opened At */
             opened_at: string;
         };
+        /**
+         * ProductGroupOut
+         * @description Bir ürün grubunun yeterliliği ve GEREKÇESİ.
+         *
+         *     Gerekçe zorunlu. "Uygun değil" tek başına kişi hakkında bir yargı gibi
+         *     okunuyor; hangi beyandan çıktığı yazılı olunca hem öyle olmadığı hem de
+         *     kullanıcının cevabını değiştirerek sonucu değiştirebileceği görünüyor.
+         */
+        ProductGroupOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Risk */
+            risk: string;
+            /** Knowledge */
+            knowledge: string;
+            /** Frequency */
+            frequency: string;
+            /** Volume */
+            volume: string;
+            /** Has Experience */
+            has_experience: boolean;
+            /** Eligible */
+            eligible: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * QuestionGroupOut
+         * @description Bir ürün grubu ve ona sorulan üç soru.
+         *
+         *     Bölüm 3 dört grup × üç soru; ekran bunu bir matris olarak çiziyor. Yapı
+         *     yalnızca SUNUM meselesi -- puanlama düz soru listesi üzerinden çalışıyor
+         *     ve bu gruplamadan habersiz.
+         */
+        QuestionGroupOut: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Risk */
+            risk: string;
+            /** Questions */
+            questions: components["schemas"]["QuestionOut"][];
+        };
         /** QuestionOptionOut */
         QuestionOptionOut: {
             /** Value */
@@ -4512,12 +4568,37 @@ export interface components {
             /** Options */
             options: components["schemas"]["QuestionOptionOut"][];
         };
+        /**
+         * QuestionSectionOut
+         * @description Testin bir bölümü.
+         *
+         *     On altı soruyu tek listede göstermek kimsenin dolduracağı bir form değil;
+         *     bölümler sihirbazın adımlarını veriyor.
+         */
+        QuestionSectionOut: {
+            /** Key */
+            key: string;
+            /** Title */
+            title: string;
+            /** Helper */
+            helper?: string | null;
+            /**
+             * Questions
+             * @default []
+             */
+            questions: components["schemas"]["QuestionOut"][];
+            /**
+             * Groups
+             * @default []
+             */
+            groups: components["schemas"]["QuestionGroupOut"][];
+        };
         /** QuestionnaireOut */
         QuestionnaireOut: {
             /** Version */
             version: string;
-            /** Questions */
-            questions: components["schemas"]["QuestionOut"][];
+            /** Sections */
+            sections: components["schemas"]["QuestionSectionOut"][];
         };
         /** QuoteIn */
         QuoteIn: {

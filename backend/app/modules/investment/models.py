@@ -442,3 +442,40 @@ class WatchlistItem(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+
+
+class AllocationTarget(Base):
+    """Kullanıcının KENDİ belirlediği hedef ağırlık, kova başına bir satır.
+
+    Sistemin önerdiği bir model portföy DEĞİL ve bilerek öyle değil.
+    `compliance/rules.py:SUI-001`'in gerekçesi şunu söylüyor: "sistem ölçüm
+    ile kullanıcının kendi beyanını karşılaştırır, bir ürünün kişiye
+    uygunluğuna karar vermez." Hedefi sistemin koyması, tam olarak o kararı
+    vermek olurdu -- üstelik dört SPK ürün grubundan yalnızca birinin
+    (hisse) bu sistemde enstrümanı var, dolayısıyla önerilen hedefin çoğu
+    uygulanamaz bir talimat olurdu.
+
+    Kova ANAHTARLA saklanıyor, etiketle değil (`allocation.BUCKETS`): bir
+    etiketi düzeltmek kimsenin kayıtlı hedefini geçersizleştirmemeli.
+
+    `user_id` düz bir kolon, foreign key değil -- modüller birbirinin ORM
+    sınıfını import etmiyor (bkz. CLAUDE.md shared/ kuralı).
+    """
+
+    __tablename__ = "allocation_targets"
+    __table_args__ = (
+        # Kova başına tek hedef. İkinci bir satır, hangisinin geçerli olduğunu
+        # söyleyemeyen bir hedef bırakırdı.
+        UniqueConstraint("user_id", "bucket", name="uq_allocation_target_bucket"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    bucket: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: 0..100. Toplamın 100 olması router'da doğrulanıyor: burada saklamak
+    #: satır başına bir kısıt, toplam ise satırlar ARASI bir kural.
+    target_percent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )

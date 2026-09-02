@@ -210,6 +210,36 @@ class RiskProfileOut(BaseModel):
     #: Always present. With no declaration it carries `alignment: "UNKNOWN"`
     #: and the call-to-action wording, so the page never has to guess.
     suitability: Optional["SuitabilityOut"] = None
+    #: Ürün grubu başına tutulan ağırlık ve o grup için verilen beyan.
+    #: `suitability`'nin ikinci yarısı: o, ölçülen risk seviyesini beyan
+    #: edilen toleransla karşılaştırıyor; bu, portföyün hangi SPK ürün
+    #: grubunda durduğunu o grup için beyan edilen bilgi ve tecrübeyle.
+    group_exposure: Optional["GroupExposureOut"] = None
+
+
+class GroupExposureRowOut(BaseModel):
+    """Bir ürün grubu -- ya da testin kapsamadığı varlıklar (`group: None`)."""
+
+    group: Optional[str] = None
+    label: str
+    value: float
+    share_percent: Optional[float] = None
+    status: str
+    #: Testte bu grup için yeterlilik çıkmış mı. None = hiç sorulmamış.
+    eligible: Optional[bool] = None
+    reason: Optional[str] = None
+    #: Kullanıcıya gösterilecek cümle, KODDA üretiliyor. SUI-001 "size uygun"
+    #: kalıbını engelliyor ve bu cümleler ondan bilerek kaçınıyor: kullanıcının
+    #: kendi beyanını aktarmak, onun hakkında karar vermekten farklı.
+    statement: str
+
+
+class GroupExposureOut(BaseModel):
+    #: Uygunluk testi hiç doldurulmamışsa False. Boş bir liste ile aynı şey
+    #: değil: biri "soruldu, kayıt yok", diğeri "hiç sorulmadı".
+    assessed: bool = False
+    total_value: float = 0.0
+    groups: List[GroupExposureRowOut] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

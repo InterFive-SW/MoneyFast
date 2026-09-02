@@ -700,6 +700,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/profile-picture": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kullanıcı profil fotoğrafını güncelle
+         * @description Kullanıcının profil fotoğrafını yükler ve kaydeder.
+         *     GÜVENLİK: Sadece yetkili kullanıcılar erişebilir ve dosya türü servis katmanında kontrol edilir.
+         */
+        post: operations["upload_profile_picture_api_auth_profile_picture_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/banking/accounts": {
         parameters: {
             query?: never;
@@ -835,6 +856,35 @@ export interface paths {
          *     gösterirdi. Kategorisi olmayan hareketler toplama girmez.
          */
         get: operations["spending_summary_api_banking_spending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/banking/cash-flow/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Nakit akışı özeti (MCP sözleşmesi)
+         * @description Kullanıcının ne kazandığı, ne harcadığı ve geriye ne kaldığı.
+         *
+         *     Hesaplama YENİ DEĞİL: `income_total` ve `spending_by_category` zaten
+         *     vardı ve `GET /spending` üzerinden arayüze veriliyordu. Eksik olan tek
+         *     şey ajanın onu görebilmesiydi -- "ayda ne kadar yatırım yapabilirim"
+         *     sorusuna asistan "bu bilgi şu anda mevcut değil" diyordu, oysa üç aylık
+         *     maaş ve doksan harcama kaydı veritabanında duruyordu.
+         *
+         *     Varsayılan pencere 90 gün ve bu bir tercih değil, ölçüm sonucu: maaş
+         *     aylık yattığı için 30 günlük pencere hiç maaş içermeyebiliyor.
+         */
+        get: operations["cash_flow_for_ai_api_banking_cash_flow__user_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1496,14 +1546,6 @@ export interface paths {
         /**
          * Kullanıcının onayladığı işlem önerisini kesinleştir
          * @description Sohbetteki onay düğmesinin çağırdığı uç nokta.
-         *
-         *     Onay **yalnızca burada**, kullanıcının kendi eylemiyle verilir. Ajan
-         *     hiçbir koşulda onay veremez; sohbet içindeki "evet", "onaylıyorum" gibi
-         *     ifadeler onay sayılmaz. Bu ayrım MCP sözleşmesinin en sert kuralı ve bu
-         *     uç nokta onun karşılığı.
-         *
-         *     Önerinin gerçekten var olduğu, süresinin dolmadığı ve onu isteyen
-         *     kullanıcıya ait olduğu doğrulanır; aksi halde reddedilir.
          */
         post: operations["confirm_transaction_proposal_api_investment_transactions__proposal_id__confirm_post"];
         delete?: never;
@@ -1552,6 +1594,58 @@ export interface paths {
          *     Sistemin ayakta olup olmadığını ve doğru modüle ulaşıldığını doğrulamak için kullanılır.
          */
         get: operations["health_check_api_investment_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/investment/allocation-target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Hedef dağılımım
+         * @description Kullanıcının kendi belirlediği hedef ağırlıklar.
+         */
+        get: operations["get_allocation_target_api_investment_allocation_target_get"];
+        /**
+         * Hedef dağılımı belirle
+         * @description Hedef ağırlıkları tamamen değiştirir; boş liste hedefi kaldırır.
+         *
+         *     Toplam 100 olmak ZORUNDA. Yüzde yüze tamamlanmayan bir hedef, sapma
+         *     hesabında her kovayı aynı anda "eksik" ya da "fazla" gösterir ve
+         *     kullanıcı hangi sayının yanlış olduğunu göremez.
+         */
+        put: operations["set_allocation_target_api_investment_allocation_target_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/investment/allocation-drift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Hedeften sapma
+         * @description Ölçülen ağırlıklar ile kullanıcının kendi hedefi arasındaki fark.
+         *
+         *     Tavsiye değil, iki olgunun çıkarması: biri portföyden ölçülüyor, diğeri
+         *     kullanıcının kendi girdiği sayı. Hiçbir yerde ne yapılması gerektiği
+         *     söylenmiyor -- yalnızca hedefe ulaşmak için kaç lira fark olduğu.
+         */
+        get: operations["get_allocation_drift_api_investment_allocation_drift_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1908,6 +2002,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market/quarterly": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bir enstrümanın çeyreklik gelir tablosu serisi
+         * @description Çeyrek çeyrek gelir, net kâr, vergi öncesi kâr ve faaliyet gideri.
+         *
+         *     `/fundamentals` bir ANLIK GÖRÜNTÜ: alan başına tek güncel değer, geçmiş
+         *     yok. Bu uç seriyi veriyor ve "son çeyrek kârı önceki çeyreğe göre" gibi
+         *     bir cümleyi ilk kez mümkün kılan şey bu.
+         *
+         *     BİTİŞİKLİK YANITTA. Sağlayıcının dönemleri ardışık gelmiyor -- ölçüldü,
+         *     40 hissenin 3'ünde 2025Q3 gelir tablosunda hiç yok. "Son iki satırı al"
+         *     diyen bir tüketici o hisselerde 2025Q2 ile 2025Q4'ü kıyaslar ve bunu
+         *     söylemez; bu yüzden kural sunucuda hesaplanıp bayrak olarak gönderiliyor.
+         *
+         *     Verisi olmayan enstrüman 404 DEĞİL, boş bir seri döndürür: "bu şirket için
+         *     çeyreklik veri yok" bir cevaptır ve ölçülen kapsamada evrenin ~%15'i için
+         *     doğru cevap odur.
+         */
+        get: operations["get_quarterly_api_market_quarterly_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/quarterly/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Çeyreklik finansalları yükle (servisler arası)
+         * @description Çeyreklik satırları yazar; aynı dönem güncellenir, ikinci satır açılmaz.
+         *
+         *     Sağlayıcı yayımlanmış bir çeyreği sonradan düzeltebiliyor ve iki sürümü
+         *     yan yana saklamak, hangisinin doğru olduğunu söyleyemeyen bir seri
+         *     bırakırdı.
+         */
+        post: operations["ingest_quarterly_api_market_quarterly_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/market/stream": {
         parameters: {
             query?: never;
@@ -2114,7 +2265,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/notification/health": {
+    "/api/notification/me/notifications": {
         parameters: {
             query?: never;
             header?: never;
@@ -2122,13 +2273,57 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Notification modülü sağlık durumu
-         * @description Notification modülünün durumunu (health check) kontrol eder.
-         *     Sistemin ayakta olup olmadığını ve doğru modüle ulaşıldığını doğrulamak için kullanılır.
+         * Kullanıcının bildirimlerini getirir
+         * @description Sisteme giriş yapmış kullanıcının bildirimlerini sayfalandırılmamış (fakat limitli) olarak döner.
+         *     Polling stratejisi kullanıldığı için her 30 saniyede bir çağrılır. En yeni bildirimler en üstte yer alır.
+         *     Ayrıca okunmamış bildirim sayısını hesaplayarak frontend üzerindeki badge güncellemesi için döner.
          */
-        get: operations["health_check_api_notification_health_get"];
+        get: operations["get_my_notifications_api_notification_me_notifications_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notification/me/notifications/{notification_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Belirli bir bildirimi okundu olarak işaretler
+         * @description Kullanıcı arayüzünde belirli bir bildirime tıklandığında (veya üzerine gelindiğinde),
+         *     bildirimin `is_read` (okundu) bayrağını True yapar.
+         *     Sadece ilgili kullanıcının kendi bildirimine müdahale etmesine izin verilir (Authorization Check).
+         */
+        put: operations["mark_notification_as_read_api_notification_me_notifications__notification_id__read_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notification/me/notifications/mark-all-read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tüm bildirimleri okundu olarak işaretler
+         * @description Kullanıcının okunmamış tüm bildirimlerini tek seferde (batch update) okundu olarak işaretler.
+         *     Bu işlem genellikle 'Tümünü Okundu İşaretle' butonuna basıldığında tetiklenir ve sayaç (badge) sıfırlanır.
+         */
+        post: operations["mark_all_notifications_as_read_api_notification_me_notifications_mark_all_read_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2570,6 +2765,43 @@ export interface components {
              */
             created_at: string;
         };
+        /** AllocationDriftBucket */
+        AllocationDriftBucket: {
+            /** Bucket */
+            bucket: string;
+            /** Label */
+            label: string;
+            /** Amount */
+            amount: number;
+            /** Currentpercent */
+            currentPercent?: number | null;
+            /** Targetpercent */
+            targetPercent?: number | null;
+            /** Gappoints */
+            gapPoints?: number | null;
+            /** Gapamount */
+            gapAmount?: number | null;
+        };
+        /** AllocationDriftOut */
+        AllocationDriftOut: {
+            /**
+             * Hastarget
+             * @default false
+             */
+            hasTarget: boolean;
+            /**
+             * Totalvalue
+             * @default 0
+             */
+            totalValue: number;
+            /** Buckets */
+            buckets?: components["schemas"]["AllocationDriftBucket"][];
+            /**
+             * Statement
+             * @default
+             */
+            statement: string;
+        };
         /** AllocationSlice */
         AllocationSlice: {
             /** Label */
@@ -2578,6 +2810,38 @@ export interface components {
             value: number;
             /** Percentage */
             percentage: number;
+        };
+        /**
+         * AllocationTargetItem
+         * @description Bir kova için hedef ağırlık.
+         */
+        AllocationTargetItem: {
+            /** Bucket */
+            bucket: string;
+            /**
+             * Label
+             * @default
+             */
+            label: string;
+            /** Targetpercent */
+            targetPercent: number;
+        };
+        /** AllocationTargetOut */
+        AllocationTargetOut: {
+            /**
+             * Hastarget
+             * @default false
+             */
+            hasTarget: boolean;
+            /** Targets */
+            targets?: components["schemas"]["AllocationTargetItem"][];
+            /** Updatedat */
+            updatedAt?: string | null;
+        };
+        /** AllocationTargetRequest */
+        AllocationTargetRequest: {
+            /** Targets */
+            targets?: components["schemas"]["AllocationTargetItem"][];
         };
         /**
          * AnalystRow
@@ -2815,6 +3079,11 @@ export interface components {
             /** Thread Id */
             thread_id?: string | null;
         };
+        /** Body_upload_profile_picture_api_auth_profile_picture_post */
+        Body_upload_profile_picture_api_auth_profile_picture_post: {
+            /** File */
+            file: string;
+        };
         /** CandleIn */
         CandleIn: {
             /** Symbol */
@@ -2957,6 +3226,74 @@ export interface components {
             description?: string | null;
             /** Account Id */
             account_id?: string | null;
+        };
+        /**
+         * CashFlowCategoryOut
+         * @description Bir harcama kategorisi, pencere toplamı ve aylık ortalamasıyla.
+         */
+        CashFlowCategoryOut: {
+            /** Category */
+            category: string;
+            /** Amount */
+            amount: number;
+            /** Monthly Amount */
+            monthly_amount: number;
+            /** Share Percent */
+            share_percent?: number | null;
+        };
+        /**
+         * CashFlowOut
+         * @description Kullanıcının nakit akışı — MCP sözleşme yüzeyi.
+         *
+         *     İki alan bu şemanın var olma sebebi.
+         *
+         *     `has_data` -- ölçüldü, 23 kullanıcının yalnızca 3'ünde bankacılık
+         *     hareketi var. Verisi olmayan için sıfır döndürmek "hiç kazanmıyor ve hiç
+         *     harcamıyor" tespiti olurdu; kayıt yokluğu tespit değildir. Bu yüzden
+         *     tutarlar da sıfır değil None.
+         *
+         *     `income_events` -- sıfır gelir iki farklı şey olabilir: "bu pencerede
+         *     maaş yatmadı" ya da "bu kişinin geliri yok". Olay sayısı olmadan ikisi
+         *     ayırt edilemez. Ölçüldü: üç aylık maaş geçmişi olan bir kullanıcıda 30
+         *     günlük pencere sıfır maaş içeriyordu.
+         */
+        CashFlowOut: {
+            /** Has Data */
+            has_data: boolean;
+            /** Coverage Note */
+            coverage_note?: string | null;
+            /** Period Days */
+            period_days: number;
+            /** Months Observed */
+            months_observed: number;
+            /**
+             * Currency Code
+             * @default TRY
+             */
+            currency_code: string;
+            /** Income Total */
+            income_total?: number | null;
+            /**
+             * Income Events
+             * @default 0
+             */
+            income_events: number;
+            /** Expense Total */
+            expense_total?: number | null;
+            /** Net Total */
+            net_total?: number | null;
+            /** Monthly Income */
+            monthly_income?: number | null;
+            /** Monthly Expense */
+            monthly_expense?: number | null;
+            /** Monthly Net */
+            monthly_net?: number | null;
+            /** Categories */
+            categories?: components["schemas"]["CashFlowCategoryOut"][];
+            /** First Transaction At */
+            first_transaction_at?: string | null;
+            /** Last Transaction At */
+            last_transaction_at?: string | null;
         };
         /**
          * CashMovementOut
@@ -3618,6 +3955,43 @@ export interface components {
             /** Earnings Date */
             earnings_date?: string | null;
         };
+        /** GroupExposureOut */
+        GroupExposureOut: {
+            /**
+             * Assessed
+             * @default false
+             */
+            assessed: boolean;
+            /**
+             * Total Value
+             * @default 0
+             */
+            total_value: number;
+            /** Groups */
+            groups?: components["schemas"]["GroupExposureRowOut"][];
+        };
+        /**
+         * GroupExposureRowOut
+         * @description Bir ürün grubu -- ya da testin kapsamadığı varlıklar (`group: None`).
+         */
+        GroupExposureRowOut: {
+            /** Group */
+            group?: string | null;
+            /** Label */
+            label: string;
+            /** Value */
+            value: number;
+            /** Share Percent */
+            share_percent?: number | null;
+            /** Status */
+            status: string;
+            /** Eligible */
+            eligible?: boolean | null;
+            /** Reason */
+            reason?: string | null;
+            /** Statement */
+            statement: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -3687,6 +4061,11 @@ export interface components {
              * @default 0
              */
             fundamentals_written: number;
+            /**
+             * Quarterly Written
+             * @default 0
+             */
+            quarterly_written: number;
             /**
              * News Symbols
              * @default {}
@@ -4020,6 +4399,44 @@ export interface components {
              * Format: date-time
              */
             published_at: string;
+        };
+        /**
+         * NotificationListResponse
+         * @description Sayfalandırılmış veya kısıtlı bildirim listesini ve okunmamış bildirim sayısını
+         *     barındıran DTO nesnesidir. İstemcideki sayaç (badge) güncellemeleri için kullanılır.
+         */
+        NotificationListResponse: {
+            /** Unread Count */
+            unread_count: number;
+            /** Items */
+            items: components["schemas"]["NotificationResponse"][];
+        };
+        /**
+         * NotificationResponse
+         * @description İstemciye dönülecek tekil bildirim nesnesinin veri transfer objesidir (DTO).
+         *     Güvenlik sebebiyle veritabanı modelinden sadece ilgili alanlar dışa aktarılır.
+         */
+        NotificationResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string;
+            /** Type */
+            type: string;
+            /** Link Url */
+            link_url?: string | null;
+            /** Is Read */
+            is_read: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** NotionalAmount */
         NotionalAmount: {
@@ -4480,7 +4897,7 @@ export interface components {
             /** Asset Class */
             asset_class: string;
             /** Exchange */
-            exchange: string;
+            exchange?: string | null;
             /** Quantity */
             quantity: number;
             /** Avg Cost */
@@ -4531,6 +4948,92 @@ export interface components {
             eligible: boolean;
             /** Reason */
             reason: string;
+        };
+        /**
+         * QuarterOut
+         * @description Bir çeyrek. Etiket türetiliyor, saklanmıyor.
+         */
+        QuarterOut: {
+            /**
+             * Period End
+             * Format: date
+             */
+            period_end: string;
+            /** Label */
+            label: string;
+            /** Total Revenue */
+            total_revenue?: number | null;
+            /** Net Income */
+            net_income?: number | null;
+            /** Pretax Income */
+            pretax_income?: number | null;
+            /** Operating Expense */
+            operating_expense?: number | null;
+        };
+        /**
+         * QuarterlyIn
+         * @description Bir enstrümanın bir çeyreği.
+         *
+         *     Her sayısal alan Optional ve öyle kalıyor. Ölçüldü: 34 hissenin 16'sında
+         *     serinin bir yerinde eksik değer var ve sıfıra çevirmek "o çeyrek
+         *     raporlandı, kâr sıfır çıktı" demek olurdu.
+         */
+        QuarterlyIn: {
+            /** Symbol */
+            symbol: string;
+            /**
+             * Period End
+             * Format: date
+             */
+            period_end: string;
+            /** Total Revenue */
+            total_revenue?: number | null;
+            /** Net Income */
+            net_income?: number | null;
+            /** Pretax Income */
+            pretax_income?: number | null;
+            /** Operating Expense */
+            operating_expense?: number | null;
+        };
+        /** QuarterlyIngestRequest */
+        QuarterlyIngestRequest: {
+            /** Items */
+            items?: components["schemas"]["QuarterlyIn"][];
+        };
+        /**
+         * QuarterlyOut
+         * @description Bir enstrümanın çeyreklik serisi, en yeniden eskiye.
+         *
+         *     İki bayrak sunucuda hesaplanıyor, tüketende değil. Ölçüldü: sağlayıcının
+         *     dönemleri ardışık gelmiyor -- 40 hissenin 3'ünde 2025Q3 gelir tablosunda
+         *     hiç yok. "Son iki satırı al" diyen bir karşılaştırma o hisselerde 2025Q2
+         *     ile 2025Q4'ü kıyaslar ve bunu söylemez.
+         */
+        QuarterlyOut: {
+            /** Symbol */
+            symbol: string;
+            /** Name */
+            name: string;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            /**
+             * Periods
+             * @default []
+             */
+            periods: components["schemas"]["QuarterOut"][];
+            /**
+             * Previous Is Adjacent
+             * @default false
+             */
+            previous_is_adjacent: boolean;
+            /**
+             * Year Ago Available
+             * @default false
+             */
+            year_ago_available: boolean;
         };
         /**
          * QuestionGroupOut
@@ -4780,6 +5283,7 @@ export interface components {
             warnings?: string[];
             declared?: components["schemas"]["DeclaredProfileOut"] | null;
             suitability?: components["schemas"]["SuitabilityOut"] | null;
+            group_exposure?: components["schemas"]["GroupExposureOut"] | null;
         };
         /** RiskRequest */
         RiskRequest: {
@@ -5471,48 +5975,22 @@ export interface components {
             /** Candidates */
             candidates?: string[];
         };
-        /**
-         * UserResponse
-         * @description Kullanıcı verilerini güvenli bir şekilde (şifresiz) döndürmek için şema.
-         */
+        /** UserResponse */
         UserResponse: {
-            /**
-             * First Name
-             * @description Kullanıcının adı
-             */
-            first_name: string;
-            /**
-             * Last Name
-             * @description Kullanıcının soyadı
-             */
-            last_name: string;
             /** Id */
             id: string;
             /** Tc No */
             tc_no: string;
-            /**
-             * Email
-             * Format: email
-             */
+            /** First Name */
+            first_name: string;
+            /** Last Name */
+            last_name: string;
+            /** Email */
             email: string;
             /** Phone Number */
             phone_number: string;
             /** Is Active */
             is_active: boolean;
-            /**
-             * Notification Preferences
-             * @description Kullanıcının detaylı bildirim tercihleri matrisi
-             */
-            notification_preferences: {
-                [key: string]: {
-                    [key: string]: boolean;
-                };
-            };
-            /**
-             * Transaction Limit
-             * @description Ek doğrulama gerektiren transfer eşiği (₺)
-             */
-            transaction_limit: number;
             /**
              * User Preferences
              * @description Kullanıcıya özgü görünüm ve bölgesel tercihler
@@ -5525,6 +6003,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Profile Picture Url */
+            profile_picture_url?: string | null;
             /** Customer No */
             customer_no?: string | null;
         };
@@ -6705,6 +7185,39 @@ export interface operations {
             };
         };
     };
+    upload_profile_picture_api_auth_profile_picture_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_profile_picture_api_auth_profile_picture_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_accounts_api_banking_accounts_get: {
         parameters: {
             query?: never;
@@ -6860,6 +7373,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SpendingSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cash_flow_for_ai_api_banking_cash_flow__user_id__get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CashFlowOut"];
                 };
             };
             /** @description Validation Error */
@@ -7657,7 +8205,9 @@ export interface operations {
                 base_currency?: string;
                 valuation_mode?: string;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 user_id: string;
             };
@@ -7795,6 +8345,79 @@ export interface operations {
             };
         };
     };
+    get_allocation_target_api_investment_allocation_target_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllocationTargetOut"];
+                };
+            };
+        };
+    };
+    set_allocation_target_api_investment_allocation_target_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AllocationTargetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllocationTargetOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_allocation_drift_api_investment_allocation_drift_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllocationDriftOut"];
+                };
+            };
+        };
+    };
     get_market_tickers_api_market_tickers_get: {
         parameters: {
             query?: never;
@@ -7884,7 +8507,9 @@ export interface operations {
                 limit?: number;
                 days?: number;
             };
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 user_id: string;
             };
@@ -8162,7 +8787,9 @@ export interface operations {
     get_portfolio_technical_for_ai_api_market_portfolio_technical__user_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string | null;
+            };
             path: {
                 user_id: string;
             };
@@ -8177,6 +8804,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioTechnicalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quarterly_api_market_quarterly_get: {
+        parameters: {
+            query: {
+                symbol: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuarterlyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_quarterly_api_market_quarterly_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuarterlyIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IngestResult"];
                 };
             };
             /** @description Validation Error */
@@ -8461,7 +9155,69 @@ export interface operations {
             };
         };
     };
-    health_check_api_notification_health_get: {
+    get_my_notifications_api_notification_me_notifications_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_notification_as_read_api_notification_me_notifications__notification_id__read_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_all_notifications_as_read_api_notification_me_notifications_mark_all_read_post: {
         parameters: {
             query?: never;
             header?: never;

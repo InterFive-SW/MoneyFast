@@ -36,6 +36,8 @@ export type PortfolioChartData = GetResponseType<paths['/api/investment/portfoli
 export type Position = GetResponseType<paths['/api/investment/positions']>[0];
 export type Order = GetResponseType<paths['/api/investment/orders']>[0];
 export type AssetAllocationItem = GetResponseType<paths['/api/investment/asset-allocation']>[0];
+export type AllocationTarget = GetResponseType<paths['/api/investment/allocation-target']>;
+export type AllocationDrift = GetResponseType<paths['/api/investment/allocation-drift']>;
 export type StageTransactionRequest = components['schemas']['StageTransactionRequest'];
 export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
@@ -756,6 +758,26 @@ class ApiClient {
 
     getAssetAllocation() {
         return this.request<AssetAllocationItem[]>('/investment/asset-allocation');
+    }
+
+    /** Kullanıcının kendi belirlediği hedef ağırlıklar. */
+    getAllocationTarget() {
+        return this.request<AllocationTarget>('/investment/allocation-target');
+    }
+
+    /**
+     * Hedefi tamamen değiştirir; boş liste hedefi kaldırır.
+     *
+     * Kısmi güncelleme yok: birleştirme, toplamı 100 olan bir hedefi sessizce
+     * 140'a çıkarabilirdi.
+     */
+    setAllocationTarget(targets: { bucket: string; targetPercent: number }[]) {
+        return this.put<AllocationTarget>('/investment/allocation-target', { targets });
+    }
+
+    /** Ölçülen ağırlık ile kullanıcının kendi hedefi arasındaki fark. */
+    getAllocationDrift() {
+        return this.request<AllocationDrift>('/investment/allocation-drift');
     }
 
     /** Follow an instrument. Idempotent — starring twice is not an error. */

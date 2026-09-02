@@ -105,6 +105,8 @@ describe('endpoint paths', () => {
     ['getWatchlist', '/api/investment/watchlist'],
     ['getTopMovers', '/api/investment/top-movers'],
     ['getAssetAllocation', '/api/investment/asset-allocation'],
+    ['getAllocationTarget', '/api/investment/allocation-target'],
+    ['getAllocationDrift', '/api/investment/allocation-drift'],
     ['getSectorAllocation', '/api/investment/sector-allocation'],
     ['getHeatmap', '/api/investment/heatmap'],
     ['getMarketTickers', '/api/market/tickers'],
@@ -1319,5 +1321,33 @@ describe('settings actions', () => {
     await apiClient.deleteAccount({ reason: 'test' })
     expect(calledUrl(fetchMock)).toContain('/api/auth/me')
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+  })
+})
+
+describe('hedef dağılım', () => {
+  it('sends the whole target list, not a patch', async () => {
+    // Kısmi güncelleme yok: birleştirme, toplamı 100 olan bir hedefi
+    // sessizce 140'a çıkarabilirdi.
+    const fetchMock = mockFetch({ hasTarget: true, targets: [] })
+    await apiClient.setAllocationTarget([
+      { bucket: 'bist_equity', targetPercent: 60 },
+      { bucket: 'cash', targetPercent: 40 },
+    ])
+    expect(calledUrl(fetchMock)).toBe('/api/investment/allocation-target')
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body as string)).toEqual({
+      targets: [
+        { bucket: 'bist_equity', targetPercent: 60 },
+        { bucket: 'cash', targetPercent: 40 },
+      ],
+    })
+  })
+
+  it('clears the target with an empty list', async () => {
+    const fetchMock = mockFetch({ hasTarget: false, targets: [] })
+    await apiClient.setAllocationTarget([])
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(JSON.parse(init.body as string)).toEqual({ targets: [] })
   })
 })

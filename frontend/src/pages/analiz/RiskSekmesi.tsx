@@ -12,6 +12,7 @@ import RiskNarrativeCard from '../../components/risk/RiskNarrativeCard'
 import RiskRecommendationsWidget from '../../components/risk/RiskRecommendationsWidget'
 import RiskScoreWidget from '../../components/risk/RiskScoreWidget'
 import ScoreBreakdown from '../../components/risk/ScoreBreakdown'
+import HedefDagilimPaneli from '../../components/risk/HedefDagilimPaneli'
 import SuitabilityCard from '../../components/risk/SuitabilityCard'
 import { useAnalysis } from '../Analiz'
 
@@ -76,6 +77,13 @@ export default function RiskSekmesi() {
                     declared={risk.declared}
                     onStart={() => setSurveyOpen(true)}
                 />
+            </div>
+
+            {/* Uygunluk kartının yanı: o, ölçülen risk seviyesini beyan edilen
+                toleransla karşılaştırıyor; bu, ölçülen ağırlıkları kullanıcının
+                kendi koyduğu hedefle. İkisi de iki OLGUNUN karşılaştırması. */}
+            <div className="mb-6">
+                <HedefDagilimPaneli />
             </div>
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

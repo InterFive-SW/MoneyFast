@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 import agent_trace
 import sanitize
+import sources
 import widgets
 from mcp_client import get_mcp_client
 from orchestrator import run_turn, run_turn_streaming
@@ -33,6 +34,11 @@ class Turn(BaseModel):
     #: enforces the same constraint; this one guards direct callers.
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1, max_length=2000)
+    #: Bu turda gösterilmiş kaynaklar. Modele HİÇ gitmiyor --
+    #: `_history_summary` yalnızca `role` ve `content` okuyor. Yalnızca
+    #: "bana kaynakça verir misin" turunun okuduğu şey; onlar olmadan o soru
+    #: bir aramaya dönüşüyor ve kota hatasına açık kalıyor.
+    sources: list[dict[str, Any]] = Field(default_factory=list, max_length=16)
 
 
 class ChatRequest(BaseModel):
@@ -58,6 +64,12 @@ class ChatResponse(BaseModel):
     # of the model. See widgets.py.
     widget: Optional[dict[str, Any]] = None
     context_topic: Optional[str] = None
+    #: Bu cevabın dayandığı kaynaklar. Widget'la aynı kural: modelden
+    #: istenmez, aracın döndürdüğünden kurulur. `sanitize` bunlara
+    #: dokunmuyor -- yalnızca `final_output` üzerinde çalışıyor -- o yüzden
+    #: buradaki her etiket Türkçe olarak KODDA kuruluyor, hiçbiri bir
+    #: yük anahtarından alınmıyor.
+    sources: list[dict[str, Any]] = []
 
 
 @app.get("/healthz")
@@ -105,6 +117,7 @@ def _response_payload(state: dict[str, Any]) -> ChatResponse:
         disclosures=state.get("disclosures") or [],
         widget=widget,
         context_topic=context_topic,
+        sources=sources.build(state),
     )
 
 

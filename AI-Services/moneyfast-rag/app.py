@@ -315,6 +315,28 @@ async def delete_document(document_id: str, owner_user_id: str) -> dict[str, Any
     return {"status": "deleted", "document_id": document_id}
 
 
+class KnownUrlsRequest(BaseModel):
+    urls: list[str] = Field(default_factory=list, max_length=2_000)
+
+
+@app.post("/documents/known-urls")
+async def known_urls(request: KnownUrlsRequest) -> dict[str, Any]:
+    """Bu adreslerden hangileri derlemde zaten var.
+
+    Gövde indirmeden önce sorulur. Backend tarafındaki `news/known-hashes`
+    ile aynı iş, ama farklı bir soru: orada "bu bildirimi biliyor muyuz",
+    burada "bu bildirimin METNİ gömülü mü". Panoya düşmüş 28.984 bildirimin
+    yalnızca bir kısmının gövdesi çekilmiş durumda ve arşivi kapatan iş bunu
+    bilmek zorunda.
+    """
+    try:
+        found = await store.known_urls(request.urls)
+    except Exception as exc:  # noqa: BLE001
+        log.error("known-url lookup failed: %s", exc)
+        raise HTTPException(status_code=503, detail="retrieval unavailable") from exc
+    return {"known": sorted(found)}
+
+
 @app.post("/ingest")
 async def ingest(document: IngestDocument) -> dict[str, Any]:
     """Load one document: split, embed, store. Idempotent by content hash."""

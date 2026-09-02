@@ -317,6 +317,138 @@ class TestNewsChunking:
         assert sinks.push_news_to_backend(client_for(recorder(status=503)), items) is None
 
 
+class TestCorpusBackfill:
+    """Panoya düşmek, sohbetin bulabilmesi demek değil.
+
+    Ölçüldü: panoda 28.984 KAP bildirimi varken derlemde 147 gövde vardı ve
+    THYAO'nun 47 bildiriminin sıfırı gömülüydü. Sebebi tasarımdı -- gövde
+    yalnızca YENİ gelenler için çekiliyordu, geriye dönük arşivin gövdesini
+    kimse çekmiyordu.
+    """
+
+    def _archive_row(self, i):
+        return {"content_hash": str(i) * 64, "title": f"THYAO — bildirim {i}",
+                "url": f"https://www.kap.org.tr/tr/Bildirim/{i}",
+                "related_symbols": ["THYAO"], "published_at": "2026-08-28T20:15:00+00:00"}
+
+    def test_only_disclosures_without_text_are_fetched(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_CORPUS_BUDGET", "10")
+        pages = [[self._archive_row(1), self._archive_row(2)], []]
+        monkeypatch.setattr(run.sinks, "fetch_news_archive",
+                            lambda c, s, l, o: pages.pop(0) if pages else [])
+        monkeypatch.setattr(
+            run.sinks, "fetch_embedded_urls",
+            lambda c, urls: {"https://www.kap.org.tr/tr/Bildirim/1"},
+        )
+        read = []
+        monkeypatch.setattr(run.kap_source, "fetch_detail",
+                            lambda i, c: read.append(i) or {"disclosureBody": ["<p>x</p>"]})
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+        assert run.backfill_kap_corpus(None)["embedded"] == 1
+        assert read == ["2"], "the one already embedded must not be re-read"
+
+    def test_the_pass_is_budgeted(self, monkeypatch):
+        """Gövde başına bir istek, host başına iki saniye. Sınırsız bırakmak
+        tek turun saatlerce sürmesi demekti."""
+        monkeypatch.setenv("INGESTOR_KAP_CORPUS_BUDGET", "2")
+        pages = [[self._archive_row(i) for i in range(5)], []]
+        monkeypatch.setattr(run.sinks, "fetch_news_archive",
+                            lambda c, s, l, o: pages.pop(0) if pages else [])
+        monkeypatch.setattr(run.sinks, "fetch_embedded_urls", lambda c, urls: set())
+        monkeypatch.setattr(run.kap_source, "fetch_detail",
+                            lambda i, c: {"disclosureBody": ["<p>x</p>"]})
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+        assert run.backfill_kap_corpus(None)["embedded"] == 2
+
+    def test_a_complete_corpus_fetches_nothing(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_news_archive",
+                            lambda c, s, l, o: [self._archive_row(1)] if o == 0 else [])
+        monkeypatch.setattr(
+            run.sinks, "fetch_embedded_urls",
+            lambda c, urls: {"https://www.kap.org.tr/tr/Bildirim/1"},
+        )
+
+        def refuse(*a, **k):
+            pytest.fail("nothing is missing; no body should be fetched")
+
+        monkeypatch.setattr(run.kap_source, "fetch_detail", refuse)
+        assert run.backfill_kap_corpus(None) == {"fetched": 0, "embedded": 0}
+
+    def test_a_zero_budget_switches_the_job_off(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_CORPUS_BUDGET", "0")
+
+        def refuse(*a, **k):
+            pytest.fail("the job is switched off")
+
+        monkeypatch.setattr(run.sinks, "fetch_news_archive", refuse)
+        assert run.backfill_kap_corpus(None) == {"skipped": True}
+
+    def test_an_archive_row_without_a_link_is_not_asked_about(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_CORPUS_BUDGET", "5")
+        row = {**self._archive_row(1), "url": None}
+        pages = [[row], []]
+        asked = []
+        monkeypatch.setattr(run.sinks, "fetch_news_archive",
+                            lambda c, s, l, o: pages.pop(0) if pages else [])
+        monkeypatch.setattr(run.sinks, "fetch_embedded_urls",
+                            lambda c, urls: asked.append(urls) or set())
+        monkeypatch.setattr(run.kap_source, "fetch_detail", lambda i, c: None)
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+        run.backfill_kap_corpus(None)
+        assert asked == [[]]
+
+    def test_a_row_whose_link_carries_no_index_is_skipped(self, monkeypatch):
+        """Bildirim numarası kalıcı bağlantının içinde; bağlantısı olmayan
+        bir satırın gövdesi çekilemez."""
+        def refuse(*a, **k):
+            pytest.fail("there is no disclosure index to fetch")
+
+        monkeypatch.setattr(run.kap_source, "fetch_detail", refuse)
+        assert run._with_bodies([{"url": None, "title": "t", "related_symbols": [],
+                                  "published_at": NOW}], None) == []
+
+    def test_an_iso_publish_date_is_parsed_back(self, monkeypatch):
+        """Arşiv ucu ISO metin döndürüyor, yoklama ise datetime taşıyor. Ek
+        penceresi tarih aritmetiği yapıyor ve metinle çalışmıyor."""
+        monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
+        monkeypatch.setattr(run.kap_source, "fetch_detail",
+                            lambda i, c: {"disclosureBody": ["<p>gövde</p>"]})
+        monkeypatch.setattr(run.kap_source, "attachment_text", lambda d, c: "")
+        docs = run._with_bodies([{
+            "url": ".../1", "title": "t", "related_symbols": [],
+            "published_at": datetime.now(timezone.utc).isoformat(),
+        }], None)
+        assert docs and isinstance(docs[0]["published_at"], datetime)
+
+
+class TestArchiveAndCorpusLookups:
+    def test_the_archive_page_is_read_from_the_backend(self):
+        handler = recorder(body={"items": [{"content_hash": "a" * 64}]})
+        rows = sinks.fetch_news_archive(client_for(handler), "KAP", 200, 0)
+        assert len(rows) == 1
+        assert handler.calls[0].url.path.endswith("/market/news/archive")
+
+    def test_an_unavailable_archive_page_yields_nothing(self):
+        assert sinks.fetch_news_archive(client_for(recorder(status=503)), "KAP", 10, 0) == []
+
+    def test_the_corpus_is_asked_which_texts_it_holds(self):
+        handler = recorder(body={"known": ["https://x/1"]})
+        got = sinks.fetch_embedded_urls(client_for(handler), ["https://x/1", "https://x/2"])
+        assert got == {"https://x/1"}
+        assert handler.calls[0].url.path.endswith("/documents/known-urls")
+
+    def test_an_empty_list_asks_nothing(self):
+        def handler(request):
+            pytest.fail("nothing to ask about")
+
+        assert sinks.fetch_embedded_urls(client_for(handler), []) == set()
+
+    def test_a_failed_lookup_assumes_nothing_is_embedded(self):
+        """Güvenli yön: fazladan indirilen bir gövde `ON CONFLICT` ile
+        eleniyor, atlanan bir gövde sessiz bir boşluk bırakırdı."""
+        assert sinks.fetch_embedded_urls(client_for(recorder(status=503)), ["https://x/1"]) == set()
+
+
 class TestKapCatchUp:
     def test_coverage_is_read_from_the_backend(self):
         handler = recorder(body={"KAP": {"items": 5, "last": "2026-08-20", "last_index": 99}})
@@ -817,6 +949,9 @@ class TestScheduler:
             # "elimizdeki en yeni bildirim eski mi" sorusunu cevaplıyor.
             "kap-topup": "date",
             "kap-backfill": "date",
+            # Listeleme ile gövde arasındaki açığı kapatıyor: ayrı bir soru,
+            # ayrı bir iş.
+            "kap-corpus": "interval",
         }
         assert warmed == ["q", "n"]
         assert started == [True]

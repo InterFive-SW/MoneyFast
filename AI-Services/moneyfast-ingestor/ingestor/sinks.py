@@ -269,6 +269,50 @@ def fetch_news_coverage(client: httpx.Client) -> dict[str, dict]:
         return {}
 
 
+def fetch_news_archive(
+    client: httpx.Client, source: str, limit: int, offset: int
+) -> list[dict]:
+    """Saklanan bildirimlerin bir sayfası, yeniden eskiye."""
+    try:
+        response = client.get(
+            f"{config.backend_url()}/market/news/archive",
+            params={"source": source, "limit": limit, "offset": offset},
+            headers=_headers(),
+            timeout=config.request_timeout(),
+        )
+        response.raise_for_status()
+        return response.json().get("items") or []
+    except Exception as exc:  # noqa: BLE001
+        log.warning("news archive page unavailable: %s", exc)
+        return []
+
+
+def fetch_embedded_urls(client: httpx.Client, urls: list[str]) -> set[str]:
+    """Bu bildirimlerden hangilerinin GÖVDESİ derlemde zaten var.
+
+    Backend'deki `known-hashes` ile aynı desen ama farklı soru: orada
+    "bu bildirimi biliyor muyuz", burada "metni gömülü mü". Panoya düşmüş
+    olmak, sohbetin onu bulabilmesi demek değil.
+
+    Hata durumunda BOŞ küme dönüyor -- yani "hiçbiri gömülü değil". Burada
+    güvenli yön bu: fazladan indirilen bir gövde `ON CONFLICT` ile eleniyor,
+    atlanan bir gövde ise sessiz bir boşluk bırakırdı.
+    """
+    if not urls:
+        return set()
+    try:
+        response = client.post(
+            f"{config.rag_url()}/documents/known-urls",
+            json={"urls": urls},
+            timeout=config.request_timeout() * 2,
+        )
+        response.raise_for_status()
+        return set(response.json().get("known") or [])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("embedded-url lookup failed, assuming none: %s", exc)
+        return set()
+
+
 def push_disclosures_to_rag(client: httpx.Client, documents: list[dict]) -> int:
     """Embed KAP disclosure bodies into the corpus.
 

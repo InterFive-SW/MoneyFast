@@ -102,13 +102,29 @@ class TestLoadHistory:
         to be reversed — handing the model a backwards conversation would
         break coreference rather than help it."""
         rows = [
-            SimpleNamespace(role="assistant", content="ikinci"),
-            SimpleNamespace(role="user", content="birinci"),
+            SimpleNamespace(role="assistant", content="ikinci", meta=None),
+            SimpleNamespace(role="user", content="birinci", meta=None),
         ]
         db = make_db(existing_conversation=SimpleNamespace(id="conv-1"), messages=rows)
         assert service.load_history(db, "user-1", "t-1") == [
-            {"role": "user", "content": "birinci"},
-            {"role": "assistant", "content": "ikinci"},
+            {"role": "user", "content": "birinci", "sources": []},
+            {"role": "assistant", "content": "ikinci", "sources": []},
+        ]
+
+    def test_stored_sources_travel_with_the_turn(self):
+        """"bana kaynakça verir misin" sorusunun cevabı ÖNCEKİ turun
+        kaynakları. Onlar geçmişte taşınmazsa o soru bir aramaya dönüşüyor ve
+        boş dönüyor -- gerçek bir sohbette ölçüldü."""
+        rows = [
+            SimpleNamespace(
+                role="assistant", content="cevap",
+                meta={"sources": [{"kind": "DOCUMENT", "label": "KAP bildirimi"}]},
+            ),
+            SimpleNamespace(role="user", content="soru", meta=None),
+        ]
+        db = make_db(existing_conversation=SimpleNamespace(id="conv-1"), messages=rows)
+        assert service.load_history(db, "user-1", "t-1")[-1]["sources"] == [
+            {"kind": "DOCUMENT", "label": "KAP bildirimi"}
         ]
 
     def test_unknown_conversation_yields_no_history(self):
@@ -129,8 +145,8 @@ class TestTrimHistory:
 
     def test_a_short_conversation_passes_through_unchanged(self):
         turns = [
-            {"role": "user", "content": "merhaba"},
-            {"role": "assistant", "content": "selam"},
+            {"role": "user", "content": "merhaba", "sources": []},
+            {"role": "assistant", "content": "selam", "sources": []},
         ]
         assert service.trim_history(turns) == turns
 
@@ -141,11 +157,11 @@ class TestTrimHistory:
         ]
         trimmed = service.trim_history(turns)
         assert len(trimmed) == service.CONTEXT_MAX_MESSAGES
-        assert trimmed[-1] == turns[-1]
+        assert trimmed[-1] == {**turns[-1], "sources": []}
         assert turns[0] not in trimmed
 
     def test_an_oversized_message_is_truncated_not_dropped(self):
-        trimmed = service.trim_history([{"role": "user", "content": "u" * 9000}])
+        trimmed = service.trim_history([{"role": "user", "content": "u" * 9000, "sources": []}])
         assert len(trimmed) == 1
         assert len(trimmed[0]["content"]) == service.MESSAGE_MAX_CHARS
         assert trimmed[0]["content"].endswith("…")
@@ -154,7 +170,7 @@ class TestTrimHistory:
         """Returning nothing would hand the router a prompt with no question
         in it, which is worse than handing it one long one."""
         trimmed = service.trim_history(
-            [{"role": "user", "content": "x" * service.CONTEXT_MAX_CHARS * 3}]
+            [{"role": "user", "content": "x" * service.CONTEXT_MAX_CHARS * 3, "sources": []}]
         )
         assert len(trimmed) == 1
 
@@ -174,9 +190,9 @@ class TestTrimHistory:
         infer what was asked."""
         trimmed = service.trim_history(
             [
-                {"role": "assistant", "content": "önceki cevap"},
-                {"role": "user", "content": "soru"},
-                {"role": "assistant", "content": "cevap"},
+                {"role": "assistant", "content": "önceki cevap", "sources": []},
+                {"role": "user", "content": "soru", "sources": []},
+                {"role": "assistant", "content": "cevap", "sources": []},
             ]
         )
         assert [t["role"] for t in trimmed] == ["user", "assistant"]
@@ -196,18 +212,18 @@ class TestTrimHistory:
         row failed to insert leaves two assistant rows adjacent."""
         trimmed = service.trim_history(
             [
-                {"role": "assistant", "content": "bir"},
-                {"role": "assistant", "content": "iki"},
-                {"role": "user", "content": "soru"},
+                {"role": "assistant", "content": "bir", "sources": []},
+                {"role": "assistant", "content": "iki", "sources": []},
+                {"role": "user", "content": "soru", "sources": []},
             ]
         )
-        assert trimmed == [{"role": "user", "content": "soru"}]
+        assert trimmed == [{"role": "user", "content": "soru", "sources": []}]
 
     def test_a_history_of_answers_only_yields_nothing(self):
-        assert service.trim_history([{"role": "assistant", "content": "cevap"}]) == []
+        assert service.trim_history([{"role": "assistant", "content": "cevap", "sources": []}]) == []
 
     def test_missing_keys_default_rather_than_raise(self):
-        assert service.trim_history([{}]) == [{"role": "user", "content": ""}]
+        assert service.trim_history([{}]) == [{"role": "user", "content": "", "sources": []}]
 
 
 class TestPersistenceStatus:
@@ -253,8 +269,8 @@ class TestLoadHistoryWindow:
 
     def test_stored_history_is_trimmed_like_any_other(self):
         rows = [
-            SimpleNamespace(role="assistant", content="a" * 9000),
-            SimpleNamespace(role="user", content="soru"),
+            SimpleNamespace(role="assistant", content="a" * 9000, meta=None),
+            SimpleNamespace(role="user", content="soru", meta=None),
         ]
         db = make_db(existing_conversation=SimpleNamespace(id="conv-1"), messages=rows)
         trimmed = service.load_history(db, "user-1", "t-1")

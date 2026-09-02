@@ -21,8 +21,11 @@ RUN apt-get update \
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
+# Her modül burada ADIYLA yazılı. Yeni bir dosya eklerken buraya da
+# eklenmezse servis import hatasıyla açılmıyor ve testler yeşil kalıyor --
+# testler dosya sisteminden değil, kaynak ağacından çalışıyor.
 COPY orchestrator.py prompts.py mcp_client.py api.py widgets.py \
-     agent_trace.py sanitize.py ./
+     sources.py agent_trace.py sanitize.py ./
 
 # ---------------------------------------------------------------------------
 # Stage 2: test. Fails the build on any test failure or a coverage drop.

@@ -1,3 +1,7 @@
+import type { MessageSource } from '../api/client';
+
+export type { MessageSource };
+
 // src/types/chat.ts
 export type SenderType = 'user' | 'ai';
 
@@ -74,6 +78,18 @@ export interface ChatMessage {
    * gerçekten gerektiği yerde de atlatıyordu.
    */
   disclosures?: string[];
+  /**
+   * Cevabın dayandığı kaynaklar.
+   *
+   * Bildirimler gibi ayrı taşınıyor ve aynı sebeple: metnin içine
+   * karıştırılan bir kaynakça okunmuyor. Ama bildirimlerden farklı olarak
+   * bunlar TIKLANABİLİR olmalı, o yüzden düz metin değil bağlantı olarak
+   * gösteriliyorlar.
+   *
+   * Widget'ların aksine geri yükleniyorlar: bir kaynak tarihsel bir olgu --
+   * o belge vardı ve bu cevap ona dayanıyordu -- ve yarın da doğru kalıyor.
+   */
+  sources?: MessageSource[];
 }
 
 /**

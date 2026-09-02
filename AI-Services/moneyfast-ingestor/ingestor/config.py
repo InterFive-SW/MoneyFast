@@ -289,3 +289,18 @@ def kap_pdf_window_days() -> int:
     bildirimlerde açık, derin taramada kapalı.
     """
     return max(0, _int("INGESTOR_KAP_PDF_WINDOW_DAYS", 30))
+
+
+def kap_corpus_page() -> int:
+    """Arşiv taramasında tek seferde okunan bildirim sayısı."""
+    return max(1, _int("INGESTOR_KAP_CORPUS_PAGE", 300))
+
+
+def kap_corpus_budget() -> int:
+    """Tek turda kaç eksik gövde indirilir.
+
+    Gövde başına bir istek ve host başına iki saniye var. Sınırsız
+    bırakmak, 28.984 bildirimlik arşivde tek bir turun saatlerce sürmesi ve
+    bu arada başka hiçbir işin sıra bulamaması demekti.
+    """
+    return max(0, _int("INGESTOR_KAP_CORPUS_BUDGET", 120))

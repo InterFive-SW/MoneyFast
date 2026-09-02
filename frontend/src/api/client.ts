@@ -450,12 +450,28 @@ export interface ConversationList {
     offset: number;
 }
 
+/**
+ * Cevabın dayandığı tek bir kaynak.
+ *
+ * `kind` bir ayırıcı: arayüz bir belgeyi bağlantı, bir ölçüm serisini düz
+ * metin olarak gösteriyor, ve kapalı bir ayırıcı ileride yeni bir kaynak
+ * türünün şema değiştirmeden eklenmesini sağlıyor.
+ */
+export interface MessageSource {
+    kind: 'DOCUMENT' | 'QUOTE' | 'SERIES' | 'HOLDINGS' | 'PROFILE';
+    label: string;
+    detail?: string;
+    url?: string | null;
+    as_of?: string | null;
+}
+
 export interface ConversationMessage {
     id: string;
     role: 'user' | 'assistant';
     content: string;
     created_at: string;
     disclosures: string[];
+    sources?: MessageSource[];
 }
 
 export interface ConversationDetail extends ConversationSummary {

@@ -514,6 +514,51 @@ def run_kap(client: httpx.Client, since=None, until=None, bodies: bool = True) -
 KAP_TOPUP_MARGIN_DAYS = 3
 
 
+def backfill_kap_corpus(client: httpx.Client) -> dict:
+    """Panoya düşmüş ama derlemde METNİ olmayan bildirimlerin gövdesini çek.
+
+    Bu iş, listeleme ile gövde arasındaki açığı kapatıyor ve o açık ölçüldü:
+    panoda 28.984 KAP bildirimi varken derlemde 147 gövde vardı. Sohbete
+    "THYAO'da son gelişmeler neler" diye sorulduğunda arşivde o şirketin 47
+    bildirimi duruyor, derlemde sıfır -- yani pano dolu, asistan boş.
+
+    Sebebi tasarımdı: gövde yalnızca YENİ gelen bildirimler için çekiliyor
+    (`run_kap`), çünkü tur başına bütçe var. Geriye dönük arşivin gövdesini
+    kimse çekmiyordu.
+
+    Yeniden eskiye ilerliyor ve tur başına bütçeli: birkaç turda kapanıyor,
+    tek bir tur saatlerce sürmüyor, ve yarıda kesilirse bitişik ve güncel
+    bir derlem bırakıyor.
+    """
+    budget = config.kap_corpus_budget()
+    if budget <= 0:
+        return {"skipped": True}
+
+    page_size = config.kap_corpus_page()
+    missing: list[dict] = []
+    offset = 0
+    while len(missing) < budget:
+        page = sinks.fetch_news_archive(client, "KAP", page_size, offset)
+        if not page:
+            break
+        offset += len(page)
+        urls = [row["url"] for row in page if row.get("url")]
+        embedded = sinks.fetch_embedded_urls(client, urls)
+        missing.extend(row for row in page if row.get("url") not in embedded)
+
+    if not missing:
+        log.info("kap corpus: every stored disclosure already has its text")
+        return {"fetched": 0, "embedded": 0}
+
+    documents = _with_bodies(missing[:budget], client)
+    embedded = sinks.push_disclosures_to_rag(client, documents)
+    log.info(
+        "kap corpus backfill: %d disclosures without text, %d bodies embedded",
+        len(missing), embedded,
+    )
+    return {"fetched": len(documents), "embedded": embedded}
+
+
 def topup_kap(client: httpx.Client) -> dict:
     """Kapalı kalınan aralığı kapat.
 
@@ -569,6 +614,13 @@ def _within_pdf_window(published_at) -> bool:
     return age <= timedelta(days=window)
 
 
+def _as_datetime(value):
+    """Arşiv ucu ISO metin döndürüyor, yoklama ise datetime taşıyor."""
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
+
+
 def _with_bodies(items: list, client: httpx.Client) -> list:
     """Read each disclosure's body and prepend the issuers it names.
 
@@ -578,14 +630,20 @@ def _with_bodies(items: list, client: httpx.Client) -> list:
     """
     documents = []
     for item in items:
-        index = item["url"].rsplit("/", 1)[-1]
+        # Bildirim numarası kalıcı bağlantının içinde. Bağlantısı olmayan bir
+        # satırın numarası da yok, dolayısıyla gövdesi çekilemez.
+        url = item.get("url") or ""
+        if "/" not in url:
+            continue
+        index = url.rsplit("/", 1)[-1]
         detail = kap_source.fetch_detail(index, client)
         if detail is None:
             continue
         text = kap_source.body_text(detail)
         if not text:
             continue
-        if _within_pdf_window(item["published_at"]):
+        published = _as_datetime(item["published_at"])
+        if _within_pdf_window(published):
             attachments = kap_source.attachment_text(detail, client)
             if attachments:
                 text = f"{text}\n\n{attachments}"
@@ -594,7 +652,7 @@ def _with_bodies(items: list, client: httpx.Client) -> list:
         documents.append({
             "title": item["title"],
             "url": item["url"],
-            "published_at": item["published_at"],
+            "published_at": published,
             "related_symbols": symbols,
             "text": f"{header}\n{item['title']}\n\n{text}".strip(),
         })
@@ -719,6 +777,17 @@ def start_scheduler() -> None:
         id="kap-backfill",
         max_instances=1,
         misfire_grace_time=None,
+    )
+    # Listeleme ile gövde arasındaki açığı kapatıyor. Ayrı bir iş, çünkü
+    # ayrı bir soruyu cevaplıyor: `kap-backfill` "bu bildirimi biliyor
+    # muyuz", bu "metnini okuduk mu".
+    scheduler.add_job(
+        _job("kap-corpus", backfill_kap_corpus),
+        "interval",
+        minutes=config.kap_interval_minutes() * 3,
+        id="kap-corpus",
+        max_instances=1,
+        coalesce=True,
     )
     # After the close, so the day's final bar is settled.
     scheduler.add_job(

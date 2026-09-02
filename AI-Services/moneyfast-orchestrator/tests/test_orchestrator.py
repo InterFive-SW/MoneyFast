@@ -159,6 +159,492 @@ class TestParseJSON:
 # ==========================================================================
 # router_node
 # ==========================================================================
+class TestResearchQuery:
+    """Arama sorgusu, planlayıcının ürettiği metin DEĞİL.
+
+    Uzman istemi ona "kullanıcının cümlesini olduğu gibi geçir, alıcı taraf
+    zamirleri sunucuda çözer" diyordu ve o sözleşme doğru değildi:
+    `_resolve_query` bağlamı yalnızca sorgunun HER kelimesi zamir ya da dolgu
+    ise katıyor. "kap verilerine göre nasıl" bu koşulu sağlamıyor, dolayısıyla
+    hisse adı hiç eklenmiyordu.
+    """
+
+    def test_the_carried_ticker_is_prepended(self):
+        assert orchestrator._research_query({
+            "user_message": "kap verilerine göre nasıl",
+            "carried_ticker": "THYAO",
+        }) == "THYAO kap verilerine göre nasıl"
+
+    def test_a_ticker_already_in_the_message_is_not_repeated(self):
+        assert orchestrator._research_query({
+            "user_message": "THYAO kap açıklaması", "carried_ticker": "THYAO",
+        }) == "THYAO kap açıklaması"
+
+    def test_a_lowercase_mention_still_counts_as_present(self):
+        assert orchestrator._research_query({
+            "user_message": "thyao hakkında ne var", "carried_ticker": "THYAO",
+        }) == "thyao hakkında ne var"
+
+    def test_without_a_ticker_the_message_goes_through_unchanged(self):
+        assert orchestrator._research_query({"user_message": "bankacılık haberleri"}) == (
+            "bankacılık haberleri"
+        )
+
+    def test_nothing_but_the_ticker_is_added(self):
+        """Bu depoda ölçüldü: kullanıcının gerçek cümlesi kendi belgesine
+        karşı 0,289 alırken çıplak ölçüt 0,380 aldı. Sorguyu 'KAP bildirimi
+        özel durum açıklaması' gibi doldurmak benzerliği DÜŞÜRÜRDÜ."""
+        out = orchestrator._research_query({
+            "user_message": "son durum ne", "carried_ticker": "ASELS",
+        })
+        assert out == "ASELS son durum ne"
+
+
+class TestNarrowThenWiden:
+    """Hisse süzgeci bir DARALTMA denemesi, sert bir kural değil.
+
+    Korpusta hisse sütunu tek ve `push_disclosures_to_rag` yalnızca ilk
+    sembolü yazıyor; iki şirketli bir bildirimin ikinci şirket için
+    bulunabilmesi bilerek anlamsal aramaya bırakılmış. Ölçüldü, eşleşmelerin
+    %37'si ikinci koddan geliyor -- sert bir süzgeç tam da onu kapatırdı.
+    """
+
+    def _rows(self, n, prefix="c", mentions=True):
+        """Geniş geçişin var olma sebebi, hissenin `ticker` sütununda DEĞİL
+        METİNDE geçtiği belgeler -- iki şirketli bir bildirimde ikinci şirket
+        gibi. Bu yüzden varsayılan satırlar hisseyi metninde anıyor."""
+        body = "İlgili şirketler: ASELS, THYAO" if mentions else "başka bir konu"
+        return [{"chunk_id": f"{prefix}{i}", "title": f"Bildirim {i}",
+                 "publisher": "KAP", "snippet": body, "published_at": "2026-08-28"}
+                for i in range(n)]
+
+    def _payload(self, rows):
+        return {"as_of": "2026-09-01T00:00:00Z", "source": "VECTOR_STORE::v1",
+                "is_delayed": False, "index_lag_minutes": 0,
+                "results": rows, "query_echo": "q"}
+
+    @pytest.mark.asyncio
+    async def test_a_productive_filter_is_kept(self, mocker):
+        calls = []
+
+        async def fake(state, tool, args, **kw):
+            calls.append(args.get("filters"))
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(self._rows(5))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
+        assert calls == [{"tickers": ["THYAO"]}], "one pass only when the filter pays"
+
+    @pytest.mark.asyncio
+    async def test_a_thin_filter_widens_and_merges(self, mocker):
+        results = [self._rows(1, "n"), self._rows(3, "w")]
+
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(results.pop(0))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        out = await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
+        rows = out["specialist_output"]["data"]["results"]
+        assert [r["chunk_id"] for r in rows] == ["n0", "w0", "w1", "w2"]
+
+    @pytest.mark.asyncio
+    async def test_a_document_found_by_both_passes_is_listed_once(self, mocker):
+        results = [self._rows(1), self._rows(2)]
+
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(results.pop(0))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        out = await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
+        assert [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]] == ["c0", "c1"]
+
+    @pytest.mark.asyncio
+    async def test_unrelated_widened_rows_are_not_padded_in(self, mocker):
+        """Genişletmenin amacı hisseyi metninde anan belgeleri yakalamak,
+        konuyla ilgisiz haberle doldurmak değil. Ölçüldü: THYAO sorusuna
+        "Asya'nın en zengin ülkesinde nüfus alarmı" kaynak olarak
+        gösterildi. Derlemde o şirkete dair bir şey yoksa doğru cevap "yok"
+        -- boş sonuç zaten TAM bir cevap sayılıyor."""
+        results = [self._rows(1, "n"), self._rows(3, "w", mentions=False)]
+
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(results.pop(0))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        out = await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
+        assert [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]] == ["n0"]
+
+    @pytest.mark.asyncio
+    async def test_a_planner_ticker_filter_does_not_survive_the_widening(self, mocker):
+        """Kaldırmasaydı iki geçiş de aynı süzgeçle çalışır ve "geniş"
+        hiçbir şey genişletmezdi -- gerçek bir turda ölçüldü, planlayıcı
+        `tickers` koydu ve iki geçiş de aynı sıfır sonucu döndürdü."""
+        seen = []
+        results = [self._rows(1, "n"), self._rows(3, "w")]
+
+        async def fake(state, tool, args, **kw):
+            seen.append(args.get("filters"))
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(results.pop(0))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        await orchestrator._narrow_then_widen(
+            {}, {"query": "q", "filters": {"tickers": ["ASELS"], "languages": ["tr"]}},
+            "THYAO", [],
+        )
+        assert seen[0] == {"languages": ["tr"], "tickers": ["THYAO"]}
+        assert seen[1] == {"languages": ["tr"]}, "the wide pass keeps other filters only"
+
+    @pytest.mark.asyncio
+    async def test_a_failed_widening_does_not_lose_the_narrow_results(self, mocker):
+        results = [self._rows(1), []]
+
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(results.pop(0))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        out = await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
+        assert len(out["specialist_output"]["data"]["results"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_both_passes_empty_reports_empty(self, mocker):
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "EMPTY",
+                                          "data": self._payload([])}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        out = await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
+        assert out["specialist_output"]["data"]["results"] == []
+
+    @pytest.mark.asyncio
+    async def test_without_a_ticker_there_is_only_one_pass(self, mocker):
+        calls = []
+
+        async def fake(state, tool, args, **kw):
+            calls.append(args)
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload([])}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        await orchestrator._narrow_then_widen({}, {"query": "q"}, None, [])
+        assert len(calls) == 1 and "filters" not in calls[0]
+
+    @pytest.mark.parametrize("row,expected", [
+        ({"tickers": ["THYAO"]}, True),
+        ({"title": "THYAO — geri alım", "tickers": []}, True),
+        ({"snippet": "İlgili şirketler: ASELS, THYAO"}, True),
+        ({"title": "thyao küçük harfle"}, True),
+        ({"title": "başka bir şirket", "snippet": "alakasız"}, False),
+        ({}, False),
+    ])
+    def test_relevance_is_checked_against_tag_and_text(self, row, expected):
+        """Etiket sütunu TEK; iki şirketli bir bildirimde ikinci şirket
+        yalnızca metinde geçiyor."""
+        assert orchestrator._mentions(row, "THYAO") is expected
+
+    def test_a_malformed_payload_yields_no_rows(self):
+        assert orchestrator._result_rows({"specialist_output": {"data": {"results": "nope"}}}) == []
+
+
+class TestSourcesRecapNode:
+    """Hiç model çağırmıyor, ve bu düğümün var olma sebebi o."""
+
+    def _state(self, rows):
+        return {"conversation_history": [
+            {"role": "assistant", "content": "...", "sources": rows}
+        ]}
+
+    @pytest.mark.asyncio
+    async def test_it_formats_the_previous_turns_sources(self):
+        out = await orchestrator.sources_recap_node(self._state([
+            {"kind": "DOCUMENT", "label": "THYAO — Pay Geri Alımı",
+             "detail": "KAP · 2026-08-28",
+             "url": "https://www.kap.org.tr/tr/Bildirim/1655982"},
+        ]))
+        assert "[THYAO — Pay Geri Alımı](https://www.kap.org.tr/tr/Bildirim/1655982)" in (
+            out["draft_response"]
+        )
+        assert "KAP · 2026-08-28" in out["draft_response"]
+
+    @pytest.mark.asyncio
+    async def test_a_source_without_a_link_is_plain_text(self):
+        out = await orchestrator.sources_recap_node(self._state([
+            {"kind": "SERIES", "label": "THYAO günlük kapanış serisi",
+             "detail": "252 işlem günü", "url": None},
+        ]))
+        assert "](" not in out["draft_response"]
+        assert "THYAO günlük kapanış serisi" in out["draft_response"]
+
+    @pytest.mark.asyncio
+    async def test_no_prior_sources_says_so_rather_than_inventing(self):
+        out = await orchestrator.sources_recap_node({"conversation_history": []})
+        assert out["draft_response"] == orchestrator.RECAP_EMPTY_TR
+
+    @pytest.mark.asyncio
+    async def test_it_calls_no_model(self, patched_llm):
+        """Turu öldüren şey tam da kota hatasıydı. Bu düğüm ona bağışık."""
+        await orchestrator.sources_recap_node(self._state([
+            {"kind": "DOCUMENT", "label": "x", "url": "https://e.test/1"},
+        ]))
+        assert patched_llm.calls == []
+
+
+class TestRoutingOverrides:
+    """Yönlendirici tek başına güvenilmiyor, ve bunun ölçülmüş bir sebebi var.
+
+    Gerçek bir sohbette "kap verilerine göre nasıl" sorusuna yönlendirici
+    `primary_intent: MARKET_RESEARCH` VE `target_agent: MARKET_DATA_AGENT`
+    döndürdü -- kendi içinde çelişen bir cevap. Piyasa verisi ajanının belge
+    derlemine hiçbir yolu yok, dolayısıyla o tur 28.917 bildirimin hiçbirini
+    göremeden hareketli ortalamalarla cevaplandı. İki kez üst üste.
+    """
+
+    def _routing(self, routing_payload, **over):
+        payload = {**routing_payload}
+        payload.update(over)
+        return payload
+
+    @pytest.mark.asyncio
+    async def test_a_research_intent_is_not_answered_by_the_data_agent(
+        self, route_as, routing_payload
+    ):
+        route_as(self._routing(
+            routing_payload, primary_intent="MARKET_RESEARCH",
+            target_agent="MARKET_DATA_AGENT", entities={"tickers": []},
+        ))
+        out = await orchestrator.router_node({"user_message": "kap verilerine göre nasıl"})
+        assert out["target_agent"] == "MARKET_RESEARCH_AGENT"
+
+    @pytest.mark.asyncio
+    async def test_naming_kap_reaches_the_corpus_whatever_the_model_said(
+        self, route_as, routing_payload
+    ):
+        route_as(self._routing(
+            routing_payload, primary_intent="MARKET_DATA_QUERY",
+            target_agent="MARKET_DATA_AGENT", entities={"tickers": ["THYAO"]},
+        ))
+        out = await orchestrator.router_node({"user_message": "THYAO KAP açıklaması var mı"})
+        assert out["target_agent"] == "MARKET_RESEARCH_AGENT"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("message", [
+        "TUPRS'ın son bilançosu ne durumda",
+        "ASELS temettü açıkladı mı",
+        "şirket bedelli sermaye artırımı yaptı mı",
+        "faaliyet raporu ne diyor",
+        # Kullanıcının sorduğu ve hareketli ortalamalarla cevaplanan soru.
+        "THYAO'da son dönemde öne çıkan gelişmeler neler?",
+        "ASELS ile ilgili haber var mı",
+    ])
+    async def test_filing_vocabulary_routes_to_research(
+        self, route_as, routing_payload, message
+    ):
+        route_as(self._routing(
+            routing_payload, primary_intent="MARKET_DATA_QUERY",
+            target_agent="MARKET_DATA_AGENT", entities={},
+        ))
+        out = await orchestrator.router_node({"user_message": message})
+        assert out["target_agent"] == "MARKET_RESEARCH_AGENT", message
+
+    @pytest.mark.asyncio
+    async def test_a_plain_price_question_is_left_alone(self, route_as, routing_payload):
+        """Düzeltme yalnızca belge sorularına dokunuyor. 'THYAO kaç lira'
+        piyasa verisi sorusudur ve öyle kalmalı."""
+        route_as(self._routing(
+            routing_payload, primary_intent="MARKET_DATA_QUERY",
+            target_agent="MARKET_DATA_AGENT", entities={"tickers": ["THYAO"]},
+        ))
+        out = await orchestrator.router_node({"user_message": "THYAO kaç lira"})
+        assert out["target_agent"] == "MARKET_DATA_AGENT"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("message", [
+        "gelişmiş ülkelerde faiz nasıl belirlenir",
+        "THYAO 52 haftalık aralığın neresinde",
+    ])
+    async def test_words_that_only_look_like_filing_words_do_not_fire(
+        self, route_as, routing_payload, message
+    ):
+        route_as(self._routing(
+            routing_payload, primary_intent="MARKET_DATA_QUERY",
+            target_agent="MARKET_DATA_AGENT", entities={},
+        ))
+        out = await orchestrator.router_node({"user_message": message})
+        assert out["target_agent"] == "MARKET_DATA_AGENT", message
+
+    @pytest.mark.asyncio
+    async def test_a_portfolio_turn_is_not_hijacked_by_a_filing_word(
+        self, route_as, routing_payload
+    ):
+        """Düzeltme yalnızca piyasa verisi ve eğitim ajanından çekiyor.
+        'portföyümdeki temettü' sahiplik sorusudur."""
+        route_as(self._routing(
+            routing_payload, primary_intent="PORTFOLIO_INQUIRY",
+            target_agent="PORTFOLIO_AGENT", entities={},
+        ))
+        out = await orchestrator.router_node({"user_message": "portföyümdeki temettü ne kadar"})
+        assert out["target_agent"] == "PORTFOLIO_AGENT"
+
+    @pytest.mark.asyncio
+    async def test_safety_still_decides_first(self, route_as, routing_payload, safety_payload):
+        """Sıkıntı turu her şeyi önceler. Düzeltmelerin hiçbiri bir sıkıntı
+        turunu yönlendirmeden çıkaramaz."""
+        route_as(
+            self._routing(routing_payload, target_agent="MARKET_DATA_AGENT"),
+            safety={**safety_payload, "safety_flags": ["DISTRESS_SIGNAL"]},
+        )
+        out = await orchestrator.router_node({"user_message": "her şeyi kaybettim kap açıklaması"})
+        assert out["target_agent"] == "HUMAN_HANDOFF"
+        assert out["meta_request"] is None
+
+
+class TestCarriedTicker:
+    """`entities` her turda bilerek sıfırlanıyor (checkpointer thread_id
+    üzerinden birleştiriyor), o yüzden devam sorularında hisse adı yalnızca
+    220 karaktere kırpılmış düzyazı özette kalıyordu."""
+
+    @pytest.mark.asyncio
+    async def test_this_turns_ticker_wins(self, route_as, routing_payload):
+        route_as({**routing_payload, "entities": {"tickers": ["ASELS"]}})
+        out = await orchestrator.router_node({
+            "user_message": "ASELS nasıl",
+            "conversation_history": [{"role": "user", "content": "THYAO aldım"}],
+        })
+        assert out["carried_ticker"] == "ASELS"
+
+    @pytest.mark.asyncio
+    async def test_an_earlier_user_turn_supplies_it(self, route_as, routing_payload):
+        route_as({**routing_payload, "entities": {"tickers": []}})
+        out = await orchestrator.router_node({
+            "user_message": "kap verilerine göre nasıl",
+            "conversation_history": [
+                {"role": "user", "content": "THYAO'da son gelişmeler neler?"},
+                {"role": "assistant", "content": "Fiyat 200 günlük ortalamanın üzerinde."},
+            ],
+        })
+        assert out["carried_ticker"] == "THYAO"
+
+    @pytest.mark.asyncio
+    async def test_kap_itself_is_not_mistaken_for_a_ticker(self, route_as, routing_payload):
+        """Bir BIST kodu üç ila altı büyük harftir ve bu kalıba Türkçe
+        kısaltmaların yarısı uyuyor -- 'KAP' dahil."""
+        route_as({**routing_payload, "entities": {"tickers": []}})
+        out = await orchestrator.router_node({
+            "user_message": "ne var ne yok",
+            "conversation_history": [{"role": "user", "content": "KAP ve BIST nedir"}],
+        })
+        assert out["carried_ticker"] is None
+
+    @pytest.mark.asyncio
+    async def test_assistant_turns_are_not_read_for_symbols(self, route_as, routing_payload):
+        """Asistan turları özetlenirken 220 karaktere kırpılıyor; oradan
+        sembol okumak konuyu rastgele bir kesme noktasına bağlardı."""
+        route_as({**routing_payload, "entities": {"tickers": []}})
+        out = await orchestrator.router_node({
+            "user_message": "peki ya bu",
+            "conversation_history": [{"role": "assistant", "content": "TUPRS yükseldi"}],
+        })
+        assert out["carried_ticker"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_failed_router_carries_nothing(self, fake_mcp, patched_llm, safety_payload):
+        """Bu turda yazılmayan bir alan, checkpointer yüzünden öncekinin
+        değerini taşır."""
+        fake_mcp.responses["classify_and_route_intent"] = safety_payload
+        patched_llm.set_responses(["not json"])
+        out = await orchestrator.router_node({"user_message": "x"})
+        assert out["carried_ticker"] is None
+        assert out["meta_request"] is None
+
+
+class TestSourcesRecap:
+    """'bana kaynakça verir misin' bir ARAMA değil. Ölçüldü: o cümle arama
+    sorgusu olarak gönderildi, sıfır sonuç döndü, ardından kota hatası turu
+    öldürdü."""
+
+    def _with_sources(self, message, tickers=None):
+        return {
+            "user_message": message,
+            "conversation_history": [
+                {"role": "user", "content": "THYAO gelişmeleri"},
+                {"role": "assistant", "content": "...",
+                 "sources": [{"kind": "DOCUMENT", "label": "KAP bildirimi",
+                              "url": "https://www.kap.org.tr/tr/Bildirim/1"}]},
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_bare_sources_question_is_flagged_as_a_recap(
+        self, route_as, routing_payload
+    ):
+        route_as({**routing_payload, "entities": {"tickers": []}})
+        out = await orchestrator.router_node(self._with_sources("bana kaynakça verir misin"))
+        assert out["meta_request"] == "SOURCES_RECAP"
+        assert out["target_agent"] == "MARKET_RESEARCH_AGENT"
+
+    @pytest.mark.asyncio
+    async def test_naming_an_instrument_makes_it_a_search_again(
+        self, route_as, routing_payload
+    ):
+        """Ayırıcı koşul bu: tur bir enstrüman anıyorsa aranacak bir şey
+        vardır. 'THYAO kaynakları' aramadır."""
+        route_as({**routing_payload, "entities": {"tickers": ["THYAO"]}})
+        out = await orchestrator.router_node(self._with_sources("THYAO kaynaklarını ver"))
+        assert out["meta_request"] is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("message", [
+        "enerji kaynakları hakkında bilgi ver",
+        "şirketin gelir kaynağı nedir",
+        "yenilenebilir enerji kaynaklarını anlat",
+    ])
+    async def test_the_word_source_alone_does_not_fire(
+        self, route_as, routing_payload, message
+    ):
+        route_as({**routing_payload, "entities": {"tickers": []}})
+        out = await orchestrator.router_node(self._with_sources(message))
+        assert out["meta_request"] is None, message
+
+    @pytest.mark.asyncio
+    async def test_a_statement_without_an_asking_verb_does_not_fire(
+        self, route_as, routing_payload
+    ):
+        route_as({**routing_payload, "entities": {"tickers": []}})
+        out = await orchestrator.router_node(self._with_sources("kaynakça çok önemlidir"))
+        assert out["meta_request"] is None
+
+    @pytest.mark.asyncio
+    async def test_without_a_prior_sourced_answer_it_is_an_ordinary_turn(
+        self, route_as, routing_payload
+    ):
+        """Özetlenecek kaynak yoksa özetlenecek bir şey de yok. Bu koşul aynı
+        zamanda güvenli tarafta başarısız oluyor: sözleşme henüz kaynak
+        taşımıyorsa bu dal hiç çalışmıyor."""
+        route_as({**routing_payload, "entities": {"tickers": []}})
+        out = await orchestrator.router_node({"user_message": "bana kaynakça verir misin"})
+        assert out["meta_request"] is None
+
+    def test_the_edge_sends_a_recap_turn_to_its_own_node(self):
+        assert orchestrator.route_after_router({
+            "primary_intent": "MARKET_RESEARCH",
+            "target_agent": "MARKET_RESEARCH_AGENT",
+            "meta_request": "SOURCES_RECAP",
+        }) == "sources_recap"
+
+    def test_safety_outranks_a_recap(self):
+        assert orchestrator.route_after_router({
+            "primary_intent": "MARKET_RESEARCH",
+            "target_agent": "MARKET_RESEARCH_AGENT",
+            "meta_request": "SOURCES_RECAP",
+            "safety_flags": ["DISTRESS_SIGNAL"],
+        }) == "handoff"
+
+
 class TestRouterNode:
     @pytest.mark.asyncio
     async def test_happy_path_populates_routing_state(

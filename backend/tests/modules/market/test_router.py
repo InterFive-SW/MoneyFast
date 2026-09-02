@@ -251,6 +251,39 @@ class TestIngestWrites:
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
         assert client.get("/api/market/news/coverage").status_code == 401
 
+    def test_the_archive_is_paged_for_the_corpus_backfill(
+        self, client, mocker, monkeypatch
+    ):
+        """Panoya düşmek, sohbetin bulabilmesi demek değil: ölçüldü, panoda
+        28.984 bildirim varken derlemde 147 gövde vardı. Bu uç, aradaki
+        açığı kapatan işin girdisi."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        mocker.patch.object(market_module_service, "news_archive", return_value=[
+            SimpleNamespace(
+                content_hash="a" * 64, title="THYAO — bildirim",
+                url="https://www.kap.org.tr/tr/Bildirim/1", related_symbols=["THYAO"],
+                published_at=NOW,
+            )
+        ])
+        response = client.get(
+            "/api/market/news/archive?source=KAP&limit=200&offset=0",
+            headers={"Authorization": "Bearer secret"},
+        )
+        assert response.status_code == 200
+        item = response.json()["items"][0]
+        assert item["url"].endswith("/Bildirim/1")
+        assert item["related_symbols"] == ["THYAO"]
+
+    def test_the_archive_is_guarded(self, client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.get("/api/market/news/archive").status_code == 401
+
+    def test_an_unbounded_archive_page_is_refused(self, client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.get(
+            "/api/market/news/archive?limit=5000", headers={"Authorization": "Bearer secret"}
+        ).status_code == 422
+
     def test_known_hashes_is_guarded(self, client, monkeypatch):
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
         assert client.post(

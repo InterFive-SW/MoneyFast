@@ -179,6 +179,18 @@ class TestNewsStore:
         assert written == 0
 
 
+class TestNewsArchive:
+    def test_it_reads_one_source_newest_first(self):
+        """Yeniden eskiye, `topup`/`backfill` ile aynı gerekçeyle: yarıda
+        kesilen bir tur bitişik ve GÜNCEL bir derlem bırakır."""
+        db = MagicMock(spec=Session)
+        chain = db.query.return_value.filter.return_value.order_by.return_value
+        chain.limit.return_value.offset.return_value.all.return_value = ["row"]
+        assert news_service.news_archive(db, "KAP", 200, 0) == ["row"]
+        chain.limit.assert_called_once_with(200)
+        chain.limit.return_value.offset.assert_called_once_with(0)
+
+
 class TestNewsCoverage:
     def _db(self, rows):
         db = MagicMock(spec=Session)

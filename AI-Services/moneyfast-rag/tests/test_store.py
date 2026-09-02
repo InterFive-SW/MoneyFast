@@ -319,3 +319,52 @@ class TestDeleteDocument:
         assert await store.delete_document("id", "owner") is True
         pool.conn.rowcount = 0
         assert await store.delete_document("id", "owner") is False
+
+
+class TestKnownUrls:
+    """`ingestor`'ın gövde indirmeden ÖNCE sorduğu soru.
+
+    Ölçüldü: panoda 28.984 KAP bildirimi varken derlemde 147 gövde vardı.
+    Pahalı olan listeleme değil, bildirim başına bir istek olan gövde
+    indirme; bu uç onu atlamayı mümkün kılıyor.
+    """
+
+    @pytest.mark.asyncio
+    async def test_it_returns_the_urls_already_held(self, pool):
+        pool.conn._rows = [{"source_url": "https://www.kap.org.tr/tr/Bildirim/1"}]
+        got = await store.known_urls([
+            "https://www.kap.org.tr/tr/Bildirim/1",
+            "https://www.kap.org.tr/tr/Bildirim/2",
+        ])
+        assert got == {"https://www.kap.org.tr/tr/Bildirim/1"}
+
+    @pytest.mark.asyncio
+    async def test_rows_are_read_by_name_not_by_position(self, pool):
+        """Havuz `dict_row` ile kuruluyor. Konumla okumak `KeyError: 0`
+        veriyor ve uç 503 dönüyordu -- gerçek bir çalıştırmada ölçüldü."""
+        pool.conn._rows = [{"source_url": "https://x/1"}]
+        assert await store.known_urls(["https://x/1"]) == {"https://x/1"}
+
+    @pytest.mark.asyncio
+    async def test_a_null_url_is_not_returned(self, pool):
+        pool.conn._rows = [{"source_url": None}]
+        assert await store.known_urls(["https://x/1"]) == set()
+
+    @pytest.mark.asyncio
+    async def test_an_empty_list_asks_nothing(self, pool):
+        assert await store.known_urls([]) == set()
+        assert pool.conn.executed == []
+
+    @pytest.mark.asyncio
+    async def test_only_the_public_corpus_is_visible(self, pool):
+        """Bir kullanıcının kendi belgesinin adresi buraya cevap verseydi,
+        o belgenin VARLIĞI servisler arası bir uçtan sızardı."""
+        await store.known_urls(["https://x/1"])
+        sql, _ = pool.conn.executed[-1]
+        assert "owner_user_id IS NULL" in sql
+
+    @pytest.mark.asyncio
+    async def test_the_request_is_capped(self, pool):
+        await store.known_urls([f"https://x/{i}" for i in range(5_000)])
+        _, params = pool.conn.executed[-1]
+        assert len(params["urls"]) == store.MAX_URL_QUERY

@@ -115,6 +115,26 @@ def known_hashes(db: Session, hashes: Sequence[str]) -> list[str]:
     return [row[0] for row in rows]
 
 
+def news_archive(
+    db: Session, source: str, limit: int, offset: int
+) -> list[NewsItem]:
+    """Saklanan bildirimler, yeniden eskiye.
+
+    `latest_news`'ten ayrı: o pano beslemesi (yirmi satır, kaynak farketmez),
+    bu arşivi kapatan iş için sayfalanmış bir tarama. Yeniden eskiye,
+    `topup`/`backfill` ile aynı gerekçeyle: yarıda kesilen bir tur bitişik ve
+    GÜNCEL bir arşiv bırakır, rastgele bir serpinti değil.
+    """
+    return (
+        db.query(NewsItem)
+        .filter(NewsItem.source == source)
+        .order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
+
+
 def latest_news(db: Session, limit: int = 20) -> list[NewsItem]:
     return (
         db.query(NewsItem)

@@ -45,6 +45,7 @@ from mcp.server.fastmcp import FastMCP
 
 import backend_client
 import compliance_tools
+import fundamentals_tools
 import market_data_tools
 import market_research_tools
 import news_tools
@@ -82,10 +83,15 @@ SERVER_NAME = "moneyfast"
 #: ÖLÇÜM: ikisi geçmiş getirilerin aritmetiği, biri gerçekten olan günler.
 #: `simulate_position_change` yeni bir yetenek değil -- `/risk/simulate`
 #: aylardır yazılmış ve testliydi, hiçbir araç onu çağırmıyordu.
-CONTRACT_VERSION = "v2.13"
+#: v2.14: `get_company_fundamentals`. YENİ VERİ DEĞİL -- 1.011 enstrümanda
+#: dolu duran otuz beş alan sohbete taşındı. `GET /market/fundamentals`
+#: hepsini zaten veriyordu ve yalnızca hisse detay sayfası okuyordu; ajanın
+#: bir şirket hakkında görebildiği her şey fiyat, değişim, hacim ve dört
+#: orandan ibaretti. `get_market_data`'nın donuk v2.2 şeması DEĞİŞMEDİ.
+CONTRACT_VERSION = "v2.14"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Sixteen tools across eleven domains.
+MoneyFast tool server. Seventeen tools across twelve domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -95,6 +101,11 @@ Data:    get_portfolio_positions, get_market_data,
 Prices:  get_market_data is the ONLY source for the price or valuation of an
          instrument the user does not hold. A null fundamental means the
          provider does not publish it; report "veri yok", never 0.
+Company: get_company_fundamentals answers "how is the BUSINESS doing" --
+         margins, debt, cash flow, analyst consensus. It is a SNAPSHOT, not
+         a series: there is no previous period stored, so never say "son
+         çeyrek", "arttı" or "düştü" from it. A null field means the
+         provider does not publish it, never zero.
 Trend:   get_technical_signals answers "how is it DOING" as opposed to "what
          does it cost". Relay its `narrative` verbatim, caveat included; a
          null field there means the history is too short to compute it, and
@@ -136,6 +147,7 @@ DOMAIN_MODULES = (
     ("technical", technical_tools),
     ("news", news_tools),
     ("scenario", scenario_tools),
+    ("fundamentals", fundamentals_tools),
 )
 
 

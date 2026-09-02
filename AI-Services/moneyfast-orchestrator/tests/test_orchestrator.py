@@ -519,6 +519,102 @@ class TestPortfolioNewsBranch:
         assert out["tools_used"] == ["get_portfolio_positions"]
 
 
+class TestFundamentalsBranch:
+    """Üçüncü araç: şirketin İŞİ nasıl gidiyor.
+
+    Fiyat "ne ediyor", eğilim "nasıl gidiyor", bu ise "kârlı mı, borçlu mu".
+    Üçü de adı geçen bir enstrüman hakkında ve aynı ajanın arkasında; ayrı bir
+    uzman ajan açmak, aynı soruyu yönlendiricide üçe bölmeyi gerektirirdi.
+
+    Bu araç YENİ VERİ GETİRMEDİ: otuz beş alan zaten toplanıyordu ve
+    `/market/fundamentals` hepsini veriyordu, ama hiçbir MCP aracı ona
+    ulaşmıyordu -- ajanın bir şirket hakkında görebildiği her şey fiyat,
+    değişim, hacim ve dört orandan ibaretti.
+    """
+
+    PAYLOAD = {
+        "instruments": [
+            {"symbol": "AKBNK", "name": "Akbank", "currency": "TRY",
+             "fundamentals": {"profit_margin": 0.284, "debt_to_equity": None}},
+        ],
+        "not_found": [], "missing_data": [],
+    }
+
+    @pytest.mark.asyncio
+    async def test_a_business_question_reaches_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_company_fundamentals", "arguments": {"symbols": ["akbnk"]}}'
+        )
+        fake_mcp.responses["get_company_fundamentals"] = self.PAYLOAD
+        out = await orchestrator.market_data_node(base_state)
+        assert out["tools_used"] == ["get_company_fundamentals"]
+        assert fake_mcp.calls[0][1]["symbols"] == ["AKBNK"]
+
+    @pytest.mark.asyncio
+    async def test_the_router_ticker_is_used_when_the_plan_names_none(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response('{"tool": "get_company_fundamentals", "arguments": {}}')
+        fake_mcp.responses["get_company_fundamentals"] = self.PAYLOAD
+        out = await orchestrator.market_data_node(
+            {**base_state, "entities": {"tickers": ["THYAO"]}}
+        )
+        assert fake_mcp.calls[0][1]["symbols"] == ["THYAO"]
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_more_than_five_symbols_are_trimmed_before_the_call(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Sözleşmenin tavanı beş ve aşıldığında REDDEDİYOR. Turu bir 422'ye
+        çevirmek, kullanıcıya kendi sorusunun cevabı yerine hata göstermek
+        olurdu."""
+        patched_llm.set_response(json.dumps({
+            "tool": "get_company_fundamentals",
+            "arguments": {"symbols": ["A", "B", "C", "D", "E", "F", "G"]},
+        }))
+        fake_mcp.responses["get_company_fundamentals"] = self.PAYLOAD
+        await orchestrator.market_data_node(base_state)
+        assert len(fake_mcp.calls[0][1]["symbols"]) == 5
+
+    @pytest.mark.asyncio
+    async def test_blank_symbols_do_not_reach_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_company_fundamentals", "arguments": {"symbols": ["", "  ", "AKBNK"]}}'
+        )
+        fake_mcp.responses["get_company_fundamentals"] = self.PAYLOAD
+        await orchestrator.market_data_node(base_state)
+        assert fake_mcp.calls[0][1]["symbols"] == ["AKBNK"]
+
+    @pytest.mark.asyncio
+    async def test_no_symbol_anywhere_falls_through_to_the_price_path(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Tek sembol isteyen bir aracı boşa çağırmaktansa, adı geçen ne
+        varsa onunla cevaplamak."""
+        patched_llm.set_response('{"tool": "get_company_fundamentals", "arguments": {}}')
+        fake_mcp.responses["get_market_data"] = {"instruments": [{"symbol": "THYAO"}]}
+        out = await orchestrator.market_data_node({**base_state, "entities": {}})
+        assert out["tools_used"] == ["get_market_data"]
+
+    @pytest.mark.asyncio
+    async def test_nothing_found_is_empty_not_an_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_company_fundamentals", "arguments": {"symbols": ["YOKBU"]}}'
+        )
+        fake_mcp.responses["get_company_fundamentals"] = {
+            "instruments": [], "not_found": ["YOKBU"], "missing_data": [],
+        }
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+
 class TestMarketResearchNode:
     @pytest.mark.asyncio
     async def test_happy_path(self, fake_mcp, patched_llm, base_state):

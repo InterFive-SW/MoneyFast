@@ -376,7 +376,8 @@ def test_tool_binding_names_exactly_one_tool(agent, tool):
 @pytest.mark.parametrize(
     "agent,tools",
     [
-        ("MARKET_DATA_AGENT", ("get_market_data", "get_technical_signals")),
+        ("MARKET_DATA_AGENT",
+         ("get_market_data", "get_technical_signals", "get_company_fundamentals")),
         # v2.11. What the user OWNS and what was PUBLISHED about it are two
         # questions with two failure modes, and only this agent can read the
         # holdings that make the second one answerable.
@@ -453,10 +454,12 @@ def test_market_research_specialist_marks_snippets_untrusted():
 #: measured wrong-instrument bug, so its budget is larger on purpose. The gate
 #: still exists to catch UNNOTICED growth -- raise a number here only with a
 #: reason worth writing down.
-#: MARKET_DATA_AGENT carries TWO tools since v2.10 -- the price lookup and
-#: the trend reading -- so it needs the envelope and the choosing rule for
-#: both. Raised deliberately and by a measured amount, not to whatever the
-#: prompt happens to be.
+#: MARKET_DATA_AGENT carries THREE tools since v2.14: what it COSTS, how it is
+#: DOING, and how the BUSINESS is doing. Her biri ADI GEÇEN bir enstrüman
+#: hakkında ve her birinin ayrı bir çıktı şeması ile ayrı bir seçim kuralı
+#: var. Üçüncüsü yeni veri getirmedi -- zaten toplanan otuz beş alan ilk kez
+#: sohbete ulaştı -- ama sözleşmesi kendi başına duruyor ve prompt onu
+#: taşımak zorunda.
 #: RISK_STRATEGY_AGENT carries FOUR tools since v2.13 -- the measurement, the
 #: factor scenario, the trade simulation and the stress test -- so it needs an
 #: output schema and a choosing rule for each. The three additions all answer
@@ -466,7 +469,7 @@ def test_market_research_specialist_marks_snippets_untrusted():
 #: the answer and the user sees nothing.
 PROMPT_BUDGETS = {
     "TRANSACTION_AGENT": 3200,
-    "MARKET_DATA_AGENT": 3000,
+    "MARKET_DATA_AGENT": 3700,
     "RISK_STRATEGY_AGENT": 3200,
 }
 DEFAULT_PROMPT_BUDGET = 2500
@@ -656,6 +659,21 @@ def test_the_scenario_factor_set_is_closed_and_matches_the_tools():
     text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
     for factor in ("USDTRY", "EURTRY", "XU100", "XAUUSD"):
         assert f'"{factor}"' in text
+
+
+def test_a_company_financials_question_routes_to_market_data():
+    """Ölçülen hata: "AKBNK kârlı bir şirket mi, borç durumu nasıl"
+    EDUCATION_AGENT'a gitti, hiçbir araç çalışmadı, ve kullanıcıya veri
+    "temin edilemedi" dendi -- marjı, özkaynak kârlılığı ve analist
+    konsensüsü veritabanında dururken."""
+    assert "A question about a company's FINANCIALS is MARKET_DATA_AGENT" \
+        in prompts.ROUTER_PROMPT
+
+
+def test_a_ratio_definition_without_a_company_stays_education():
+    """"Kâr marjı ne demek" bir tanım sorusu; araçlı bir ajana yollamak,
+    şirketsiz bir sorguyu şirket verisine göndermek olurdu."""
+    assert "stays EDUCATION_AGENT" in flat(prompts.ROUTER_PROMPT)
 
 
 def test_a_conditional_portfolio_question_routes_to_the_risk_agent():

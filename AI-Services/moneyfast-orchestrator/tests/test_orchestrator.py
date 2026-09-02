@@ -615,6 +615,71 @@ class TestFundamentalsBranch:
         assert out["specialist_output"]["status"] == "EMPTY"
 
 
+class TestQuarterlyBranch:
+    """Dördüncü araç: adı konmuş bir ÇEYREK.
+
+    Diğer üçünün hiçbirinde seri yok -- fiyat anlık, eğilim türetilmiş, temel
+    veri anlık görüntü. "Son çeyrek kârı" sorusunu cevaplayabilen tek yol bu,
+    ve dokümandaki örnek senaryonun eksik yarısı tam olarak buydu.
+    """
+
+    PAYLOAD = {
+        "symbol": "AKBNK", "name": "Akbank", "currency": "TRY",
+        "periods": [
+            {"period_end": "2026-06-30", "label": "2026Q2", "net_income": 15_198_000_000},
+            {"period_end": "2026-03-31", "label": "2026Q1", "net_income": 14_100_000_000},
+        ],
+        "previous_is_adjacent": True, "year_ago_available": True,
+    }
+
+    @pytest.mark.asyncio
+    async def test_a_quarter_question_reaches_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_quarterly_financials", "arguments": {"symbol": "akbnk"}}'
+        )
+        fake_mcp.responses["get_quarterly_financials"] = self.PAYLOAD
+        out = await orchestrator.market_data_node(base_state)
+        assert out["tools_used"] == ["get_quarterly_financials"]
+        assert fake_mcp.calls[0][1]["symbol"] == "AKBNK"
+
+    @pytest.mark.asyncio
+    async def test_the_router_ticker_is_used_when_the_plan_names_none(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response('{"tool": "get_quarterly_financials", "arguments": {}}')
+        fake_mcp.responses["get_quarterly_financials"] = self.PAYLOAD
+        await orchestrator.market_data_node(
+            {**base_state, "entities": {"tickers": ["THYAO"]}}
+        )
+        assert fake_mcp.calls[0][1]["symbol"] == "THYAO"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_series_is_empty_not_an_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Ölçüldü: 40 hissenin 6'sında hiç çeyreklik veri yok. Hata değil."""
+        patched_llm.set_response(
+            '{"tool": "get_quarterly_financials", "arguments": {"symbol": "YENI"}}'
+        )
+        fake_mcp.responses["get_quarterly_financials"] = {
+            "symbol": "YENI", "name": "Yeni", "currency": "TRY", "periods": [],
+            "previous_is_adjacent": False, "year_ago_available": False,
+        }
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_no_symbol_anywhere_falls_through_to_the_price_path(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response('{"tool": "get_quarterly_financials", "arguments": {}}')
+        fake_mcp.responses["get_market_data"] = {"instruments": [{"symbol": "THYAO"}]}
+        out = await orchestrator.market_data_node({**base_state, "entities": {}})
+        assert out["tools_used"] == ["get_market_data"]
+
+
 class TestMarketResearchNode:
     @pytest.mark.asyncio
     async def test_happy_path(self, fake_mcp, patched_llm, base_state):

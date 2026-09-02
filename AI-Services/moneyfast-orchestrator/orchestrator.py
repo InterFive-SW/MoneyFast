@@ -526,6 +526,20 @@ async def market_data_node(state: MoneyFastState) -> dict[str, Any]:
         # Sembol yoksa fiyat yoluna düşülüyor: adı geçen bir şey varsa o
         # cevaplanır, tek sembol isteyen bir aracı boşa çağırmaktansa.
 
+    # Dördüncü araç: adı konmuş bir ÇEYREK. Diğer üçünün hiçbirinde seri
+    # yok -- fiyat anlık, eğilim türetilmiş, temel veri anlık görüntü. "Son
+    # çeyrek kârı" sorusunu cevaplayabilen tek yol bu.
+    if plan.get("tool") == "get_quarterly_financials":
+        symbol = args.get("symbol") or _first_ticker(state)
+        if symbol:
+            return await _run_tool(
+                state, "get_quarterly_financials", {"symbol": str(symbol).upper()},
+                assumptions=assumptions,
+                # Boş seri, ölçülmüş bir cevap: 40 hissenin 6'sında hiç
+                # çeyreklik veri yok. Hata değil.
+                empty_when=lambda p: not p.get("periods"),
+            )
+
     # A turn that named no instrument and no filter would otherwise screen the
     # entire universe and hand the model 50 rows to summarise.
     if not args.get("symbols") and not args.get("filters"):

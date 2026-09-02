@@ -53,6 +53,8 @@ EXPECTED_TOOLS = {
     # v2.14: şirketin işi nasıl gidiyor. Yeni veri değil -- zaten toplanan
     # otuz beş alan, ajana ilk kez ulaşıyor.
     "get_company_fundamentals",
+    # v2.15: tek SERİ taşıyan araç. Anlık görüntünün cevaplayamadığı soru.
+    "get_quarterly_financials",
 }
 
 #: Every tool that reaches the backend. classify_and_route_intent is
@@ -69,7 +71,7 @@ class TestWiring:
         # v2.10: `get_technical_signals` eklendi. Bilerek yapılan bir
         # sözleşme değişikliği, dolayısıyla iddia gevşetilmiyor, onunla
         # birlikte taşınıyor.
-        assert server.CONTRACT_VERSION == "v2.14"
+        assert server.CONTRACT_VERSION == "v2.15"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it

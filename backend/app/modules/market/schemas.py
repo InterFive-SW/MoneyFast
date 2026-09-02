@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 class MarketTicker(BaseModel):
     """
@@ -123,6 +123,25 @@ class NewsIngestRequest(BaseModel):
     items: List[NewsItemIn] = Field(default_factory=list)
 
 
+class QuarterlyIn(BaseModel):
+    """Bir enstrümanın bir çeyreği.
+
+    Her sayısal alan Optional ve öyle kalıyor. Ölçüldü: 34 hissenin 16'sında
+    serinin bir yerinde eksik değer var ve sıfıra çevirmek "o çeyrek
+    raporlandı, kâr sıfır çıktı" demek olurdu.
+    """
+    symbol: str
+    period_end: date
+    total_revenue: Optional[int] = None
+    net_income: Optional[int] = None
+    pretax_income: Optional[int] = None
+    operating_expense: Optional[int] = None
+
+
+class QuarterlyIngestRequest(BaseModel):
+    items: List[QuarterlyIn] = Field(default_factory=list)
+
+
 class FundamentalsIn(BaseModel):
     """One instrument's ratios.
 
@@ -187,6 +206,7 @@ class IngestResult(BaseModel):
     candles_written: int = 0
     news_written: int = 0
     fundamentals_written: int = 0
+    quarterly_written: int = 0
     #: Haber yüklemesinde çözülen semboller, `content_hash` -> semboller.
     #: `ingestor` bunu RAG'a yazarken kullanıyor: çözümleme evrenin bulunduğu
     #: yerde, yani BURADA yapılıyor ve sonucu geri vermezsek korpustaki kopya
@@ -370,6 +390,36 @@ class PortfolioTechnicalOut(BaseModel):
     #: Para birimi çevrilemediği için ağırlık hesabına girmeyen pozisyonlar.
     #: Sessizce düşürmek, portföyün bir kısmını yok saymak olurdu.
     unconvertible: List[str] = []
+
+class QuarterOut(BaseModel):
+    """Bir çeyrek. Etiket türetiliyor, saklanmıyor."""
+    period_end: date
+    #: `2026Q2`. `period_end`'den türetiliyor; iki kez saklamak ikisinin
+    #: ayrışabileceği bir yer açardı.
+    label: str
+    total_revenue: Optional[int] = None
+    net_income: Optional[int] = None
+    pretax_income: Optional[int] = None
+    operating_expense: Optional[int] = None
+
+
+class QuarterlyOut(BaseModel):
+    """Bir enstrümanın çeyreklik serisi, en yeniden eskiye.
+
+    İki bayrak sunucuda hesaplanıyor, tüketende değil. Ölçüldü: sağlayıcının
+    dönemleri ardışık gelmiyor -- 40 hissenin 3'ünde 2025Q3 gelir tablosunda
+    hiç yok. "Son iki satırı al" diyen bir karşılaştırma o hisselerde 2025Q2
+    ile 2025Q4'ü kıyaslar ve bunu söylemez.
+    """
+    symbol: str
+    name: str
+    currency: str = "TRY"
+    periods: List[QuarterOut] = []
+    #: En yeni dönemin bir öncekiyle BİTİŞİK olup olmadığı. False ise
+    #: çeyreklik karşılaştırma yapılamaz.
+    previous_is_adjacent: bool = False
+    #: Geçen yılın aynı çeyreği elde mi -- tam dört çeyrek geride.
+    year_ago_available: bool = False
 
 class FundamentalsOut(BaseModel):
     """Bir enstrümanın saklanan tüm temel verisi.

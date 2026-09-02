@@ -25,6 +25,8 @@ from .schemas import (
     NewsItem,
     PortfolioNewsOut,
     PortfolioTechnicalOut,
+    QuarterlyIngestRequest,
+    QuarterlyOut,
     QuoteIngestRequest,
     TechnicalSignalsOut,
     FundamentalsOut,
@@ -510,6 +512,66 @@ def _portfolio_technical_payload(db: Session, user_id: str) -> dict:
         "unconvertible": unconvertible,
     }
 
+
+
+@router.get(
+    "/quarterly",
+    response_model=QuarterlyOut,
+    summary="Bir enstrümanın çeyreklik gelir tablosu serisi",
+)
+def get_quarterly(
+    symbol: str = Query(..., min_length=1),
+    limit: int = Query(default=8, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    """
+    Çeyrek çeyrek gelir, net kâr, vergi öncesi kâr ve faaliyet gideri.
+
+    `/fundamentals` bir ANLIK GÖRÜNTÜ: alan başına tek güncel değer, geçmiş
+    yok. Bu uç seriyi veriyor ve "son çeyrek kârı önceki çeyreğe göre" gibi
+    bir cümleyi ilk kez mümkün kılan şey bu.
+
+    BİTİŞİKLİK YANITTA. Sağlayıcının dönemleri ardışık gelmiyor -- ölçüldü,
+    40 hissenin 3'ünde 2025Q3 gelir tablosunda hiç yok. "Son iki satırı al"
+    diyen bir tüketici o hisselerde 2025Q2 ile 2025Q4'ü kıyaslar ve bunu
+    söylemez; bu yüzden kural sunucuda hesaplanıp bayrak olarak gönderiliyor.
+
+    Verisi olmayan enstrüman 404 DEĞİL, boş bir seri döndürür: "bu şirket için
+    çeyreklik veri yok" bir cevaptır ve ölçülen kapsamada evrenin ~%15'i için
+    doğru cevap odur.
+    """
+    found = market_service.quarterly_for(db, symbol, limit=limit)
+    if found is None:
+        product = market_service.resolve_symbol(db, symbol)
+        return {
+            "symbol": product.symbol if product else symbol.upper(),
+            "name": (product.name if product else symbol.upper()) or symbol.upper(),
+            "currency": (product.currency_code if product else "TRY") or "TRY",
+            "periods": [],
+        }
+    return found
+
+
+@router.post(
+    "/quarterly/ingest",
+    response_model=IngestResult,
+    summary="Çeyreklik finansalları yükle (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def ingest_quarterly(request: QuarterlyIngestRequest, db: Session = Depends(get_db)):
+    """
+    Çeyreklik satırları yazar; aynı dönem güncellenir, ikinci satır açılmaz.
+
+    Sağlayıcı yayımlanmış bir çeyreği sonradan düzeltebiliyor ve iki sürümü
+    yan yana saklamak, hangisinin doğru olduğunu söyleyemeyen bir seri
+    bırakırdı.
+    """
+    written = market_service.upsert_quarterly(
+        db, [item.model_dump() for item in request.items]
+    )
+    log.info("ingested %d quarterly rows of %d offered", written, len(request.items))
+    return {"quotes_written": 0, "candles_written": 0, "news_written": 0,
+            "quarterly_written": written}
 
 @router.get(
     "/stream",

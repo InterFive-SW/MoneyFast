@@ -17,11 +17,12 @@ fundamental attached to them is real.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -166,6 +167,61 @@ class TransactionProposal(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     audit_id: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class InstrumentQuarterly(Base):
+    """Çeyreklik gelir tablosu. Enstrüman başına DÖNEM DÖNEM bir satır.
+
+    `InstrumentFundamentals` bir anlık görüntü: alan başına tek güncel değer,
+    geçmiş yok. Bu yüzden "son çeyrek kârı önceki çeyreğe göre şu kadar arttı"
+    kurulamıyordu -- kıyaslanacak ikinci dönem hiç saklanmıyordu. Bu tablo o
+    boşluğu kapatıyor ve iki tablo AYRI duruyor, çünkü biri her gün üstüne
+    yazılıyor, diğeri birikiyor.
+
+    DOĞAL ANAHTAR (product_id, period_end). Sıra numarası değil: sağlayıcının
+    dönemleri ardışık gelmiyor -- ölçüldü, AKBNK/GARAN/EREGL'de 2025Q3 gelir
+    tablosunda hiç yok. "Son iki satırı al" diyen bir karşılaştırma o üç
+    hissede 2025Q2 ile 2025Q4'ü kıyaslar ve bunu söylemez; bitişiklik dönem
+    sonundan hesaplanmak zorunda.
+
+    Dört kalem saklanıyor. Sağlayıcının gelir tablosu şirkete göre 33-52 satır
+    ve derin örneklenen on iki sembolün hepsinde bulunan yirmi kalemden
+    yalnızca bunlar bu kartın sorusunu cevaplıyor. `Basic EPS` bilerek yok:
+    34 hissede son çeyrekte 32 kez dolu, bir önceki çeyrekte YALNIZCA 3 kez --
+    seri olarak saklamak neredeyse hep yarısı boş bir kolon açmak olurdu ve
+    hisse başına kâr zaten anlık tabloda duruyor.
+
+    Her sayısal kolon nullable. Ölçüldü: 34 hissenin 16'sında serinin bir
+    yerinde eksik değer var, ve sıfıra çevirmek "o çeyrek raporlandı, kâr
+    sıfır çıktı" demek olurdu.
+    """
+
+    __tablename__ = "instrument_quarterly"
+    __table_args__ = (
+        UniqueConstraint(
+            "product_id", "period_end", name="uq_instrument_quarterly_period"
+        ),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    product_id: Mapped[str] = mapped_column(
+        String, ForeignKey(f"{SCHEMA}.investment_products.id"), nullable=False, index=True
+    )
+    #: Çeyreğin BİTİŞ tarihi, sağlayıcının verdiği hâliyle. Etiket
+    #: ("2026Q2") saklanmıyor: tamamen bundan türetilebiliyor ve hiçbir zaman
+    #: değişmeyecek bir değer için ikinci bir sütun, ikisinin ayrışabileceği
+    #: bir yer açardı.
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+
+    total_revenue: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    net_income: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    pretax_income: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    operating_expense: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class InstrumentFundamentals(Base):

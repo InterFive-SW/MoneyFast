@@ -30,6 +30,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from mcp.server.fastmcp import FastMCP
 
 TOOL = "get_company_fundamentals"
+QUARTERLY_TOOL = "get_quarterly_financials"
 
 #: Tek çağrıda kaç enstrüman. Ölçüldü: enstrüman başına ~1.030 karakter,
 #: dolayısıyla beş sembol ~5.150 ve sentez gövdesinin 8.000 karakterlik
@@ -202,6 +203,115 @@ def _normalize(payload: Any, requested: str) -> Optional[dict[str, Any]]:
     }
 
 
+async def get_quarterly_financials(symbol: str) -> dict[str, Any]:
+    """
+    Retrieves one instrument's QUARTERLY income statement, period by period: revenue,
+    net income, pre-tax income and operating expense, newest quarter first. READ-ONLY.
+
+    This is the series that `get_company_fundamentals` does not have. That tool stores
+    one current value per field with no history; this one stores each quarter
+    separately, and it is the only way to say what a company earned in a named quarter
+    or how that compares with another quarter.
+
+    WHEN TO USE
+        - The user asks about a named period: "AKBNK'ın son çeyrek kârı ne kadar",
+          "geçen çeyreğe göre ne oldu", "2026'nın ilk çeyreğinde ne kazandı",
+          "geçen yılın aynı çeyreğiyle kıyasla".
+        - Any question whose answer needs two periods.
+
+    WHEN NOT TO USE
+        - Ratios, margins, debt, analyst consensus. Those are
+          get_company_fundamentals; they are not stored per quarter.
+        - Price, trend, or the user's own holdings.
+
+    Args:
+        symbol (str): ONE instrument symbol. Exactly one: a quarter-by-quarter answer
+            is already several numbers, and two instruments at once produce a table
+            nobody reads.
+
+    Returns:
+        dict with exactly these top-level keys:
+            symbol (str), name (str), currency (str)
+            periods (list[dict]): newest first, each with
+                period_end (str, ISO date), label (str, e.g. "2026Q2"),
+                total_revenue, net_income, pretax_income, operating_expense —
+                any figure may be null.
+            previous_is_adjacent (bool): whether the second entry is the quarter
+                IMMEDIATELY before the first. Measured: the provider skips quarters —
+                3 of 40 sampled BIST instruments have no 2025Q3 income statement at
+                all. When this is false the two newest entries are NOT consecutive.
+            year_ago_available (bool): whether the same quarter one year earlier is
+                in the series.
+
+    Raises:
+        InvalidInputError: No symbol given.
+        UpstreamUnavailableError: Service unreachable. Say the figures could not be
+            retrieved; never recall a quarter from memory.
+
+    Constraints:
+        - NAME THE PERIOD in every figure you report. "2026Q2'de 15,2 milyar TL net
+          kâr", never "son çeyrekte 15,2 milyar" without saying which quarter. The
+          series has holes and the reader cannot see them.
+        - Compare the two newest quarters ONLY when `previous_is_adjacent` is true.
+          When it is false, say the intervening quarter is not available and compare
+          nothing — a comparison across a gap reads as quarter-over-quarter and is
+          not. Measured: without this rule the answer would silently put 2025Q2 next
+          to 2025Q4 for three instruments in forty.
+        - Compare with the year-ago quarter ONLY when `year_ago_available` is true.
+        - An empty `periods` list means this system holds no quarterly data for the
+          instrument. Measured: 6 of 40 sampled instruments have none. Say exactly
+          that; it is not an outage and not a zero.
+        - A null figure means the provider did not publish that line for that quarter,
+          NOT zero. 16 of 34 instruments with data have a hole somewhere in the series.
+        - Write every comparison in CHRONOLOGICAL order -- older quarter first, newest
+          second: "2026Q1 19,2 milyar TL -> 2026Q2 15,2 milyar TL". The series arrives
+          NEWEST FIRST and relaying it in arrival order points the arrow the opposite
+          way to the change being described. Measured: "%-20,7 azalma (15,2 milyar TL
+          -> 19,2 milyar TL)" -- the sentence says a fall, the arrow shows a rise.
+        - These are REPORTED PAST RESULTS. Do not extrapolate the next quarter, do not
+          call a rise a trend, and do not turn any of it into a view on the share.
+        - Do NOT name the fields by their keys: "net kâr", not "net_income".
+        - Any response containing these figures MUST pass validate_compliance_rules.
+    """
+    wanted = str(symbol or "").strip().upper()
+    if not wanted:
+        raise backend_client.InvalidInputError(f"{QUARTERLY_TOOL}: bir sembol gerekiyor.")
+
+    payload = await backend_client.request(
+        "GET", "/market/quarterly", tool=QUARTERLY_TOOL, params={"symbol": wanted}
+    )
+    backend_client.require(payload, ("symbol", "periods"), QUARTERLY_TOOL)
+    periods = backend_client.require_list(payload, "periods", QUARTERLY_TOOL)
+    return {
+        "symbol": str(payload["symbol"]),
+        "name": str(payload.get("name") or wanted),
+        "currency": str(payload.get("currency") or "TRY"),
+        "periods": [_normalize_period(row) for row in periods],
+        # Sunucudan geliyor, BURADA hesaplanmıyor: kural tek yerde durmalı,
+        # yoksa her tüketici aynı boşluğu ayrı ayrı gözden kaçırır.
+        "previous_is_adjacent": bool(payload.get("previous_is_adjacent", False)),
+        "year_ago_available": bool(payload.get("year_ago_available", False)),
+    }
+
+
+_QUARTER_FIELDS = (
+    "total_revenue", "net_income", "pretax_income", "operating_expense",
+)
+
+
+def _normalize_period(raw: Any) -> dict[str, Any]:
+    """Bir çeyrek. Etiket ZORUNLU: dönemi adlandırmadan rakam vermek, serinin
+    deliklerini okunamaz kılar."""
+    if not isinstance(raw, dict):
+        raise ContractViolationError(f"{QUARTERLY_TOOL}: each period must be an object.")
+    backend_client.require(raw, ("period_end", "label"), QUARTERLY_TOOL)
+    return {
+        "period_end": str(raw["period_end"]),
+        "label": str(raw["label"]),
+        **{field: raw.get(field) for field in _QUARTER_FIELDS},
+    }
+
 def register(mcp: "FastMCP") -> None:
     """Attach this domain's tools to the shared FastMCP instance."""
     mcp.tool()(get_company_fundamentals)
+    mcp.tool()(get_quarterly_financials)

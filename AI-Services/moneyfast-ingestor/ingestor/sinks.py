@@ -169,6 +169,39 @@ def push_fundamentals(client: httpx.Client, rows: list[dict]) -> Optional[dict]:
         return None
 
 
+#: Tek istekte gönderilen çeyreklik satır sayısı. Enstrüman başına 5-8 dönem
+#: geliyor, dolayısıyla evrenin tamamı ~6.000 satır demek ve hepsini tek
+#: gövdede yollamak hem isteği hem tek bir veritabanı işlemini gereksizce
+#: büyütürdü.
+QUARTERLY_CHUNK = 500
+
+
+def push_quarterly(client: httpx.Client, rows: list[dict]) -> Optional[dict]:
+    """Çeyreklik gelir tablosu satırlarını backend'e yazar.
+
+    Parçalanarak: bir parça düşerse diğerleri yazılmış kalıyor. Seri
+    birikimli olduğu için eksik bir parça bir sonraki turda tamamlanıyor --
+    anlık görüntüden farkı bu, orada eksik tur eksik veri demekti.
+    """
+    if not rows:
+        return None
+    written = 0
+    for start in range(0, len(rows), QUARTERLY_CHUNK):
+        chunk = rows[start:start + QUARTERLY_CHUNK]
+        try:
+            response = client.post(
+                f"{config.backend_url()}/market/quarterly/ingest",
+                json=_serialise({"items": chunk}),
+                headers=_headers(),
+                timeout=config.request_timeout() * 3,
+            )
+            response.raise_for_status()
+            written += (response.json() or {}).get("quarterly_written", 0)
+        except Exception as exc:
+            log.error("quarterly ingest failed for a chunk of %d: %s", len(chunk), exc)
+    return {"quarterly_written": written}
+
+
 def push_news_to_backend(client: httpx.Client, items: list[dict]) -> Optional[dict]:
     if not items:
         return None

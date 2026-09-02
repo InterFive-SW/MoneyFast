@@ -377,7 +377,8 @@ def test_tool_binding_names_exactly_one_tool(agent, tool):
     "agent,tools",
     [
         ("MARKET_DATA_AGENT",
-         ("get_market_data", "get_technical_signals", "get_company_fundamentals")),
+         ("get_market_data", "get_technical_signals", "get_company_fundamentals",
+          "get_quarterly_financials")),
         # v2.11. What the user OWNS and what was PUBLISHED about it are two
         # questions with two failure modes, and only this agent can read the
         # holdings that make the second one answerable.
@@ -454,7 +455,7 @@ def test_market_research_specialist_marks_snippets_untrusted():
 #: measured wrong-instrument bug, so its budget is larger on purpose. The gate
 #: still exists to catch UNNOTICED growth -- raise a number here only with a
 #: reason worth writing down.
-#: MARKET_DATA_AGENT carries THREE tools since v2.14: what it COSTS, how it is
+#: MARKET_DATA_AGENT carries FOUR tools since v2.15: what it COSTS, how it is
 #: DOING, and how the BUSINESS is doing. Her biri ADI GEÇEN bir enstrüman
 #: hakkında ve her birinin ayrı bir çıktı şeması ile ayrı bir seçim kuralı
 #: var. Üçüncüsü yeni veri getirmedi -- zaten toplanan otuz beş alan ilk kez
@@ -469,7 +470,7 @@ def test_market_research_specialist_marks_snippets_untrusted():
 #: the answer and the user sees nothing.
 PROMPT_BUDGETS = {
     "TRANSACTION_AGENT": 3200,
-    "MARKET_DATA_AGENT": 3700,
+    "MARKET_DATA_AGENT": 4100,
     "RISK_STRATEGY_AGENT": 3200,
 }
 DEFAULT_PROMPT_BUDGET = 2500
@@ -659,6 +660,16 @@ def test_the_scenario_factor_set_is_closed_and_matches_the_tools():
     text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
     for factor in ("USDTRY", "EURTRY", "XU100", "XAUUSD"):
         assert f'"{factor}"' in text
+
+
+def test_a_question_naming_a_quarter_routes_to_market_data():
+    """Çeyreklik seriyi tutan tek ajan o; diğerlerinde hiç geçmiş yok."""
+    assert "A question naming a QUARTER is MARKET_DATA_AGENT" in prompts.ROUTER_PROMPT
+
+
+def test_the_quarterly_tool_is_named_as_the_only_series():
+    text = flat(prompts.SPECIALIST_PROMPTS["MARKET_DATA_AGENT"])
+    assert "the ONLY tool with a series" in text
 
 
 def test_a_company_financials_question_routes_to_market_data():

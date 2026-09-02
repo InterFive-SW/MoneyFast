@@ -615,6 +615,77 @@ class TestFundamentalsBranch:
         assert out["specialist_output"]["status"] == "EMPTY"
 
 
+class TestCashFlowBranch:
+    """Üçüncü araç: neye sahip olduğu değil, ne kazanıp ne harcadığı.
+
+    Köprü bu ajanda kuruluyor -- "bunu kaldırabilir miyim" hem pozisyonları
+    hem aylık artanı gerektiriyor ve iki ayrı ajan bunu tek turda
+    birleştiremez.
+    """
+
+    PAYLOAD = {
+        "has_data": True, "period_days": 90, "months_observed": 3.0,
+        "currency_code": "TRY", "income_total": 112406.75, "income_events": 4,
+        "expense_total": 67452.46, "net_total": 44954.29,
+        "monthly_income": 37468.92, "monthly_expense": 22484.15,
+        "monthly_net": 14984.76,
+        "categories": [{"category": "Kira", "amount": 28000.0,
+                        "monthly_amount": 9333.33, "share_percent": 41.5}],
+        "first_transaction_at": None, "last_transaction_at": None,
+    }
+
+    @pytest.mark.asyncio
+    async def test_a_budget_question_reaches_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_cash_flow_summary", "arguments": {}}'
+        )
+        fake_mcp.responses["get_cash_flow_summary"] = self.PAYLOAD
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["tools_used"] == ["get_cash_flow_summary"]
+        assert fake_mcp.calls[0][1]["user_id"] == base_state["user_id"]
+
+    @pytest.mark.asyncio
+    async def test_a_named_window_is_forwarded(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_cash_flow_summary", "arguments": {"days": 180}}'
+        )
+        fake_mcp.responses["get_cash_flow_summary"] = self.PAYLOAD
+        await orchestrator.portfolio_node(base_state)
+        assert fake_mcp.calls[0][1]["days"] == 180
+
+    @pytest.mark.asyncio
+    async def test_the_reporting_currency_is_not_forced_onto_this_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """`base_currency` ve `valuation_mode` pozisyon aracının alanları.
+        Bu araç onları tanımıyor ve gönderilirse sözleşme dışı bir çağrı
+        olurdu."""
+        patched_llm.set_response('{"tool": "get_cash_flow_summary", "arguments": {}}')
+        fake_mcp.responses["get_cash_flow_summary"] = self.PAYLOAD
+        await orchestrator.portfolio_node(base_state)
+        assert set(fake_mcp.calls[0][1]) <= {"user_id", "days"}
+
+    @pytest.mark.asyncio
+    async def test_no_banking_record_is_an_answer_not_an_empty_result(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Ölçüldü: 23 kullanıcının 3'ünde bankacılık hareketi var. EMPTY
+        sayılırsa ajan "veriye ulaşamadım" der; oysa söylenecek şey sistemde
+        bu kişiye ait kayıt olmadığı."""
+        patched_llm.set_response('{"tool": "get_cash_flow_summary", "arguments": {}}')
+        fake_mcp.responses["get_cash_flow_summary"] = {
+            **self.PAYLOAD, "has_data": False, "income_total": None,
+            "expense_total": None, "net_total": None, "monthly_net": None,
+            "income_events": 0, "categories": [],
+        }
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["specialist_output"]["status"] == "OK"
+
+
 class TestQuarterlyBranch:
     """Dördüncü araç: adı konmuş bir ÇEYREK.
 

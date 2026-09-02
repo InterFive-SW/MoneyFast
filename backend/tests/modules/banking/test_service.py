@@ -850,3 +850,121 @@ class TestAccrueInterest:
         service.accrue_interest(db, user_id="u-1")
         # user_id verildiğinde sorguya fazladan bir filtre ekleniyor.
         assert db.query.return_value.filter.return_value.filter.called
+
+
+class TestCashFlow:
+    """Ne girdi, ne çıktı, geriye ne kaldı.
+
+    Bu sınıfın koruduğu iki şey, ikisi de aynı aileden -- YOKLUĞU BİR TESPİTE
+    ÇEVİRMEMEK.
+
+    `has_data`: ölçüldü, 23 kullanıcının 3'ünde bankacılık hareketi var.
+    `income_events`: sıfır gelir "bu pencerede maaş yatmadı" da olabilir,
+    "geliri yok" da; maaş aylık yattığı için otuz günlük bir pencere hiç maaş
+    içermeyebiliyor ve gerçek bir kullanıcıda tam olarak bu ölçüldü.
+    """
+
+    def _db(self, mocker, bounds, income, categories, events):
+        mocker.patch.object(
+            banking_service, "accounts_for",
+            return_value=[SimpleNamespace(id="acct-1", currency_code="TRY")],
+        )
+        mocker.patch.object(banking_service, "income_total", return_value=income)
+        mocker.patch.object(
+            banking_service, "spending_by_category", return_value=categories
+        )
+        db = MagicMock(spec=Session)
+        db.execute.return_value.one.return_value = bounds
+        db.execute.return_value.scalar_one.return_value = events
+        return db
+
+    BOUNDS = (datetime(2026, 5, 23, tzinfo=timezone.utc),
+              datetime(2026, 8, 26, tzinfo=timezone.utc))
+    CATEGORIES = [{"category": "Kira", "amount": 28000.0},
+                  {"category": "Market", "amount": 10428.67}]
+
+    def test_the_totals_agree_with_their_parts(self, mocker):
+        db = self._db(mocker, self.BOUNDS, 112406.75, self.CATEGORIES, 4)
+        flow = banking_service.cash_flow(db, "user-1")
+        assert flow["expense_total"] == 38428.67
+        assert flow["net_total"] == round(112406.75 - 38428.67, 2)
+
+    def test_monthly_figures_are_the_window_divided_by_its_months(self, mocker):
+        """Bölme SUNUCUDA. "Ayda ne kadar" sorusunun cevabı bu ve aritmetiği
+        modele bırakmak, denetlenemeyen bir sayı bırakmak olurdu."""
+        db = self._db(mocker, self.BOUNDS, 90000.0, self.CATEGORIES, 3)
+        flow = banking_service.cash_flow(db, "user-1", days=90)
+        assert flow["months_observed"] == 3.0
+        assert flow["monthly_income"] == 30000.0
+
+    def test_category_share_is_of_spending_not_income(self, mocker):
+        """"Harcamamın %72'si kira" okunabilir bir cümle; "gelirimin %25'i
+        kira" başka bir soru."""
+        db = self._db(mocker, self.BOUNDS, 112406.75, self.CATEGORIES, 4)
+        rent = banking_service.cash_flow(db, "user-1")["categories"][0]
+        assert rent["share_percent"] == round(28000.0 / 38428.67 * 100, 1)
+
+    def test_a_zero_spend_window_reports_no_share_rather_than_dividing(self, mocker):
+        db = self._db(mocker, self.BOUNDS, 5000.0, [], 1)
+        assert banking_service.cash_flow(db, "user-1")["categories"] == []
+
+    def test_a_thin_window_carries_a_sentence_from_the_backend(self, mocker):
+        """Kural önce prompt'a yazıldı; ölçüldüğünde model uygulamadı.
+
+        İki maaş 90 güne bölününce kişinin kazandığının üçte bir altına
+        düşüyor ve sayı verilmeden bu onun geliri gibi okunuyor -- prompt'a
+        bırakılacak bir şey değil."""
+        db = self._db(mocker, self.BOUNDS, 124000.0, self.CATEGORIES, 2)
+        note = banking_service.cash_flow(db, "user-1", days=90)["coverage_note"]
+        assert note is not None
+        assert "2 gelir ödemesi" in note
+        assert "altında kalabilir" in note
+
+    def test_a_window_that_covers_the_cycle_carries_no_sentence(self, mocker):
+        db = self._db(mocker, self.BOUNDS, 124000.0, self.CATEGORIES, 3)
+        assert banking_service.cash_flow(db, "user-1", days=90)["coverage_note"] is None
+
+    def test_zero_payments_get_their_own_sentence(self, mocker):
+        """"Geliriniz yok" ile "bu pencereye ödeme düşmedi" farklı şeyler."""
+        db = self._db(mocker, self.BOUNDS, 0.0, self.CATEGORIES, 0)
+        note = banking_service.cash_flow(db, "user-1")["coverage_note"]
+        assert "hiç gelir ödemesi görülmedi" in note
+        assert "gelir olmadığı anlamına gelmez" in note
+
+    def test_no_records_carries_no_sentence(self, mocker):
+        mocker.patch.object(banking_service, "accounts_for", return_value=[])
+        flow = banking_service.cash_flow(MagicMock(spec=Session), "ghost")
+        assert flow["coverage_note"] is None
+
+    def test_income_events_travel_with_the_total(self, mocker):
+        """Sıfır gelirin hangi anlama geldiğini ayıran tek alan."""
+        db = self._db(mocker, self.BOUNDS, 0.0, self.CATEGORIES, 0)
+        flow = banking_service.cash_flow(db, "user-1")
+        assert flow["income_total"] == 0.0
+        assert flow["income_events"] == 0
+        assert flow["has_data"] is True
+
+    def test_a_user_with_no_account_has_no_data_rather_than_zeros(self, mocker):
+        mocker.patch.object(banking_service, "accounts_for", return_value=[])
+        flow = banking_service.cash_flow(MagicMock(spec=Session), "ghost")
+        assert flow["has_data"] is False
+        assert flow["income_total"] is None
+        assert flow["net_total"] is None
+
+    def test_an_account_with_no_movements_has_no_data_either(self, mocker):
+        db = self._db(mocker, (None, None), 0.0, [], 0)
+        assert banking_service.cash_flow(db, "user-1")["has_data"] is False
+
+    def test_the_observed_range_is_reported(self, mocker):
+        """Geçmişten geniş bir pencere, geniş olduğu görülebilsin diye."""
+        db = self._db(mocker, self.BOUNDS, 1.0, self.CATEGORIES, 1)
+        flow = banking_service.cash_flow(db, "user-1", days=365)
+        assert flow["first_transaction_at"] == self.BOUNDS[0]
+        assert flow["last_transaction_at"] == self.BOUNDS[1]
+
+    def test_the_default_window_is_not_thirty_days(self, mocker):
+        """30 günlük pencere gerçek bir kullanıcıda 0 TL gelir ve 6.697 TL
+        gider gösteriyordu -- "geliriniz yok, ayda 6.697 harcıyorsunuz"."""
+        assert banking_service.CASH_FLOW_WINDOW_DAYS == 90
+        db = self._db(mocker, self.BOUNDS, 1.0, self.CATEGORIES, 1)
+        assert banking_service.cash_flow(db, "user-1")["period_days"] == 90

@@ -23,6 +23,7 @@ from .schemas import (
     BalanceHistoryOut,
     BankAccountOut,
     BillLookupOut,
+    CashFlowOut,
     CardOut,
     CardSettingsRequest,
     LoanOut,
@@ -212,6 +213,35 @@ def spending_summary(
         "change_percent": change,
         "categories": current,
     }
+
+
+@router.get(
+    "/cash-flow/{user_id}",
+    response_model=CashFlowOut,
+    summary="Nakit akışı özeti (MCP sözleşmesi)",
+    # Konusunu YOLDA adlandırıyor, dolayısıyla ilk günden korumalı: bu uç
+    # maaşı, kirayı ve harcama kategorilerini taşıyor -- portföyden daha
+    # hassas. Aynı ailenin üç ucu bir dönem korumasızdı, bkz. investment/deps.
+    dependencies=[Depends(require_service_token)],
+)
+def cash_flow_for_ai(
+    user_id: str,
+    days: int = Query(default=service.CASH_FLOW_WINDOW_DAYS, ge=7, le=365),
+    db: Session = Depends(get_db),
+):
+    """
+    Kullanıcının ne kazandığı, ne harcadığı ve geriye ne kaldığı.
+
+    Hesaplama YENİ DEĞİL: `income_total` ve `spending_by_category` zaten
+    vardı ve `GET /spending` üzerinden arayüze veriliyordu. Eksik olan tek
+    şey ajanın onu görebilmesiydi -- "ayda ne kadar yatırım yapabilirim"
+    sorusuna asistan "bu bilgi şu anda mevcut değil" diyordu, oysa üç aylık
+    maaş ve doksan harcama kaydı veritabanında duruyordu.
+
+    Varsayılan pencere 90 gün ve bu bir tercih değil, ölçüm sonucu: maaş
+    aylık yattığı için 30 günlük pencere hiç maaş içermeyebiliyor.
+    """
+    return service.cash_flow(db, user_id, days=days)
 
 
 @router.get("/balance-history", response_model=BalanceHistoryOut, summary="Bakiye geçmişi")

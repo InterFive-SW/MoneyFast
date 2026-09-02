@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy import func, select
@@ -775,3 +775,162 @@ def goals_for(db: Session, user_id: str) -> list[SavingsGoal]:
         .order_by(SavingsGoal.created_at)
         .all()
     )
+
+
+#: Nakit akışı penceresinin varsayılanı. Otuz gün DEĞİL, ve sebebi ölçüldü:
+#: maaş aylık yatıyor, dolayısıyla otuz günlük bir pencere hiç maaş
+#: İÇERMEYEBİLİR. Üç aylık maaş geçmişi olan gerçek bir kullanıcıda ölçüldü --
+#: 30 günlük pencere 0 TL gelir ve 6.697 TL gider gösteriyordu, yani
+#: "geliriniz yok, ayda 6.697 harcıyorsunuz". 90 gün en az iki maaş döngüsü
+#: içeriyor (ölçüldü: 2 maaş, 110.607 TL).
+CASH_FLOW_WINDOW_DAYS = 90
+
+#: Bir ayın gün sayısı, pencereden ay sayısını türetmek için. Takvim ayı
+#: değil: pencere gün cinsinden veriliyor ve 30'a bölmek, "son 90 gün"
+#: ifadesini "üç ay" diye okumakla aynı yaklaşıklık.
+DAYS_PER_MONTH = 30.0
+
+
+def cash_flow(
+    db: Session, user_id: str, days: int = CASH_FLOW_WINDOW_DAYS
+) -> dict[str, Any]:
+    """Ne girdi, ne çıktı, geriye ne kaldı.
+
+    `income_total` ve `spending_by_category` üstüne kurulu -- ikisi de kendi
+    hesapları arası transferi eliyor, dolayısıyla kimse parasını ileri geri
+    taşıyarak gelirini ya da giderini şişiremiyor.
+
+    `income_events` AYRI taşınıyor ve sözleşmenin en önemli alanı. Sıfır
+    gelir iki farklı şey olabilir: "bu pencerede maaş yatmadı" ya da "bu
+    kişinin geliri yok". Olay sayısı olmadan ikisi ayırt edilemez ve ajan
+    ikincisini söyler -- birinin maaşı hakkında yanlış bir olgu.
+
+    `has_data` da öyle: ölçüldü, 23 kullanıcının 3'ünde bankacılık hareketi
+    var. Verisi olmayan için sıfırlar döndürmek "hiç kazanmıyor ve hiç
+    harcamıyor" demek olurdu; kayıt yokluğu bir tespit değil.
+    """
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+
+    accounts = accounts_for(db, user_id)
+    account_ids = [account.id for account in accounts]
+    if not account_ids:
+        return _empty_cash_flow(days)
+
+    bounds = db.execute(
+        select(
+            func.min(AccountTransaction.created_at),
+            func.max(AccountTransaction.created_at),
+        ).where(AccountTransaction.account_id.in_(account_ids))
+    ).one()
+    if bounds[0] is None:
+        return _empty_cash_flow(days)
+
+    income = income_total(db, user_id, since=since)
+    categories = spending_by_category(db, user_id, since=since)
+    expense = round(sum(row["amount"] for row in categories), 2)
+
+    events = db.execute(
+        select(func.count())
+        .select_from(AccountTransaction)
+        .where(
+            AccountTransaction.account_id.in_(account_ids),
+            AccountTransaction.direction == "CREDIT",
+            AccountTransaction.created_at >= since,
+            AccountTransaction.transaction_id.notin_(
+                select(AccountTransaction.transaction_id)
+                .where(
+                    AccountTransaction.account_id.in_(account_ids),
+                    AccountTransaction.direction == "DEBIT",
+                )
+                .scalar_subquery()
+            ),
+        )
+    ).scalar_one()
+
+    months = round(days / DAYS_PER_MONTH, 2)
+    return {
+        # Cümle KODDA, prompt'ta değil. Kural prompt'a yazıldı ve ölçüldüğünde
+        # model onu uygulamadı -- bu modülün her yerinde tekrarlanan ders:
+        # prompt tavsiyedir, zorunlu bir davranışın kodda karşılığı olmalı.
+        "coverage_note": _coverage_note(int(events), months, days),
+        "has_data": True,
+        "period_days": days,
+        "months_observed": months,
+        "currency_code": accounts[0].currency_code or "TRY",
+        "income_total": income,
+        "income_events": int(events),
+        "expense_total": expense,
+        "net_total": round(income - expense, 2),
+        # Aylık ortalamalar SUNUCUDA hesaplanıyor. "Ayda ne kadar" sorusunun
+        # cevabı bu ve bölmeyi modele bırakmak, denetlenemeyen bir aritmetik
+        # bırakmak olurdu.
+        "monthly_income": round(income / months, 2) if months else 0.0,
+        "monthly_expense": round(expense / months, 2) if months else 0.0,
+        "monthly_net": round((income - expense) / months, 2) if months else 0.0,
+        "categories": [
+            {
+                **row,
+                "monthly_amount": round(row["amount"] / months, 2) if months else 0.0,
+                # Payda GİDER, gelir değil: "harcamamın %31'i kira" okunabilir
+                # bir cümle, "gelirimin %19'u kira" başka bir soru.
+                "share_percent": round(row["amount"] / expense * 100, 1)
+                if expense
+                else None,
+            }
+            for row in categories
+        ],
+        "first_transaction_at": bounds[0],
+        "last_transaction_at": bounds[1],
+    }
+
+
+def _coverage_note(events: int, months: float, days: int) -> Optional[str]:
+    """Aylık ortalamanın eksik kaldığı durumu söyleyen hazır cümle.
+
+    Gelir ödemesi sayısı ay sayısından AZSA ortalama, kişinin gerçekten
+    kazandığının altında kalıyor. Ölçüldü: 62.000 TL'lik iki maaş 90 güne
+    bölününce 41.333 TL/ay çıkıyor -- kazandığının üçte bir altı -- ve sayı
+    verilmediğinde okuyan bunu geliri sanıyor.
+
+    Sıfır ödeme AYRI bir cümle: orada eksik olan ortalama değil, gelirin
+    kendisi, ve "geliriniz yok" ile "bu pencerede ödeme yatmadı" farklı
+    şeyler.
+    """
+    if events == 0:
+        return (
+            f"Son {days} günde hiç gelir ödemesi görülmedi. Bu, gelir olmadığı "
+            f"anlamına gelmez; bu pencereye ödeme düşmemiş olabilir."
+        )
+    if events < months:
+        return (
+            f"Son {days} günde {events} gelir ödemesi görüldü. Aylık ortalama "
+            f"bu tutarların {months:g} aya bölünmesiyle bulunuyor, dolayısıyla "
+            f"düzenli aylık gelirinizin altında kalabilir."
+        )
+    return None
+
+
+def _empty_cash_flow(days: int) -> dict[str, Any]:
+    """Hesabı ya da hiç hareketi olmayan kullanıcı.
+
+    Sıfırlarla DEĞİL, `has_data: False` ile dönüyor: kayıt yokluğu, sıfır
+    gelir ve sıfır gider tespiti değil.
+    """
+    return {
+        "has_data": False,
+        "coverage_note": None,
+        "period_days": days,
+        "months_observed": round(days / DAYS_PER_MONTH, 2),
+        "currency_code": "TRY",
+        "income_total": None,
+        "income_events": 0,
+        "expense_total": None,
+        "net_total": None,
+        "monthly_income": None,
+        "monthly_expense": None,
+        "monthly_net": None,
+        "categories": [],
+        "first_transaction_at": None,
+        "last_transaction_at": None,
+    }

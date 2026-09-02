@@ -20,7 +20,9 @@ gone, they can see who we are and say so.
 from __future__ import annotations
 
 import hashlib
+import html
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -91,12 +93,47 @@ def _wait_for_host(url: str) -> None:
     _last_request[host] = time.monotonic()
 
 
+#: HTML etiketleri. RSS özetleri işaretlemeyi olduğu gibi taşıyor -- ölçülen
+#: örnek: `<img align="right" src="..." style="border: navy 1px solid;" />`.
+_HTML_TAG = re.compile(r"<[^>]*>")
+
+
+def clean_summary(raw: str) -> str:
+    """Özetten işaretlemeyi atar, varlıkları çözer.
+
+    İki yeri birden düzeltiyor. Sembol eşleştirmesi: temizlenmemiş metinde
+    `<img align="right">` özniteliği Align Technology'ye (ALGN) bağlanıyordu.
+    Ve daha önemlisi RAG: ingestor özeti korpusa `content` olarak gönderiyor,
+    yani gömme vektörleri haberin metni yerine HTML gürültüsünü de taşıyordu
+    -- ölçüldü, korpustaki 876 parça işaretleme içeriyor.
+
+    Etiketin İÇİ değil KENDİSİ atılıyor: öznitelik adları ve URL'ler haberin
+    metni değil. `&#039;` gibi varlıklar ise SİLİNMİYOR, çözülüyor: "Türkiye
+    &#039;nin" -> "Türkiye'nin", yani metin okunur kalıyor.
+    """
+    text = _HTML_TAG.sub(" ", raw or "")
+    # İki geçiş, çünkü beslemeler ÇİFT kaçışlı gönderiyor: ölçülen veride
+    # `LPG&amp;#039;nin` var, tek geçiş bunu `&#039;`de bırakıyor. Kararlı
+    # hâle gelince duruyor, sonsuz döngü yok.
+    for _ in range(2):
+        unescaped = html.unescape(text)
+        if unescaped == text:
+            break
+        text = unescaped
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def content_hash(title: str, summary: str) -> str:
     """Deduplication key, shared with the rag service.
 
     Hashing the text rather than the URL because the same wire story is
     republished under different links, and some feeds renumber their URLs on
     every rebuild — which would re-import the whole history each poll.
+
+    Beslemenin verdiği HAM özet üzerinden hesaplanıyor, temizlenmiş hâli
+    üzerinden değil. Temizliğe geçerken hash tanımını da değiştirmek, daha
+    önce alınmış her haberin kimliğini değiştirir ve arşivin tamamı "yeni"
+    sayılıp yeniden yazılırdı.
     """
     return hashlib.sha256(f"{title}\n{summary}".strip().encode("utf-8")).hexdigest()
 
@@ -115,10 +152,17 @@ def _published(entry: Any) -> datetime:
 
 
 def _tickers(entry: Any) -> list[str]:
-    """Symbols the FEED tagged. Never inferred from the headline.
+    """Ticker CANDIDATES the feed tagged. Never inferred from the headline.
 
-    Guessing a ticker from text would put one company's news on another
-    company's page, and the retrieval contract lets the model filter on these.
+    Guessing a ticker from prose would put one company's news on another
+    company's page. These are candidates, not conclusions: the backend checks
+    each one against the instrument universe before storing it, because the
+    universe lives there and this process holds no database credentials.
+
+    That check is what makes the loose shape test below safe. Turkish finance
+    feeds file articles under sections like `BORSA` and `FINANS`, both of
+    which pass "3-6 letters" and would otherwise be recorded as though they
+    were listed companies. Neither is an instrument, so neither survives.
     """
     tags = getattr(entry, "tags", None) or []
     out = []
@@ -253,9 +297,11 @@ def fetch_feed(url: str, client: httpx.Client) -> list[dict[str, Any]]:
             continue
         items.append(
             {
+                # Hash HAM özetten, saklanan metin TEMİZ. İkisini ayırmak,
+                # temizliğe geçerken arşivin kimliğini korumanın tek yolu.
                 "content_hash": content_hash(title, summary),
                 "title": title,
-                "summary": summary or None,
+                "summary": clean_summary(summary) or None,
                 "source": (getattr(parsed.feed, "title", "") or urlparse(url).netloc).strip(),
                 "url": link,
                 "language": "tr",

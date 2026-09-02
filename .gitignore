@@ -39,3 +39,6 @@ frontend/coverage/
 # is overwritten during the build regardless.
 frontend/dist/
 *.tsbuildinfo
+
+# WSL, Windows'tan kopyalanan her dosyanın yanına bunu bırakıyor.
+*:Zone.Identifier

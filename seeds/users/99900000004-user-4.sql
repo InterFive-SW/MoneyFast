@@ -9,4 +9,7 @@
 -- Synthetic data only (see CLAUDE.md). Do not hand-edit; re-export.
 
 -- public.users (1)
-INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences") VALUES ('ccd0cee4-f854-429c-bb95-e55439a0173e', 'user.4@dummy.moneyfast.local', '$2b$12$MKznLAklBM28DhQVhKkRMurxVb6ZqSblqLRWqjlvNiAR6AmG6D4jO', TRUE, '2026-08-25T11:41:17.004776+00:00', '99900000004', 'Mehmet', 'Doğan', '+905550000004', FALSE, '{}', 50000, '{}') ON CONFLICT DO NOTHING;
+INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences") VALUES ('ccd0cee4-f854-429c-bb95-e55439a0173e', 'user.4@dummy.moneyfast.local', '$2b$12$MKznLAklBM28DhQVhKkRMurxVb6ZqSblqLRWqjlvNiAR6AmG6D4jO', TRUE, '2026-08-25T11:41:17.004776+00:00', '99900000004', 'Mehmet', 'Doğan', '+905550000004', TRUE, '{}', 50000, '{}') ON CONFLICT DO NOTHING;
+
+-- banking.accounts (1)
+INSERT INTO banking.accounts ("id", "user_id", "account_number", "iban", "account_type", "currency_code", "balance", "status", "created_at", "updated_at", "interest_rate", "term_days", "last_accrued_at") VALUES ('4bb56cef-1ae6-486e-93cb-209d9fd912cd', 'ccd0cee4-f854-429c-bb95-e55439a0173e', '2122825579424', 'TR000000000002122825579424', 'vadeli', 'TRY', 0.0000, 'active', '2026-09-01T10:48:32.406935+00:00', '2026-09-01T10:48:32.406935+00:00', 38.000, 1, NULL) ON CONFLICT DO NOTHING;

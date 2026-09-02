@@ -12,11 +12,13 @@
 INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences") VALUES ('1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'sprint3.test@moneyfast-test.com', '$2b$12$WZGc5hqCZSOPYNgPxc2X2.2BD4j6FfS/SZmwdBB3DzO6Bb2E/AZrG', TRUE, '2026-08-25T14:45:10.373876+00:00', '99900011122', 'Test', 'Kullanici', '+905551112233', TRUE, '{}', 50000, '{}') ON CONFLICT DO NOTHING;
 
 -- investment.investment_accounts (1)
-INSERT INTO investment.investment_accounts ("id", "user_id", "account_number", "name", "currency_code", "cash_balance", "status", "created_at", "iban") VALUES ('cbb5766c-d0a3-486b-a410-aaab4420b050', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'TR-1EB1C03EB319', 'Yatırım Hesabı', 'TRY', 7174.7200, 'active', '2026-08-25T14:45:10.382753+00:00', NULL) ON CONFLICT DO NOTHING;
+INSERT INTO investment.investment_accounts ("id", "user_id", "account_number", "name", "currency_code", "cash_balance", "status", "created_at", "iban") VALUES ('cbb5766c-d0a3-486b-a410-aaab4420b050', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'TR-1EB1C03EB319', 'Yatırım Hesabı', 'TRY', 2505.3800, 'active', '2026-08-25T14:45:10.382753+00:00', 'TR0010925701868989880000010') ON CONFLICT DO NOTHING;
 
--- investment.portfolio_positions (3)
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('cbe15f47-fc7f-453e-bf5b-1a0317ce47f8', 'cbb5766c-d0a3-486b-a410-aaab4420b050', (SELECT id FROM investment.investment_products WHERE symbol = 'AEFES'), 12.000000, 18.9700, '2026-08-26T15:05:50.477983+00:00', '2026-08-26T15:05:50.477983+00:00') ON CONFLICT DO NOTHING;
+-- investment.portfolio_positions (5)
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('62c36eb8-d04f-4066-991f-fb0c36fda28f', 'cbb5766c-d0a3-486b-a410-aaab4420b050', (SELECT id FROM investment.investment_products WHERE symbol = 'ASELS'), 10.000000, 387.0000, '2026-09-02T07:43:41.454954+00:00', '2026-09-02T07:43:41.454954+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('90999087-dddf-4600-8119-889610979c93', 'cbb5766c-d0a3-486b-a410-aaab4420b050', (SELECT id FROM investment.investment_products WHERE symbol = 'DOAS'), 100.000000, 166.9000, '2026-08-28T08:05:27.493204+00:00', '2026-08-28T08:05:27.493204+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('eee508ab-b7a0-41ae-b75d-cd911bfaaf00', 'cbb5766c-d0a3-486b-a410-aaab4420b050', (SELECT id FROM investment.investment_products WHERE symbol = 'TUPRS'), 2.000000, 396.0000, '2026-09-02T07:45:05.871558+00:00', '2026-09-02T07:45:05.871558+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('cbe15f47-fc7f-453e-bf5b-1a0317ce47f8', 'cbb5766c-d0a3-486b-a410-aaab4420b050', (SELECT id FROM investment.investment_products WHERE symbol = 'AEFES'), 12.000000, 18.9700, '2026-08-26T15:05:50.477983+00:00', '2026-08-26T15:05:50.477983+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('d5d1670c-f6f7-4596-bea9-faf552faaffc', 'cbb5766c-d0a3-486b-a410-aaab4420b050', (SELECT id FROM investment.investment_products WHERE symbol = 'AKBNK'), 12.000000, 73.3000, '2026-08-26T15:05:58.701435+00:00', '2026-08-26T15:05:58.701435+00:00') ON CONFLICT DO NOTHING;
 
 -- investment.watchlist_items (26)
@@ -47,10 +49,11 @@ INSERT INTO investment.watchlist_items ("id", "user_id", "product_id", "created_
 INSERT INTO investment.watchlist_items ("id", "user_id", "product_id", "created_at") VALUES ('c6da4a5e-1223-466c-81a1-0010735e845d', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', (SELECT id FROM investment.investment_products WHERE symbol = 'ECILC'), '2026-08-28T08:05:12.478788+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.watchlist_items ("id", "user_id", "product_id", "created_at") VALUES ('dbd5533d-c0f0-4d47-b4d6-3100f441c6b4', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', (SELECT id FROM investment.investment_products WHERE symbol = 'EKGYO'), '2026-08-28T08:05:14.998290+00:00') ON CONFLICT DO NOTHING;
 
--- banking.accounts (1)
+-- banking.accounts (2)
 INSERT INTO banking.accounts ("id", "user_id", "account_number", "iban", "account_type", "currency_code", "balance", "status", "created_at", "updated_at", "interest_rate", "term_days", "last_accrued_at") VALUES ('01b51d66-8288-439d-9bc0-c92816b05480', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', '1109702123103', 'TR0000011097021231030000000', 'vadesiz', 'TRY', 50000.0000, 'active', '2026-08-25T14:45:10.380566+00:00', '2026-08-25T14:45:10.380569+00:00', NULL, NULL, NULL) ON CONFLICT DO NOTHING;
+INSERT INTO banking.accounts ("id", "user_id", "account_number", "iban", "account_type", "currency_code", "balance", "status", "created_at", "updated_at", "interest_rate", "term_days", "last_accrued_at") VALUES ('08be03f6-faed-416e-9a17-2ff9c06ca8e8', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', '2109702123103', 'TR000000000002109702123103', 'vadeli', 'TRY', 0.0000, 'active', '2026-09-01T10:48:32.406935+00:00', '2026-09-01T10:48:32.406935+00:00', 38.000, 1, NULL) ON CONFLICT DO NOTHING;
 
--- investment.transaction_proposals (8)
+-- investment.transaction_proposals (10)
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-C40088EE82AAD7D0', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'idem_c4e83a94342649eea1e994c8', 'PENDING_USER_CONFIRMATION', 'BUY', 'ASELS', 2.000000, 'TR-1EB1C03EB319', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "ASELS", "quantity": 2.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-1EB1C03EB319", "destination_account_id": null}, "audit_id": "ca522d61-496c-47a4-b56b-7034b824b586", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 1.2, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.06, "currency": "TRY"}], "currency": "TRY", "net_amount": 803.26, "gross_amount": 802.0, "price_certainty": "INDICATIVE", "reference_price": 401.0}, "warnings": ["Varsayım: User wants to buy 2 units of ASELS"], "expires_at": "2026-08-26T07:34:10.922288Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-C40088EE82AAD7D0", "missing_fields": [], "confirmation_required": true}', '2026-08-26T07:34:10.922288+00:00', NULL, NULL, 'ca522d61-496c-47a4-b56b-7034b824b586', '2026-08-26T07:19:10.925053+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-EAE1E970057BAEA5', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'idem_0671e454f386765ce1a1c4b9', 'PENDING_USER_CONFIRMATION', 'BUY', 'THYAO', 2.000000, 'TR-1EB1C03EB319', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "THYAO", "quantity": 2.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-1EB1C03EB319", "destination_account_id": null}, "audit_id": "d9ed610a-df2e-482a-8cf9-72ae52f4d2d8", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 0.92, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.05, "currency": "TRY"}], "currency": "TRY", "net_amount": 614.97, "gross_amount": 614.0, "price_certainty": "INDICATIVE", "reference_price": 307.0}, "warnings": ["Varsayım: User wants to buy 2 shares of THYAO at market price"], "expires_at": "2026-08-26T07:34:43.002296Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-EAE1E970057BAEA5", "missing_fields": [], "confirmation_required": true}', '2026-08-26T07:34:43.002296+00:00', NULL, NULL, 'd9ed610a-df2e-482a-8cf9-72ae52f4d2d8', '2026-08-26T07:19:43.003087+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-7043DDBEA0D72B1A', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'idem_30b95ce32728b7422e4c5806', 'PENDING_USER_CONFIRMATION', 'BUY', 'THYAO', 5.000000, 'TR-1EB1C03EB319', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "THYAO", "quantity": 5.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-1EB1C03EB319", "destination_account_id": null}, "audit_id": "17113d66-086d-450a-b11a-d346e7050415", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 2.3, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.11, "currency": "TRY"}], "currency": "TRY", "net_amount": 1534.91, "gross_amount": 1532.5, "price_certainty": "INDICATIVE", "reference_price": 306.5}, "warnings": [], "expires_at": "2026-08-26T07:36:25.428466Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-7043DDBEA0D72B1A", "missing_fields": [], "confirmation_required": true}', '2026-08-26T07:36:25.428466+00:00', NULL, NULL, '17113d66-086d-450a-b11a-d346e7050415', '2026-08-26T07:21:25.429451+00:00') ON CONFLICT DO NOTHING;
@@ -59,8 +62,10 @@ INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key"
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-0A29D2D1279B0082', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'ui-AEFES-1787756750616', 'CONFIRMED', 'BUY', 'AEFES', 12.000000, 'TR-1EB1C03EB319', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "AEFES", "quantity": 12.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-1EB1C03EB319", "destination_account_id": null}, "audit_id": "27f6b7f0-d139-4312-b1f2-2f24054ee0ba", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 0.34, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.02, "currency": "TRY"}], "currency": "TRY", "net_amount": 228.0, "gross_amount": 227.64, "price_certainty": "INDICATIVE", "reference_price": 18.97}, "warnings": [], "expires_at": "2026-08-26T15:20:50.460638Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-0A29D2D1279B0082", "missing_fields": [], "confirmation_required": true}', '2026-08-26T15:20:50.460638+00:00', '2026-08-26T15:05:50.474513+00:00', NULL, '27f6b7f0-d139-4312-b1f2-2f24054ee0ba', '2026-08-26T15:05:50.462859+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-A2C05B047327DDFC', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'ui-AKBNK-1787756758561', 'CONFIRMED', 'BUY', 'AKBNK', 12.000000, 'TR-1EB1C03EB319', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "AKBNK", "quantity": 12.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-1EB1C03EB319", "destination_account_id": null}, "audit_id": "36bb8938-75c2-4315-add5-57fa9fdfd2bd", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 1.32, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.07, "currency": "TRY"}], "currency": "TRY", "net_amount": 880.99, "gross_amount": 879.6, "price_certainty": "INDICATIVE", "reference_price": 73.3}, "warnings": [], "expires_at": "2026-08-26T15:20:58.678151Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-A2C05B047327DDFC", "missing_fields": [], "confirmation_required": true}', '2026-08-26T15:20:58.678151+00:00', '2026-08-26T15:05:58.698465+00:00', NULL, '36bb8938-75c2-4315-add5-57fa9fdfd2bd', '2026-08-26T15:05:58.681480+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-202495B170ADB94D', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'ui-DOAS-1787904327893', 'CONFIRMED', 'BUY', 'DOAS', 100.000000, 'TR-1EB1C03EB319', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "DOAS", "quantity": 100.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-1EB1C03EB319", "destination_account_id": null}, "audit_id": "b11c8983-c31d-45ec-81dd-af8b5625ab23", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 25.04, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 1.25, "currency": "TRY"}], "currency": "TRY", "net_amount": 16716.29, "gross_amount": 16690.0, "price_certainty": "INDICATIVE", "reference_price": 166.9}, "warnings": [], "expires_at": "2026-08-28T08:20:27.460867Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-202495B170ADB94D", "missing_fields": [], "confirmation_required": true}', '2026-08-28T08:20:27.460867+00:00', '2026-08-28T08:05:27.490225+00:00', NULL, 'b11c8983-c31d-45ec-81dd-af8b5625ab23', '2026-08-28T08:05:27.467293+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-38B18E33391EBBD7', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'ui-ASELS-1788335021402', 'CONFIRMED', 'BUY', 'ASELS', 10.000000, 'TR-1EB1C03EB319', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "ASELS", "quantity": 10.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-1EB1C03EB319", "destination_account_id": null}, "audit_id": "2343b67d-5341-4dd5-a20e-e3a01734c189", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 5.8, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.29, "currency": "TRY"}], "currency": "TRY", "net_amount": 3876.09, "gross_amount": 3870.0, "price_certainty": "INDICATIVE", "reference_price": 387.0}, "warnings": [], "expires_at": "2026-09-02T07:58:41.435839Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-38B18E33391EBBD7", "missing_fields": [], "confirmation_required": true}', '2026-09-02T07:58:41.435839+00:00', '2026-09-02T07:43:41.452093+00:00', NULL, '2343b67d-5341-4dd5-a20e-e3a01734c189', '2026-09-02T07:43:41.438420+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-EBF4660FC34AEC08', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'ui-TUPRS-1788335105824', 'CONFIRMED', 'BUY', 'TUPRS', 2.000000, 'TR-1EB1C03EB319', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "TUPRS", "quantity": 2.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-1EB1C03EB319", "destination_account_id": null}, "audit_id": "4e8075e2-1b1a-4082-a9eb-80a299f7d97e", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 1.19, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.06, "currency": "TRY"}], "currency": "TRY", "net_amount": 793.25, "gross_amount": 792.0, "price_certainty": "INDICATIVE", "reference_price": 396.0}, "warnings": [], "expires_at": "2026-09-02T08:00:05.850126Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-EBF4660FC34AEC08", "missing_fields": [], "confirmation_required": true}', '2026-09-02T08:00:05.850126+00:00', '2026-09-02T07:45:05.869859+00:00', NULL, '4e8075e2-1b1a-4082-a9eb-80a299f7d97e', '2026-09-02T07:45:05.852412+00:00') ON CONFLICT DO NOTHING;
 
--- ai.conversations (8)
+-- ai.conversations (11)
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('98d2674e-00ed-4724-873f-b18526ceb38f', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', '979a3110-6869-4855-81aa-a0bb1e6a7a37', 'ASELS hissesi ne kadar', 'active', '2026-08-26T07:19:08.898281+00:00', '2026-08-26T07:20:14.266426+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('7255f0b4-d098-415a-9002-d930f8803993', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', '06e7302c-f9c1-40c8-98a7-ca1f9cae7daf', 'THYAO 250 adet alacaktım', 'active', '2026-08-26T07:20:36.697203+00:00', '2026-08-26T07:21:07.462113+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('efe95cd3-0dc4-4357-9fd0-81396b10dee5', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'cb19471b-21ca-4145-951f-750860722bc4', 'THYAO 5 adet almak istiyorum', 'active', '2026-08-26T07:21:28.558087+00:00', '2026-08-26T07:21:48.014915+00:00') ON CONFLICT DO NOTHING;
@@ -69,8 +74,11 @@ INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('3769b6e0-3c88-4537-9dd4-4ea8957bf021', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'risk-faz5-check3', 'portföyüm ne kadar riskli?', 'active', '2026-08-27T08:04:50.386526+00:00', '2026-08-27T08:04:50.387386+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('3f19dcee-9300-444c-866d-92b736d31c76', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'risk-faz5-final', 'portföyüm ne kadar riskli?', 'active', '2026-08-27T11:52:49.164405+00:00', '2026-08-27T11:52:49.166735+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('3e78cfe3-bf68-4497-a744-b04cb3e6b215', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', '18fa384c-66ec-4e23-8749-f030d0833beb', 'portföyümü analiz et', 'active', '2026-08-27T13:48:40.172372+00:00', '2026-08-27T13:48:40.174024+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('af6214ce-948e-4118-be76-42e2d5cd5f43', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'analiz-faz-son', 'portföyüm ne kadar riskli?', 'active', '2026-08-28T09:28:56.807775+00:00', '2026-08-28T09:28:56.810480+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('81dd8131-0444-480a-9a4e-584b652d3ec7', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', 'default', 'portföyümdeki hisselerle ilgili haber var mı', 'active', '2026-09-01T14:47:09.377183+00:00', '2026-09-01T18:36:33.732260+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('ebe53111-8732-40fe-be3f-7768b5ef7944', '1eb1c03e-b319-4101-8f17-a3c6930b2f7d', '595044b6-5ef4-4499-8a1c-18b32d555d22', 'portföyümdeki hisselerle ilgili haber var mı', 'active', '2026-09-02T07:55:00.277649+00:00', '2026-09-02T08:10:55.839110+00:00') ON CONFLICT DO NOTHING;
 
--- ai.messages (32)
+-- ai.messages (106)
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b887cdd7-ce93-4249-9b8f-5d0db01460ce', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '979a3110-6869-4855-81aa-a0bb1e6a7a37'), 'user', 'ASELS hissesi ne kadar', '{}', '2026-08-26T07:19:08.898889+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('8ef05075-cd15-47e1-99c2-e3692fef2914', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '979a3110-6869-4855-81aa-a0bb1e6a7a37'), 'assistant', 'ASELSAN hissesi şu anda **401,0 TL** seviyesinde işlem görüyor.
 
@@ -307,3 +315,353 @@ Portföyünüzde iki hisse ve nakit bulunuyor. Hisseler dün açıldı ve fiyatl
 - Veri gecikmeli olduğu için anlık fiyat hareketleri yansımamış olabilir.
 
 Başka bir hesaplama görmek isterseniz, örneğin sektör dağılımı, getiriler veya risk ölçütleri gibi, söyleyin.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Paylaşılan portföy verileri, belirtilen değerleme anına aittir ve kişiye özel bir uygunluk değerlendirmesi içermez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "PORTFOLIO_AGENT", "context_topic": null, "primary_intent": "PORTFOLIO_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-08-27T13:48:40.175024+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('ee16dc33-f3d2-4f87-b1b2-a91bd760c3e1', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'analiz-faz-son'), 'user', 'portföyüm ne kadar riskli?', '{}', '2026-08-28T09:28:56.810480+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('dcc143fc-78fa-4613-96f6-572000777abb', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'analiz-faz-son'), 'assistant', '**Portföy Risk Özeti**
+
+Portföyünüzdeki risk ölçümleri aşağıdaki gibidir:
+
+| Ölçüt | Değer |
+|---------------------------|-------|
+| Yıllık volatilite | %28,29 |
+| En büyük düşüş (max‑drawdown) | %21,89 |
+| HHI (konsantrasyon) | 0,8833 |
+| Etkin çeşitlilik (effective N) | 1,13 |
+| En büyük pozisyon ağırlığı | %93,85 (DOAS) |
+| VaR (95 % / 1 gün) | -452,11 TL |
+| CVaR (95 % / 1 gün) | -685,54 TL |
+| Sharpe oranı | -1,3806 |
+
+**Ölçülen portföy riskiniz "Yüksek" seviyesinde; ankette belirttiğiniz tolerans "Düşük". Portföy, beyan ettiğiniz bandın üzerinde ölçülüyor.**
+
+**Öne çıkan gözlemler:**
+- Portföy %100’ü üç en büyük pozisyonda yoğunlaşmış; bu durum tek bir hisse hareketinin tüm portföyü etkileme riskini artırıyor.
+- Yıllık volatilite %28,3 seviyesinde, geçmiş dönemdeki dalgalanmanın ölçüsü yüksek.
+- Sharpe oranının negatif olması, risk‑düzeltmeli getirinin geçmişte negatif olduğunu gösterir.
+- Veri kalitesi %100 kapsam ve istatistiksel olarak güvenilir, ancak geçmiş performans geleceği garanti etmez.
+
+Başka bir analiz ya da farklı bir ölçüm görmek isterseniz, söylemeniz yeterli.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-08-28T09:28:56.811480+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('1d6d7c69-cbae-441e-b626-e85d2630cc10', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'portföyümdeki hisselerle ilgili haber var mı', '{}', '2026-09-01T14:47:09.381142+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('326cd73a-fe09-4b0c-9d0e-2adbc67f2e46', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', '**Portföy Haber Özeti**
+
+Portföyümdeki hisseler için son 90 gün içinde çıkan haber sayısını inceledim.
+
+| Hisse | Haber Sayısı |
+|------|--------------:|
+| AEFES | 0 |
+| AKBNK | 12 |
+| DOAS | 0 |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+
+**Öne çıkan gözlemler:**
+- Akbank (AKBNK) için 12 haber bulunmuş, çoğu KAP bildirimleri ve finans haberleri.
+- Anadolu Efes (AEFES) ve Doğuş Otomotiv Servis (DOAS) için haber bulunmamış.
+- Haber sayısı, haberlerin içeriği veya piyasa üzerindeki etkisini yansıtmaz.
+
+**Akbank Haber Başlıkları (ilk 10)**
+
+Portföydeki tek hisse olan Akbank için son 90 günde yayınlanan haber başlıklarını inceledim.
+
+| Başlık | Kaynak | Yayın Tarihi |
+|--------|--------|--------------|
+| AKBANK T.A.Ş. — Pay Dışında Sermaye Piyasası Aracı İşlemlerine İlişkin Bildirim (Faiz İçeren) | KAP | 1 Eylül 2026 16:59 |
+| AKBANK T.A.Ş. — İhraç Belgesi | KAP | 31 Ağustos 2026 17:07 |
+| AKBANK T.A.Ş. — Pay Dışında Sermaye Piyasası Aracı İşlemlerine İlişkin Bildirim (Faiz İçeren) | KAP | 31 Ağustos 2026 17:06 |
+| Zurich Sigorta Genel Müdür Baş Yardımcısı Esra Bozkurt hayatını kaybetti | Patronlar Dünyası - Ekonomi | 15 Ağustos 2026 11:26 |
+| Akbank''tan yılın ilk yarısında ekonomiye 2,9 trilyon lira kredi desteği | Patronlar Dünyası - Finans | 28 Temmuz 2026 17:08 |
+| Akbank ve KGF iş birliğiyle KOBİ’ler, Dijital KGF kredisine Akbank Mobil üzerinden dakikalar içinde ulaşabilecek | Patronlar Dünyası - Finans | 21 Temmuz 2026 09:34 |
+| BIST 100 değer kaybetti, endekse dahil hisselerin 55''i prim yaptı | Patronlar Dünyası - Borsa | 13 Temmuz 2026 16:02 |
+| Akbank 3,26 milyar TL''lik kredi alacağını 514 milyon karşılığında sattı | Patronlar Dünyası - Şirketler | 26 Haziran 2026 12:36 |
+| Akbank, kullanıcılarına 2 milyar TL’nin üzerinde fayda sağlayan Wings’i yapay zeka destekli seyahat asistanı ile güçlendirecek | Patronlar Dünyası - Finans | 18 Haziran 2026 04:46 |
+| Akbank ve MEB işbirliğine imza attı, ileri dönüşüm teknikleri meslek liselerinin eğitim modeline dahil oluyor | Patronlar Dünyası - Şirketler | 9 Haziran 2026 15:23 |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+
+**Öne çıkan gözlemler:**
+- Başlıkların çoğu KAP bildirimleri ve banka faaliyetleriyle ilgili.
+- Haberlerin tarihleri, son iki ayı kapsıyor; daha eski haberler listede yer almıyor.
+- Bu tablo sadece haber başlıklarını ve yayın tarihlerini gösterir; haberlerin içeriği ve piyasa üzerindeki etkisi burada değerlendirilmemiştir.
+
+**Karar sizin.** Başka bir analiz ya da farklı bir zaman dilimi için bilgi isterseniz, yardımcı olabilirim.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez."], "target_agent": "PORTFOLIO_AGENT", "context_topic": null, "primary_intent": "PORTFOLIO_INQUIRY", "compliance_verdict": "REVISE"}', '2026-09-01T14:47:09.382142+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('020bfac2-11b4-455c-bf33-8aff822a5123', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'hisselerim teknik olarak nasıl duruyor', '{}', '2026-09-01T15:19:45.234000+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b651588f-5778-43d6-9fde-30792396cdc6', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Portföyünüzdeki hisselerin teknik durumu aşağıdaki gibidir.
+
+BIST 100 içinden seçtiğiniz üç hisseye son bir yıllık günlük fiyat verilerini inceledim; hareketli ortalamalar, yüzde sapmalar, RSI ve yıllık volatilite gibi teknik göstergelere baktım.
+
+| Hisse | Trend | Son Kapanış (TRY) | SMA 20 | SMA 50 | SMA 200 | % SMA20''den | % SMA50''den | RSI 14 | Yıllık Volatilite | Max Düşüş % |
+|-------|-------|-------------------|--------|--------|----------|-------------|-------------|--------|-------------------|------------|
+| AEFES | Düşüş | 18,85 | 20,54 | 20,74 | 18,58 | –8,23 | –9,12 | 34,81 | %38,21 | –26,16 |
+| AKBNK | Yükseliş | 72,00 | 67,34 | 71,06 | 71,76 | +6,93 | +1,33 | 61,04 | %42,57 | –31,60 |
+| DOAS | Düşüş | 166,00 | 172,94 | 173,11 | 173,20 | –4,01 | –4,11 | 38,50 | %28,88 | –21,76 |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+
+**Öne çıkan gözlemler:**
+- AEFES ve DOAS, 50 günlük ortalamanın altında ve RSI değerleri 35 civarında, bu da aşırı satım bölgesine yakın bir durum gösteriyor.
+- AKBNK, 20 günlük ortalamanın %7 üzeri ve RSI 61 seviyesinde, momentumun hâlen pozitif olduğunu işaret ediyor.
+- Tüm hisseler için işlem hacmi ortalamaya göre düşük (≈ 0,9‑1,0), bu da likidite riskinin bir miktar olduğunu gösterir.
+- Volatilite değerleri %28‑%43 arasında değişiyor; yüksek volatilite fiyat dalgalanmalarının olası büyüklüğünü yansıtır.
+- Teknik göstergeler sadece geçmiş fiyat hareketine dayanır; gelecekteki fiyat davranışını garanti etmez.
+
+Portföyünüzün yıllıklaştırılmış oynaklığı %28,3, en büyük gerileme %21,9’dur. Risk skoru 100 üzerinden 35,5 puan; bu da **Yüksek** risk seviyesine işaret eder. Ölçülen portföy riskiniz “Yüksek” seviyesinde; ankette belirttiğiniz tolerans “Düşük”. Portföy, beyan ettiğiniz bandın üzerinde ölçülüyor.
+
+**Karar sizin.**
+
+**Fiyatlar 15 dakika gecikmeli; 24 Ağustos 2026 itibarıyla.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-01T15:19:45.235000+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('a8e81e39-c4f9-47e3-b299-c042da907fe7', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'dolar %10 yükselirse portföyüm ne olur', '{}', '2026-09-01T16:12:48.551680+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('559ce9a4-a27e-4263-b7a0-c0d681841919', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', '**Senaryo Analizi**
+Dolar/TL kurunda %10’luk bir artış, portföyünüzün TL cinsinden değerini etkiler.
+
+- **Kanal:** Dolar/TL kurundaki değişim, portföy değerinizin TL bazlı ölçümüne yansır.
+- **Yön:** Dolar yükseldiğinde TL değerinde azalma baskısı oluşur (negatif etki).
+- **Ölçülen profil:** Beta **‑0,68**, korelasyon **‑0,03**, r² **%0,1** – bu, portföy değerindeki değişimin yalnızca %0,1’ini açıklayan zayıf bir ilişki olduğunu gösterir.
+- **Diğer yön:** Hisse fiyatları, yerel ekonomik koşullar gibi faktörler farklı yönlerde baskı oluşturabilir; bu faktörler ölçülen veri kapsamında değildir.
+
+**Tahmini Etki**
+Dolar/TL %10 yükselirse, portföyünüzün değeri yaklaşık **%6,8** azalır; bu da yaklaşık **‑1.188,69 TL** eder.
+
+**Varsayımım:**
+- 10 % şok USDTRY üzerine uygulanmıştır.
+- Duyarlılık, günlük getirilerin geçmiş birlikte hareketinden ölçülmüştür.
+- Etki doğrusal varsayılmıştır.
+- Portföy bileşimi değişmemiş kabul edilmiştir.
+
+**Bu varsayımsal bir senaryo; gerçekleşip gerçekleşmeyeceğini kimse bilemez.**
+**Karar sizin.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-01T16:12:48.552680+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('758ff94b-8eaa-433a-9d64-5055e6fa4444', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm ne olur', '{}', '2026-09-01T16:12:59.290321+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('4b639e09-03c9-498b-850c-ea5da0bd582a', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T16:12:59.291321+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('a8104f4c-0dc8-4a55-b7f7-fea464125e6c', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'dolar %10 yükselirse portföyüm ne olur', '{}', '2026-09-01T16:13:43.927750+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('e4241ae6-a61f-440a-bd26-d73be7826925', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', '**Kimse size kazandırır diyemez.** Ben de diyemem.
+
+**Düşüş lehine**
+- Dolar/TL %10 yükseldiğinde, son 1 yıl ölçülen duyarlılığa göre portföyünüzün değeri yaklaşık **%6,79** azalır.
+- Bu, portföy değerinizde **‑1.188,69 TL** civarında bir düşüşe denk gelir.
+
+Bu rakamlar, portföydeki bireysel hisse hareketlerini, likidite etkilerini, faiz değişikliklerini veya diğer makro‑ekonomik faktörleri kapsamaz.
+
+**Bu dönemde veriler ağırlıklı olarak değer kaybı yönündeki baskıya işaret ediyor.**
+
+**Karar sizin.**
+
+**Varsayımlar**
+- Duyarlılık, günlük getirilerin geçmiş birlikte hareketinden ölçülmüştür.
+- Etki doğrusal varsayılmış ve ölçülen katsayı şok büyüklüğüyle çarpılmıştır.
+- Portföy bileşimi sabit kalmıştır.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-01T16:13:43.928750+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('debe3bbc-67eb-4973-aea4-2e735245aedb', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'dolar %10 yükselirse portföyüm ne olur', '{}', '2026-09-01T16:15:27.945631+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('3361a731-4d6c-4b86-a79f-3cb11adc5475', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', '**Kimse size kazandırır diyemez.** Ben de diyemem.
+
+**Artış lehine**
+*(bu senaryoda ölçülen pozitif bir etki bulunmamaktadır)*
+
+**Düşüş lehine**
+- Portföy değeri, Dolar/TL %10 yükseldiğinde yaklaşık **%6,8** azalır.
+- Bu azalma, portföyünüzün TL cinsinden değerinde **‑1.188,69 TL** civarında bir düşüşe eşdeğerdir.
+- Duyarlılık katsayısı **‑0,679**’dir; dolar yükseldiğinde portföy değeri ters yönde hareket eder.
+- Bu faktör, portföyün geçmiş fiyat hareketinin yalnızca **%0,1**’ini açıklamaktadır (r² ≈ 0,001).
+
+Bu rakamlar, portföydeki diğer risk faktörlerini, likidite etkilerini veya gelecekteki makroekonomik değişkenleri kapsamamaktadır.
+
+Veriler, portföy değerinizde **düşüş baskısına** işaret ediyor; ölçülen etki negatif ve %6,8 civarında bir azalmayı gösteriyor.
+
+**Karar sizin.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Bu bir tahmin değil, geçmiş birlikte hareketin ölçümüdür; geçmiş fiyat hareketi geleceği belirlemez."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_STRATEGY", "compliance_verdict": "REVISE"}', '2026-09-01T16:15:27.946631+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('fa2c1816-6b0c-403a-80bb-72b115643f6a', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:16:12.679778+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('2e7d9653-5c8d-45e0-a8f7-b72435b8b9ad', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_STRATEGY", "compliance_verdict": "BLOCK"}', '2026-09-01T16:16:12.680778+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('831b6ecd-701a-4f04-9efd-18f0f2a25823', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:16:39.215449+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('74977502-97b9-4b73-8647-60419afd6a0c', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_STRATEGY", "compliance_verdict": "BLOCK"}', '2026-09-01T16:16:39.216449+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('9cc5b3f9-1d9f-4a32-bf36-47afe0dbd5a6', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:17:29.842170+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('38af3d64-572c-469c-a656-1e1d1a302772', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T16:17:29.843170+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('7dba1d49-5b74-4312-89f3-c7fdac0a33a5', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:18:20.509522+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('2fe59362-dcaf-42ce-9602-6811b84b52f9', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T16:18:20.510522+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('1b29ffd8-0352-4634-9dea-dc63499065fc', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:19:15.662685+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('1ec6f927-e3c5-490f-80bb-3863f2795dac', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T16:19:15.663685+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('19f7aab6-2265-43ed-a68d-1e593467669c', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:19:56.256037+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('6257946f-995a-45a8-a016-7fcc8da964ae', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Üzgünüm, faiz oranlarındaki değişimin portföyünüz üzerindeki etkisini hesaplamak için gerekli veriler şu anda alınamadı. Bu senaryoyu değerlendirebilmem için portföyünüzdeki hisse ve tahvil gibi enstrümanların listesini ve ilgili pozisyon bilgilerini paylaşabilir misiniz?
+
+**Karar sizin.**', '{"disclosures": [], "target_agent": "EDUCATION_AGENT", "context_topic": null, "primary_intent": "OUT_OF_SCOPE", "compliance_verdict": "PASS"}', '2026-09-01T16:19:56.257037+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('49b60255-8196-46c5-9469-706ac72c2fdc', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:22:09.563405+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('5feaebef-6417-41b1-993a-13c94a9c2e29', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T16:22:09.564405+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('0b6fbff2-b8eb-4b9c-9201-6d89aaa4ae6f', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:22:42.117630+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('75d236e4-b455-460c-8ca6-0daf4ded89d1', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', '**Kimse size kazandırır diyemez.** Ben de diyemem.
+
+Şu anda faiz oranlarındaki değişimin portföyünüz üzerindeki etkisini hesaplamak için gerekli veriler alınamadı. Bu analizi yapabilmem için portföyünüzde bulunan hisse, tahvil ve diğer enstrümanların listesini paylaşabilir misiniz?
+
+**Karar sizin.**', '{"disclosures": [], "target_agent": "EDUCATION_AGENT", "context_topic": null, "primary_intent": "OUT_OF_SCOPE", "compliance_verdict": "PASS"}', '2026-09-01T16:22:42.118630+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('e46f82c5-8576-4563-a789-6b838ed7e5fd', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:25:13.396090+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('7cf7dadc-8670-478e-a49a-a33546b79de1', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda faiz artışının portföyünüz üzerindeki etkisini ölçmek için gerekli verilere ulaşamadım, bu yüzden sayı paylaşamıyorum. Tekrar denememi ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-01T16:25:13.397090+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('00034626-4c9c-4c8f-a02f-84a1539d2804', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:28:01.283413+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b2a16ac6-b4dd-442c-bc08-42d84dac21a4', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T16:28:01.284413+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('de183c70-bbde-4188-8bf8-e6ed9ad7f201', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:28:41.340659+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('172e1580-7cb8-4bf2-853d-76f471737483', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T16:28:41.341659+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('469ca0ad-c15c-401e-8701-e4e4996401d1', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:29:30.186685+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b658d07f-18ae-4046-8beb-98ba95e28a85', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T16:29:30.187685+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('954aec6d-387a-4670-b44f-b24739a74ded', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:30:21.224535+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('37bd209e-03a8-44d4-b5c3-9fd0c1155c78', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T16:30:21.225535+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('d8fa309b-ada6-4c7b-b4a5-140568e85059', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:30:48.833700+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('f5e446f0-7055-4cab-b566-36eae403cafc', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Portföyünüzdeki faiz artışının etkisiyle ilgili gerekli veriler alınamadı; bu nedenle analiz sağlayamıyorum.', '{"disclosures": [], "target_agent": "EDUCATION_AGENT", "context_topic": null, "primary_intent": "OUT_OF_SCOPE", "compliance_verdict": "PASS"}', '2026-09-01T16:30:48.834700+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('912fdb9f-6f98-4d94-8228-5fc8e8d9bcd8', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T16:33:15.729778+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('3e97d276-6248-4749-88e7-7ad7cec26120', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T16:33:15.730778+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('7009f716-11a8-4a33-8384-7a1bec911b89', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T18:22:13.889439+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('a7bbb20e-3ce5-4d4f-82f2-d0eb8747bcf4', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T18:22:13.890439+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('6e3ab6ec-042a-428e-98b2-8fd2c94a552f', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'nasılsın', '{}', '2026-09-01T18:22:33.656030+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('063e1590-4d37-4dcf-b8b9-50631ec17c71', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'İyiyim, teşekkür ederim. Siz nasılsınız?', '{"disclosures": [], "target_agent": "SMALLTALK_AGENT", "context_topic": null, "primary_intent": "SMALLTALK", "compliance_verdict": "PASS"}', '2026-09-01T18:22:33.657030+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('f343e563-cede-4489-a238-44fc891147da', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T18:23:18.747077+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('a8b1f73b-815a-426a-b36c-221f247da7a2', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T18:23:18.748077+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('a7d54e9d-387a-4b56-83d5-f351a05f3a21', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'portföyüm nasıl', '{}', '2026-09-01T18:24:01.346934+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('40ac694a-78fc-4a6e-9905-4aa2cef24868', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Portföyünüzdeki hisseleri ve nakit durumunu aşağıdaki gibi özetledim.
+
+BIST 100 içinde yer alan üç hisseyi, **piyasa değerine göre büyükten küçüğe** sıraladım.
+
+| Hisse | Adet | Ortalama Maliyet (TL) | Son Fiyat (TL) | Değer (TL) | Gerçekleşmemiş P/L (TL) |
+|------|------|-----------------------|----------------|-----------|------------------------|
+| DOAS | 100 | 166,90 | 164,20 | 16.420,00 | -270,00 |
+| AKBNK | 12 | 73,30 | 71,95 | 863,40 | -16,20 |
+| AEFES | 12 | 18,97 | 18,08 | 216,96 | -10,68 |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+**Fiyatlar 15 dakika gecikmeli; 1 Eylül 2026 15:42 itibarıyla.**
+
+**Öne çıkan gözlemler:**
+- Toplam piyasa değeri 17.500,36 TL, toplam maliyet 17.797,24 TL; gerçekleşmemiş zarar 296,88 TL (%‑1,67).
+- Nakit bakiyeniz 7.174,72 TL, portföyünüzün yaklaşık % 71’i nakit olarak duruyor.
+- En büyük pozisyon DOAS, toplam portföy ağırlığının % 94’ünü oluşturuyor; sektör bilgisi eksik olduğu için risk dağılımı hakkında sınırlı veri mevcut.
+
+Karar sizin. Başka bir analiz (örneğin risk profili veya sektör dağılımı) görmek ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Paylaşılan portföy verileri, belirtilen değerleme anına aittir ve kişiye özel bir uygunluk değerlendirmesi içermez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "PORTFOLIO_AGENT", "context_topic": null, "primary_intent": "PORTFOLIO_INQUIRY", "compliance_verdict": "REVISE"}', '2026-09-01T18:24:01.347934+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('ff6eb7d9-4ac8-4368-b974-776e38d31a3d', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T18:24:45.848486+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('db068d03-12d2-4949-a9b2-1d73bd557d22', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "BLOCK"}', '2026-09-01T18:24:45.849486+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('84dfb5e6-a0c5-4219-a9aa-b43bd5c6a58b', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T18:34:03.562016+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('7ede3df1-220c-48c5-a2ff-404f777c64cd', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', '**Varsayımım:** Faiz oranı faktörü mevcut değil; bunun yerine geçmiş stres testi verileri kullanıldı.
+
+**Artış lehine**
+- USD/TRY %0,89 artışında portföy %3,15 yükselmiş (5 işlem günü).
+- EUR/TRY %3,57 artışında portföy %0,59 yükselmiş (5 işlem günü).
+- BIST 100 %9,91 artışında portföy %7,99 yükselmiş (5 işlem günü).
+
+**Düşüş lehine**
+- Ons altın %‑14,77 düşüşünde portföy %‑2,65 gerilemiş (5 işlem günü).
+- En kötü beş günde portföy getirileri: %‑7,52 (01 Mar 2026), %‑4,62 (20 May 2026), %‑4,46 (18 Feb 2026), %‑4,37 (22 Mar 2026), %‑3,53 (26 Jan 2026).
+
+**Ölçülenler neyi yakalamıyor?**
+Bu veriler faiz oranı hareketlerini doğrudan ölçmez; sadece döviz, hisse senedi ve altın gibi ilgili faktörlerin geçmişteki etkilerini gösterir.
+
+**Ağırlıklı bulgu**
+Bu dönemde veriler, faiz artışıyla ilişkili olası TL güçlenmesi ve piyasa gerilemesi nedeniyle portföyün negatif baskı altında olabileceğini işaret ediyor.
+
+**Karar sizin.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Bu bir tahmin değil, geçmiş birlikte hareketin ölçümüdür; geçmiş fiyat hareketi geleceği belirlemez."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-01T18:34:03.563016+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('ac338904-71ee-4669-99f3-9c5f55429e75', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-01T18:36:33.732260+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('2e76b54f-fed1-43f2-a3f0-5d2cd464b741', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = 'default'), 'assistant', 'Faiz ve enflasyon için bu sistemde günlük bir seri tutulmuyor, dolayısıyla portföyünüzün onlara duyarlılığı ölçülemiyor — bu geçici bir sorun değil, ölçebildiklerimin sınırı. Ölçebildiğim faktörler: Dolar/TL, Euro/TL, BIST 100 ve ons altın.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-01T18:36:33.733260+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('24d3107a-4088-4f55-8709-bfe797cb01eb', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'user', 'portföyümdeki hisselerle ilgili haber var mı', '{}', '2026-09-02T07:55:00.279390+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('1c9e2949-7830-4cc4-a8b1-b767339e6841', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'assistant', '**Portföyünüzdeki hisseler için son 90 gün içinde KAP üzerinden haberleri taradım.**
+
+| Hisse | Haber Sayısı |
+|-------|--------------|
+| AEFES | 0 |
+| AKBNK | 14 |
+| ASELS | 0 |
+| DOAS | 1 |
+| TUPRS | 4 |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+
+**Öne çıkan gözlemler:**
+- Akbank (AKBNK) en çok haber (14) içeriyor; çoğu pay dışı işlemler ve kredi desteğiyle ilgili.
+- Tüpraş (TUPRS) 4 haberle ikinci sırada; konular arasında pay alım‑satım bildirimi ve özel durum açıklamaları.
+- Doğuş Otomotiv Servis (DOAS) sadece bir haber taşıyor; bir özel durum açıklaması.
+- Anadolu Efes (AEFES) ve Aselsan (ASELS) için son 90 günde haber bulunmadı.
+- Tarama yalnızca KAP kaynaklarını kapsar; diğer medya ve analist raporları bu listede yer almıyor.
+
+Bu tablo, haberlerin içeriği ve piyasa üzerindeki olası etkisi gibi niteliksel faktörleri yansıtmaz.
+
+**Karar sizin.**
+
+Başka bir hisse hakkında daha fazla haber detayı görmek ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez."], "target_agent": "PORTFOLIO_AGENT", "context_topic": null, "primary_intent": "PORTFOLIO_INQUIRY", "compliance_verdict": "REVISE"}', '2026-09-02T07:55:00.280390+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('8b205f7b-b844-48d1-a1a4-8daa2ca7c48c', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'user', 'hisselerim teknik olarak nasıl duruyor', '{}', '2026-09-02T07:56:22.643285+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('9cf99787-efc1-428b-b0db-ced8d0c8e271', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'assistant', '**Portföyünüzdeki 5 hisse için teknik analiz özeti**
+
+5 pozisyonunuzun 2''si 50 günlük ortalamanın altında (portföy değerinin %75,0''i); 2''si yükseliş eğiliminde, 2''si düşüş eğiliminde, 1''i yatay seyrediyor.
+
+**Artış lehine**
+- **AKBNK** – 50 günlük ortalamanın %2,5 üzerinde, son 20 işlem gününün 9''unda yükselerek kapattı, 52 hafta aralığının %52,6 seviyesinde; teknik olarak yükseliş eğiliminde. Bu görünüm sürdüğü sürece yükseliş eğiliminin devamı beklenebilir — ancak geçmiş fiyat hareketi geleceği belirlemez.
+- **TUPRS** – 50 günlük ortalamanın %30,7 üzerinde, son 20 işlem gününün 15''inde yükselerek kapattı, 52 hafta aralığının %98,4 seviyesinde; teknik olarak yükseliş eğiliminde. Bu görünüm sürdüğü sürece yükseliş eğiliminin devamı beklenebilir — ancak geçmiş fiyat hareketi geleceği belirlemez.
+
+**Düşüş lehine**
+- **AEFES** – 50 günlük ortalamanın %11,4 altında, son 20 işlem gününün 9''unda yükselerek kapattı, 52 hafta aralığının %53,6 seviyesinde; teknik olarak düşüş eğiliminde. Bu görünüm sürdüğü sürece düşüş eğiliminin devamı beklenebilir — ancak geçmiş fiyat hareketi geleceği belirlemez.
+- **DOAS** – 50 günlük ortalamanın %4,0 altında, son 20 işlem gününün 8''inde yükselerek kapattı, 52 hafta aralığının %30,9 seviyesinde; teknik olarak düşüş eğiliminde. Bu görünüm sürdüğü sürece düşüş eğiliminin devamı beklenebilir — ancak geçmiş fiyat hareketi geleceği belirlemez.
+
+**Yatay eğilim**
+- **ASELS** – 50 günlük ortalamanın %3,2 üzerinde, son 20 işlem gününün 10''unda yükselerek kapattı, 52 hafta aralığının %81,1 seviyesinde; teknik olarak yatay seyrediyor.
+
+Bu veriler likidite, haber akışı, temel değerleme gibi faktörleri içermemektedir.
+
+Veriler iki yönlü baskıyı gösteriyor; net bir yön belirlemek zor.
+
+**Karar sizin.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-02T07:56:22.644285+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('86397a98-18a4-4449-9b62-73f1ba2b660c', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'user', 'dolar %10 yükselirse portföyüm ne olur', '{}', '2026-09-02T07:57:02.567197+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('205fc9ef-79e5-428d-b2eb-c9d5e71116d2', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'assistant', 'Dolar %10 yükselirse portföyünüzün risk ölçümlerine şu anda ulaşamadım. Tekrar denememi ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-02T07:57:02.568197+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('51356fba-a778-4deb-a857-2457d41398c0', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'user', 'tekrar dene', '{}', '2026-09-02T07:57:16.932876+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('1de7ea64-8829-4513-a8e4-0b2a758bc57e', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'assistant', '**Kimse size kazandırır diyemez. Ben de diyemem.**
+
+**Düşüş lehine**
+- Dolar/TL %10 yükselseydi, portföy değeri yaklaşık %3,6 azalarak **‑793,01 TL** düşerdi.
+- Beta **‑0,361**; dolar yükseldiğinde portföy değeri ters yönde hareket eder.
+- Korelasyon **‑0,019**; ilişki çok zayıf.
+- R‑kare **0,00037**; bu faktör geçmiş hareketin yalnızca **%0,0**’ını açıklar.
+
+Bu rakamlar, sadece dolar/TL şokunun portföy üzerindeki etkisini ölçer; diğer makro faktörler, sektör dinamikleri ve bireysel hisse hareketleri hesaba katılmamıştır.
+
+**Bu dönemde veriler ağırlıklı olarak düşüş tarafındaki baskıya işaret ediyor.**
+
+**Karar sizin.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Bu bir tahmin değil, geçmiş birlikte hareketin ölçümüdür; geçmiş fiyat hareketi geleceği belirlemez."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-02T07:57:16.933876+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b2f62680-815a-4656-88b5-a0322cfa1867', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'user', 'faizler artarsa portföyüm nasıl etkilenir', '{}', '2026-09-02T07:58:11.109140+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('3910a407-61bc-43bd-be69-cc0a62da6962', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'assistant', 'Faiz ve enflasyon için bu sistemde günlük bir seri tutulmuyor, dolayısıyla portföyünüzün onlara duyarlılığı ölçülemiyor — bu geçici bir sorun değil, ölçebildiklerimin sınırı. Ölçebildiğim faktörler: Dolar/TL, Euro/TL, BIST 100 ve ons altın.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-02T07:58:11.110140+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('e2e4caff-2cb6-4c93-9436-707005d58db1', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'user', '100 adet AKBNK daha alsam riskim ne olur', '{}', '2026-09-02T07:58:56.985965+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('8c2094cc-0049-4db8-87f6-14f00a8a0b89', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'assistant', '**Mevcut risk ölçümü**
+- Skor: 100 üzerinden **41,0**
+- Seviye: **Yüksek**
+- Volatilite: **0,2570**
+- HHI (piyasa yoğunluğu): **0,5814**
+- Etkili çeşitlilik (effective N): **1,7199**
+- Maksimum düşüş (max drawdown): **‑0,1769**
+
+**100 adet AKBNK eklenince risk ölçümü**
+- Skor: 100 üzerinden **48,6**
+- Seviye: **Orta**
+- Volatilite: **0,2552**
+- HHI: **0,4061**
+- Etkili çeşitlilik: **2,4624**
+- Maksimum düşüş: **‑0,1938**
+
+**Değişim (ekleme sonrası – mevcut)**
+- Skor artışı: **+7,6** puan
+- Volatilite değişimi: **‑0,0018**
+- HHI değişimi: **‑0,1753**
+- Etkili çeşitlilik artışı: **+0,7425**
+- Maksimum düşüş artışı: **‑0,0169**
+
+Bu ölçüm, yalnızca portföydeki varlıkların tarihsel volatilitesi, dağılımı ve geçmiş fiyat hareketlerine dayanır; likidite koşulları, piyasa sentimenti veya gelecekteki ekonomik gelişmeler gibi faktörleri içermez.
+
+**Karar sizin.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Bu bir tahmin değil, geçmiş birlikte hareketin ölçümüdür; geçmiş fiyat hareketi geleceği belirlemez."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-02T07:58:56.986965+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('0d5d42c0-0343-4172-ba78-753844a65490', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'user', 'en kötü günüm neydi', '{}', '2026-09-02T07:59:50.730509+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('f3593b25-8736-4058-8935-62612aa33d15', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'assistant', '**En kötü günleriniz (son 1 yıl)**
+
+Geçen bir yıl içinde günlük portföy getirilerini inceledim, en düşük getirileri sıraladım.
+
+| Tarih | Günlük getiri |
+|-------|---------------|
+| 01 Mart 2026 | -5,53 % |
+| 20 Mayıs 2026 | -4,48 % |
+| 18 Şubat 2026 | -3,96 % |
+| 26 Ocak 2026 | -3,52 % |
+| 02 Haziran 2026 | -3,35 % |
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
+
+**Öne çıkan gözlemler:**
+- En kötü gün -5,53 % kayıp, günlük volatilitenin üzerinde bir düşüş.
+- İlk beş en kötü gün %3,35‑%5,53 aralığında kayıplar gösteriyor.
+- Veri yalnızca kapanış fiyatlarına dayalı günlük getirileri içeriyor; intraday hareketler ölçülmemiştir.
+
+**Karar sizin.**
+
+Başka bir analiz ya da farklı bir zaman dilimi görmek ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Bu bir tahmin değil, geçmiş birlikte hareketin ölçümüdür; geçmiş fiyat hareketi geleceği belirlemez."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-02T07:59:50.731509+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('48ed29b2-3dc8-4f94-9810-687d0f004831', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'user', 'AKBNK şirketinin son çeyrek karı portföyümü nasıl etkiler', '{}', '2026-09-02T08:10:55.839110+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('309a3700-5ffd-4e10-af8b-229b49c5fa86', (SELECT id FROM ai.conversations WHERE user_id = '1eb1c03e-b319-4101-8f17-a3c6930b2f7d' AND thread_id = '595044b6-5ef4-4499-8a1c-18b32d555d22'), 'assistant', 'AKBNK’nin son çeyrek karının portföyünüz üzerindeki etkisini şu anda ölçemedim. Tekrar denememi ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "RISK_STRATEGY_AGENT", "context_topic": null, "primary_intent": "RISK_ANALYSIS", "compliance_verdict": "REVISE"}', '2026-09-02T08:10:55.840110+00:00') ON CONFLICT DO NOTHING;

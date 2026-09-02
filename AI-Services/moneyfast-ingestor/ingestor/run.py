@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from . import config, refresh_server, sinks
-from .sources import rss_source, yfinance_source
+from .sources import kap_source, rss_source, yfinance_source
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -434,13 +434,34 @@ def _last_trading_day(today: Optional[date] = None) -> str:
 
 def run_news(client: httpx.Client) -> dict:
     items = rss_source.fetch_all()
+
+    # KAP aynı lavaboya akıyor: bildirimler de haber öğesi biçiminde çıkıyor,
+    # dolayısıyla backend ve RAG için ikinci bir yol yok. Fark kaynakta --
+    # RSS haberlerinde sembolü metinden çıkarmak zorundayız (ölçülen isabet
+    # %3), bildirimlerde ihraççı KAP'ın kendi etiketinden geliyor.
+    known = sinks.fetch_known_news_ids(client, kap_source.SOURCE)
+    disclosures = kap_source.fetch_disclosures(known)
+    items = items + disclosures
+
+    # Sıra önemli: backend ÖNCE yazılıyor, çünkü sembolleri o çözüyor
+    # (enstrüman evreni orada, bu serviste değil) ve RAG'a giden kopya o
+    # etiketleri taşımalı. Ters sırada korpus etiketsiz kalırdı -- ölçüldü,
+    # sonuç geri alınmadığı için 1.970 RSS belgesinin sıfırında ticker vardı.
     backend_result = sinks.push_news_to_backend(client, items) or {}
-    embedded = sinks.push_news_to_rag(client, items)
+    symbols = backend_result.pop("news_symbols", None) or {}
+    embedded = sinks.push_news_to_rag(client, items, symbols)
     log.info(
-        "news cycle: %d fetched, %s stored, %d embedded",
-        len(items), backend_result.get("news_written", 0), embedded,
+        "news cycle: %d fetched (%d KAP), %s stored, %d embedded, %d symbol-tagged",
+        len(items), len(disclosures), backend_result.get("news_written", 0),
+        embedded, len(symbols),
     )
-    return {"fetched": len(items), "embedded": embedded, **backend_result}
+    return {
+        "fetched": len(items),
+        "kap": len(disclosures),
+        "embedded": embedded,
+        "tagged": len(symbols),
+        **backend_result,
+    }
 
 
 def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False) -> dict:

@@ -92,14 +92,47 @@ RATE_LIMITED_TR = (
     "ederiz."
 )
 
+#: İstek, modelin tek seferde alabileceğinden BÜYÜK. Sağlayıcı bunu 413 ile
+#: ve `rate_limit_exceeded` koduyla döndürüyor, dolayısıyla aşağıdaki kota
+#: işaretlerine de takılıyor -- ama ikisi karşıt durumlar: kota beklemekle
+#: geçer, bu geçmez. Bir dakika sonra aynı istek yine aynı boyutta.
+#:
+#: ÖLÇÜLDÜ ve kullanıcı bildirdi: "faizler artarsa portföyüm nasıl etkilenir"
+#: her seferinde "yoğunluk sınırına takıldım, birkaç dakika sonra deneyin"
+#: cevabı veriyordu; aynı oturumda sorulan başka sorular anında cevaplanıyordu.
+#: Beklemek hiçbir zaman işe yaramayacaktı. Sağlayıcı kaydı: 8.393 token
+#: istendi, sınır 8.000.
+_TOO_LARGE_MARKERS = (
+    "request too large", "reduce your message size", "413",
+    "context length", "maximum context",
+)
+
 #: Substrings that mark a provider quota/rate-limit refusal. Matched on the
 #: exception text because the LLM client wraps the provider's 429 rather than
 #: raising a typed error.
 _RATE_LIMIT_MARKERS = ("rate limit", "rate_limit", "429", "quota", "too many requests")
 
+#: Boyut hatası kullanıcıya beklemesini SÖYLEMEZ. Beklemek düzeltmiyor ve
+#: "birkaç dakika sonra deneyin" demek, kullanıcıyı hiç sonuçlanmayacak bir
+#: döngüde tutmak olur -- kullanıcı bunu bizden önce fark etti.
+TOO_LARGE_TR = (
+    "Bu sorunun yanıtı için toplanan veri tek seferde işleyebileceğimden "
+    "büyük çıktı, bu yüzden yanıtı hazırlayamadım. Beklemek bunu değiştirmez; "
+    "soruyu daha dar sorarsanız (örneğin tek bir konuya odaklanarak) "
+    "yanıtlayabilirim."
+)
+
 
 def _failure_message(exc: Exception) -> str:
+    """Sağlayıcı hatasını kullanıcıya doğru cümleyle anlatır.
+
+    Boyut kontrolü kota kontrolünden ÖNCE: Groq'un 413'ü `rate_limit_exceeded`
+    kodunu taşıyor ve sıra ters olsaydı kalıcı bir hata geçici diye
+    anlatılırdı -- ki tam olarak bu oldu.
+    """
     text = str(exc).casefold()
+    if any(m in text for m in _TOO_LARGE_MARKERS):
+        return TOO_LARGE_TR
     return RATE_LIMITED_TR if any(m in text for m in _RATE_LIMIT_MARKERS) else GENERIC_FAILURE_TR
 
 
@@ -210,6 +243,60 @@ def _parse_json(raw: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Nodes
 # ---------------------------------------------------------------------------
+#: Bu sistemin ölçemediği makro faktörler. Sabit var, seri yok:
+#: `TR_POLICY_RATE` tek bir sayı ve enflasyon hiç toplanmıyor. Liste dar
+#: tutuldu -- ölçülebilen faktörler (dolar, euro, BIST, altın) BURAYA GİRMEZ,
+#: onların yolu zaten doğru çalışıyor.
+_UNMEASURABLE_FACTOR = re.compile(
+    r"\b(faiz|faizler|faizin|faizi|enflasyon|enflasyonun|tüfe|tufe|ppk)\b",
+    re.IGNORECASE,
+)
+
+#: Turun kullanıcının KENDİ portföyü hakkında olduğunu gösteren sözcükler.
+#: İkisi birden gerekiyor: "faiz nedir" bir tanım sorusu ve EDUCATION_AGENT'ın
+#: işi; "faizler artarsa portföyüm ne olur" bir ölçüm talebi.
+_OWNERSHIP_WORD = re.compile(
+    r"\b(portföy\w*|portfoy\w*|pozisyon\w*|hissem|hisselerim\w*|"
+    r"yatırımlarım\w*|yatirimlarim\w*|varlığım\w*|varligim\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_unmeasurable_factor_turn(message: str) -> bool:
+    """Ölçülemeyen bir makro faktör + kullanıcının KENDİ portföyü.
+
+    İkisi birden gerekiyor: "faiz nedir" bir tanım sorusu, "faizler artarsa
+    portföyüm ne olur" bir ölçüm talebi ve ölçüm yapılamaz.
+    """
+    return bool(
+        _UNMEASURABLE_FACTOR.search(message) and _OWNERSHIP_WORD.search(message)
+    )
+
+
+def _forced_agent(message: str) -> Optional[str]:
+    """Ölçülemeyen bir makro faktör + kullanıcının kendi portföyü.
+
+    Kodda, çünkü ÖLÇÜLDÜ: "faizler artarsa portföyüm nasıl etkilenir" iki ayrı
+    denemede de EDUCATION_AGENT'a gitti -- yönlendirme kuralı prompt'a
+    yazıldıktan SONRA da. Bu modülün kendi dersi (`_keep_crisis`,
+    `_verify_named_instrument`): prompt tavsiyedir ve zorunlu bir davranışın
+    kodda bir karşılığı olmalı.
+
+    Yanlış cevabın iki ayrı zararı vardı: "veriler alınamadı" bir KESİNTİ gibi
+    okunuyordu -- oysa faiz serisi yapısal olarak yok, "şu anda" değil hiçbir
+    zaman -- ve kullanıcıdan pozisyonlarını YAPIŞTIRMASI isteniyordu, ki bu
+    ürün pozisyonları kayıt saklayıcısından okur ve MCP sözleşmesi kullanıcı
+    beyanını açıkça yasaklar.
+
+    RISK_STRATEGY_AGENT ölçemediğini biliyor ve sebebini söylüyor. Doğru cevap
+    "hesaplayamıyorum" değil, "bu sistemde faiz serisi tutulmuyor".
+
+    Güvenlik kararlarını EZMEZ: çağıran bunu DISTRESS_SIGNAL kontrolünden
+    ÖNCE uyguluyor, dolayısıyla güvenlik her zaman üstte kalıyor.
+    """
+    return "RISK_STRATEGY_AGENT" if _is_unmeasurable_factor_turn(message) else None
+
+
 async def router_node(state: MoneyFastState) -> dict[str, Any]:
     """Classify the turn, in two passes with different trust levels.
 
@@ -275,9 +362,20 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
         )
     except Exception as exc:  # network, rate limit, malformed JSON
         log.error("router classification failed: %s", exc)
+        # Deterministik kapı BU YOLDA DA geçerli -- hatta asıl burada.
+        # Sınıflandırıcı düştüğünde tur EDUCATION_AGENT'a düşüyor ve o ajan
+        # hiçbir araç tutmuyor; ölçüldü, sonuç "gerekli veriler alınamadı"
+        # oldu ve kullanıcı bunu bir kesinti sandı. Oysa faiz serisi zaten
+        # yok ve bunu söylemek için bir model çağrısına ihtiyaç yok.
+        #
+        # Güvenlik burada da üstte: `flags` pass 1'in deterministik regex'i
+        # ve sıkıntı sinyali her şeyi eziyor.
+        fallback = "EDUCATION_AGENT"
+        if "DISTRESS_SIGNAL" not in flags:
+            fallback = _forced_agent(state["user_message"]) or fallback
         return {
             "primary_intent": "OUT_OF_SCOPE",
-            "target_agent": "EDUCATION_AGENT",
+            "target_agent": "HUMAN_HANDOFF" if "DISTRESS_SIGNAL" in flags else fallback,
             "entities": {},
             "safety_flags": flags,
             "needs_clarification": False,
@@ -292,6 +390,14 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
         # A hallucinated agent name must not fall through to a real specialist.
         log.warning("router returned unknown agent %r, falling back", target)
         target = "EDUCATION_AGENT"
+
+    # Ölçülemeyen bir makro faktör hakkındaki portföy sorusu, reddi BİLEN
+    # ajana gider. Güvenlik kontrolünden ÖNCE, ki DISTRESS_SIGNAL bunu her
+    # zaman ezebilsin.
+    forced = _forced_agent(state["user_message"])
+    if forced is not None and target != forced:
+        log.info("routing override: %s -> %s (unmeasurable factor)", target, forced)
+        target = forced
 
     # Union, never replacement: the model may notice an injection attempt the
     # regex missed, but it may not clear a flag the regex raised.
@@ -328,6 +434,24 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
     )
     args = plan.get("arguments") or {}
     args["user_id"] = state.get("user_id") or "unknown"
+
+    # Two tools behind one agent, the same split as MARKET_DATA_AGENT: what
+    # the user OWNS, and what was PUBLISHED about it. The intersection lives
+    # here rather than in market research because it is not a search --
+    # "portföyümdeki hisselerle ilgili haber" names no company, so a document
+    # search has nothing to search for, and only this agent can read the
+    # holdings that make the question answerable.
+    if plan.get("tool") == "get_portfolio_news":
+        return await _run_tool(
+            state, "get_portfolio_news",
+            {key: args[key] for key in ("user_id", "limit", "days") if key in args},
+            assumptions=plan.get("assumptions") or [],
+            # An empty article list is a COMPLETE answer -- nothing matched in
+            # the window -- but it must be reported with the window, so the
+            # payload still travels.
+            empty_when=lambda p: not p.get("articles"),
+        )
+
     # Reporting currency follows the session locale, not the model. It is a
     # presentation choice, and letting the model pick means a Turkish user can
     # be shown their portfolio in USD because the plan happened to say so.
@@ -559,12 +683,44 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
             "tools_used": (state.get("tools_used") or []) + ["get_portfolio_positions"],
         }
 
+    # Ölçülemeyen faktör turu, PLAN SORULMADAN kesiliyor.
+    #
+    # Reddi `_scenario_branch`'e bırakmak yetmiyordu: o yalnızca model
+    # `run_portfolio_scenario` seçtiğinde çalışıyor. ÖLÇÜLDÜ -- model bunun
+    # yerine `get_portfolio_stress_test`'i seçti, araç düzgün çalıştı ve model
+    # döviz ile altın replaylerini FAİZ İÇİN VEKİL olarak kullanıp "faiz
+    # artışıyla ilişkili olası TL güçlenmesi..." diye bir okuma kurdu. Araç
+    # sözleşmesi bunu açıkça yasaklıyor ve yasak tutmadı.
+    #
+    # Koşul, yönlendirmeyi zorlayan koşulun AYNISI: tek bir doğru, iki yerde
+    # uygulanıyor. Bir LLM çağrısı da tasarruf ediliyor.
+    if _is_unmeasurable_factor_turn(state["user_message"]):
+        return {
+            "specialist_output": {
+                "agent": "RISK_STRATEGY_AGENT",
+                "status": "UNSUPPORTED",
+                "user_message_tr": UNSUPPORTED_FACTOR_TR,
+                "data": None,
+            },
+            "tools_used": (state.get("tools_used") or []) + ["get_portfolio_positions"],
+        }
+
     plan = await _llm_json(
         SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"], _specialist_task(state), fast=True
     )
     args = plan.get("arguments") or {}
+    lookback = args.get("lookback") or "1Y"
+
+    # "Ne olurdu" ailesi: üçü de bu düğümden çıkıyor ve üçü de ÖLÇÜM. Ayrı
+    # bir uzman ajan açılmadı, çünkü hepsi aynı portföyü aynı seriden okuyor
+    # ve yönlendirmeyi ikiye bölmek, "dolar çıksa ne olur" ile "riskim ne"
+    # arasında bir sınır çizmeyi gerektirirdi -- ikisi de risk ölçümü.
+    branch = _WHAT_IF_TOOLS.get(plan.get("tool") or "")
+    if branch is not None:
+        return await branch(state, user_id, args, lookback, plan)
+
     args["positions"] = positions
-    args.setdefault("lookback", "1Y")
+    args["lookback"] = lookback
     args.setdefault("confidence_level", 0.95)
     args.setdefault("rebalance_assumption", "BUY_AND_HOLD")
 
@@ -581,6 +737,15 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     except (MCPUnavailable, MCPToolError) as exc:
         log.warning("risk profile summary unavailable: %s", exc)
 
+    # Aynı sebeple best-effort: teknik görünüm turu zenginleştirir, ayakta
+    # tutmaz. Buraya bağlı, MARKET_DATA_AGENT'a değil -- o ajanın holdings
+    # erişimi yok ve olmaması bilinçli; portföyün TAMAMINI ölçen tek düğüm bu.
+    posture = None
+    try:
+        posture = await mcp.call("get_portfolio_technicals", {"user_id": user_id})
+    except (MCPUnavailable, MCPToolError) as exc:
+        log.warning("portfolio technicals unavailable: %s", exc)
+
     out = await _run_tool(
         state, "calculate_portfolio_risk_metrics", args,
         assumptions=plan.get("assumptions") or [],
@@ -592,6 +757,13 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     )
     tools = ["get_portfolio_positions"] + (out.get("tools_used") or [])
     data = (out.get("specialist_output") or {}).get("data")
+    if posture and isinstance(data, dict):
+        # Ölçümün yanına, içine değil bir kardeş anahtar olarak da değil:
+        # synthesis `data`'yı okuyor. Volatilite ve düşüş, portföyün kendi
+        # geçmişine göre nerede DURDUĞUNU söylemiyor -- "riskim ne" sorusunun
+        # cevabı iki ölçümün ikisini birden istiyor.
+        data["technical_posture"] = _slim_posture(posture)
+        tools.append("get_portfolio_technicals")
     if summary and isinstance(data, dict):
         # Carried inside the metrics payload rather than beside it: the
         # synthesis step reads `data`, and a sibling key would need every
@@ -601,6 +773,153 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     out["tools_used"] = tools
     return out
 
+
+
+# ── "Ne olurdu" dalları ──────────────────────────────────────────────────────
+#
+# Üçü de RISK_STRATEGY_AGENT'ın arkasında, MARKET_DATA_AGENT'ta değil: hepsi
+# kullanıcının PORTFÖYÜNÜ ölçüyor ve o ajanın holdings erişimi yok.
+
+
+async def _scenario_branch(state, user_id, args, lookback, plan):
+    """`run_portfolio_scenario`: bir faktör oynasaydı."""
+    factor = str(args.get("factor") or "").upper()
+    if factor not in SCENARIO_FACTORS:
+        # Ölçülemeyen faktörü aracın 422'sine göndermek yerine burada
+        # kesiliyor: en sık geleni FAİZ ve sistemde faiz serisi yok. Bir
+        # döviz faktörünü vekil olarak koymak, ölçülmemiş bir sayıyı ölçüm
+        # diye vermek olurdu.
+        # EMPTY DEĞİL. "Boş" bir sonuç, aracın çalışıp bir şey bulamaması
+        # demek ve sentez kuralı onu "veri şu anda yok"a çeviriyor -- ölçüldü,
+        # kullanıcıya iki kez "tekrar denememi ister misiniz" dendi. Bu ise
+        # kalıcı bir sınır ve cümlesi kodda duruyor.
+        return {
+            "specialist_output": {
+                "agent": "RISK_STRATEGY_AGENT",
+                "status": "UNSUPPORTED",
+                "user_message_tr": UNSUPPORTED_FACTOR_TR,
+                "data": None,
+            },
+            "tools_used": state.get("tools_used") or [],
+        }
+    return await _run_tool(
+        state, "run_portfolio_scenario",
+        {
+            "user_id": user_id,
+            "factor": factor,
+            # Kullanıcı bir büyüklük söylemediyse %10. Varsayım aracın
+            # sözleşmesinde de yazılı ve ajana bunu SÖYLEMESİ talimat verilmiş.
+            "shock_pct": float(args.get("shock_pct") or 10),
+            "lookback": lookback,
+        },
+        assumptions=plan.get("assumptions") or [],
+        empty_when=lambda p: not p.get("statement"),
+    )
+
+
+async def _stress_branch(state, user_id, args, lookback, plan):
+    """`get_portfolio_stress_test`: gerçekten olanlar."""
+    return await _run_tool(
+        state, "get_portfolio_stress_test",
+        {"user_id": user_id, "lookback": lookback},
+        assumptions=plan.get("assumptions") or [],
+        empty_when=lambda p: not p.get("worst_days") and not p.get("replays"),
+    )
+
+
+async def _simulate_branch(state, user_id, args, lookback, plan):
+    """`simulate_position_change`: bir alım/satım yapılsaydı.
+
+    Değişikliği SUNUCU ÖNERMEZ. Model bir değişiklik üretmediyse tur burada
+    biter ve kullanıcıya sorulur -- kendi kendine bir miktar uydurmak, bir
+    öneri motoruna dönüşmenin ilk adımı olurdu.
+    """
+    changes = [
+        {"symbol": str(row["symbol"]).upper(),
+         "quantity_delta": float(row["quantity_delta"])}
+        for row in (args.get("changes") or [])
+        if isinstance(row, dict) and row.get("symbol") and row.get("quantity_delta")
+    ]
+    if not changes:
+        return {
+            "specialist_output": {
+                "agent": "RISK_STRATEGY_AGENT",
+                "status": "NEEDS_INPUT",
+                "missing_fields": ["changes"],
+                "clarification_request": (
+                    "Hangi hisseden ne kadar alıp sattığınızı varsayalım?"
+                ),
+            },
+            "tools_used": state.get("tools_used") or [],
+        }
+    return await _run_tool(
+        state, "simulate_position_change",
+        {"user_id": user_id, "changes": changes[:10], "lookback": lookback},
+        assumptions=plan.get("assumptions") or [],
+        empty_when=lambda p: not p.get("current"),
+    )
+
+
+#: Backend'in `scenario.FACTORS`'ıyla ve aracın `FACTORS`'ıyla AYNI liste.
+#: Üçü ayrışırsa model geçersiz bir faktör üretir ve kullanıcı "ölçemedim"
+#: cevabı alır -- `ALLOWED_SORTS` ile bir kez yaşanmış bir hata.
+SCENARIO_FACTORS = ("USDTRY", "EURTRY", "XU100", "XAUUSD")
+
+#: Kullanıcıya gösterilecek adlar. Sembol sızmaz (`prompts.py`'deki NAMING
+#: kuralı); backend'in `scenario.FACTORS`'ındaki adların aynısı.
+SCENARIO_FACTOR_NAMES = "Dolar/TL, Euro/TL, BIST 100 ve ons altın"
+
+#: Ölçülemeyen bir faktör istendiğinde kullanıcıya gidecek cümle, KODDA.
+#: Modelden istenmiyor, çünkü ölçüldü: aynı durum iki kez "veriler şu anda
+#: alınamadı, tekrar denememi ister misiniz" diye anlatıldı -- bir KESİNTİ
+#: dili. Oysa faiz serisi yapısal olarak yok; tekrar denemek hiçbir zaman
+#: işe yaramayacak ve öyle demek kullanıcıya olmayan bir umut vermek.
+UNSUPPORTED_FACTOR_TR = (
+    "Faiz ve enflasyon için bu sistemde günlük bir seri tutulmuyor, "
+    "dolayısıyla portföyünüzün onlara duyarlılığı ölçülemiyor — bu geçici "
+    "bir sorun değil, ölçebildiklerimin sınırı. Ölçebildiğim faktörler: "
+    f"{SCENARIO_FACTOR_NAMES}."
+)
+
+_WHAT_IF_TOOLS = {
+    "run_portfolio_scenario": _scenario_branch,
+    "get_portfolio_stress_test": _stress_branch,
+    "simulate_position_change": _simulate_branch,
+}
+
+
+def _slim_posture(posture: dict[str, Any]) -> dict[str, Any]:
+    """Teknik görünümün YAZARA giden hâli: cümleler, ham gösterge blokları değil.
+
+    Pozisyon başına yirmi alanlık `signals` bloğu EKRANIN ihtiyacı -- tablo
+    onu çiziyor. Yazarın ihtiyacı `summary.statement` ve satır başına
+    `narrative`; araç sözleşmesi zaten "cümleleri olduğu gibi aktar" diyor ve
+    göstergeleri alan adlarıyla anmayı YASAKLIYOR. Alan adlarını yazara
+    göndermek hem israf hem de o yasağın önüne yem koymak.
+
+    Ölçüldü ve bu bir GERİLEME düzeltmesi: `technical_posture` eklendiğinde
+    risk turunun sentez gövdesi 3.269 karakter büyüdü ve toplam, sağlayıcının
+    tek istek sınırını aştı (8.393 token istendi, sınır 8.000). Sonuç,
+    kullanıcının bildirdiği davranıştı: aynı soru her seferinde "yoğunluk
+    sınırına takıldım" cevabı veriyor, aynı oturumdaki başka sorular anında
+    cevaplanıyordu. Kırpma bu bloğu 3.269'dan ~1.440'a indiriyor.
+
+    Sayılar kaybolmuyor, YOLU değişiyor: ekran aynı uç noktadan tam hâlini
+    okumaya devam ediyor.
+    """
+    positions = posture.get("positions") or []
+    return {
+        "summary": posture.get("summary") or {},
+        "positions": [
+            {
+                "symbol": row.get("symbol"),
+                "trend": row.get("trend"),
+                "narrative": row.get("narrative"),
+            }
+            for row in positions
+        ],
+        "unconvertible": posture.get("unconvertible") or [],
+    }
 
 async def _verify_named_instrument(
     state: MoneyFastState, plan: dict[str, Any]
@@ -944,6 +1263,39 @@ async def handoff_node(state: MoneyFastState) -> dict[str, Any]:
     }
 
 
+
+#: Sentez gövdesinin karakter tavanı, TAHMİN DEĞİL ÖLÇÜM.
+#:
+#: Sağlayıcının istek başına sınırı 8.000 token. Sabit maliyet ölçüldü:
+#: sistem prompt'u 15.874 + şablon 2.029 = 17.903 karakter (~4.475 token).
+#: Sohbet geçmişi ölçülen turlarda ~1.500 token tutuyor. Geriye kalan
+#: ~2.000 token ≈ 8.000 karakter.
+#:
+#: Önceki değer 12.000'di ve nereden geldiği yazılı değildi; `technical_posture`
+#: eklenince toplam sınırı aştı ve kullanıcı bunu üründe gördü.
+SYNTHESIS_PAYLOAD_CHARS = 8000
+
+
+def _fit_payload(payload: dict[str, Any]) -> str:
+    """Uzman çıktısını sentez bütçesine sığdırır ve kırptığında SÖYLER.
+
+    Kırpma son çare: JSON'u ortasından kesmek modele bozuk bir gövde vermek
+    demek ve bu gövdeden okunan bir sayı yanlış olabilir. Bu yüzden asıl iş
+    kırpmak değil, gövdeyi baştan küçük tutmak (`_slim_posture`); burası
+    yalnızca öngörülmemiş bir büyümenin turu bir sağlayıcı hatasına
+    çevirmesini engelliyor.
+
+    Sessizce kırpmıyor: bir uyarı satırı, gövdenin neden eksik göründüğünü
+    log'da aranabilir kılıyor.
+    """
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    if len(text) <= SYNTHESIS_PAYLOAD_CHARS:
+        return text
+    log.warning(
+        "synthesis payload truncated: %d -> %d chars", len(text), SYNTHESIS_PAYLOAD_CHARS
+    )
+    return text[:SYNTHESIS_PAYLOAD_CHARS]
+
 async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
     """Turn the internal envelope into the Turkish user-facing draft."""
     revision = int(state.get("revision_count") or 0)
@@ -964,9 +1316,7 @@ async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
                 conversation_summary=_history_summary(state) or "(none)",
                 primary_intent=state.get("primary_intent") or "UNKNOWN",
                 target_agent=state.get("target_agent") or "EDUCATION_AGENT",
-                specialist_json=json.dumps(
-                    state.get("specialist_output") or {}, ensure_ascii=False, indent=2
-                )[:12000],
+                specialist_json=_fit_payload(state.get("specialist_output") or {}),
             )
         draft = await _llm_text(ORCHESTRATOR_SYSTEM_PROMPT, task)
     except Exception as exc:  # LLM outage
@@ -979,13 +1329,62 @@ async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
     return {"draft_response": draft}
 
 
+#: Koşullu bir okumanın ayrılmaz yarısı. Backend'in `scenario.HEDGE_TR`'si ve
+#: `technicals.HEDGE_TR`'si ile AYNI cümle -- üç yerde üç farklı çekince
+#: yazmak, birinin daha az bağlayıcı olduğu izlenimi verirdi.
+SCENARIO_HEDGE_TR = (
+    "Bu bir tahmin değil, geçmiş birlikte hareketin ölçümüdür; geçmiş fiyat "
+    "hareketi geleceği belirlemez."
+)
+
+#: Çekincenin metinde zaten geçtiğini anlamak için aranan parça. Tam cümleyi
+#: aramak, modelin küçük bir yeniden ifadesinde ikinci bir kopya eklerdi.
+_HEDGE_MARK = "geleceği belirlemez"
+
+#: Çekincenin garanti edildiği araçlar. Üçü de KOŞULLU okuma üretiyor.
+HEDGED_TOOLS = frozenset(
+    {"run_portfolio_scenario", "get_portfolio_stress_test", "simulate_position_change"}
+)
+
+
+def _keep_hedge(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
+    """Koşullu bir turun çekincesini kapının HER dalından geçirir.
+
+    `_keep_crisis` ile aynı sebep ve aynı ders: prompt tavsiyedir. Araç
+    sözleşmesi "`statement`'ı çekincesiyle birlikte olduğu gibi aktar" diyor
+    ve ÖLÇÜLDÜ -- model senaryo cümlesini yeniden yazdı ve kapanış çekincesini
+    düşürdü. Kalan metin "portföyünüzün değeri yaklaşık %6,8 azalır" idi:
+    koşulsuz, çekincesiz, ve ölçümün söylemediği bir kesinlikte.
+
+    Genel uygunluk açıklaması (DISC-GENERAL) bunun yerini tutmuyor: o
+    içeriğin yatırım danışmanlığı olmadığını söylüyor, bu ise sayının bir
+    tahmin değil bir ölçüm olduğunu.
+
+    Metin çekinceyi zaten taşıyorsa ikinci kez eklenmiyor.
+    """
+    if not (HEDGED_TOOLS & set(state.get("tools_used") or [])):
+        return out
+    if _HEDGE_MARK in (out.get("final_output") or ""):
+        return out
+    existing = out.get("disclosures") or []
+    if any(_HEDGE_MARK in item for item in existing):
+        return out
+    out["disclosures"] = existing + [SCENARIO_HEDGE_TR]
+    return out
+
+
 def _keep_crisis(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
     """Ensure a distress turn carries its resources out of the gate.
 
     Applied to every branch, BLOCK included. A blocked crisis turn used to end
     at a generic failure string with nothing actionable in it, which is the
     worst moment to hand someone a dead end.
+
+    Koşullu okumanın çekincesi de buradan geçiyor. Ayrı bir sarmalayıcı,
+    kapının yedi dalından birinin unutulması demekti -- bu fonksiyon zaten
+    hepsinden geçiyor.
     """
+    out = _keep_hedge(state, out)
     notices = state.get("crisis_notices") or []
     if not notices:
         return out

@@ -10,7 +10,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.modules.investment import market_service
+from app.core.deps import get_current_user_id
+from app.modules.investment import ai_service, market_service
 from . import service, stream, technicals
 from .schemas import (
     IngestResult,
@@ -22,6 +23,8 @@ from .schemas import (
     MarketTicker,
     NewsIngestRequest,
     NewsItem,
+    PortfolioNewsOut,
+    PortfolioTechnicalOut,
     QuoteIngestRequest,
     TechnicalSignalsOut,
     FundamentalsOut,
@@ -117,6 +120,85 @@ def get_market_news(
         for row in service.latest_news(db, limit=limit)
     ]
 
+
+
+@router.get(
+    "/news/portfolio",
+    response_model=PortfolioNewsOut,
+    summary="Portföye dokunan haberler (oturum sahibinin pozisyonları)",
+)
+def get_portfolio_news(
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=service.NEWS_WINDOW_DAYS, ge=1, le=365),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Kullanıcının tuttuğu hisselere bağlı haberler.
+
+    Oturum ZORUNLU, demo portföyüne düşülmüyor. Okuma uçlarının çoğu anonim
+    çağrıyı demo hesabına düşürüyor ve bu zararsız -- ama "portföyünüze
+    dokunan haberler" başlığı altında başkasının portföyünün haberlerini
+    göstermek, izleme listesinin eskiden yaptığı hatanın aynısı olurdu:
+    kullanıcının seçmediği bir listeyi onunmuş gibi sunmak.
+
+    Haberler YORUMLANMIYOR. Başlık, kaynak ve tarih veriliyor; bir haberin
+    olumlu ya da olumsuz olduğu söylenmiyor, çünkü bu bir piyasa görüşüdür ve
+    bu sistemin görüş tutma izni yok.
+    """
+    return _portfolio_news_payload(db, user_id, limit=limit, days=days)
+
+
+@router.get(
+    "/news/portfolio/{user_id}",
+    response_model=PortfolioNewsOut,
+    summary="Portföye dokunan haberler (MCP sözleşmesi)",
+)
+def get_portfolio_news_for_ai(
+    user_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=service.NEWS_WINDOW_DAYS, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """
+    Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+
+    `get_portfolio_positions`'ın deseni: MCP araçları kullanıcıyı doğrulanmış
+    oturum zarfından alıp yola koyar, bearer token taşımaz. İkisi TEK bir
+    yardımcıyı çağırıyor, böylece panel ile sohbetin kullanıcının neye sahip
+    olduğu ya da hangi haberin ona dokunduğu konusunda ayrışması mümkün değil.
+    """
+    return _portfolio_news_payload(db, user_id, limit=limit, days=days)
+
+
+def _portfolio_news_payload(db: Session, user_id: str, limit: int, days: int) -> dict:
+    """İki ucun ortak gövdesi."""
+    holdings = market_service.holdings(db, user_id=user_id)
+    symbols = service.held_symbols(holdings)
+    names = {holding["symbol"]: holding.get("name") or holding["symbol"] for holding in holdings}
+    rows, counts = service.portfolio_news(db, symbols, limit=limit, days=days)
+    held = set(symbols)
+    return {
+        "symbols": [
+            {"symbol": symbol, "name": names.get(symbol, symbol), "count": counts.get(symbol, 0)}
+            for symbol in symbols
+        ],
+        "items": [
+            {
+                "id": row.id,
+                "source": row.source,
+                "title": row.title,
+                "url": row.url or "#",
+                "time": _relative_time(row.published_at),
+                "publishedAt": row.published_at,
+                "sentiment": "neutral",
+                "relatedSymbols": list(row.related_symbols or []),
+                "heldSymbols": [s for s in (row.related_symbols or []) if s in held],
+            }
+            for row in rows
+        ],
+        "windowDays": days,
+    }
 
 
 @router.get(
@@ -348,6 +430,87 @@ def get_technicals(
     }
 
 
+
+@router.get(
+    "/portfolio/technical",
+    response_model=PortfolioTechnicalOut,
+    summary="Portföy geneli teknik görünüm",
+)
+def get_portfolio_technical(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Her pozisyonun teknik durumu ve portföy geneli toplulaştırma.
+
+    `market` modülünde, `investment`ta değil. Teknik motor burada ve bu modül
+    zaten `investment.market_service`'i okuyor; uç noktayı investment'a koymak
+    iki modül arasında ÇİFT YÖNLÜ bir bağımlılık açardı (`market.technicals`
+    da `risk.returns`'ü okuyor, yani zincir zaten tek yönlü kurulu). Yolu
+    değil, bağımlılık yönünü korumak önemli.
+
+    Sayfadaki tek hisse görünümüyle aynı `compute`/`narrate` çağrılıyor: iki
+    yüzeyin aynı hisse için farklı bir eğilim söylemesi mümkün değil.
+    """
+    return _portfolio_technical_payload(db, user_id)
+
+
+@router.get(
+    "/portfolio/technical/{user_id}",
+    response_model=PortfolioTechnicalOut,
+    summary="Portföy geneli teknik görünüm (MCP sözleşmesi)",
+)
+def get_portfolio_technical_for_ai(user_id: str, db: Session = Depends(get_db)):
+    """
+    Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+
+    `get_portfolio_positions` ve `news/portfolio` ile aynı desen: MCP araçları
+    kullanıcıyı doğrulanmış oturum zarfından alıp yola koyar. İkisi TEK bir
+    yardımcıyı çağırıyor, böylece panelin ve sohbetin aynı portföy için farklı
+    bir eğilim söylemesi mümkün değil.
+    """
+    return _portfolio_technical_payload(db, user_id)
+
+
+def _portfolio_technical_payload(db: Session, user_id: str) -> dict:
+    """İki ucun ortak gövdesi."""
+    holdings = market_service.holdings(db, user_id=user_id)
+    rates = ai_service.fx_rates(market_service.latest_quotes(db))
+    # `holding_value`'ın varsayılanıyla aynı; ekranın para birimi ürün
+    # genelinde TRY ve ayrı bir sabit tanımlamak, ikisinin ayrışabileceği
+    # bir yer açardı.
+    base = "TRY"
+
+    rows, unconvertible = [], []
+    for holding in holdings:
+        symbol = holding["symbol"]
+        bars = market_service.candle_series(db, symbol, limit=technicals.BARS_NEEDED)
+        signals = technicals.compute(bars)
+        # Değer, taban para birimine çevrilmiş hâliyle. Çevrilemeyen pozisyon
+        # None kalır ve ağırlık hesabına girmez -- kuru olmayan bir pozisyonu
+        # 1.0 ile çevirmek, 15.098 TL'lik bir varlığı 315 TL saymak demekti.
+        value = ai_service.holding_value(holding, rates, base)
+        if value is None:
+            unconvertible.append(symbol)
+        rows.append(
+            {
+                "symbol": symbol,
+                "name": holding.get("name") or symbol,
+                "currency": holding.get("currency") or base,
+                "signals": signals,
+                "narrative": technicals.narrate(symbol, signals),
+                "value": value,
+            }
+        )
+
+    return {
+        "base_currency": base,
+        "positions": rows,
+        "summary": technicals.aggregate(rows),
+        "unconvertible": unconvertible,
+    }
+
+
 @router.get(
     "/stream",
     summary="Canlı fiyat akışı (Server-Sent Events)",
@@ -411,6 +574,29 @@ def ingest_market_data(request: QuoteIngestRequest, db: Session = Depends(get_db
 
 
 @router.get(
+    "/news/known-ids",
+    summary="Kayıtlı bildirim numaraları (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def known_news_ids(
+    source: str = Query(..., min_length=2, max_length=40),
+    db: Session = Depends(get_db),
+):
+    """`ingestor`'ın "bunlardan hangileri bende zaten var" diye sorduğu uç.
+
+    KAP listesi her koşuda iki bin bildirim döndürüyor ve her birinin gövdesi
+    ayrı bir sayfada. Sormadan çekmek, aynı iki bin sayfayı on beş dakikada
+    bir yeniden istemek olurdu. `candles/coverage` ile aynı desen ve aynı
+    sebep: kaynağa neyi zaten aldığımızı sormak yerine ona söylemek.
+
+    Numara URL'den okunuyor, ayrı bir sütundan değil -- bildirimin adresi
+    `.../Bildirim/1656735` ve numara zaten orada. Bunun için şema büyütmek,
+    aynı bilgiyi ikinci kez saklamak olurdu.
+    """
+    return {"source": source, "ids": service.known_news_ids(db, source)}
+
+
+@router.get(
     "/candles/coverage",
     summary="Mum verisi kapsaması (servisler arası)",
     dependencies=[Depends(require_service_token)],
@@ -462,9 +648,16 @@ def fundamentals_missing(db: Session = Depends(get_db)):
     dependencies=[Depends(require_service_token)],
 )
 def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db)):
-    written = service.upsert_news(db, [item.model_dump() for item in request.items])
-    log.info("ingested %d new news items of %d offered", written, len(request.items))
-    return {"quotes_written": 0, "candles_written": 0, "news_written": written}
+    written, symbols = service.upsert_news(db, [item.model_dump() for item in request.items])
+    log.info(
+        "ingested %d new news items of %d offered, %d symbol-tagged",
+        written, len(request.items), len(symbols),
+    )
+    # Semboller geri veriliyor: çözümleme evrenin bulunduğu yerde yapılıyor
+    # ve `ingestor` aynı haberi RAG'a da yazıyor. Sonucu geri vermezsek
+    # korpustaki kopya etiketsiz kalır.
+    return {"quotes_written": 0, "candles_written": 0, "news_written": written,
+            "news_symbols": symbols}
 
 
 @router.post(

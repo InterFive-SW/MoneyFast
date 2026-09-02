@@ -413,3 +413,104 @@ class RiskSummaryOut(BaseModel):
     findings: List[RiskFinding] = Field(default_factory=list)
     data_quality: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Koşullu senaryo ve stres testi
+# ---------------------------------------------------------------------------
+
+
+class ScenarioRequest(BaseModel):
+    #: Ölçülebilir faktörlerden biri. Kapalı küme: her biri için GÜNLÜK bir
+    #: fiyat serisi gerekiyor ve faiz bilerek dışarıda -- sistemde faiz
+    #: SERİSİ yok, yalnızca bir sabit var.
+    factor: str
+    #: Yüzde olarak şok. Negatif de olabilir; "dolar %10 düşse" de bir soru.
+    #: Sınır ±%100: ölçülen bir günlük duyarlılığı bunun ötesine uzatmak,
+    #: doğrusal varsayımı taşıyamayacağı yere taşımak olur.
+    shock_pct: float = Field(..., ge=-100, le=100)
+    lookback: str = "1Y"
+
+    @field_validator("factor")
+    @classmethod
+    def _upper(cls, value: str) -> str:
+        return value.upper().strip()
+
+    @field_validator("lookback")
+    @classmethod
+    def _known_lookback(cls, value: str) -> str:
+        upper = value.upper()
+        if upper not in LOOKBACKS:
+            raise ValueError(f"lookback {value!r} geçersiz; beklenen: {', '.join(LOOKBACKS)}")
+        return upper
+
+
+class SensitivityOut(BaseModel):
+    """Ölçülen duyarlılık. `r_squared` ZORUNLU eşlikçi.
+
+    Tek başına bir beta, ilişkinin ne kadar gerçek olduğu hakkında hiçbir şey
+    söylemiyor: 0,42'lik bir beta, faktör değişkenliğin %3'ünü açıklıyorken de
+    çıkar.
+    """
+    beta: float
+    correlation: Optional[float] = None
+    r_squared: Optional[float] = None
+    observation_count: int
+    is_statistically_reliable: bool
+
+
+class ReplayOut(BaseModel):
+    """Faktörün en sert oynadığı pencere ve portföyün o günlerde yaptığı.
+
+    Bir model çıktısı değil: o günler gerçekten oldu.
+    """
+    start_date: datetime
+    end_date: datetime
+    factor_move_pct: float
+    portfolio_move_pct: float
+    trading_days: int
+
+
+class WorstDayOut(BaseModel):
+    date: datetime
+    return_pct: float
+
+
+class ScenarioOut(BaseModel):
+    factor: str
+    factor_name: str
+    shock_pct: float
+    lookback: str
+    base_currency: str = "TRY"
+    sensitivity: SensitivityOut
+    #: Şokun portföye tahmini yansıması, yüzde ve tutar olarak. Tutar,
+    #: değerlenebilen pozisyonların toplamı üzerinden.
+    estimated_impact_pct: float
+    estimated_impact_value: Optional[float] = None
+    #: Kullanıcıya gösterilecek KOŞULLU cümle, çekincesiyle birlikte tam
+    #: hâliyle. İkiye bölüp yalnızca ilk yarısını göstermek, koşulu düşürüp
+    #: iddiayı bırakmak olur.
+    statement: str
+    #: Varsayımlar gizlenmiyor: gizlenmiş bir varsayım olmayan bir kesinlik
+    #: üretir.
+    assumptions: List[str] = []
+    warnings: List[str] = []
+
+
+class StressOut(BaseModel):
+    """İki tür stres, ikisi de ÖLÇÜM.
+
+    Uydurulmuş bir kayıp senaryosu yok: biri faktörün en sert oynadığı gerçek
+    pencere, diğeri portföyün gerçekten yaşadığı en kötü günler.
+    """
+    lookback: str
+    base_currency: str = "TRY"
+    observation_count: int
+    worst_days: List[WorstDayOut] = []
+    #: Faktör başına tarihsel replay. Ölçülemeyen faktör listede YER ALMAZ,
+    #: sıfırla görünmez.
+    replays: dict[str, ReplayOut] = {}
+    factor_names: dict[str, str] = {}
+    excluded_symbols: List[str] = []
+    warnings: List[str] = []
+

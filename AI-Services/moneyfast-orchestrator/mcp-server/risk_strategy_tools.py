@@ -23,6 +23,59 @@ from backend_client import (
 )
 
 TOOL = "calculate_portfolio_risk_metrics"
+
+#: Bu aracın hesaplayabildiği istatistikler. Sözleşme bunları baştan beri
+#: LİSTELİYORDU ama hiçbir şey doğrulamıyordu; tanınmayan bir ad backend'e
+#: gidip 422 ile dönüyor ve tur ölüyordu.
+#:
+#: Ölçüldü: risk profili özetine `allocation_drift` eklendikten sonra planlayıcı
+#: onu istenecek bir METRİK sandı ve `metrics: ["allocation_drift"]` gönderdi.
+#: Kullanıcı "hedef dağılımımdan ne kadar saptım" sorusuna "ölçüm elde
+#: edilemedi" cevabı aldı -- oysa sapma, aynı turda başarıyla alınan özetin
+#: içinde duruyordu.
+#:
+#: `sort_by`'ın aynası: tanınmayan değer sessizce yok sayılmaz, geçerli kümeyi
+#: ADIYLA söyleyen bir hata verir -- bu düğümün tek düzeltme denemesi o mesajı
+#: okuyabilsin diye.
+ALLOWED_METRICS = (
+    "VOLATILITY", "MAX_DRAWDOWN", "VAR", "CVAR", "BETA", "SHARPE",
+    "CONCENTRATION", "CORRELATION_MATRIX",
+)
+
+
+#: Bu araçtan İSTENEMEYEN ama turda zaten TESLİM EDİLEN bloklar. Ayıklanıyor,
+#: reddedilmiyor -- `_SORT_SYNONYMS` ile aynı gerekçe: model bunları istediğinde
+#: yanlış bir şey İSTEMİYOR, yanlış kapıyı çalıyor, ve reddetmek cevabı modelin
+#: hangi kapıyı seçtiğine bağlı kılıyor.
+#:
+#: Ölçüldü ve prompt YETMEDİ: kural sözleşmeye ve uzman prompt'una yazıldıktan
+#: SONRA da planlayıcı `metrics: ["allocation_drift"]` göndermeye devam etti ve
+#: turun tek düzeltme denemesi de aynı değerle döndü. Bu modülün her yerinde
+#: tekrarlanan ders: prompt tavsiyedir.
+_DELIVERED_ALONGSIDE = frozenset({"ALLOCATION_DRIFT", "GROUP_EXPOSURE"})
+
+
+def _canonical_metrics(metrics: Optional[list[str]]) -> Optional[list[str]]:
+    """Metrik adlarını kanonik hâle getirir, ya da geçerli kümeyi adıyla söyler."""
+    if metrics is None:
+        return None
+    wanted: list[str] = []
+    for raw in metrics:
+        name = str(raw).strip().upper().replace(" ", "_").replace("-", "_")
+        if name in _DELIVERED_ALONGSIDE:
+            # Sessizce yok sayma DEĞİL: istenen şey turda gerçekten geliyor,
+            # yalnızca bu parametreyle değil.
+            continue
+        if name not in ALLOWED_METRICS:
+            raise InvalidInputError(
+                f"{TOOL}: '{raw}' bir metrik adı değil. Geçerli değerler: "
+                f"{', '.join(ALLOWED_METRICS)}. `group_exposure` ve "
+                f"`allocation_drift` metrik DEĞİL; risk profili özetiyle "
+                f"birlikte kendiliğinden geliyorlar."
+            )
+        if name not in wanted:
+            wanted.append(name)
+    return wanted or None
 SUMMARY_TOOL = "get_risk_profile_summary"
 
 #: The four values `suitability.alignment` may take. An unrecognised one is a
@@ -207,6 +260,10 @@ async def calculate_portfolio_risk_metrics(
     if not positions:
         raise InvalidInputError(f"{TOOL}: positions is empty.")
 
+    # Metrik adları AĞA ÇIKMADAN doğrulanıyor: geçersiz bir ad backend'de 422
+    # veriyor ve o mesaj geçerli kümeyi söylese de turu düşürüyordu.
+    wanted_metrics = _canonical_metrics(metrics)
+
     # POST /risk/calculate on the backend. risk_free_rate is passed through as None when unset
     # so the backend resolves the policy rate and reports it in assumptions;
     # backend_client drops None keys, so the field is omitted rather than null.
@@ -218,13 +275,15 @@ async def calculate_portfolio_risk_metrics(
             "positions": positions,
             "lookback": lookback,
             "benchmark_symbol": benchmark_symbol,
-            "metrics": metrics,
+            "metrics": wanted_metrics,
             "confidence_level": confidence_level,
             "risk_free_rate": risk_free_rate,
             "rebalance_assumption": rebalance_assumption,
         },
     )
-    return _normalize(payload, benchmark_symbol, metrics, lookback, rebalance_assumption)
+    return _normalize(
+        payload, benchmark_symbol, wanted_metrics, lookback, rebalance_assumption
+    )
 
 
 def _normalize(
@@ -337,6 +396,16 @@ async def get_risk_profile_summary(
             opposite to the score: a high score yields the lowest band.
         position_count (int): Positions that could be valued and measured.
 
+        group_exposure (dict | null): hangi SPK ürün grubunda ne kadar durduğu ve
+            o grup için ankette verilen bilgi/tecrübe beyanı. Her satırın
+            `statement`'ı hazır Türkçe; OLDUĞU GİBİ aktarılır. Bu bir uygunluk
+            KARARI değil: kullanıcının kendi cevabı aktarılıyor.
+        allocation_drift (dict | null): ölçülen kova ağırlıkları ile KULLANICININ
+            KENDİ girdiği hedef arasındaki fark. `statement` hazır Türkçe.
+            `has_target` false ise hedef girilmemiş demektir -- sapma sıfır
+            DEĞİL, ölçülemez. `target_percent` null olan kovada hedef yok;
+            %0 sayma. `gap_amount` hedefe ulaşmak için kaç lira fark olduğunu
+            söyler ve BİR EMİR DEĞİLDİR.
         suitability (dict):
             measured_level (str | None): The band above, repeated here so the
                 comparison is self-contained.
@@ -380,6 +449,21 @@ async def get_risk_profile_summary(
         - When declared is None, say the questionnaire has not been completed.
           Do NOT infer a tolerance from the portfolio - that would compare the
           measurement against itself.
+        - `group_exposure` and `allocation_drift` carry READY Turkish sentences.
+          Relay them as written. Both put a MEASUREMENT beside the user's OWN
+          declaration -- one their product-group answers, the other the target
+          weights they typed in -- and both stay on the right side of the
+          advisory line only while they are relayed rather than reworded.
+        - `allocation_drift.gap_amount` is arithmetic against a target the USER
+          set. It is NOT an order and NOT a recommendation: "hedefe ulaşmak için
+          7.419 TL fark var" is a subtraction, "7.419 TL satın" is advice this
+          product does not give.
+        - `has_target` false means no target was ever entered. That is NOT zero
+          drift; there is nothing to measure against and saying the portfolio is
+          on target would be false.
+        - NEVER propose a target allocation of your own. The system does not
+          publish model portfolios, and only one of the four assessed product
+          groups (equities) has instruments here at all.
     """
     if not user_id:
         raise InvalidInputError(f"{SUMMARY_TOOL}: user_id is required.")
@@ -446,6 +530,12 @@ def _normalize_summary(payload: dict[str, Any]) -> dict[str, Any]:
             "alignment": alignment,
             "statement": str(suitability["statement"]),
         },
+        # v2.17. `require` listesine EKLENMEDİ ve bu bilerek: sözleşme
+        # yalnızca EKLEMELİ değişiyor, ve eski bir backend'in yanıtı bu iki
+        # alanı taşımadan da geçerli kalmalı. Yokluk None, boş yapı değil --
+        # "hedef karşılaştırması hiç gelmedi" ile "hedef yok" farklı şeyler.
+        "group_exposure": payload.get("group_exposure"),
+        "allocation_drift": payload.get("allocation_drift"),
         "declared": payload["declared"],
         "metrics": metrics,
         "findings": list(payload["findings"] or []),

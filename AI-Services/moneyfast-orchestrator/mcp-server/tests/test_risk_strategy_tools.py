@@ -449,8 +449,32 @@ class TestSummaryPayload:
         out = await SUMMARY("usr_9001")
         assert set(out) == {
             "as_of", "score", "level", "position_count", "suitability",
+            # v2.17: ölçüm ile kullanıcının kendi beyanının iki
+            # karşılaştırması daha -- ürün grubu beyanı ve kendi girdiği
+            # hedef ağırlıklar.
+            "group_exposure", "allocation_drift",
             "declared", "metrics", "findings", "data_quality", "warnings",
         }
+
+    async def test_a_backend_without_the_new_blocks_still_passes(self, fake_backend):
+        """Sözleşme yalnızca EKLEMELİ değişiyor: iki alan `require`
+        listesinde DEĞİL, dolayısıyla onları taşımayan bir yanıt hâlâ
+        geçerli. Yokluk None -- "hiç gelmedi" ile "hedef yok" farklı."""
+        out = await SUMMARY("usr_9001")
+        assert out["group_exposure"] is None or isinstance(out["group_exposure"], dict)
+
+    async def test_the_new_blocks_travel_when_present(
+        self, fake_backend, risk_summary_payload
+    ):
+        fake_backend.json("risk_summary", {
+            **risk_summary_payload,
+            "allocation_drift": {"has_target": True, "total_value": 100.0,
+                                 "buckets": [], "statement": "Hedefin üzerinde."},
+            "group_exposure": {"assessed": True, "total_value": 100.0, "groups": []},
+        })
+        out = await SUMMARY("usr_9001")
+        assert out["allocation_drift"]["statement"] == "Hedefin üzerinde."
+        assert out["group_exposure"]["assessed"] is True
 
     async def test_the_score_and_band_survive_intact(self, fake_backend):
         out = await SUMMARY("usr_9001")
@@ -655,3 +679,74 @@ class TestLookbackCanonicalisation:
                 sample_positions, lookback="haftalık"
             )
         assert fake_backend.attempts == 0
+
+
+class TestMetricNames:
+    """Sözleşme geçerli metrikleri baştan beri LİSTELİYORDU ama hiçbir şey
+    doğrulamıyordu.
+
+    Ölçüldü: risk özetine `allocation_drift` eklendikten sonra planlayıcı onu
+    istenecek bir metrik sandı, `metrics: ["allocation_drift"]` gönderdi ve
+    kullanıcı "hedef dağılımımdan ne kadar saptım" sorusuna "ölçüm elde
+    edilemedi" cevabı aldı -- oysa sapma aynı turda başarıyla alınmıştı.
+    """
+
+    @pytest.mark.parametrize("written", ["allocation_drift", "GROUP_EXPOSURE"])
+    async def test_the_alongside_blocks_are_stripped_not_refused(
+        self, fake_backend, sample_positions, written
+    ):
+        """Model yanlış bir şey İSTEMİYOR, yanlış kapıyı çalıyor: iki blok da
+        turda zaten geliyor.
+
+        Reddetmek denendi ve yetmedi -- kural sözleşmeye ve prompt'a
+        yazıldıktan sonra da planlayıcı aynı değeri gönderdi ve turun tek
+        düzeltme denemesi de onu tekrarladı."""
+        await risk_strategy_tools.calculate_portfolio_risk_metrics(
+            sample_positions, metrics=[written]
+        )
+        assert "metrics" not in fake_backend.body()
+
+    async def test_a_genuinely_unknown_metric_still_raises(
+        self, fake_backend, sample_positions
+    ):
+        with pytest.raises(InvalidInputError) as excinfo:
+            await risk_strategy_tools.calculate_portfolio_risk_metrics(
+                sample_positions, metrics=["SORTINO"]
+            )
+        assert fake_backend.attempts == 0
+        assert "VOLATILITY" in str(excinfo.value)
+
+    async def test_a_valid_metric_survives_beside_a_stripped_one(
+        self, fake_backend, sample_positions
+    ):
+        await risk_strategy_tools.calculate_portfolio_risk_metrics(
+            sample_positions, metrics=["allocation_drift", "SHARPE"]
+        )
+        assert fake_backend.body()["metrics"] == ["SHARPE"]
+
+    async def test_valid_names_pass_through(self, fake_backend, sample_positions):
+        await risk_strategy_tools.calculate_portfolio_risk_metrics(
+            sample_positions, metrics=["VOLATILITY", "SHARPE"]
+        )
+        assert fake_backend.body()["metrics"] == ["VOLATILITY", "SHARPE"]
+
+    @pytest.mark.parametrize("written", ["volatility", " Sharpe ", "max-drawdown"])
+    async def test_casing_and_separators_are_tolerated(
+        self, fake_backend, sample_positions, written
+    ):
+        await risk_strategy_tools.calculate_portfolio_risk_metrics(
+            sample_positions, metrics=[written]
+        )
+        assert fake_backend.body()["metrics"][0] in risk_strategy_tools.ALLOWED_METRICS
+
+    async def test_duplicates_collapse(self, fake_backend, sample_positions):
+        await risk_strategy_tools.calculate_portfolio_risk_metrics(
+            sample_positions, metrics=["VOLATILITY", "volatility"]
+        )
+        assert fake_backend.body()["metrics"] == ["VOLATILITY"]
+
+    async def test_none_still_means_every_default_metric(
+        self, fake_backend, sample_positions
+    ):
+        await risk_strategy_tools.calculate_portfolio_risk_metrics(sample_positions)
+        assert "metrics" not in fake_backend.body()

@@ -1126,6 +1126,11 @@ class TestSummaryContract:
         body = client.get(SUMMARY_URL, headers=service_auth).json()
         assert set(body) == {
             "as_of", "score", "level", "position_count", "suitability",
+            # v2.17: ölçüm ile kullanıcının kendi beyanının iki
+            # karşılaştırması daha -- ürün grubu beyanı ve kendi girdiği
+            # hedef ağırlıklardan sapma. `suitability` ile aynı gerekçeyle
+            # burada: sayfa ve sohbet aynı şekli okumazsa ayrışırlar.
+            "group_exposure", "allocation_drift",
             "declared", "metrics", "findings", "data_quality", "warnings",
         }
 

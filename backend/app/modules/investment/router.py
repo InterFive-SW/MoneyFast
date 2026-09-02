@@ -1058,14 +1058,9 @@ async def health_check():
 
 
 def _targets_for(db: Session, user_id: Optional[str]) -> dict[str, float]:
-    if not user_id:
-        return {}
-    rows = (
-        db.query(AllocationTarget)
-        .filter(AllocationTarget.user_id == user_id)
-        .all()
-    )
-    return {row.bucket: float(row.target_percent) for row in rows}
+    """Okuma `service`'e taşındı: risk modülü de aynı satırları okuyor ve
+    tabloyu sahibi olan modülün okuması gerekiyor."""
+    return service.allocation_targets(db, user_id)
 
 
 @router.get(

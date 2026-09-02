@@ -489,12 +489,40 @@ class RiskSummaryOut(BaseModel):
     #: Same shape the page reads, so the two surfaces cannot diverge.
     suitability: SuitabilityOut
     declared: Optional[DeclaredProfileOut] = None
+    #: Sayfanın okuduğu iki karşılaştırma daha. `suitability` ile aynı
+    #: gerekçeyle burada: iki yüzey aynı şekli okumazsa ayrışır, ve ikisi de
+    #: ÖLÇÜM ile KULLANICININ KENDİ BEYANINI yan yana koyuyor -- biri ürün
+    #: grubu beyanıyla, diğeri kendi girdiği hedef ağırlıkla.
+    group_exposure: Optional["GroupExposureOut"] = None
+    allocation_drift: Optional["AllocationDriftOut"] = None
     #: The subset the score is built from, so a stated figure is traceable.
     metrics: Dict[str, Any] = Field(default_factory=dict)
     #: What the score is made of, already in Turkish.
     findings: List[RiskFinding] = Field(default_factory=list)
     data_quality: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
+
+
+class AllocationDriftBucketOut(BaseModel):
+    bucket: str
+    label: str
+    amount: float
+    #: Portföy boşken None, %0 değil.
+    current_percent: Optional[float] = None
+    #: Hedef koyulmamış kovada None. %0 SAYILMAZ -- "hedefim yok" ile
+    #: "hedefim sıfır" farklı şeyler.
+    target_percent: Optional[float] = None
+    gap_points: Optional[float] = None
+    gap_amount: Optional[float] = None
+
+
+class AllocationDriftOut(BaseModel):
+    has_target: bool = False
+    total_value: float = 0.0
+    buckets: List[AllocationDriftBucketOut] = Field(default_factory=list)
+    #: Kodda üretilen cümle; ajan olduğu gibi aktarıyor. Sapmanın yönü yanlış
+    #: okunursa kullanıcı hedefinin tersine hareket eder.
+    statement: str = ""
 
 
 # ---------------------------------------------------------------------------

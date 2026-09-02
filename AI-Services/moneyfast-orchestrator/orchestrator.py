@@ -70,7 +70,16 @@ MAX_COMPLIANCE_REVISIONS = int(os.getenv("MAX_COMPLIANCE_REVISIONS", "1"))
 #: live trimmers in the path and the next person to widen the window would
 #: have to find both.
 HISTORY_MAX_TURNS = int(os.getenv("HISTORY_MAX_TURNS", "20"))
-HISTORY_MAX_CHARS = int(os.getenv("HISTORY_MAX_CHARS", "8000"))
+#: 8.000'di ve `SYNTHESIS_PAYLOAD_CHARS`'ın aritmetiğiyle ÇELİŞİYORDU. O
+#: hesap geçmiş için ~1.500 token ayırıyor; 8.000 karakter ise ~2.000 token
+#: eder. Üç tavan aynı anda dolduğunda toplam 8.475 token çıkıyor ve
+#: sağlayıcının tek istek sınırı 8.000.
+#:
+#: Ölçüldü, uzun bir sohbette: gövde bütçesine SIĞDIĞI hâlde istek 8.871
+#: token oldu ve kullanıcı "tek seferde işleyebileceğimden büyük çıktı"
+#: cevabı aldı. Tavan yazılı varsayıma çekildi -- 6.000 karakter ≈ 1.500
+#: token, ve 4.475 + 1.500 + 2.000 = 7.975.
+HISTORY_MAX_CHARS = int(os.getenv("HISTORY_MAX_CHARS", "6000"))
 
 #: How much of a PREVIOUS ANSWER survives into the prompt. Only the subject
 #: is needed to resolve "ondan 2 adet"; the body is what a model copies when
@@ -829,7 +838,7 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
         # Carried inside the metrics payload rather than beside it: the
         # synthesis step reads `data`, and a sibling key would need every
         # consumer to learn about it.
-        data["profile_summary"] = summary
+        data["profile_summary"] = _slim_summary(summary)
         tools.append("get_risk_profile_summary")
     out["tools_used"] = tools
     return out
@@ -981,6 +990,53 @@ def _slim_posture(posture: dict[str, Any]) -> dict[str, Any]:
         ],
         "unconvertible": posture.get("unconvertible") or [],
     }
+
+def _slim_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    """Risk özetinin YAZARA giden hâli.
+
+    `_slim_posture` ile aynı gerekçe ve aynı ölçülen sebep. v2.17 ile özete
+    iki karşılaştırma daha eklendi -- ürün grubu beyanı ve kullanıcının kendi
+    hedefinden sapma -- ve toplam yine sağlayıcının tek istek sınırını aştı:
+    kullanıcı "hedef dağılımımdan ne kadar saptım" sorusuna "tek seferde
+    işleyebileceğimden büyük çıktı" cevabı aldı.
+
+    İki blokta da YAZARIN ihtiyacı hazır CÜMLELER, satırlar değil. Satırlar
+    EKRANIN ihtiyacı: tablo onlardan çiziliyor ve ekran aynı uç noktadan tam
+    hâlini okumaya devam ediyor.
+
+    Satırları da göndermek denendi ve yetmedi. Risk turu bu eklemeden ÖNCE de
+    tavana yakındı -- ölçüldü: teknik görünüm 7.463, risk özeti 3.557,
+    metrikler 1.605 karakter -- ve sekiz pozisyonlu bir portföyde gövde
+    9.744'e çıkıp kırpıldı, istek yine 8.128 token ile 8.000'lik sınırı aştı.
+    `allocation_drift.statement` en büyük farkı zaten iki sayısıyla birlikte
+    adlandırıyor, dolayısıyla cevabın kendisi cümlede duruyor.
+    """
+    # `metrics` ve `data_quality` bu gövdede İKİ KEZ bulunuyordu: ölçüm
+    # aracının kendi çıktısı zaten aynı turda, aynı `data` sözlüğünde
+    # duruyor ve istatistiklerin yetkili kaynağı o. Özetin kopyası yalnızca
+    # puanın hangi alt kümeden üretildiğini gösteriyor -- ekranın işi, yazarın
+    # değil.
+    slim = {
+        key: value
+        for key, value in summary.items()
+        if key not in ("metrics", "data_quality")
+    }
+    exposure = summary.get("group_exposure")
+    if isinstance(exposure, dict):
+        slim["group_exposure"] = {
+            "assessed": exposure.get("assessed"),
+            "statements": [
+                row.get("statement") for row in exposure.get("groups") or []
+            ],
+        }
+    drift = summary.get("allocation_drift")
+    if isinstance(drift, dict):
+        slim["allocation_drift"] = {
+            "has_target": drift.get("has_target"),
+            "statement": drift.get("statement"),
+        }
+    return slim
+
 
 async def _verify_named_instrument(
     state: MoneyFastState, plan: dict[str, Any]
@@ -1349,7 +1405,13 @@ def _fit_payload(payload: dict[str, Any]) -> str:
     Sessizce kırpmıyor: bir uyarı satırı, gövdenin neden eksik göründüğünü
     log'da aranabilir kılıyor.
     """
-    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    # Girinti YOK. Ölçüldü: aynı risk turu sıkıştırılmış hâlde 6.388,
+    # `indent=2` ile 8.707 karakter -- bütçenin üçte biri, modelin hiçbir
+    # işine yaramayan boşluğa gidiyordu. Sekiz pozisyonlu bir portföyde tur
+    # bu yüzden sığmıyordu ve kullanıcı "tek seferde işleyebileceğimden büyük
+    # çıktı" cevabı alıyordu; kırpma da devreye giriyor ama kırpılmış JSON
+    # zaten bozuk bir gövde demek.
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     if len(text) <= SYNTHESIS_PAYLOAD_CHARS:
         return text
     log.warning(

@@ -480,7 +480,13 @@ PROMPT_BUDGETS = {
     "PORTFOLIO_AGENT": 3700,
     "TRANSACTION_AGENT": 3200,
     "MARKET_DATA_AGENT": 4100,
-    "RISK_STRATEGY_AGENT": 3200,
+    #: v2.17 ile iki karşılaştırma daha yanında geliyor: ürün grubu beyanı ve
+    #: kullanıcının kendi hedefinden sapma. Bütçeyi aşan kısım kısaltılınca
+    #: kaybolan kurallar: hazır cümlelerin YENİDEN YAZILMAMASI, hedefsizliğin
+    #: sıfır sapma SAYILMAMASI, ve ikisinin de METRİK ADI OLMADIĞI -- sonuncusu
+    #: ölçüldü, planlayıcı `metrics: ["allocation_drift"]` gönderip turu
+    #: düşürdü.
+    "RISK_STRATEGY_AGENT": 3700,
 }
 DEFAULT_PROMPT_BUDGET = 2500
 
@@ -669,6 +675,13 @@ def test_the_scenario_factor_set_is_closed_and_matches_the_tools():
     text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
     for factor in ("USDTRY", "EURTRY", "XU100", "XAUUSD"):
         assert f'"{factor}"' in text
+
+
+def test_a_target_allocation_question_routes_to_risk_strategy():
+    """Karşılaştırma risk profili özetiyle geliyor; PORTFOLIO_AGENT yalnızca
+    pozisyonları tutuyor ve hedefi göremiyor."""
+    assert "TARGET allocation" in prompts.ROUTER_PROMPT
+    assert "RISK_STRATEGY_AGENT" in prompts.ROUTER_PROMPT
 
 
 def test_a_question_naming_a_quarter_routes_to_market_data():

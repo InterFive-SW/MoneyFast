@@ -11,14 +11,17 @@ from app.core.deps import get_current_user_id, get_optional_user_id
 from app.modules.auth.models import User
 from app.core.email import send_transaction_email, send_transaction_request_email
 from app.modules.notification.models import Notification
-from . import ai_service, market_service, service
+from . import ai_service, allocation, market_service, service
 from app.modules.analytics import service as analytics_service
 from .deps import require_service_token
-from .models import TransactionProposal
+from .models import AllocationTarget, TransactionProposal
 from .ai_schemas import (
     PortfolioPositionsOut, StageTransactionRequest, StageTransactionOut,
 )
 from .schemas import (
+    AllocationDriftOut,
+    AllocationTargetOut,
+    AllocationTargetRequest,
     InvestmentBalance, Position, Order, CandlestickDataPoint, AssetAllocationItem,
     WatchlistItem, TopMoverItem, SectorAllocationItem, HeatmapItem,
     OrderProposeRequest, OrderConfirmRequest, CashStatementOut
@@ -274,57 +277,28 @@ def get_asset_allocation(
     rates = ai_service.fx_rates(quotes)
     account = market_service.account(db, user_id=user_id)
 
-    # Bucketed by the instrument's MARKET, not by its currency. Currency was a
-    # workable proxy while the only foreign instrument was American, but gold
-    # is quoted in dollars and is not a foreign share -- it was being counted
-    # as one. Values are still converted through `holding_value`, which skips
-    # a holding whose rate is unknown rather than assuming 1.0.
-    #: Venue to bucket. Anything unlisted falls to "Diğer" rather than being
-    #: dropped: a holding that disappears from an allocation chart is far
-    #: harder to notice than one in a catch-all slice.
-    #: Altın ve döviz AYRI kovalar. Bir dönem ikisi "Emtia / Döviz" olarak
-    #: birlikteydi ve proje dokümanı tam da bu üçlüyü adıyla ayırıyor:
-    #: "Kullanıcının hisse, altın ve döviz varlıkları analiz edilir." İkisini
-    #: tek dilimde toplamak, dokümanın istediği kırılımı okunamaz kılıyordu --
-    #: hem altın hem dolar tutan biri tek bir sayı görüyor ve hangisinin ne
-    #: kadar olduğunu söyleyemiyordu.
-    by_market = {
-        "BIST": "BIST Hisse",
-        "NASDAQ": "ABD Hisse",
-        "NYSE": "ABD Hisse",
-        "COMEX": "Altın",
-        "FX": "Döviz",
-    }
-
-    buckets = {
-        "Nakit (TRY)": float(account.cash_balance) if account else 0.0,
-        "BIST Hisse": 0.0,
-        "ABD Hisse": 0.0,
-        "Altın": 0.0,
-        "Döviz": 0.0,
-        "Diğer": 0.0,
-    }
+    # Kovalar `allocation.py`'de, tek kaynak. Burada ikinci bir liste tutmak,
+    # hedef karşılaştırmasının farklı adlarla okuması demekti -- bu depoda
+    # aynı hata `sort_by` ve `market` filtresi için iki kez ölçüldü.
+    valued = []
     for row in rows:
         value = ai_service.holding_value(row, rates)
-        if value is None:
-            continue
-        buckets[by_market.get(row.get("market") or "", "Diğer")] += value
-    grand = sum(buckets.values())
-    palette = {
-        "Nakit (TRY)": "#64748b",
-        "BIST Hisse": "#0ea5e9",
-        "ABD Hisse": "#22c55e",
-        # Altın sarı, döviz camgöbeği: pastada birbirinden ayırt edilebilsin.
-        "Altın": "#f59e0b",
-        "Döviz": "#06b6d4",
-        "Diğer": "#a855f7",
-    }
+        if value is not None:
+            valued.append((row, value))
+    amounts = allocation.current_amounts(
+        valued, float(account.cash_balance) if account else 0.0
+    )
+    grand = sum(amounts.values())
     # An empty bucket is noise on a pie chart; cash is kept even at zero
     # because "no cash" is itself worth seeing.
     buckets = {
-        name: amount
-        for name, amount in buckets.items()
-        if amount or name == "Nakit (TRY)"
+        allocation.label_for(key): amount
+        for key, amount in amounts.items()
+        if amount or key == allocation.CASH
+    }
+    palette = {
+        allocation.label_for(key): allocation.colour_for(key)
+        for key in allocation.BUCKETS
     }
     return [
         {
@@ -1070,3 +1044,158 @@ async def health_check():
     Sistemin ayakta olup olmadığını ve doğru modüle ulaşıldığını doğrulamak için kullanılır.
     """
     return {"status": "ok", "module": "investment"}
+
+
+# ---------------------------------------------------------------------------
+# Hedef dağılım ve ondan sapma
+#
+# Hedefi KULLANICI koyuyor, sistem değil. `compliance/rules.py:SUI-001`'in
+# gerekçesi: "sistem ölçüm ile kullanıcının kendi beyanını karşılaştırır, bir
+# ürünün kişiye uygunluğuna karar vermez." Bir model portföy önermek o kararı
+# vermek olurdu -- ve dört SPK ürün grubundan yalnızca hisse senedinin bu
+# sistemde enstrümanı olduğu için önerilenin çoğu uygulanamazdı.
+# ---------------------------------------------------------------------------
+
+
+def _targets_for(db: Session, user_id: Optional[str]) -> dict[str, float]:
+    if not user_id:
+        return {}
+    rows = (
+        db.query(AllocationTarget)
+        .filter(AllocationTarget.user_id == user_id)
+        .all()
+    )
+    return {row.bucket: float(row.target_percent) for row in rows}
+
+
+@router.get(
+    "/allocation-target",
+    response_model=AllocationTargetOut,
+    summary="Hedef dağılımım",
+)
+def get_allocation_target(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """Kullanıcının kendi belirlediği hedef ağırlıklar."""
+    rows = (
+        db.query(AllocationTarget)
+        .filter(AllocationTarget.user_id == user_id)
+        .order_by(AllocationTarget.bucket)
+        .all()
+        if user_id
+        else []
+    )
+    return {
+        "hasTarget": bool(rows),
+        "targets": [
+            {
+                "bucket": row.bucket,
+                "label": allocation.label_for(row.bucket),
+                "targetPercent": float(row.target_percent),
+            }
+            for row in rows
+        ],
+        "updatedAt": max((row.updated_at for row in rows), default=None),
+    }
+
+
+@router.put(
+    "/allocation-target",
+    response_model=AllocationTargetOut,
+    summary="Hedef dağılımı belirle",
+)
+def set_allocation_target(
+    request: AllocationTargetRequest,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    Hedef ağırlıkları tamamen değiştirir; boş liste hedefi kaldırır.
+
+    Toplam 100 olmak ZORUNDA. Yüzde yüze tamamlanmayan bir hedef, sapma
+    hesabında her kovayı aynı anda "eksik" ya da "fazla" gösterir ve
+    kullanıcı hangi sayının yanlış olduğunu göremez.
+    """
+    seen: dict[str, float] = {}
+    for item in request.targets:
+        if item.bucket not in allocation.TARGETABLE:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"'{item.bucket}' hedef belirlenebilir bir kova değil; "
+                    f"geçerli değerler: {', '.join(allocation.TARGETABLE)}."
+                ),
+            )
+        if item.bucket in seen:
+            raise HTTPException(
+                status_code=422,
+                detail=f"'{item.bucket}' için iki hedef verildi.",
+            )
+        seen[item.bucket] = float(item.targetPercent)
+
+    if seen:
+        total = round(sum(seen.values()), 2)
+        if total != 100.0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Hedeflerin toplamı 100 olmalı; verilen toplam {total:g}.",
+            )
+
+    db.query(AllocationTarget).filter(AllocationTarget.user_id == user_id).delete()
+    now = datetime.now(timezone.utc)
+    for bucket, percent in seen.items():
+        db.add(AllocationTarget(
+            user_id=user_id, bucket=bucket, target_percent=percent, updated_at=now
+        ))
+    db.commit()
+    return get_allocation_target(db=db, user_id=user_id)
+
+
+@router.get(
+    "/allocation-drift",
+    response_model=AllocationDriftOut,
+    summary="Hedeften sapma",
+)
+def get_allocation_drift(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    Ölçülen ağırlıklar ile kullanıcının kendi hedefi arasındaki fark.
+
+    Tavsiye değil, iki olgunun çıkarması: biri portföyden ölçülüyor, diğeri
+    kullanıcının kendi girdiği sayı. Hiçbir yerde ne yapılması gerektiği
+    söylenmiyor -- yalnızca hedefe ulaşmak için kaç lira fark olduğu.
+    """
+    rows = market_service.holdings(db, user_id=user_id)
+    quotes = market_service.latest_quotes(db)
+    rates = ai_service.fx_rates(quotes)
+    account = market_service.account(db, user_id=user_id)
+
+    valued = [
+        (row, value)
+        for row, value in ((row, ai_service.holding_value(row, rates)) for row in rows)
+        if value is not None
+    ]
+    amounts = allocation.current_amounts(
+        valued, float(account.cash_balance) if account else 0.0
+    )
+    result = allocation.drift(amounts, _targets_for(db, user_id))
+    return {
+        "hasTarget": result["has_target"],
+        "totalValue": result["total_value"],
+        "buckets": [
+            {
+                "bucket": row["bucket"],
+                "label": row["label"],
+                "amount": row["amount"],
+                "currentPercent": row["current_percent"],
+                "targetPercent": row["target_percent"],
+                "gapPoints": row["gap_points"],
+                "gapAmount": row["gap_amount"],
+            }
+            for row in result["buckets"]
+        ],
+        "statement": result["statement"],
+    }

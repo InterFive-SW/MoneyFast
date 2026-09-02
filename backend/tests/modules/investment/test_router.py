@@ -742,3 +742,214 @@ class TestConfirmedProposalsReader:
         rows = [SimpleNamespace(symbol="THYAO")]
         db.query.return_value.filter.return_value.all.return_value = rows
         assert _confirmed_proposals(db, "user-1") == rows
+
+
+@pytest.fixture()
+def as_user(client):
+    """Oturum açılmış istemci.
+
+    İKİSİ de geçersiz kılınıyor: yazma ucu `get_current_user_id` istiyor,
+    okuma ve sapma uçları `get_optional_user_id`. Yalnızca birini bağlamak,
+    kaydeden ile okuyanın farklı kullanıcı görmesi demekti.
+    """
+    from app.core.deps import get_current_user_id, get_optional_user_id
+    from app.main import app
+
+    app.dependency_overrides[get_current_user_id] = lambda: "user-1"
+    app.dependency_overrides[get_optional_user_id] = lambda: "user-1"
+    try:
+        yield client
+    finally:
+        app.dependency_overrides.pop(get_current_user_id, None)
+        app.dependency_overrides.pop(get_optional_user_id, None)
+
+
+class TestAllocationTarget:
+    """Hedefi KULLANICI koyuyor, sistem değil.
+
+    `compliance/rules.py:SUI-001`'in gerekçesi: "sistem ölçüm ile kullanıcının
+    kendi beyanını karşılaştırır, bir ürünün kişiye uygunluğuna karar vermez."
+    Bir model portföy önermek o kararı vermek olurdu -- ve dört SPK ürün
+    grubundan yalnızca hisse senedinin bu sistemde enstrümanı olduğu için
+    önerilenin çoğu uygulanamaz bir talimat olurdu.
+    """
+
+    URL = "/api/investment/allocation-target"
+    VALID = {"targets": [
+        {"bucket": "bist_equity", "targetPercent": 60},
+        {"bucket": "gold", "targetPercent": 25},
+        {"bucket": "cash", "targetPercent": 15},
+    ]}
+
+    def test_a_target_that_does_not_reach_a_hundred_is_refused(self, as_user):
+        """Yüzde yüze tamamlanmayan bir hedef, sapma hesabında her kovayı
+        aynı anda eksik ya da fazla gösterir ve kullanıcı hangi sayının
+        yanlış olduğunu göremez."""
+        response = as_user.put(
+            self.URL, json={"targets": [{"bucket": "bist_equity", "targetPercent": 60}]}
+        )
+        assert response.status_code == 422
+        assert "100" in response.json()["detail"]
+
+    def test_an_unknown_bucket_is_refused_with_the_valid_set(self, as_user):
+        response = as_user.put(
+            self.URL, json={"targets": [{"bucket": "tahvil", "targetPercent": 100}]}
+        )
+        assert response.status_code == 422
+        assert "bist_equity" in response.json()["detail"]
+
+    def test_the_catch_all_bucket_cannot_be_targeted(self, as_user):
+        response = as_user.put(
+            self.URL, json={"targets": [{"bucket": "other", "targetPercent": 100}]}
+        )
+        assert response.status_code == 422
+
+    def test_a_repeated_bucket_is_refused(self, as_user):
+        response = as_user.put(self.URL, json={"targets": [
+            {"bucket": "cash", "targetPercent": 50},
+            {"bucket": "cash", "targetPercent": 50},
+        ]})
+        assert response.status_code == 422
+
+    def test_a_percentage_outside_the_range_is_refused(self, as_user):
+        response = as_user.put(
+            self.URL, json={"targets": [{"bucket": "cash", "targetPercent": 140}]}
+        )
+        assert response.status_code == 422
+
+    def test_an_empty_list_is_accepted_and_clears_the_target(self, as_user):
+        """Hedefi kaldırmak geçerli bir işlem; 100 kuralı yalnızca hedef
+        VARKEN geçerli."""
+        assert as_user.put(self.URL, json={"targets": []}).status_code == 200
+
+
+class TestAllocationDrift:
+    """Ölçülen ağırlık ile kullanıcının KENDİ hedefi arasındaki fark.
+
+    Tavsiye değil, iki olgunun çıkarması -- `profile.suitability` ile aynı
+    gerekçe ve aynı sınır.
+    """
+
+    TARGET_URL = "/api/investment/allocation-target"
+    DRIFT_URL = "/api/investment/allocation-drift"
+
+    def _portfolio(self, mocker, rows, cash=1000.0):
+        from app.modules.investment import market_service
+
+        mocker.patch.object(market_service, "holdings", return_value=rows)
+        mocker.patch.object(
+            market_service, "latest_quotes",
+            return_value={"USDTRY": {"price": 40.0}},
+        )
+        mocker.patch.object(
+            market_service, "account",
+            return_value=SimpleNamespace(id="a1", cash_balance=cash,
+                                         currency_code="TRY", account_number="TR-1"),
+        )
+
+    def _row(self, symbol, market, quantity, price, currency="TRY"):
+        return {"symbol": symbol, "currency": currency, "market": market,
+                "quantity": quantity, "price": price, "avg_cost": price}
+
+    def _targets(self, mocker, mapping):
+        """Kayıtlı hedefleri okuma yolunu taklit eder."""
+        from app.modules.investment import router as investment_router
+
+        mocker.patch.object(
+            investment_router, "_targets_for", return_value=mapping
+        )
+
+    def test_no_target_says_so_rather_than_reporting_a_gap(self, client, mocker):
+        self._portfolio(mocker, [self._row("THYAO", "BIST", 90, 100.0)])
+        self._targets(mocker, {})
+        body = client.get(self.DRIFT_URL).json()
+        assert body["hasTarget"] is False
+        assert "belirlemediniz" in body["statement"]
+
+    def test_the_gap_is_reported_per_bucket_with_a_lira_amount(self, client, mocker):
+        self._portfolio(mocker, [self._row("THYAO", "BIST", 90, 100.0)])
+        self._targets(mocker, {"bist_equity": 60.0, "cash": 15.0, "gold": 25.0})
+        body = client.get(self.DRIFT_URL).json()
+        bist = next(b for b in body["buckets"] if b["bucket"] == "bist_equity")
+        assert bist["currentPercent"] == 90.0
+        assert bist["gapPoints"] == 30.0
+        assert bist["gapAmount"] > 0
+
+    def test_a_bucket_held_but_not_targeted_reports_no_gap(self, client, mocker):
+        """"Hedefim yok" ile "hedefim sıfır" farklı şeyler."""
+        self._portfolio(mocker, [self._row("XAUUSD", "COMEX", 1, 10.0, "USD")])
+        self._targets(mocker, {"bist_equity": 100.0})
+        body = client.get(self.DRIFT_URL).json()
+        gold = next(b for b in body["buckets"] if b["bucket"] == "gold")
+        assert gold["targetPercent"] is None
+        assert gold["gapPoints"] is None
+
+    def test_the_statement_names_the_widest_gap(self, client, mocker):
+        self._portfolio(mocker, [self._row("THYAO", "BIST", 90, 100.0)])
+        self._targets(mocker, {"bist_equity": 60.0, "cash": 15.0, "gold": 25.0})
+        assert "BIST Hisse" in client.get(self.DRIFT_URL).json()["statement"]
+
+    def test_a_saved_target_is_read_back(self, as_user, mocker):
+        """Yazma ve okuma aynı satırları görmeli; ayrışırlarsa kullanıcı
+        kaydettiğinden başka bir hedefe göre ölçülür."""
+        saved = [SimpleNamespace(bucket="cash", target_percent=40.0,
+                                 updated_at=NOW),
+                 SimpleNamespace(bucket="bist_equity", target_percent=60.0,
+                                 updated_at=NOW)]
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = saved
+        app.dependency_overrides[get_db] = lambda: db
+        try:
+            body = as_user.get(self.TARGET_URL).json()
+        finally:
+            app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
+        assert body["hasTarget"] is True
+        assert {t["bucket"]: t["targetPercent"] for t in body["targets"]} == {
+            "cash": 40.0, "bist_equity": 60.0
+        }
+        assert body["targets"][0]["label"] == "Nakit (TRY)"
+
+    def test_an_anonymous_caller_has_no_targets(self, client, mocker):
+        """`_targets_for` kullanıcı yoksa boş döner; anonim bir okuma
+        başkasının hedefini görmemeli."""
+        from app.modules.investment import router as investment_router
+
+        assert investment_router._targets_for(MagicMock(spec=Session), None) == {}
+
+    def test_saved_rows_become_a_bucket_to_percent_map(self):
+        """`_targets_for` sapma hesabının okuduğu tek yol; taklit edilmeden
+        çalıştığı burada görülüyor."""
+        from app.modules.investment import router as investment_router
+
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.all.return_value = [
+            SimpleNamespace(bucket="cash", target_percent=40.0),
+            SimpleNamespace(bucket="bist_equity", target_percent=60.0),
+        ]
+        assert investment_router._targets_for(db, "user-1") == {
+            "cash": 40.0, "bist_equity": 60.0
+        }
+
+    def test_saving_replaces_the_previous_target_entirely(self, as_user, mocker):
+        """Kısmi güncelleme YOK: eski satırlar siliniyor, yenileri yazılıyor.
+        Birleştirme, toplamı 100 olan bir hedefi sessizce 140'a çıkarabilirdi.
+        """
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []
+        app.dependency_overrides[get_db] = lambda: db
+        try:
+            response = as_user.put(self.TARGET_URL, json={"targets": [
+                {"bucket": "bist_equity", "targetPercent": 70},
+                {"bucket": "cash", "targetPercent": 30},
+            ]})
+        finally:
+            app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
+
+        assert response.status_code == 200
+        db.query.return_value.filter.return_value.delete.assert_called_once()
+        written = {
+            call.args[0].bucket: float(call.args[0].target_percent)
+            for call in db.add.call_args_list
+        }
+        assert written == {"bist_equity": 70.0, "cash": 30.0}
+        db.commit.assert_called_once()

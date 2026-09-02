@@ -466,7 +466,12 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
 
 
 async def market_data_node(state: MoneyFastState) -> dict[str, Any]:
-    """Current prices and valuation ratios, or the trend of one instrument."""
+    """Adı geçen bir enstrüman hakkında üç soru, üç araç.
+
+    Fiyat ("ne ediyor"), eğilim ("nasıl gidiyor") ve şirketin işi ("kârlı mı").
+    Üçü de aynı ajanın arkasında, çünkü üçü de bu sistemin tuttuğu veriden
+    cevaplanıyor ve yönlendiricide üçe bölmek aynı soruyu üç kez sormak olurdu.
+    """
     plan = await _llm_json(
         SPECIALIST_PROMPTS["MARKET_DATA_AGENT"], _specialist_task(state), fast=True
     )
@@ -492,6 +497,34 @@ async def market_data_node(state: MoneyFastState) -> dict[str, Any]:
         # No symbol to look up. Falling through to the price path lets the
         # turn be answered from whatever the user did name, rather than
         # calling a one-symbol tool with nothing.
+
+    # Üçüncü araç: şirketin İŞİ nasıl gidiyor. Fiyat "ne ediyor", eğilim
+    # "nasıl gidiyor", bu ise "kârlı mı, borçlu mu". Üçü de ADI GEÇEN bir
+    # enstrüman hakkında ve üçü de bu sistemin tuttuğu veriden cevaplanıyor;
+    # ayrı bir uzman ajan açmak, aynı soruyu yönlendiricide üçe bölmeyi
+    # gerektirirdi.
+    if plan.get("tool") == "get_company_fundamentals":
+        symbols = [
+            str(symbol).upper()
+            for symbol in (args.get("symbols") or [])
+            if str(symbol).strip()
+        ] or [t for t in ((state.get("entities") or {}).get("tickers") or [])]
+        if symbols:
+            return await _run_tool(
+                state, "get_company_fundamentals",
+                # Sözleşmenin tavanı beş ve aşıldığında REDDEDİYOR. Burada
+                # kırpmak, aracın bilerek reddettiği şeyi sessizce yapmak
+                # olurdu -- ama turu bir 422'ye çevirmek de kullanıcıya
+                # kendi sorusunun cevabı yerine bir hata gösterirdi.
+                # Kırpılan sembol `warnings`'e girmiyor çünkü araç onu hiç
+                # görmüyor; bu yüzden model beşten fazlasını istediğinde
+                # yönlendirici zaten en fazla beş ticker çıkarıyor.
+                {"symbols": symbols[:5]},
+                assumptions=assumptions,
+                empty_when=lambda p: not p.get("instruments"),
+            )
+        # Sembol yoksa fiyat yoluna düşülüyor: adı geçen bir şey varsa o
+        # cevaplanır, tek sembol isteyen bir aracı boşa çağırmaktansa.
 
     # A turn that named no instrument and no filter would otherwise screen the
     # entire universe and hand the model 50 rows to summarise.

@@ -339,7 +339,9 @@ AGENTS
                         archive; research can only search text, and the text
                         "portföyümdeki hisseler" names no company.
   MARKET_DATA_AGENT     the PRICE or VALUATION of any instrument, held or
-                        not, its TREND, and any screen over objective
+                        not, its TREND, its BUSINESS FINANCIALS (margins,
+                        debt, cash flow, earnings per share, dividend terms,
+                        analyst consensus), and any screen over objective
                         criteria: "THYAO kaç lira", "dolar kaç TL", "F/K'sı
                         10'un altındaki hisseler", "piyasa değeri en büyük
                         şirketler", 52-week ranges, P/E, P/B, market cap,
@@ -444,6 +446,16 @@ ROUTING RULES
   no numbers under it -- and then "veriler temin edilemedi", which reads as an
   outage. An advice question naming NOTHING ("ne almalıyım") stays
   EDUCATION_AGENT: there is nothing to compare.
+- A question about a company's FINANCIALS is MARKET_DATA_AGENT, not education
+  and not research: "AKBNK kârlı mı", "THYAO'nun borcu ne kadar", "kâr marjı
+  nedir bu şirketin", "özkaynak kârlılığı", "temettü veriyor mu", "analistler
+  ne diyor". This system STORES these figures for 1.011 instruments and the
+  agent can read them. Measured failure: "AKBNK kârlı bir şirket mi, borç
+  durumu nasıl" went to EDUCATION_AGENT, no tool ran, and the user was told
+  the data "temin edilemedi" -- about a company whose margin, return on
+  equity and analyst consensus were all sitting in the database.
+  A question about what a ratio MEANS with no company named ("kâr marjı ne
+  demek") stays EDUCATION_AGENT.
 - A named instrument plus a PRICE-OR-STATE question is MARKET_DATA_AGENT, not
   research: "ne durumda", "piyasası ne durumda", "kaç para", "fiyatı", "kaçtan
   işlem görüyor", "durumu nasıl". Measured failure: "şuan türk hava yolları
@@ -576,8 +588,17 @@ SPECIALIST_PROMPTS["MARKET_DATA_AGENT"] = """\
 Backend specialist for current prices and valuation fundamentals. Not
 user-facing. Your only consumer is the Orchestrator. English only.
 
-TOOL BINDING: get_market_data and get_technical_signals. You have no access to
-holdings; a price is not a return and a P/E is not a forecast.
+TOOL BINDING: get_market_data, get_technical_signals and
+get_company_fundamentals. You have no access to holdings; a price is not a
+return and a P/E is not a forecast.
+
+WHICH TOOL — three questions about a named instrument:
+  what does it COST        -> get_market_data (price, change, volume, P/E, P/B)
+  how is it DOING          -> get_technical_signals (trend, averages, RSI)
+  how is the BUSINESS      -> get_company_fundamentals (margins, debt, cash
+                              flow, earnings per share, analyst consensus)
+"kâr marjı", "borcu", "özkaynak kârlılığı", "temettü veriyor mu",
+"analistler ne diyor" are the third. "Kaç lira" is the first.
 
 TASK: a named lookup (symbols), a screen (filters), or a trend reading of ONE
 instrument. Pass tickers as the user wrote them; the backend resolves case,
@@ -596,6 +617,11 @@ returns a ready Turkish sentence; relay it as given, caveat included.
  "assumptions": [str]}
 
 or, for a trend reading of one instrument:
+
+{"tool": "get_company_fundamentals", "arguments": {"symbols": [str]},
+ "assumptions": [str]}
+
+At most FIVE symbols; more are refused, not trimmed.
 
 {"tool": "get_technical_signals", "arguments": {"symbol": str},
  "assumptions": [str]}

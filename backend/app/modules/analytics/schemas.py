@@ -9,7 +9,7 @@ the allocation to sum to 100%, which is only meaningful if the parts are real.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -92,3 +92,32 @@ class PortfolioAnalysis(BaseModel):
     #: portfolio is not the portfolio's trend.
     excluded_symbols: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+
+class ReportSection(BaseModel):
+    """Raporun bir bölümü.
+
+    `summary` KODDA kurulmuş tek cümle; ekran, PDF ve sohbet onu olduğu gibi
+    okuyor. `lines` insan okuru için hazır satırlar, `rows` ise tabloyu çizen
+    yapısal veri -- ikisi aynı bilgiyi taşıyor çünkü PDF satırları, ekran
+    tabloyu istiyor.
+    """
+
+    key: str
+    title: str
+    summary: str = ""
+    lines: List[str] = Field(default_factory=list)
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PortfolioReport(BaseModel):
+    #: Belgenin ÜRETİLDİĞİ an.
+    generated_at: str
+    currency_code: str = "TRY"
+    #: İçindeki FİYATLARIN ait olduğu an -- `generated_at` ile aynı şey değil.
+    #: Rapor, gecikmeyi söylemeyen tek yüzey olmamalı: sohbet, portföy ucu ve
+    #: gösterge paneli hepsi söylüyor.
+    as_of: str = ""
+    is_delayed: bool = False
+    delay_minutes: int = 0
+    sections: List[ReportSection] = Field(default_factory=list)

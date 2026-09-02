@@ -439,6 +439,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analytics/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Detaylı rapor (tek çağrı)
+         * @description "Detaylı Rapor Oluştur" düğmesinin tek çağrısı.
+         *
+         *     Proje dokümanı bu düğmeyi adıyla istiyor: tek tıkla kapsamlı analiz
+         *     raporu. Yeni bir ölçüm yapmıyor -- her bölüm zaten var olan bir servisten
+         *     okuyor ve cümleler `report.py`'de bir kez kuruluyor, ekran ile PDF ile
+         *     sohbet aynı metni okusun diye.
+         */
+        get: operations["portfolio_report_api_analytics_report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/analytics/report/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Detaylı rapor (MCP sözleşmesi)
+         * @description Yukarıdakiyle aynı rapor, kullanıcısı yoldan gelen hâli.
+         *
+         *     Konusunu YOLDA adlandırıyor, dolayısıyla servis token'ı istiyor: rapor
+         *     pozisyonları, bakiyeyi, maaşı ve kira giderini bir arada taşıyor ve bu,
+         *     ayrı ayrı korunan uçların hepsinin toplamı.
+         */
+        get: operations["portfolio_report_for_ai_api_analytics_report__user_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/register": {
         parameters: {
             query?: never;
@@ -2782,25 +2831,22 @@ export interface components {
             /** Gapamount */
             gapAmount?: number | null;
         };
-        /** AllocationDriftOut */
-        AllocationDriftOut: {
-            /**
-             * Hastarget
-             * @default false
-             */
-            hasTarget: boolean;
-            /**
-             * Totalvalue
-             * @default 0
-             */
-            totalValue: number;
-            /** Buckets */
-            buckets?: components["schemas"]["AllocationDriftBucket"][];
-            /**
-             * Statement
-             * @default
-             */
-            statement: string;
+        /** AllocationDriftBucketOut */
+        AllocationDriftBucketOut: {
+            /** Bucket */
+            bucket: string;
+            /** Label */
+            label: string;
+            /** Amount */
+            amount: number;
+            /** Current Percent */
+            current_percent?: number | null;
+            /** Target Percent */
+            target_percent?: number | null;
+            /** Gap Points */
+            gap_points?: number | null;
+            /** Gap Amount */
+            gap_amount?: number | null;
         };
         /** AllocationSlice */
         AllocationSlice: {
@@ -4715,6 +4761,33 @@ export interface components {
             /** Warnings */
             warnings?: string[];
         };
+        /** PortfolioReport */
+        PortfolioReport: {
+            /** Generated At */
+            generated_at: string;
+            /**
+             * Currency Code
+             * @default TRY
+             */
+            currency_code: string;
+            /**
+             * As Of
+             * @default
+             */
+            as_of: string;
+            /**
+             * Is Delayed
+             * @default false
+             */
+            is_delayed: boolean;
+            /**
+             * Delay Minutes
+             * @default 0
+             */
+            delay_minutes: number;
+            /** Sections */
+            sections?: components["schemas"]["ReportSection"][];
+        };
         /** PortfolioTechnicalOut */
         PortfolioTechnicalOut: {
             /**
@@ -5210,6 +5283,32 @@ export interface components {
             trading_days: number;
         };
         /**
+         * ReportSection
+         * @description Raporun bir bölümü.
+         *
+         *     `summary` KODDA kurulmuş tek cümle; ekran, PDF ve sohbet onu olduğu gibi
+         *     okuyor. `lines` insan okuru için hazır satırlar, `rows` ise tabloyu çizen
+         *     yapısal veri -- ikisi aynı bilgiyi taşıyor çünkü PDF satırları, ekran
+         *     tabloyu istiyor.
+         */
+        ReportSection: {
+            /** Key */
+            key: string;
+            /** Title */
+            title: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Lines */
+            lines?: string[];
+            /** Rows */
+            rows?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
          * ResetPasswordRequest
          * @description Şifreyi sıfırlamak için şema.
          */
@@ -5367,6 +5466,8 @@ export interface components {
             position_count: number;
             suitability: components["schemas"]["SuitabilityOut"];
             declared?: components["schemas"]["DeclaredProfileOut"] | null;
+            group_exposure?: components["schemas"]["GroupExposureOut"] | null;
+            allocation_drift?: components["schemas"]["app__modules__risk__schemas__AllocationDriftOut"] | null;
             /** Metrics */
             metrics?: {
                 [key: string]: unknown;
@@ -6102,6 +6203,46 @@ export interface components {
             /** Return Pct */
             return_pct: number;
         };
+        /** AllocationDriftOut */
+        app__modules__investment__schemas__AllocationDriftOut: {
+            /**
+             * Hastarget
+             * @default false
+             */
+            hasTarget: boolean;
+            /**
+             * Totalvalue
+             * @default 0
+             */
+            totalValue: number;
+            /** Buckets */
+            buckets?: components["schemas"]["AllocationDriftBucket"][];
+            /**
+             * Statement
+             * @default
+             */
+            statement: string;
+        };
+        /** AllocationDriftOut */
+        app__modules__risk__schemas__AllocationDriftOut: {
+            /**
+             * Has Target
+             * @default false
+             */
+            has_target: boolean;
+            /**
+             * Total Value
+             * @default 0
+             */
+            total_value: number;
+            /** Buckets */
+            buckets?: components["schemas"]["AllocationDriftBucketOut"][];
+            /**
+             * Statement
+             * @default
+             */
+            statement: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -6824,6 +6965,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    portfolio_report_api_analytics_report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioReport"];
+                };
+            };
+        };
+    };
+    portfolio_report_for_ai_api_analytics_report__user_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -8413,7 +8607,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AllocationDriftOut"];
+                    "application/json": components["schemas"]["app__modules__investment__schemas__AllocationDriftOut"];
                 };
             };
         };

@@ -38,6 +38,7 @@ export type Order = GetResponseType<paths['/api/investment/orders']>[0];
 export type AssetAllocationItem = GetResponseType<paths['/api/investment/asset-allocation']>[0];
 export type AllocationTarget = GetResponseType<paths['/api/investment/allocation-target']>;
 export type AllocationDrift = GetResponseType<paths['/api/investment/allocation-drift']>;
+export type PortfolioReport = GetResponseType<paths['/api/analytics/report']>;
 export type StageTransactionRequest = components['schemas']['StageTransactionRequest'];
 export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
@@ -758,6 +759,16 @@ class ApiClient {
 
     getAssetAllocation() {
         return this.request<AssetAllocationItem[]>('/investment/asset-allocation');
+    }
+
+    /**
+     * "Detaylı Rapor Oluştur": sistemin ölçtüğü her şey tek belgede.
+     *
+     * Bölüm cümleleri BACKEND'de kuruluyor ve olduğu gibi gösteriliyor;
+     * ekran, PDF ve sohbet aynı metni okumalı.
+     */
+    getPortfolioReport() {
+        return this.request<PortfolioReport>('/analytics/report');
     }
 
     /** Kullanıcının kendi belirlediği hedef ağırlıklar. */

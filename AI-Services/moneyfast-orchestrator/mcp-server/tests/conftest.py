@@ -96,6 +96,7 @@ ROUTES = {
     "/investment/portfolio/": "portfolio",
     "/investment/transactions/stage": "stage",
     "/risk/calculate": "risk",
+    "/analytics/report/": "report",
     "/risk/profile/": "risk_summary",
     # v2.13. Üçü de kullanıcıyı yoldan alıyor, `risk/profile/` gibi.
     "/risk/scenario": "scenario",

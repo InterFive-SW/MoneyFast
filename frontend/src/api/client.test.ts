@@ -106,6 +106,8 @@ describe('endpoint paths', () => {
     ['getTopMovers', '/api/investment/top-movers'],
     ['getAssetAllocation', '/api/investment/asset-allocation'],
     ['getAllocationTarget', '/api/investment/allocation-target'],
+    // "Detaylı Rapor Oluştur": tek çağrı, altı bölüm.
+    ['getPortfolioReport', '/api/analytics/report'],
     ['getAllocationDrift', '/api/investment/allocation-drift'],
     ['getSectorAllocation', '/api/investment/sector-allocation'],
     ['getHeatmap', '/api/investment/heatmap'],

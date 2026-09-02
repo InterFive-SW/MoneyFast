@@ -176,6 +176,12 @@ def _measure(db: Session, user_id: str, lookback: str) -> dict:
         "suitability": profile.suitability(
             scored["level"], declared.tolerance_level if declared else None
         ),
+        # Aynı çizginin ikinci yarısı: `suitability` ölçülen risk seviyesini
+        # beyan edilen toleransla karşılaştırıyor, bu ise ÜRÜN GRUBU başına
+        # tutulan ağırlığı o grup için verilen bilgi/tecrübe beyanıyla.
+        "group_exposure": profile.group_exposure(
+            positions, getattr(declared, "product_groups", None)
+        ),
         "warnings": warnings,
     }
 
@@ -251,6 +257,7 @@ def risk_profile(
         warnings=measured["warnings"],
         declared=_declared_payload(measured["declared"]),
         suitability=measured["suitability"],
+        group_exposure=measured["group_exposure"],
     )
 
 

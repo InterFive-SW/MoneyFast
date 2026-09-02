@@ -47,8 +47,11 @@ class NewsItem(Base):
     source: Mapped[str] = mapped_column(String(120), nullable=False)
     url: Mapped[str | None] = mapped_column(Text, nullable=True)
     language: Mapped[str] = mapped_column(String(10), nullable=False, default="tr")
-    #: Tickers the feed itself tagged. Never inferred from the headline text:
-    #: a wrong tag would put an unrelated company's news on an instrument page.
+    #: Haberin dokunduğu enstrümanlar. Kaynak etiketliyorsa (KAP bildirimleri
+    #: `stockCode` taşıyor) o kullanılır; RSS beslemeleri etiketlemediği için
+    #: `symbol_match` başlık ve özetten çözer -- tam kelime, kesin ad, bulanık
+    #: eşleşme YOK. Kural değişmedi, yalnızca nereye taşındı: yanlış bir
+    #: etiket, başka bir şirketin haberini bu hissenin sayfasına koyar.
     related_symbols: Mapped[list[str]] = mapped_column(ARRAY(String(32)), nullable=False, default=list)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)

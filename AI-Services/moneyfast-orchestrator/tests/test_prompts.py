@@ -364,7 +364,6 @@ def test_every_specialist_is_english_only(agent):
 @pytest.mark.parametrize(
     "agent,tool",
     [
-        ("PORTFOLIO_AGENT", "get_portfolio_positions"),
         ("MARKET_RESEARCH_AGENT", "rag_semantic_market_search"),
         ("RISK_STRATEGY_AGENT", "calculate_portfolio_risk_metrics"),
         ("TRANSACTION_AGENT", "prepare_transaction_proposal"),
@@ -372,6 +371,47 @@ def test_every_specialist_is_english_only(agent):
 )
 def test_tool_binding_names_exactly_one_tool(agent, tool):
     assert f"TOOL BINDING: {tool} only" in prompts.SPECIALIST_PROMPTS[agent]
+
+
+@pytest.mark.parametrize(
+    "agent,tools",
+    [
+        ("MARKET_DATA_AGENT", ("get_market_data", "get_technical_signals")),
+        # v2.11. What the user OWNS and what was PUBLISHED about it are two
+        # questions with two failure modes, and only this agent can read the
+        # holdings that make the second one answerable.
+        ("PORTFOLIO_AGENT", ("get_portfolio_positions", "get_portfolio_news")),
+    ],
+)
+def test_a_two_tool_agent_names_both_and_says_how_to_choose(agent, tools):
+    """A binding that names two tools without a rule for picking between them
+    is how a holdings question reached the news tool and came back empty."""
+    text = prompts.SPECIALIST_PROMPTS[agent]
+    for tool in tools:
+        assert tool in text
+    assert "WHICH TOOL" in text or "for how it is DOING" in text
+
+
+def test_the_portfolio_agent_is_told_not_to_invent_a_news_window():
+    """The backend window is also the Analiz screen's window. A number
+    invented in the plan makes the two disagree about what "no news" covers."""
+    text = flat(prompts.SPECIALIST_PROMPTS["PORTFOLIO_AGENT"])
+    assert "`days` ONLY when the user named a period" in text
+
+
+def test_the_portfolio_agent_may_not_interpret_an_article():
+    """Calling a headline positive or negative is a market view, and this
+    system holds none."""
+    text = flat(prompts.SPECIALIST_PROMPTS["PORTFOLIO_AGENT"])
+    assert "Never call an article positive or negative" in text
+    assert "never rank articles" in text
+
+
+def test_news_about_holdings_routes_to_the_portfolio_agent():
+    """"portföyümdeki hisselerle ilgili haber" names no company, so a document
+    search has nothing to search for."""
+    assert "NEWS about the user's OWN holdings is PORTFOLIO_AGENT" \
+        in prompts.ROUTER_PROMPT
 
 
 @pytest.mark.parametrize(
@@ -417,7 +457,18 @@ def test_market_research_specialist_marks_snippets_untrusted():
 #: the trend reading -- so it needs the envelope and the choosing rule for
 #: both. Raised deliberately and by a measured amount, not to whatever the
 #: prompt happens to be.
-PROMPT_BUDGETS = {"TRANSACTION_AGENT": 3200, "MARKET_DATA_AGENT": 3000}
+#: RISK_STRATEGY_AGENT carries FOUR tools since v2.13 -- the measurement, the
+#: factor scenario, the trade simulation and the stress test -- so it needs an
+#: output schema and a choosing rule for each. The three additions all answer
+#: "what if", and the rules keeping them measurements rather than forecasts
+#: (relay the caveat, state the assumptions, never say what a factor will do)
+#: are the part that cannot be trimmed: without them the compliance gate cuts
+#: the answer and the user sees nothing.
+PROMPT_BUDGETS = {
+    "TRANSACTION_AGENT": 3200,
+    "MARKET_DATA_AGENT": 3000,
+    "RISK_STRATEGY_AGENT": 3200,
+}
 DEFAULT_PROMPT_BUDGET = 2500
 
 
@@ -548,11 +599,109 @@ def test_the_risk_specialist_still_forbids_threshold_judgements():
 
 
 def test_the_risk_specialist_does_not_plan_the_summary_call():
-    """The graph fetches it. A planner that tries to request it produces an
-    argument the tool binding does not accept."""
+    """The graph fetches them. A planner that tries to request either produces
+    an argument the tool binding does not accept."""
     text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-    assert "fetched alongside without your planning it" in text
-    assert "do not request it" in text
+    assert "fetched alongside without your planning them" in text
+    assert "do not request either" in text
+    assert "the risk profile summary" in text
+    assert "technical_posture" in text
+
+
+def test_the_risk_specialist_may_not_merge_the_count_with_the_weight():
+    """Ölçüldü: üç pozisyonun ikisi 50 günlük ortalamasının altında ama değerin
+    %95'i. Sayıyı portföyün yüzdesi diye sunmak, ölçümün söylemediğini
+    söylemek olur."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "Never merge them" in text
+    assert "never call a count a percentage of the portfolio" in text
+
+
+def test_the_risk_specialist_names_all_four_tools_and_how_to_pick():
+    """Dört araç ve aralarında seçim kuralı. Kuralsız bir bağlama, bir ölçüm
+    sorusunun senaryo aracına gitmesi demekti."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "WHICH TOOL" in text
+    for tool in ("calculate_portfolio_risk_metrics", "run_portfolio_scenario",
+                 "simulate_position_change", "get_portfolio_stress_test"):
+        assert tool in text
+
+
+def test_the_risk_specialist_is_told_there_is_no_rate_series():
+    """Ölçülemeyen bir faktörü ölçülebilirmiş gibi sunmak, uydurulmuş bir
+    sayıyı ölçüm diye vermek olur. En sık gelen soru da bu."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "There is NO interest-rate" in text
+    assert "never substitute a currency for a rate question" in text
+
+
+def test_the_risk_specialist_may_not_invent_a_trade():
+    """Değişikliği sunucu önermez; öneri motoruna dönüşmenin ilk adımı bu."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "NEVER invent a symbol or a quantity" in text
+    assert "never propose a trade of your own" in text
+
+
+def test_a_scenario_is_never_labelled_a_forecast():
+    """`GUA-003`'ün çizdiği sınır prompt'ta da yazılı: koşullu okuma serbest,
+    çekincesiz yön iddiası değil."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert "says what WOULD have followed, never what WILL happen" in text
+    assert "relay its `statement` with the caveat attached" in text
+
+
+def test_the_scenario_factor_set_is_closed_and_matches_the_tools():
+    """Üç yerde aynı liste: prompt, MCP aracı, backend. Ayrışırlarsa model
+    geçersiz bir faktör üretir ve kullanıcı "ölçemedim" cevabı alır."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    for factor in ("USDTRY", "EURTRY", "XU100", "XAUUSD"):
+        assert f'"{factor}"' in text
+
+
+def test_a_conditional_portfolio_question_routes_to_the_risk_agent():
+    assert "A CONDITIONAL question about the portfolio is RISK_STRATEGY_AGENT" \
+        in prompts.ROUTER_PROMPT
+
+
+def test_synthesis_separates_a_permanent_limit_from_an_outage():
+    """Kural 4 EMPTY'yi "veri yok"a eşliyor ve bu doğru. Ama ölçülemeyen bir
+    faktör boş bir sonuç değil, KALICI bir sınır -- ölçüldü, iki kez kesinti
+    gibi anlatıldı ve bir kez kullanıcıdan verisini yapıştırması istendi."""
+    # `flat`: kural metni satır sonlarıyla sarılıyor ve ham birleştirme,
+    # yalnızca sarma değiştiğinde kırılan bir test yapardı.
+    text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT + prompts.SYNTHESIS_TASK_TEMPLATE)
+    assert "Status UNSUPPORTED is NOT" in text
+    assert "Relay `user_message_tr`" in text
+    assert "do NOT offer to try again" in text
+    # Ölçüldü: model faizi ölçemeyince döviz ve altın replaylerini vekil
+    # olarak kullandı. Bir kur, bir faizin yerine geçmez.
+    assert "do NOT reach for" in text
+    assert "not a proxy for a rate" in text
+
+
+def test_an_unmeasurable_macro_factor_still_routes_to_the_risk_agent():
+    """Ölçülen hata: "faizler artarsa portföyüm nasıl etkilenir"
+    EDUCATION_AGENT'a gitti, hiçbir araç çalışmadı, ve kullanıcıya veri
+    "alınamadı" dendi -- bir kesinti gibi okunuyor, oysa o veri yapısal
+    olarak yok. Reddi bunu BİLEN ajan vermeli."""
+    assert "This INCLUDES a macro factor this system cannot measure" \
+        in prompts.ROUTER_PROMPT
+    assert "Faizler artarsa" in prompts.ROUTER_PROMPT
+
+
+def test_the_router_never_sends_a_turn_somewhere_that_asks_for_holdings():
+    """Aynı turda kullanıcıdan pozisyonlarını yapıştırması istendi. Sistem
+    pozisyonları kayıt saklayıcısından okuyor ve MCP sözleşmesi bunları
+    kullanıcı beyanından almayı açıkça yasaklıyor."""
+    assert "NEVER route a turn somewhere that will ask the user to supply" \
+        in prompts.ROUTER_PROMPT
+
+
+def test_all_holdings_technical_state_routes_to_the_risk_agent():
+    """Tek NAMED enstrüman MARKET_DATA_AGENT'ta kalıyor: o ajanın holdings
+    erişimi yok ve olmaması bilinçli."""
+    assert "The technical state of ALL holdings is RISK_STRATEGY_AGENT" \
+        in prompts.ROUTER_PROMPT
 
 
 def test_the_risk_specialist_names_the_closed_lookback_set():

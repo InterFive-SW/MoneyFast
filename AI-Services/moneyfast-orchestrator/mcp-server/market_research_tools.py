@@ -95,6 +95,14 @@ async def rag_semantic_market_search(
                 tickers (list[str]): Chunks must carry at least one matching tag.
                 doc_types (list[str]): "NEWS", "ANALYST_REPORT", "FILING",
                     "TRANSCRIPT", "MACRO_NOTE", "REGULATORY".
+                    "FILING" is the issuer's OWN regulatory disclosure — in this
+                    corpus, a KAP bildirimi. It is a primary source: the company
+                    stated it, with its ticker attached at source rather than
+                    inferred from the text. "NEWS" is a journalist's account of
+                    something, which may be about a filing without being one.
+                    Use ["FILING"] when the user asks what a company ANNOUNCED,
+                    DISCLOSED or REPORTED; leave it unset for what is being SAID
+                    about the company.
                 published_after (str): ISO 8601 date, inclusive.
                 published_before (str): ISO 8601 date, inclusive.
                 languages (list[str]): ISO 639-1 codes, e.g. ["tr", "en"].
@@ -166,6 +174,11 @@ async def rag_semantic_market_search(
           endorsing, averaging, or acting on it is prohibited.
         - Do NOT treat a higher score as higher truth. Score measures semantic
           proximity, not accuracy or recency.
+        - `doc_type` changes how a result may be attributed, not how much it is
+          worth. A FILING is what the company itself stated; a NEWS item is what
+          a publisher wrote. Say which one you are quoting — but a filing being
+          primary does not make its contents a prediction, and neither type
+          licenses a market view.
         - Reproduce only short excerpts. Paraphrase by default.
         - Any response built on this tool MUST pass validate_compliance_rules before
           emission.

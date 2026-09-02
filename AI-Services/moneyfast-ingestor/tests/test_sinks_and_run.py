@@ -140,6 +140,34 @@ class TestNewsPush:
         assert sinks.push_news_to_rag(client_for(handler), items) == 1
 
 
+class TestKnownNewsIds:
+    """`ingestor` backend'e "bunlardan hangileri sende var" diye soruyor.
+
+    KAP listesi her koşuda iki bin bildirim döndürüyor ve her birinin gövdesi
+    ayrı bir sayfada. Sormadan çekmek, aynı iki bin sayfayı on beş dakikada
+    bir yeniden istemek olurdu.
+    """
+
+    def test_ids_come_back_as_a_set_of_numbers(self):
+        handler = recorder(body={"source": "KAP", "ids": [1, 2, 3]})
+        assert sinks.fetch_known_news_ids(client_for(handler), "KAP") == {1, 2, 3}
+
+    def test_the_source_is_passed_as_a_filter(self):
+        handler = recorder(body={"ids": []})
+        sinks.fetch_known_news_ids(client_for(handler), "KAP")
+        assert "source=KAP" in str(handler.calls[0].url)
+        assert handler.calls[0].url.path.endswith("/market/news/known-ids")
+
+    def test_a_failure_reads_as_nothing_stored(self):
+        """Boş küme "hiçbiri bende yok" demek ve koşu başına ayrıntı sınırı
+        bunun bir akına dönüşmesini engelliyor."""
+        assert sinks.fetch_known_news_ids(client_for(recorder(status=500)), "KAP") == set()
+
+    def test_a_missing_key_is_not_a_crash(self):
+        handler = recorder(body={"source": "KAP"})
+        assert sinks.fetch_known_news_ids(client_for(handler), "KAP") == set()
+
+
 class TestProductFetch:
     def test_symbol_map_comes_from_the_backend(self):
         """Asked for rather than configured here, so adding an instrument is a
@@ -281,10 +309,52 @@ class TestCli:
 class TestCycles:
     def test_news_cycle_reports_both_destinations(self, monkeypatch):
         monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [{"title": "x"}])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: set())
+        monkeypatch.setattr(run.kap_source, "fetch_disclosures", lambda known: [])
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
-        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i: 1)
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 1)
         result = run.run_news(None)
-        assert result == {"fetched": 1, "embedded": 1, "news_written": 1}
+        assert result == {"fetched": 1, "kap": 0, "embedded": 1, "tagged": 0,
+                          "news_written": 1}
+
+    def test_disclosures_ride_the_same_pipeline_as_news(self, monkeypatch):
+        """KAP için ikinci bir yol açılmadı: bildirimler de haber öğesi
+        biçiminde çıkıyor ve aynı lavaboya akıyor. Ayrı bir yol, backend'in
+        ve RAG'ın iki farklı biçim tanıması demekti."""
+        pushed = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [{"title": "haber"}])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: {1, 2})
+        monkeypatch.setattr(
+            run.kap_source, "fetch_disclosures", lambda known: [{"title": "bildirim"}]
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: pushed.update(backend=list(i)) or {"news_written": 2},
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i, s=None: pushed.update(rag=list(i), symbols=s) or 2,
+        )
+        result = run.run_news(None)
+        assert result["kap"] == 1
+        assert [x["title"] for x in pushed["backend"]] == ["haber", "bildirim"]
+        # Aynı liste ikisine de gidiyor.
+        assert pushed["rag"] == pushed["backend"]
+
+    def test_the_backend_is_asked_what_it_already_has(self, monkeypatch):
+        """Sormadan çekmek, aynı iki bin sayfayı on beş dakikada bir yeniden
+        istemek olurdu."""
+        seen = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: {7, 8})
+        monkeypatch.setattr(
+            run.kap_source, "fetch_disclosures",
+            lambda known: seen.update(known=known) or [],
+        )
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 0)
+        run.run_news(None)
+        assert seen["known"] == {7, 8}
 
     def test_candle_cycle_reports_new_bars(self, monkeypatch):
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
@@ -959,3 +1029,147 @@ class TestFundamentalsBackfill:
 
     def test_an_empty_reply_is_an_empty_set(self):
         assert sinks.fetch_missing_fundamentals(client_for(recorder(body={}))) == set()
+
+
+class TestSymbolsReachTheCorpus:
+    """RSS haberlerinin korpustaki kopyası bir dönem ETİKETSİZ yazılıyordu.
+
+    Sebep akış sırası değil, sonucun geri alınmamasıydı: eşleştirme enstrüman
+    evreninin bulunduğu yerde -- backend'de -- yapılıyor, bu servisin evreni
+    yok ve olmamalı (veritabanı kredensiyeli taşımıyor). Backend çözüyordu,
+    dönüyordu, ve RAG'a giden kopya beslemenin kendi boş etiketini taşıyordu.
+    Ölçüldü: korpustaki 1.970 RSS belgesinin SIFIRINDA ticker vardı ve ajanın
+    `tickers` filtresi yalnızca KAP bildirimlerinde çalışıyordu -- onlar
+    etiketi kaynağından getirdiği için.
+    """
+
+    ITEM = {"content_hash": "a" * 64, "title": "Akbank'tan rekor", "source": "Dünya",
+            "published_at": "2026-09-01T10:00:00Z", "related_symbols": []}
+
+    def test_the_backend_resolution_reaches_the_document(self):
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(
+            client_for(handler), [dict(self.ITEM)], {"a" * 64: ["AKBNK"]}
+        )
+        assert seen["ticker"] == "AKBNK"
+
+    def test_without_a_resolution_the_feeds_own_tag_is_used(self):
+        """KAP bildirimi etiketini kaynağından getiriyor ve backend onu aynen
+        geri veriyor; harita gelmese de kaybolmamalı."""
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        item = {**self.ITEM, "related_symbols": ["EMVAR"]}
+        sinks.push_news_to_rag(client_for(handler), [item], None)
+        assert seen["ticker"] == "EMVAR"
+
+    def test_a_story_matching_nothing_is_written_without_a_ticker(self):
+        """Uydurma bir etiket, bir şirketin haberini başkasının sayfasına
+        koyardı. Etiketsiz belge metinden bulunabilir kalıyor."""
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(client_for(handler), [dict(self.ITEM)], {})
+        assert seen["ticker"] is None
+
+    def test_a_multi_tagged_story_keeps_its_first_symbol(self):
+        """Korpus şeması belge başına tek ticker taşıyor; gerisi metinden
+        bulunabilir kalıyor."""
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(
+            client_for(handler), [dict(self.ITEM)], {"a" * 64: ["AKBNK", "THYAO"]}
+        )
+        assert seen["ticker"] == "AKBNK"
+
+    def test_the_cycle_hands_the_backend_answer_to_the_corpus(self, monkeypatch):
+        """Turun kendisi: backend ne çözdüyse RAG'a o gidiyor, ve `news_symbols`
+        sonuç sözlüğüne SIZMIYOR -- o bir taşıma detayı, bir sayaç değil."""
+        pushed = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [dict(self.ITEM)])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: set())
+        monkeypatch.setattr(run.kap_source, "fetch_disclosures", lambda known: [])
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: {"news_written": 1, "news_symbols": {"a" * 64: ["AKBNK"]}},
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i, s=None: pushed.update(symbols=s) or 1,
+        )
+        result = run.run_news(None)
+        assert pushed["symbols"] == {"a" * 64: ["AKBNK"]}
+        assert result["tagged"] == 1
+        assert "news_symbols" not in result
+
+    def test_an_older_backend_without_the_field_still_works(self, monkeypatch):
+        """Alan eklenmeden önce yazılmış bir backend'e karşı tur düşmemeli."""
+        pushed = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [dict(self.ITEM)])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: set())
+        monkeypatch.setattr(run.kap_source, "fetch_disclosures", lambda known: [])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i, s=None: pushed.update(symbols=s) or 1,
+        )
+        result = run.run_news(None)
+        assert pushed["symbols"] == {}
+        assert result["tagged"] == 0
+
+
+class TestDisclosuresAreTypedAsFilings:
+    """KAP bildirimi bir HABER değil, ihraççının kendi beyanı.
+
+    Ayrım ajanın işine yarıyor ve korpus şeması onu zaten taşıyor: arama
+    `doc_types` ile süzebiliyor ve sözleşmenin donuk kümesinde `FILING`
+    hazır duruyordu -- yeni bir tür icat etmek, dondurulmuş bir alana
+    belgelenmemiş bir değer koymak olurdu.
+
+    Ölçülen durum: korpustaki 858 KAP belgesinin tamamı `NEWS` yazıyordu, yani
+    "şirket şunu bildirdi" ile "bir gazete şunu yazdı" ayırt edilemiyordu.
+    """
+
+    def _typed(self, item):
+        seen = {}
+
+        def handler(request):
+            seen["type"] = json.loads(request.content)["document_type"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(client_for(handler), [item])
+        return seen["type"]
+
+    BASE = {"content_hash": "a" * 64, "title": "Başlık",
+            "published_at": "2026-09-01T10:00:00Z", "related_symbols": []}
+
+    def test_a_kap_disclosure_is_a_filing(self):
+        assert self._typed({**self.BASE, "source": "KAP"}) == "FILING"
+
+    def test_a_press_article_stays_news(self):
+        assert self._typed({**self.BASE, "source": "Patronlar Dünyası"}) == "NEWS"
+
+    def test_a_source_that_is_missing_does_not_become_a_filing(self):
+        """Kaynağı bilinmeyen bir öğeyi birincil kaynak saymak, ona
+        hak etmediği bir güvenilirlik vermek olurdu."""
+        item = dict(self.BASE)
+        item["source"] = None
+        assert self._typed(item) == "NEWS"
+
+    def test_the_filing_sources_are_named_not_guessed(self):
+        assert "KAP" in sinks.FILING_SOURCES

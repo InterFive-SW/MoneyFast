@@ -100,6 +100,31 @@ def fetch_candle_coverage(client: httpx.Client) -> dict[str, dict]:
         return {}
 
 
+def fetch_known_news_ids(client: httpx.Client, source: str) -> set[int]:
+    """Which disclosures the backend already holds, by their own numbering.
+
+    Asked before the KAP cycle so only unseen disclosures cost a detail
+    request. The list endpoint returns two thousand records every run and each
+    body is a separate page; fetching without asking would mean re-requesting
+    the same two thousand pages every fifteen minutes.
+
+    A failure is not fatal -- an empty set reads as "nothing is stored", and
+    the per-run detail cap keeps that from becoming a stampede.
+    """
+    try:
+        response = client.get(
+            f"{config.backend_url()}/market/news/known-ids",
+            params={"source": source},
+            headers=_headers(),
+            timeout=config.request_timeout(),
+        )
+        response.raise_for_status()
+        return {int(x) for x in (response.json().get("ids") or [])}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("known news ids unavailable for %s, assuming none: %s", source, exc)
+        return set()
+
+
 def reset_products_cache() -> None:
     """For tests, and for a forced refresh after a universe change."""
     global _products_cache, _products_fetched_at
@@ -161,7 +186,11 @@ def push_news_to_backend(client: httpx.Client, items: list[dict]) -> Optional[di
         return None
 
 
-def push_news_to_rag(client: httpx.Client, items: list[dict]) -> int:
+def push_news_to_rag(
+    client: httpx.Client,
+    items: list[dict],
+    symbols: Optional[dict[str, list[str]]] = None,
+) -> int:
     """Chunk and embed each article into the vector store.
 
     One request per article because `rag /ingest` splits and embeds a single
@@ -171,21 +200,42 @@ def push_news_to_rag(client: httpx.Client, items: list[dict]) -> int:
     Failures are counted, not raised. News that reaches the dashboard but not
     the corpus is a degraded state, not a broken one — the chatbot will simply
     say it found no sources, which is true.
+
+    `symbols` backend'in ÇÖZDÜĞÜ etiketler, hash'e göre. Bu servis enstrüman
+    evrenini tutmuyor ve tutmamalı (kredensiyeli yok), dolayısıyla bir RSS
+    haberinin hangi şirketten bahsettiğini tek bilen backend. Bir dönem sonuç
+    geri alınmıyordu ve korpusa giden kopya beslemenin kendi (boş) etiketiyle
+    yazılıyordu: ölçüldü, 1.970 RSS belgesinin SIFIRINDA ticker vardı ve
+    ajanın `tickers` filtresi yalnızca KAP bildirimlerinde çalışıyordu.
     """
     written = 0
+    resolved = symbols or {}
     for item in items:
         body = {
             "title": item["title"],
             "source": item["source"],
             "category": "market-news",
-            "document_type": "NEWS",
+            # KAP bildirimi bir HABER değil, ihraççının kendi beyanı --
+            # birincil kaynak. Sözleşmenin donuk `doc_types` kümesinde bunun
+            # karşılığı zaten var (`FILING`); yeni bir tür icat etmek,
+            # dondurulmuş bir alana belgelenmemiş bir değer koymak olurdu.
+            #
+            # Ayrım ajanın işine yarıyor: "şirket şunu bildirdi" ile "bir
+            # gazete şunu yazdı" farklı güvenilirlikte ve arama artık ikisini
+            # süzebiliyor.
+            "document_type": _document_type(item),
             "content": item.get("summary") or item["title"],
             "source_url": item.get("url"),
             "language": item.get("language", "tr"),
             # One ticker per document; the corpus schema carries a single
             # ticker column. Multi-tagged stories keep their first symbol and
             # remain findable by text.
-            "ticker": (item.get("related_symbols") or [None])[0],
+            #
+            # Backend'in çözdüğü etiket ÖNCELİKLİ: evren orada ve eşleştirme
+            # orada yapılıyor. Kaynağın kendi etiketi (KAP `stockCode`) zaten
+            # backend'den aynen geri geliyor, dolayısıyla bu bir üstüne yazma
+            # değil; yalnızca çözülemediğinde elde olana düşülüyor.
+            "ticker": _first_ticker(item, resolved),
             "published_at": item["published_at"],
         }
         try:
@@ -201,6 +251,25 @@ def push_news_to_rag(client: httpx.Client, items: list[dict]) -> int:
             log.warning("rag ingest failed for %r: %s", item["title"][:60], exc)
     return written
 
+
+#: Kaynağı bildirim yayımlayan yerler. Şimdilik tek üye; liste, ikincisi
+#: geldiğinde `if source == "KAP"` yazmaktan daha okunabilir olsun diye.
+FILING_SOURCES = frozenset({"KAP"})
+
+
+def _document_type(item: dict) -> str:
+    """Korpusa yazılacak belge türü."""
+    return "FILING" if item.get("source") in FILING_SOURCES else "NEWS"
+
+def _first_ticker(item: dict, resolved: dict[str, list[str]]) -> Optional[str]:
+    """Belgeye yazılacak tek sembol.
+
+    Korpus şeması belge başına TEK ticker taşıyor. Birden fazla şirkete
+    dokunan bir haber ilkini saklar ve gerisi metinden bulunabilir kalır --
+    "BIST 100 değer kaybetti" gibi bir başlık dört şirketi anabiliyor.
+    """
+    candidates = resolved.get(item.get("content_hash") or "") or item.get("related_symbols")
+    return (candidates or [None])[0]
 
 def trigger_interest_accrual(client: httpx.Client) -> dict:
     """Vadeli hesap faizlerini işletmesi için backend'i uyarır.

@@ -148,7 +148,7 @@ class TestFreshness:
 class TestNewsStore:
     def test_empty_batch_makes_no_query(self):
         db = MagicMock(spec=Session)
-        assert news_service.upsert_news(db, []) == 0
+        assert news_service.upsert_news(db, []) == (0, {})
         assert db.execute.called is False
 
     def test_articles_are_deduplicated_on_content_hash(self):
@@ -156,7 +156,7 @@ class TestNewsStore:
         links, and a feed that renumbers would re-import its whole history."""
         db = MagicMock(spec=Session)
         db.execute.return_value = SimpleNamespace(rowcount=1)
-        written = news_service.upsert_news(
+        written, _ = news_service.upsert_news(
             db,
             [
                 {
@@ -173,10 +173,81 @@ class TestNewsStore:
     def test_rowcount_none_reports_zero_rather_than_raising(self):
         db = MagicMock(spec=Session)
         db.execute.return_value = SimpleNamespace(rowcount=None)
-        written = news_service.upsert_news(
+        written, _ = news_service.upsert_news(
             db, [{"content_hash": "b" * 64, "title": "t", "source": "s", "published_at": NOW}]
         )
         assert written == 0
+
+
+class TestNewsSymbolResolution:
+    """Haberi portföydeki hisseye bağlayan yer.
+
+    Bu bağ olmadan "portföyünüzdeki hisseye dair haber" diye bir şey yok:
+    `related_symbols` 1.540 haberin 1.540'ında boştu.
+    """
+
+    UNIVERSE = [
+        SimpleNamespace(symbol="THYAO", name="Türk Hava Yolları A.O.", product_type="stock"),
+        SimpleNamespace(symbol="ASELS", name="Aselsan Elektronik", product_type="stock"),
+    ]
+
+    def _db(self):
+        db = MagicMock(spec=Session)
+        db.execute.return_value = SimpleNamespace(rowcount=1)
+        db.query.return_value.filter.return_value.all.return_value = self.UNIVERSE
+        return db
+
+    def _stored(self, db):
+        return db.execute.call_args.args[0].compile().params
+
+    def test_a_company_named_in_the_headline_is_linked(self, mocker):
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "c" * 64, "title": "Türk Hava Yolları'ndan rekor",
+            "source": "Dünya", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_a_story_naming_no_company_is_linked_to_nothing(self):
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "d" * 64, "title": "Merkez Bankası faiz kararını açıkladı",
+            "source": "AA", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == []
+
+    def test_a_feed_supplied_ticker_is_kept_without_reading_the_text(self):
+        """KAP bildirimleri ihraççısıyla birlikte gelir. Kesin bilgiyi
+        metinden çıkarımla değiştirmek geriye gidiş olurdu."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "e" * 64, "title": "Türk Hava Yolları'ndan rekor",
+            "source": "KAP", "published_at": NOW, "related_symbols": ["ASELS"],
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["ASELS"]
+
+    def test_a_section_name_offered_as_a_ticker_is_dropped(self):
+        """Türkçe finans beslemeleri yazıları `BORSA` ve `FINANS` bölümlerine
+        koyuyor; ikisi de "3-6 harf" testini geçer ama enstrüman değildir.
+        Evrende karşılığı olmayan etiket düşer ve metinden çözümleme devreye
+        girer."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "f" * 64, "title": "Türk Hava Yolları'ndan rekor",
+            "source": "Dünya", "published_at": NOW,
+            "related_symbols": ["BORSA", "FINANS"],
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_only_stocks_are_offered_to_the_matcher(self):
+        """Bir haberin "USDTRY" ya da "XU100" ile ilişkilendirilmesi,
+        kullanıcıya şirket haberi vaat edip endeks haberi göstermek olurdu."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "0" * 64, "title": "x", "source": "s", "published_at": NOW,
+        }])
+        filter_arg = str(db.query.return_value.filter.call_args.args[0])
+        assert "product_type" in filter_arg
 
 
 class TestProductLookups:

@@ -5,6 +5,7 @@ import {
 import { toNumber, seriesName } from '../../lib/chartFormat'
 import { benchmarkName, toComparisonSeries } from '../../lib/riskFormat'
 import { formatMoney } from '../../lib/money'
+import PortfoyHaberleri from '../../components/analiz/PortfoyHaberleri'
 import { formatDateTime } from '../../lib/datetime'
 import { useAnalysis } from '../Analiz'
 
@@ -226,6 +227,9 @@ export default function GenelBakis() {
                     </p>
                 )}
             </div>
+
+            {/* Portföye dokunan haberler — listelenir ve tarihlenir, yorumlanmaz */}
+            <PortfoyHaberleri />
 
             {/* Uyarılar — hesabın neyi kapsamadığı, gizlenmeden */}
             {(analysis.warnings ?? []).length > 0 && (

@@ -6,6 +6,7 @@ import QuestionnaireModal from '../../components/risk/QuestionnaireModal'
 import RiskConcentrationPanel from '../../components/risk/RiskConcentrationPanel'
 import RiskContributionPanel from '../../components/risk/RiskContributionPanel'
 import RiskFactorsWidget from '../../components/risk/RiskFactorsWidget'
+import TeknikGorunumPaneli from '../../components/analiz/TeknikGorunumPaneli'
 import RiskMetricsPanel from '../../components/risk/RiskMetricsPanel'
 import RiskNarrativeCard from '../../components/risk/RiskNarrativeCard'
 import RiskRecommendationsWidget from '../../components/risk/RiskRecommendationsWidget'
@@ -106,6 +107,10 @@ export default function RiskSekmesi() {
                             {/* Yoğunlaşmanın hemen ardından: ağırlıkları
                                 gördükten sonraki soru "peki risk hangisinden". */}
                             <RiskContributionPanel raw={metrics.risk_contributions} />
+                            {/* Risk ölçümleri portföyün ne kadar OYNADIĞINI
+                                söylüyor; teknik görünüm şu an NEREDE durduğunu.
+                                İkisi ayrı soru ve yan yana okunuyor. */}
+                            <TeknikGorunumPaneli />
                             <RiskFactorsWidget factors={risk.findings ?? []} />
                             <RiskRecommendationsWidget
                                 recommendations={risk.suggestions ?? []}

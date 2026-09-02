@@ -394,6 +394,101 @@ class TestSourcesRecapNode:
         assert patched_llm.calls == []
 
 
+class TestLlmRetry:
+    """Modele giden tek yolda yeniden deneme.
+
+    Buraya kadar hiçbir yerde yoktu ve sonucu gerçek bir sohbette ölçüldü:
+    tek bir 429, kullanıcıya "yoğunluk sınırına takıldım" olarak döndü ve
+    tur orada bitti.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_rate_limit_is_retried(self, patched_llm, mocker):
+        mocker.patch.object(orchestrator.asyncio, "sleep", new_callable=mocker.AsyncMock)
+        patched_llm.set_responses([RuntimeError("429 rate limit exceeded"), "tamam"])
+        assert await orchestrator._llm_text("s", "u") == "tamam"
+
+    @pytest.mark.asyncio
+    async def test_a_transport_error_is_retried(self, patched_llm, mocker):
+        mocker.patch.object(orchestrator.asyncio, "sleep", new_callable=mocker.AsyncMock)
+        patched_llm.set_responses([RuntimeError("connection reset by peer"), "tamam"])
+        assert await orchestrator._llm_text("s", "u") == "tamam"
+
+    @pytest.mark.asyncio
+    async def test_the_backoff_grows(self, patched_llm, mocker):
+        sleep = mocker.patch.object(orchestrator.asyncio, "sleep", new_callable=mocker.AsyncMock)
+        patched_llm.set_responses([
+            RuntimeError("429"), RuntimeError("429"), "tamam",
+        ])
+        await orchestrator._llm_text("s", "u")
+        waits = [call.args[0] for call in sleep.call_args_list]
+        assert waits == [orchestrator.LLM_BACKOFF_SECONDS, orchestrator.LLM_BACKOFF_SECONDS * 2]
+
+    @pytest.mark.asyncio
+    async def test_it_gives_up_after_the_last_attempt(self, patched_llm, mocker):
+        mocker.patch.object(orchestrator.asyncio, "sleep", new_callable=mocker.AsyncMock)
+        patched_llm.set_responses([RuntimeError("429")] * orchestrator.LLM_MAX_ATTEMPTS)
+        with pytest.raises(RuntimeError):
+            await orchestrator._llm_text("s", "u")
+
+    @pytest.mark.asyncio
+    async def test_a_permanent_error_is_not_retried(self, patched_llm, mocker):
+        """Sıcaklık sıfır: aynı istem aynı baytları döndürür. Bozuk bir
+        cevabı yeniden istemek sağlayıcıya bedava yük bindirmekten başka bir
+        şey yapmaz."""
+        sleep = mocker.patch.object(orchestrator.asyncio, "sleep", new_callable=mocker.AsyncMock)
+        patched_llm.set_responses([ValueError("invalid api key")])
+        with pytest.raises(ValueError):
+            await orchestrator._llm_text("s", "u")
+        assert sleep.call_args_list == []
+
+
+class TestResilientSpecialists:
+    """Bir uzmanın çökmesi turu düşürmesin.
+
+    Uzman düğümlerinin hiçbirinde try/except yoktu: bir kota hatası grafın
+    dışına çıkıyor, backend 502 veriyor ve `record_turn` hiç çalışmıyordu --
+    kullanıcının kendi mesajı bile kaydedilmiyordu.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_crashing_specialist_becomes_an_error_payload(self):
+        async def boom(state):
+            raise RuntimeError("429 rate limit")
+
+        wrapped = orchestrator._resilient("market_research", boom)
+        out = await wrapped({"target_agent": "MARKET_RESEARCH_AGENT"})
+        assert out["specialist_output"]["status"] == "ERROR"
+        assert out["specialist_output"]["agent"] == "MARKET_RESEARCH_AGENT"
+        assert "yoğunluk" in out["specialist_output"]["error"]
+        assert out["errors"]
+
+    @pytest.mark.asyncio
+    async def test_a_healthy_specialist_is_untouched(self):
+        async def fine(state):
+            return {"specialist_output": {"status": "OK"}}
+
+        wrapped = orchestrator._resilient("portfolio", fine)
+        assert await wrapped({}) == {"specialist_output": {"status": "OK"}}
+
+    @pytest.mark.asyncio
+    async def test_the_agent_falls_back_to_the_node_name(self):
+        async def boom(state):
+            raise RuntimeError("down")
+
+        out = await orchestrator._resilient("risk", boom)({})
+        assert out["specialist_output"]["agent"] == "RISK"
+
+    def test_the_compliance_gate_is_not_wrapped(self):
+        """Orada açık başarısızlık, modelin ürettiğini denetleyen kontrolü
+        sessizce devre dışı bırakmak olurdu."""
+        import inspect
+
+        source = inspect.getsource(orchestrator.build_graph)
+        assert '_resilient("compliance"' not in source
+        assert '_resilient("synthesis"' not in source
+
+
 class TestRoutingOverrides:
     """Yönlendirici tek başına güvenilmiyor, ve bunun ölçülmüş bir sebebi var.
 

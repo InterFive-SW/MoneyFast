@@ -97,15 +97,21 @@ def fake_llm(mocker):
 
         fake_llm.set_response('{"arguments": {}}')
         fake_llm.set_responses(["first", "second"])   # one per call
+
+    A queued Exception is RAISED rather than returned, which is how a
+    provider outage is expressed -- the retry path has no other way to be
+    tested, and the client wraps Groq's 429 instead of raising a typed
+    error, so the text of the exception is what matters.
     """
     llm = mocker.MagicMock(name="ChatGroq")
     llm._queue = []
 
     async def _ainvoke(messages):
         llm.calls.append(messages)
-        if llm._queue:
-            return FakeMessage(llm._queue.pop(0))
-        return FakeMessage(llm._default)
+        nxt = llm._queue.pop(0) if llm._queue else llm._default
+        if isinstance(nxt, Exception):
+            raise nxt
+        return FakeMessage(nxt)
 
     llm.calls = []
     llm._default = "Taslak yanıt."

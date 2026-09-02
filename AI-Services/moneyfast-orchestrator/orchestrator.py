@@ -98,6 +98,11 @@ RATE_LIMITED_TR = (
 #: raising a typed error.
 _RATE_LIMIT_MARKERS = ("rate limit", "rate_limit", "429", "quota", "too many requests")
 
+#: Geçici taşıma hataları. Kota gibi bunlar da bir sonraki denemede
+#: geçebiliyor; kalıcı bir yapılandırma hatası (eksik anahtar) geçmiyor ve
+#: bu yüzden burada yok.
+_TRANSPORT_MARKERS = ("timeout", "timed out", "connection", "temporarily", "503", "502")
+
 
 def _failure_message(exc: Exception) -> str:
     text = str(exc).casefold()
@@ -186,10 +191,52 @@ def get_llm(fast: bool = False):
     return ChatGroq(model=model, temperature=0, api_key=api_key)
 
 
+#: Kota hatasında kaç kez yeniden denenir. Groq dakikalık pencere
+#: uyguluyor, yani birkaç saniyelik bir bekleme çoğu turu kurtarıyor.
+LLM_MAX_ATTEMPTS = int(os.getenv("LLM_MAX_ATTEMPTS", "3"))
+
+#: İlk bekleme, saniye. Sonrakiler ikiye katlanıyor.
+LLM_BACKOFF_SECONDS = float(os.getenv("LLM_BACKOFF_SECONDS", "1.5"))
+
+
 async def _llm_text(system: str, user: str, fast: bool = False) -> str:
+    """Modele giden TEK yol -- `_llm_json` de buradan geçiyor.
+
+    Yeniden deneme YALNIZCA kota/taşıma hatasında. Bozuk JSON'da değil:
+    sıcaklık sıfır, yani aynı istem aynı baytları döndürür ve yeniden
+    denemek sağlayıcıya bedava bir yük bindirmekten başka bir şey yapmaz.
+
+    Buraya kadar hiçbir yerde yeniden deneme yoktu ve sonucu ölçüldü:
+    tek bir 429, kullanıcıya "yoğunluk sınırına takıldım" olarak döndü ve
+    tur orada bitti.
+    """
     llm = get_llm(fast)
-    reply = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
-    return (reply.content or "").strip()
+    messages = [SystemMessage(content=system), HumanMessage(content=user)]
+    delay = LLM_BACKOFF_SECONDS
+    for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
+        try:
+            reply = await llm.ainvoke(messages)
+            return (reply.content or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            if attempt >= LLM_MAX_ATTEMPTS or not _is_retryable(exc):
+                raise
+            log.warning(
+                "llm attempt %d/%d failed (%s), retrying in %.1fs",
+                attempt, LLM_MAX_ATTEMPTS, exc, delay,
+            )
+            await asyncio.sleep(delay)
+            delay *= 2
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Yeniden denemeye değer bir hata mı.
+
+    `_failure_message` ile aynı metin eşlemesi, aynı sebeple: istemci
+    sağlayıcının 429'unu sarmalıyor ve tipli bir hata fırlatmıyor.
+    """
+    text = str(exc).casefold()
+    return any(marker in text for marker in _RATE_LIMIT_MARKERS + _TRANSPORT_MARKERS)
 
 
 async def _llm_json(system: str, user: str, fast: bool = False) -> dict[str, Any]:
@@ -282,6 +329,10 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
             fast=True,
         )
     except Exception as exc:  # network, rate limit, malformed JSON
+        # Kota hatasında sessizce EDUCATION_AGENT'a düşmek kendi başına bir
+        # yanlış yönlendirme: kullanıcı konusuyla ilgisiz bir cevap alıyor ve
+        # hiçbir yerde bir hata görünmüyor. Hata artık turla birlikte
+        # taşınıyor ve sentez onu okuyabiliyor.
         log.error("router classification failed: %s", exc)
         return {
             "primary_intent": "OUT_OF_SCOPE",
@@ -1499,14 +1550,51 @@ def _traced(name: str, fn):
     return wrapper
 
 
+def _resilient(name: str, fn):
+    """Bir uzman düğümünün çökmesi turu düşürmesin.
+
+    Uzman düğümlerinin HİÇBİRİNDE try/except yoktu. Bir kota hatası
+    orada grafın dışına çıkıyor, `api.py` 500 veriyor, backend 502'ye
+    çeviriyor ve `record_turn` hiç çalışmıyor -- yani kullanıcının kendi
+    mesajı bile kaydedilmiyordu. Sentez düğümünde bu ele alınmıştı,
+    uzmanlarda alınmamıştı.
+
+    Yakalanan hata `specialist_output`'a ERROR olarak yazılıyor: sentez
+    o durumda elindekiyle -- ve varsa toplanmış kaynaklarla -- devam
+    ediyor, boş bir ekran yerine.
+
+    Uygunluk kapısı BİLEREK sarılmıyor: orada açık başarısızlık, modelin
+    ürettiğini denetleyen kontrolü sessizce devre dışı bırakmak olurdu.
+    """
+
+    async def wrapper(state: MoneyFastState) -> dict[str, Any]:
+        try:
+            return await fn(state)
+        except Exception as exc:  # noqa: BLE001
+            log.error("%s node failed: %s", name, exc)
+            return {
+                "specialist_output": {
+                    "agent": state.get("target_agent") or name.upper(),
+                    "status": "ERROR",
+                    "tool": None,
+                    "data": {},
+                    "error": _failure_message(exc),
+                },
+                "errors": (state.get("errors") or []) + [f"{name}: {exc}"],
+            }
+
+    wrapper.__name__ = getattr(fn, "__name__", name)
+    return wrapper
+
+
 def build_graph():
     g = StateGraph(MoneyFastState)
     g.add_node("router", _traced("router", router_node))
-    g.add_node("portfolio", _traced("portfolio", portfolio_node))
-    g.add_node("market_data", _traced("market_data", market_data_node))
-    g.add_node("market_research", _traced("market_research", market_research_node))
-    g.add_node("risk", _traced("risk", risk_node))
-    g.add_node("transaction", _traced("transaction", transaction_node))
+    g.add_node("portfolio", _traced("portfolio", _resilient("portfolio", portfolio_node)))
+    g.add_node("market_data", _traced("market_data", _resilient("market_data", market_data_node)))
+    g.add_node("market_research", _traced("market_research", _resilient("market_research", market_research_node)))
+    g.add_node("risk", _traced("risk", _resilient("risk", risk_node)))
+    g.add_node("transaction", _traced("transaction", _resilient("transaction", transaction_node)))
     g.add_node("handoff", _traced("handoff", handoff_node))
     g.add_node("sources_recap", _traced("sources_recap", sources_recap_node))
     g.add_node("synthesis", _traced("synthesis", synthesis_node))

@@ -194,6 +194,23 @@ def run_fundamentals(client: httpx.Client) -> dict:
     return {"fetched": len(rows), **result}
 
 
+def run_quarterly(client: httpx.Client) -> dict:
+    """Çeyreklik gelir tablosu. Temel veriden AYRI bir tur ve daha seyrek.
+
+    Anlık görüntü her gün tazeleniyor çünkü fiyata bağlı oranlar (F/K, PD/DD)
+    her gün değişiyor. Çeyreklik rakamlar ise üç ayda bir açıklanıyor;
+    günde bir çekmek, doksan gün boyunca aynı satırı doksan kez yazmak olurdu.
+
+    Ölçülen hız ~0,8 sn/sembol, dolayısıyla evrenin tamamı ~13 dakika.
+    """
+    products = sinks.fetch_products(client)
+    rows = yfinance_source.fetch_quarterly_financials(products)
+    result = sinks.push_quarterly(client, rows) or {}
+    log.info("quarterly cycle: %d rows fetched, %s written",
+             len(rows), result.get("quarterly_written", 0))
+    return {"fetched": len(rows), **result}
+
+
 def backfill_intraday(client: httpx.Client) -> dict:
     """Gün içi barların derin penceresi; açılışta bir kez.
 

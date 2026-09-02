@@ -88,10 +88,15 @@ SERVER_NAME = "moneyfast"
 #: hepsini zaten veriyordu ve yalnızca hisse detay sayfası okuyordu; ajanın
 #: bir şirket hakkında görebildiği her şey fiyat, değişim, hacim ve dört
 #: orandan ibaretti. `get_market_data`'nın donuk v2.2 şeması DEĞİŞMEDİ.
-CONTRACT_VERSION = "v2.14"
+#: v2.15: `get_quarterly_financials`. v2.14'ün sahip OLMADIĞI şey: SERİ.
+#: O araç alan başına tek güncel değer saklıyor; bu araç her çeyreği ayrı
+#: saklıyor ve "son çeyrek kârı" sorusunu cevaplayabilen tek yol. Sağlayıcı
+#: çeyrek atlıyor -- 40 hissenin 3'ünde 2025Q3 yok -- dolayısıyla bitişiklik
+#: bayrak olarak taşınıyor ve karşılaştırma ona bağlı.
+CONTRACT_VERSION = "v2.15"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Seventeen tools across twelve domains.
+MoneyFast tool server. Eighteen tools across twelve domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -101,6 +106,9 @@ Data:    get_portfolio_positions, get_market_data,
 Prices:  get_market_data is the ONLY source for the price or valuation of an
          instrument the user does not hold. A null fundamental means the
          provider does not publish it; report "veri yok", never 0.
+Quarter: get_quarterly_financials is the only tool with a SERIES. Name the
+         quarter in every figure, and compare two quarters ONLY when the
+         payload says they are adjacent -- the provider skips quarters.
 Company: get_company_fundamentals answers "how is the BUSINESS doing" --
          margins, debt, cash flow, analyst consensus. It is a SNAPSHOT, not
          a series: there is no previous period stored, so never say "son

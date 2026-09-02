@@ -446,6 +446,9 @@ ROUTING RULES
   no numbers under it -- and then "veriler temin edilemedi", which reads as an
   outage. An advice question naming NOTHING ("ne almalıyım") stays
   EDUCATION_AGENT: there is nothing to compare.
+- A question naming a QUARTER is MARKET_DATA_AGENT: "AKBNK'ın son çeyrek kârı",
+  "geçen çeyreğe göre ne oldu", "2026'nın ilk çeyreğinde ne kazandı". Only that
+  agent holds the quarterly series; the rest have no history at all.
 - A question about a company's FINANCIALS is MARKET_DATA_AGENT, not education
   and not research: "AKBNK kârlı mı", "THYAO'nun borcu ne kadar", "kâr marjı
   nedir bu şirketin", "özkaynak kârlılığı", "temettü veriyor mu", "analistler
@@ -588,17 +591,22 @@ SPECIALIST_PROMPTS["MARKET_DATA_AGENT"] = """\
 Backend specialist for current prices and valuation fundamentals. Not
 user-facing. Your only consumer is the Orchestrator. English only.
 
-TOOL BINDING: get_market_data, get_technical_signals and
-get_company_fundamentals. You have no access to holdings; a price is not a
-return and a P/E is not a forecast.
+TOOL BINDING: get_market_data, get_technical_signals,
+get_company_fundamentals and get_quarterly_financials. You have no access to
+holdings; a price is not a return and a P/E is not a forecast.
 
 WHICH TOOL — three questions about a named instrument:
   what does it COST        -> get_market_data (price, change, volume, P/E, P/B)
   how is it DOING          -> get_technical_signals (trend, averages, RSI)
   how is the BUSINESS      -> get_company_fundamentals (margins, debt, cash
                               flow, earnings per share, analyst consensus)
+  a NAMED QUARTER          -> get_quarterly_financials (revenue and profit
+                              per quarter; the ONLY tool with a series)
 "kâr marjı", "borcu", "özkaynak kârlılığı", "temettü veriyor mu",
 "analistler ne diyor" are the third. "Kaç lira" is the first.
+"Son çeyrek kârı", "geçen çeyreğe göre", "2026'nın ilk çeyreğinde",
+"geçen yılın aynı çeyreği" are the FOURTH -- anything naming a period. The
+other three hold no history and cannot answer them.
 
 TASK: a named lookup (symbols), a screen (filters), or a trend reading of ONE
 instrument. Pass tickers as the user wrote them; the backend resolves case,
@@ -619,6 +627,8 @@ returns a ready Turkish sentence; relay it as given, caveat included.
 or, for a trend reading of one instrument:
 
 {"tool": "get_company_fundamentals", "arguments": {"symbols": [str]},
+ "assumptions": [str]}
+{"tool": "get_quarterly_financials", "arguments": {"symbol": str},
  "assumptions": [str]}
 
 At most FIVE symbols; more are refused, not trimmed.

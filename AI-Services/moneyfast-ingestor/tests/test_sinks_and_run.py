@@ -1173,3 +1173,71 @@ class TestDisclosuresAreTypedAsFilings:
 
     def test_the_filing_sources_are_named_not_guessed(self):
         assert "KAP" in sinks.FILING_SOURCES
+
+
+class TestQuarterly:
+    """Çeyreklik gelir tablosu turu — Faz B.
+
+    Anlık görüntüden ayrı ve daha seyrek: oranlar fiyata bağlı olduğu için
+    her gün değişiyor, çeyreklik rakamlar üç ayda bir açıklanıyor.
+    """
+
+    def test_nothing_to_push_is_not_a_request(self):
+        assert sinks.push_quarterly(client_for(recorder()), []) is None
+
+    def test_rows_reach_the_ingest_endpoint(self):
+        handler = recorder(body={"quarterly_written": 2})
+        got = sinks.push_quarterly(client_for(handler), [
+            {"symbol": "AKBNK", "period_end": "2026-06-30", "net_income": 15},
+            {"symbol": "AKBNK", "period_end": "2026-03-31", "net_income": 19},
+        ])
+        assert got == {"quarterly_written": 2}
+        assert handler.calls[0].url.path.endswith("/market/quarterly/ingest")
+
+    def test_rows_are_chunked(self, monkeypatch):
+        """Parçalanarak: bir parça düşerse diğerleri yazılmış kalıyor."""
+        monkeypatch.setattr(sinks, "QUARTERLY_CHUNK", 3)
+        handler = recorder(body={"quarterly_written": 1})
+        sinks.push_quarterly(client_for(handler), [
+            {"symbol": f"S{i}"} for i in range(7)
+        ])
+        assert [len(json.loads(call.content)["items"]) for call in handler.calls] == [3, 3, 1]
+
+    def test_a_failed_chunk_does_not_lose_the_others(self, monkeypatch):
+        """Seri birikimli: eksik parça bir sonraki turda tamamlanıyor. Anlık
+        görüntüden farkı bu -- orada eksik tur eksik veri demekti."""
+        monkeypatch.setattr(sinks, "QUARTERLY_CHUNK", 2)
+        seen = {"n": 0}
+
+        def handler(request):
+            seen["n"] += 1
+            if seen["n"] == 1:
+                return httpx.Response(500, json={})
+            return httpx.Response(200, json={"quarterly_written": 2})
+
+        got = sinks.push_quarterly(client_for(handler), [
+            {"symbol": f"S{i}"} for i in range(4)
+        ])
+        assert got == {"quarterly_written": 2}
+
+    def test_the_cycle_fetches_then_pushes(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "AKBNK", "data_symbol": "AKBNK.IS"},
+        ])
+        monkeypatch.setattr(
+            run.yfinance_source, "fetch_quarterly_financials",
+            lambda products: [{"symbol": "AKBNK", "period_end": "2026-06-30"}],
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_quarterly", lambda c, rows: {"quarterly_written": len(rows)},
+        )
+        assert run.run_quarterly(None) == {"fetched": 1, "quarterly_written": 1}
+
+    def test_an_empty_fetch_still_reports(self, monkeypatch):
+        """Hiç satır yoksa sink None döndürüyor; tur yine bir sonuç yazmalı."""
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(
+            run.yfinance_source, "fetch_quarterly_financials", lambda products: [],
+        )
+        monkeypatch.setattr(run.sinks, "push_quarterly", lambda c, rows: None)
+        assert run.run_quarterly(None) == {"fetched": 0}

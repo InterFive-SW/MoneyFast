@@ -10,7 +10,7 @@ import difflib
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterable, Optional
 
@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from .models import (
     IndexMembership,
     InstrumentFundamentals,
+    InstrumentQuarterly,
     InvestmentAccount,
     InvestmentProduct,
     MarketCandle,
@@ -687,6 +688,134 @@ def fundamentals_for(db: Session, symbol: str) -> Optional[dict[str, Any]]:
         out[field] = float(value) if isinstance(value, Decimal) else value
     return out
 
+
+# ── Çeyreklik finansallar ────────────────────────────────────────────────────
+
+
+def upsert_quarterly(db: Session, rows: list[dict[str, Any]]) -> int:
+    """Çeyreklik gelir tablosu satırlarını yazar; aynı dönem güncellenir.
+
+    Doğal anahtar (product_id, period_end): aynı çeyreğin yeniden çekilmesi
+    ikinci bir satır değil, güncelleme. Sağlayıcı yayımlanmış bir çeyreği
+    sonradan düzeltebiliyor ve iki sürümü yan yana saklamak, hangisinin
+    doğru olduğunu söyleyemeyen bir seri bırakırdı.
+    """
+    if not rows:
+        return 0
+
+    by_symbol = {
+        product.symbol: product.id for product in _tradable_universe_all(db)
+    }
+    payload = []
+    for row in rows:
+        product_id = by_symbol.get((row.get("symbol") or "").upper())
+        if product_id is None:
+            continue
+        payload.append({
+            "id": _uuid_str(),
+            "product_id": product_id,
+            "period_end": row["period_end"],
+            "total_revenue": row.get("total_revenue"),
+            "net_income": row.get("net_income"),
+            "pretax_income": row.get("pretax_income"),
+            "operating_expense": row.get("operating_expense"),
+            "updated_at": datetime.now(timezone.utc),
+        })
+    if not payload:
+        return 0
+
+    statement = insert(InstrumentQuarterly).values(payload)
+    statement = statement.on_conflict_do_update(
+        constraint="uq_instrument_quarterly_period",
+        set_={
+            "total_revenue": statement.excluded.total_revenue,
+            "net_income": statement.excluded.net_income,
+            "pretax_income": statement.excluded.pretax_income,
+            "operating_expense": statement.excluded.operating_expense,
+            "updated_at": statement.excluded.updated_at,
+        },
+    )
+    db.execute(statement)
+    db.commit()
+    return len(payload)
+
+
+def _tradable_universe_all(db: Session) -> list[InvestmentProduct]:
+    """Sembolden id'ye çevirmek için evren. `_tradable_universe` haber
+    modülünde ve yalnızca hisseleri alıyor; burada tür süzgeci yok."""
+    return db.query(InvestmentProduct).all()
+
+
+def _uuid_str() -> str:
+    import uuid
+
+    return str(uuid.uuid4())
+
+
+def quarter_label(period_end: date) -> str:
+    """`2026-06-30` -> `2026Q2`.
+
+    Saklanmıyor, türetiliyor: hiçbir zaman değişmeyecek ve tamamen dönem
+    sonundan çıkarılabilen bir değer için ikinci bir sütun, ikisinin
+    ayrışabileceği bir yer açardı.
+    """
+    return f"{period_end.year}Q{(period_end.month - 1) // 3 + 1}"
+
+
+def _quarter_index(period_end: date) -> int:
+    """Çeyreğin mutlak sırası. Bitişiklik bundan hesaplanıyor."""
+    return period_end.year * 4 + (period_end.month - 1) // 3
+
+
+def quarterly_for(
+    db: Session, symbol: str, limit: int = 8
+) -> Optional[dict[str, Any]]:
+    """Bir enstrümanın çeyreklik serisi, en yeniden eskiye.
+
+    `previous_is_adjacent` ve `year_ago_available` BURADA hesaplanıyor, tüketen
+    katmanda değil. Sebebi ölçülmüş: sağlayıcının dönemleri ardışık gelmiyor --
+    40 hissenin 3'ünde 2025Q3 gelir tablosunda hiç yok. "Son iki satırı al"
+    diyen bir karşılaştırma o hisselerde 2025Q2 ile 2025Q4'ü kıyaslar ve bunu
+    söylemez. Kuralı tek yerde tutmak, her tüketicinin aynı hatayı ayrı ayrı
+    yapmasını engelliyor.
+    """
+    product = get_product(db, symbol)
+    if product is None:
+        return None
+
+    rows = (
+        db.query(InstrumentQuarterly)
+        .filter(InstrumentQuarterly.product_id == product.id)
+        .order_by(InstrumentQuarterly.period_end.desc())
+        .limit(limit)
+        .all()
+    )
+    if not rows:
+        return None
+
+    periods = [
+        {
+            "period_end": row.period_end,
+            "label": quarter_label(row.period_end),
+            "total_revenue": row.total_revenue,
+            "net_income": row.net_income,
+            "pretax_income": row.pretax_income,
+            "operating_expense": row.operating_expense,
+        }
+        for row in rows
+    ]
+
+    indices = [_quarter_index(row.period_end) for row in rows]
+    return {
+        "symbol": product.symbol,
+        "name": product.name,
+        "currency": product.currency_code or "TRY",
+        "periods": periods,
+        # Bir önceki SATIR değil, bir önceki ÇEYREK mi.
+        "previous_is_adjacent": len(indices) > 1 and indices[0] - indices[1] == 1,
+        # Geçen yılın aynı çeyreği elimizde mi -- tam dört çeyrek geride.
+        "year_ago_available": any(index == indices[0] - 4 for index in indices[1:]),
+    }
 
 def calendar_rows(db: Session, limit: int = 40) -> dict[str, list[dict[str, Any]]]:
     """Analist konsensüsü, temettü ve bilanço takvimi — evren genelinde.

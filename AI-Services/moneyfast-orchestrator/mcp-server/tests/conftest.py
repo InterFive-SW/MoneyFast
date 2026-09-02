@@ -109,6 +109,7 @@ ROUTES = {
     # v2.14. `/market/fundamentals` ile `/market/fundamentals/ingest` ayrı
     # yollar; ikincisine bu suite hiç dokunmuyor.
     "/market/fundamentals": "fundamentals",
+    "/market/quarterly": "quarterly",
     # v2.12. `/market/portfolio/technical` ile `/market/technicals` ayrı
     # yollar; ilki bu satırdan ÖNCE eşleşmeli diye değil, hiç çakışmadıkları
     # için ayrı yazılı.

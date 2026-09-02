@@ -285,7 +285,194 @@ class TestContractWording:
 
 
 class TestRegistration:
-    def test_the_tool_is_attached_to_the_server(self):
+    def test_the_first_tool_is_attached_first(self):
         registered = []
         ft.register(type("FakeMCP", (), {"tool": lambda self: registered.append})())
-        assert registered == [ft.get_company_fundamentals]
+        assert registered[0] is ft.get_company_fundamentals
+
+
+# ==========================================================================
+# get_quarterly_financials — sözleşme v2.15
+# ==========================================================================
+"""Çeyreklik seri: `get_company_fundamentals`'ın sahip OLMADIĞI şey.
+
+O araç alan başına tek güncel değer saklıyor, geçmiş yok. Bu araç her çeyreği
+ayrı saklıyor ve bir şirketin adı konmuş bir çeyrekte ne kazandığını
+söyleyebilen tek yol bu.
+
+Bu bölümün koruduğu asıl şey BİTİŞİKLİK. Sağlayıcı çeyrek atlıyor: evrenden
+rastgele 40 BIST hissesi ölçüldüğünde 3'ünde 2025Q3 gelir tablosunda hiç
+yoktu. "Son iki satırı karşılaştır" diyen bir cevap o hisselerde 2025Q2 ile
+2025Q4'ü yan yana koyar ve bunu söylemez.
+"""
+
+QUARTERLY_KEYS = {
+    "symbol", "name", "currency", "periods",
+    "previous_is_adjacent", "year_ago_available",
+}
+PERIOD_KEYS = {
+    "period_end", "label",
+    "total_revenue", "net_income", "pretax_income", "operating_expense",
+}
+
+
+def period(label="2026Q2", end="2026-06-30", net_income=15_198_000_000, **overrides):
+    row = {
+        "period_end": end, "label": label,
+        "total_revenue": 71_000_000_000, "net_income": net_income,
+        "pretax_income": 19_000_000_000, "operating_expense": 30_000_000_000,
+    }
+    row.update(overrides)
+    return row
+
+
+def quarterly_body(**overrides):
+    payload = {
+        "symbol": "AKBNK", "name": "Akbank T.A.Ş.", "currency": "TRY",
+        "periods": [period(), period("2026Q1", "2026-03-31", 14_100_000_000)],
+        "previous_is_adjacent": True,
+        "year_ago_available": True,
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestQuarterlyContract:
+    @pytest.mark.asyncio
+    async def test_keys_match_the_contract_exactly(self, fake_backend):
+        fake_backend.json("quarterly", quarterly_body())
+        out = await ft.get_quarterly_financials("AKBNK")
+        assert set(out) == QUARTERLY_KEYS
+        assert set(out["periods"][0]) == PERIOD_KEYS
+
+    @pytest.mark.asyncio
+    async def test_the_symbol_is_uppercased(self, fake_backend):
+        fake_backend.json("quarterly", quarterly_body())
+        await ft.get_quarterly_financials("akbnk")
+        assert "symbol=AKBNK" in str(fake_backend.last.url)
+
+    @pytest.mark.asyncio
+    async def test_periods_come_back_newest_first_with_their_labels(self, fake_backend):
+        fake_backend.json("quarterly", quarterly_body())
+        out = await ft.get_quarterly_financials("AKBNK")
+        assert [p["label"] for p in out["periods"]] == ["2026Q2", "2026Q1"]
+
+    @pytest.mark.asyncio
+    async def test_a_period_without_a_label_is_a_contract_violation(self, fake_backend):
+        """Dönemi adlandırmadan rakam vermek, serinin deliklerini okunamaz
+        kılar; etiket zorunlu."""
+        bad = period()
+        del bad["label"]
+        fake_backend.json("quarterly", quarterly_body(periods=[bad]))
+        with pytest.raises(ContractViolationError):
+            await ft.get_quarterly_financials("AKBNK")
+
+    @pytest.mark.asyncio
+    async def test_a_non_object_period_is_refused(self, fake_backend):
+        fake_backend.json("quarterly", quarterly_body(periods=["2026Q2"]))
+        with pytest.raises(ContractViolationError):
+            await ft.get_quarterly_financials("AKBNK")
+
+    @pytest.mark.asyncio
+    async def test_a_missing_periods_block_is_a_contract_violation(self, fake_backend):
+        fake_backend.json("quarterly", {"symbol": "AKBNK"})
+        with pytest.raises(ContractViolationError):
+            await ft.get_quarterly_financials("AKBNK")
+
+    @pytest.mark.asyncio
+    async def test_no_symbol_is_refused(self, fake_backend):
+        with pytest.raises(InvalidInputError):
+            await ft.get_quarterly_financials("   ")
+
+    @pytest.mark.asyncio
+    async def test_an_unreachable_backend_raises(self, fake_backend, no_sleep):
+        fake_backend.fail("quarterly")
+        with pytest.raises(UpstreamUnavailableError):
+            await ft.get_quarterly_financials("AKBNK")
+
+
+class TestQuarterlyGaps:
+    @pytest.mark.asyncio
+    async def test_the_adjacency_flag_is_carried_not_recomputed(self, fake_backend):
+        """Kural sunucuda, tek yerde. Burada yeniden hesaplamak, iki yerin
+        ayrışabileceği bir yer açardı."""
+        fake_backend.json("quarterly", quarterly_body(previous_is_adjacent=False))
+        out = await ft.get_quarterly_financials("AKBNK")
+        assert out["previous_is_adjacent"] is False
+
+    @pytest.mark.asyncio
+    async def test_a_missing_flag_defaults_to_not_adjacent(self, fake_backend):
+        """Varsayılan GÜVENLİ tarafta: bayrak gelmezse karşılaştırma
+        yapılmıyor. Tersi, boşluk üzerinden bir kıyas üretirdi."""
+        payload = quarterly_body()
+        del payload["previous_is_adjacent"]
+        del payload["year_ago_available"]
+        fake_backend.json("quarterly", payload)
+        out = await ft.get_quarterly_financials("AKBNK")
+        assert out["previous_is_adjacent"] is False
+        assert out["year_ago_available"] is False
+
+    @pytest.mark.asyncio
+    async def test_an_instrument_with_no_quarters_is_an_empty_series(self, fake_backend):
+        """Ölçüldü: 40 hissenin 6'sında hiç çeyreklik veri yok. Bu bir
+        kesinti değil ve sıfır değil."""
+        fake_backend.json("quarterly", quarterly_body(
+            periods=[], previous_is_adjacent=False, year_ago_available=False,
+        ))
+        out = await ft.get_quarterly_financials("YENI")
+        assert out["periods"] == []
+
+    @pytest.mark.asyncio
+    async def test_a_null_figure_stays_null(self, fake_backend):
+        """34 hissenin 16'sında serinin bir yerinde delik var."""
+        fake_backend.json("quarterly", quarterly_body(
+            periods=[period(net_income=None)],
+        ))
+        out = await ft.get_quarterly_financials("AKBNK")
+        assert out["periods"][0]["net_income"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_field_the_backend_omits_is_null_not_absent(self, fake_backend):
+        row = period()
+        del row["pretax_income"]
+        fake_backend.json("quarterly", quarterly_body(periods=[row]))
+        out = await ft.get_quarterly_financials("AKBNK")
+        assert out["periods"][0]["pretax_income"] is None
+        assert set(out["periods"][0]) == PERIOD_KEYS
+
+
+class TestQuarterlyContractWording:
+    def test_the_period_must_be_named(self):
+        doc = ft.get_quarterly_financials.__doc__
+        assert "NAME THE PERIOD in every figure" in doc
+
+    def test_comparison_is_gated_on_adjacency(self):
+        doc = ft.get_quarterly_financials.__doc__
+        assert "ONLY when `previous_is_adjacent` is true" in doc
+        assert "a comparison across a gap reads as quarter-over-quarter" in doc
+
+    def test_an_empty_series_is_not_an_outage(self):
+        doc = ft.get_quarterly_financials.__doc__
+        assert "not an outage and not a zero" in doc
+
+    def test_a_comparison_is_written_oldest_first(self):
+        """Ölçülen kusur: cümle düşüş diyor, ok yükseliş gösteriyor.
+
+        Seri yeniden eskiye geliyor -- "son çeyrek" sorusunun cevabı ilk satır
+        olmalı -- ve model onu geldiği sırayla oka diziyordu.
+        """
+        doc = ft.get_quarterly_financials.__doc__
+        assert "CHRONOLOGICAL order" in doc
+        assert "older quarter first" in doc
+        assert "%-20,7 azalma" in doc
+
+    def test_past_results_may_not_be_extrapolated(self):
+        doc = ft.get_quarterly_financials.__doc__
+        assert "Do not extrapolate the next quarter" in doc
+
+
+class TestQuarterlyRegistration:
+    def test_both_tools_are_attached(self):
+        registered = []
+        ft.register(type("FakeMCP", (), {"tool": lambda self: registered.append})())
+        assert registered == [ft.get_company_fundamentals, ft.get_quarterly_financials]

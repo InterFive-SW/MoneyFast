@@ -192,9 +192,12 @@ export default function PortfolioChartWidget({ w = 4, h = 4 }: Props) {
   return (
     <div className="flex flex-col h-full w-full bg-transparent p-1">
       <div className="flex items-center justify-between mb-4 z-10">
+        {/* "TRADINGVIEW ALTYAPISI" rozeti kaldırıldı: o kütüphane
+            kullanılmıyor. Grafik Recharts ve okuduğu seri bizim kendi
+            `market_candles` tablomuz -- kullanılmayan bir sağlayıcıyı
+            künyede taşımak, verinin nereden geldiği konusunda yanıltıyordu. */}
         <div className="flex items-center gap-3">
           <h3 className="text-[13px] uppercase tracking-wider font-semibold text-slate-300">Portföy Performansı</h3>
-          <span className="text-[11px] font-medium text-slate-400 bg-white/10 px-2 py-0.5 rounded-full">TRADINGVIEW ALTYAPISI</span>
         </div>
         
         <div className="flex space-x-1 bg-white/5 p-1 rounded-lg">

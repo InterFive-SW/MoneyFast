@@ -1,3 +1,4 @@
+import { formatDate as formatInIstanbul } from './datetime'
 /**
  * Risk metriklerini okunabilir Türkçeye çeviren katman.
  *
@@ -82,16 +83,16 @@ export function formatMetric(name: string, value: number | null | undefined): st
     return PERCENT_METRICS.has(name) ? formatPercent(value) : formatRatio(value)
 }
 
-/** `2026-05-05` -> `5 Mayıs 2026`. Geçersiz veya boş tarih `null` döner. */
+/** `2026-05-05` -> `5 Mayıs 2026`. Geçersiz veya boş tarih `null` döner.
+ *
+ *  Kendi `null` sözleşmesi var (çağıranlar "tarih yok" ile "tarih bozuk"u
+ *  ayırt etmiyor, ikisinde de satırı çizmiyorlar), o yüzden ortak
+ *  biçimlendiriciyi sarmalıyor -- ama saat dilimi ondan geliyor. */
 export function formatDate(value: string | null | undefined): string | null {
     if (!value) return null
     const parsed = new Date(value)
     if (Number.isNaN(parsed.getTime())) return null
-    return parsed.toLocaleDateString('tr-TR', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-    })
+    return formatInIstanbul(parsed, { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
 export interface DrawdownView {

@@ -17,7 +17,8 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -288,18 +289,28 @@ def run_interest(client: httpx.Client) -> dict:
     return result
 
 
-def run_candles(client: httpx.Client, symbols: set[str] | None = None) -> dict:
+def run_candles(
+    client: httpx.Client,
+    symbols: set[str] | None = None,
+    days: Optional[int] = None,
+) -> dict:
     """Daily bars. `symbols` narrows the run to a subset; None means all.
 
     The subset exists for the start-up backfill, which asks for only the
     instruments that are short of history.
+
+    `days` narrows the WINDOW. Bir günlük boşluğu kapatmak için iki yıllık
+    pencere istemek, sağlayıcıdan her sembol için gereksiz yüz kat veri
+    çekmek olurdu; catch-up işi ne kadar geride kaldığını biliyor.
     """
     products = sinks.fetch_products(client)
     if symbols is not None:
         products = [p for p in products if p.get("symbol") in symbols]
         if not products:
             return {"fetched": 0, "candles_written": 0}
-    candles = yfinance_source.fetch_candles(products, days=config.history_days())
+    candles = yfinance_source.fetch_candles(
+        products, days=days or config.history_days()
+    )
 
     # Gün içi yolla AYNI parçalama. Buraya eklenmemişti ve ilk açılış
     # ölçüldüğünde 1.011 enstrüman için 638.968 bar tek bir gövdede
@@ -352,6 +363,73 @@ def backfill_candles(client: httpx.Client) -> dict:
     log.info("candle backfill: %d of %d instruments below %d bars",
              len(thin), len(products), config.CANDLE_MIN_BARS)
     return run_candles(client, symbols=thin)
+
+
+def topup_candles(client: httpx.Client) -> dict:
+    """Geçmişi olan ama GÜNCEL olmayan enstrümanların aradaki barları.
+
+    `backfill_candles` "hiç geçmişi yok" sorusunu cevaplıyor. Bu, ayrı bir
+    soruyu: "geçmişi var ama eski mi". İkisi karışırsa commit'lenmiş taban
+    verisiyle açılan bir klon her enstrümanı ~500 barla dolu bulur, geri
+    doldurma haklı olarak atlar -- ve akşam 19:15 cron'una kadar hiçbir şey
+    çalışmaz. Sabah 10'da açan biri, grafiği commit tarihinde biten bir
+    uygulamayı bütün gün görürdü.
+
+    `coverage` zaten sembol başına `{"bars": N, "last": "YYYY-MM-DD"}`
+    döndürüyordu; `last` yarısı bugüne kadar hiç okunmuyordu.
+    """
+    coverage = sinks.fetch_candle_coverage(client)
+    if not coverage:
+        # Kapsama okunamadı. Geri doldurma zaten güvenli tarafa düşüyor;
+        # burada tahminle iş yapmak, evrenin tamamını gereksiz çekmek olurdu.
+        return {"skipped": True}
+
+    cutoff = _last_trading_day()
+    stale = {
+        symbol
+        for symbol, entry in coverage.items()
+        # Barı hiç olmayanlar backfill'in işi; burada yalnızca ESKİ olanlar.
+        if entry.get("bars") and (entry.get("last") or "") < cutoff
+    }
+    if not stale:
+        log.info("candle top-up: every instrument is current as of %s", cutoff)
+        return {"fetched": 0, "candles_written": 0}
+
+    # Boşluk kadar pencere, artı bir tampon: sağlayıcı hafta sonlarını ve
+    # tatilleri bar döndürmeyerek geçiyor, dolayısıyla takvim günü sayısı
+    # işlem günü sayısından her zaman büyük.
+    behind = (date.fromisoformat(cutoff) - min(
+        date.fromisoformat(entry["last"]) for entry in coverage.values()
+        if entry.get("bars") and entry.get("last")
+    )).days
+    window = min(config.history_days(), behind + TOPUP_MARGIN_DAYS)
+
+    log.info(
+        "candle top-up: %d instruments behind %s, fetching %d days",
+        len(stale), cutoff, window,
+    )
+    return run_candles(client, symbols=stale, days=window)
+
+
+#: Catch-up penceresine eklenen tampon. Sağlayıcı hafta sonu ve tatilde bar
+#: döndürmüyor; boşluk takvim günüyle ölçüldüğü için birkaç gün fazladan
+#: istemek, eksik istemekten ucuz.
+TOPUP_MARGIN_DAYS = 5
+
+
+def _last_trading_day(today: Optional[date] = None) -> str:
+    """En son kapanmış işlem gününün tarihi, ISO.
+
+    Hafta sonu geri sarılıyor: cumartesi sabahı "dün cumaydı" demek, cuma
+    barını beklemek demek ve o bar zaten var. Tatil takvimi YOK -- bir resmi
+    tatilde tek yapacağı, o gün için boş dönen bir istek atmak.
+    """
+    day = today or datetime.now(ISTANBUL).date()
+    # Pazartesi 0 ... Pazar 6. Bugünün barı henüz kapanmadı, dünden başla.
+    day -= timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day.isoformat()
 
 
 def run_news(client: httpx.Client) -> dict:
@@ -526,6 +604,13 @@ def start_scheduler() -> None:
         "date",
         run_date=datetime.now(ISTANBUL),
         id="intraday-backfill",
+        misfire_grace_time=None,
+    )
+    scheduler.add_job(
+        _job("candle-topup", topup_candles),
+        "date",
+        run_date=datetime.now(ISTANBUL),
+        id="candle-topup",
         misfire_grace_time=None,
     )
     scheduler.add_job(

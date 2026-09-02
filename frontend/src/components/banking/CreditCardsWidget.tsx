@@ -1,4 +1,5 @@
 import type { CreditCard } from '../../data/mockBankingData'
+import { formatDate } from '../../lib/datetime'
 
 interface Props {
   cards: CreditCard[]
@@ -31,7 +32,7 @@ export default function CreditCardsWidget({ cards, onPayDebt, onSettings }: Prop
                 <div className="text-white text-xl tracking-[0.2em] font-mono mb-2">{card.cardNumber}</div>
                 <div className="flex justify-between items-end">
                   <div className="text-white/90 text-sm font-medium">{card.name}</div>
-                  <div className="text-white/70 text-xs">Son: <span className="text-white">{new Date(card.dueDate).toLocaleDateString('tr-TR')}</span></div>
+                  <div className="text-white/70 text-xs">Son: <span className="text-white">{formatDate(card.dueDate)}</span></div>
                 </div>
               </div>
             </div>

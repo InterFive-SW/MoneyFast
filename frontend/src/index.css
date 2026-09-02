@@ -3,6 +3,31 @@
 @tailwind utilities;
 
 /*
+ * Seçili metin.
+ *
+ * Hiçbir global kural yoktu, dolayısıyla seçim tarayıcının varsayılanına
+ * kalıyordu: açık renkli bir vurgu. Uygulama koyu ve metinlerin çoğu
+ * `text-white`, yani seçilen bir asistan mesajı beyaz zemine beyaz yazı
+ * oluyor ve OKUNAMIYORDU.
+ *
+ * Hem arka plan HEM renk yazılıyor. Yalnızca arka planı vermek, metin
+ * rengini yine tarayıcıya bırakır ve aynı hatayı başka bir yüzeyde geri
+ * getirir.
+ *
+ * `::-moz-selection` ayrıca yazılı: Firefox birleşik listeyi tanımaz ve
+ * kuralın tamamını atar.
+ */
+::-moz-selection {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+::selection {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+/*
  * Scrollbars.
  *
  * There was no custom CSS at all, so every scrolling region rendered the

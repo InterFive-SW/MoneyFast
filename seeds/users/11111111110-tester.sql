@@ -9,26 +9,28 @@
 -- Synthetic data only (see CLAUDE.md). Do not hand-edit; re-export.
 
 -- public.users (1)
-INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences") VALUES ('28bfbc42-ef4f-423c-be80-224900637af7', 'tester@example.com', '$2b$12$FiuNlIApd4aMfu1Y3tq6hO2FbhfDz8fQsqrxEKW.om6l4Toerdjja', TRUE, '2026-08-20T12:23:07.796238+00:00', '11111111110', 'Test', 'Kullanici', '05000000000', TRUE, '{}', 50000, '{}') ON CONFLICT DO NOTHING;
+INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences") VALUES ('28bfbc42-ef4f-423c-be80-224900637af7', 'tester@example.com', '$2b$12$FiuNlIApd4aMfu1Y3tq6hO2FbhfDz8fQsqrxEKW.om6l4Toerdjja', TRUE, '2026-08-20T12:23:07.796238+00:00', '11111111110', 'Test', 'Kullanici', '05000000000', TRUE, '{}', 85000, '{"currency": "TRY", "language": "tr", "default_template": "standard-banking"}') ON CONFLICT DO NOTHING;
 
 -- investment.investment_accounts (1)
-INSERT INTO investment.investment_accounts ("id", "user_id", "account_number", "name", "currency_code", "cash_balance", "status", "created_at", "iban") VALUES ('fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', '28bfbc42-ef4f-423c-be80-224900637af7', 'TR-0003-28BFBC42', 'Yatırım Hesabı', 'TRY', 9614.4067, 'active', '2026-08-20T17:29:11.975957+00:00', 'TR0070693718753888300000070') ON CONFLICT DO NOTHING;
+INSERT INTO investment.investment_accounts ("id", "user_id", "account_number", "name", "currency_code", "cash_balance", "status", "created_at", "iban") VALUES ('fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', '28bfbc42-ef4f-423c-be80-224900637af7', 'TR-0003-28BFBC42', 'Yatırım Hesabı', 'TRY', 7019.0667, 'active', '2026-08-20T17:29:11.975957+00:00', NULL) ON CONFLICT DO NOTHING;
 
--- investment.portfolio_positions (14)
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('cd60f55e-b21f-46a9-8768-f98c7b6bb00a', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'EREGL'), 1102.000000, 31.7355, '2026-02-21T11:47:34.761920+00:00', '2026-08-21T08:49:33.225953+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('b307bff0-449f-4d9a-9033-6c2335d2715e', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'SISE'), 500.000000, 46.3970, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T17:29:11.975957+00:00') ON CONFLICT DO NOTHING;
+-- investment.portfolio_positions (16)
 INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('fb4e47a6-ec95-4471-8068-5f00647e4a09', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'MSFT'), 10.000000, 396.3715, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T17:29:11.975957+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('d10ae974-e168-42b6-87a5-fc43a3f94270', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'GARAN'), 400.000000, 152.2475, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T17:29:11.975957+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('ca5ad5aa-37f3-4970-9007-bd0a4d44644b', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'ASELS'), 319.000000, 316.7686, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T22:38:18.700450+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('ae5d2c6f-796d-465f-83c3-26a683a0097e', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'DOAS'), 3.000000, 166.4000, '2026-08-26T06:48:06.941158+00:00', '2026-08-26T06:48:06.941158+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('53b474a8-a595-4b94-9c83-34bafbff83f2', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'ALARK'), 10.000000, 107.8000, '2026-08-21T11:10:02.548514+00:00', '2026-08-21T11:10:02.548514+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('c689d531-4b5f-4c11-ba78-646ba43ac614', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'TUPRS'), 150.000000, 218.0579, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T17:29:11.975957+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('f8b94e7b-be05-4629-abff-d43d23bd3e6d', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'AAPL'), 13.000000, 274.6047, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T22:41:27.170788+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('52771dcd-b05e-4fe9-b0be-e99742250584', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'THYAO'), 112.000000, 313.4684, '2026-02-21T11:47:34.761920+00:00', '2026-08-21T12:38:39.962878+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('293d221a-69a8-4813-a2f2-8f89c62d2057', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'NVDA'), 26.000000, 190.6431, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T22:41:48.270074+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('0cb2a5d8-1691-4721-a430-ff245a549ce7', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'FROTO'), 25.000000, 116.5983, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T17:29:11.975957+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('2a60601d-6e19-42b2-b468-24530ca3ac06', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'MRVL'), 2.000000, 251.0100, '2026-08-21T13:10:52.835847+00:00', '2026-08-21T13:10:52.835847+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('9c798209-e8cd-4882-809a-7f8e1a58b159', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'BJKAS'), 1000.000000, 2.2600, '2026-08-31T12:44:41.516228+00:00', '2026-08-31T12:44:41.516228+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('cd60f55e-b21f-46a9-8768-f98c7b6bb00a', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'EREGL'), 1102.000000, 31.7355, '2026-02-21T11:47:34.761920+00:00', '2026-08-21T08:49:33.225953+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('0bf2ddb2-7c50-41c8-9bb7-5a27466c9a12', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'KCHOL'), 80.000000, 208.6005, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T17:29:11.975957+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('f8b94e7b-be05-4629-abff-d43d23bd3e6d', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'AAPL'), 13.000000, 274.6047, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T22:41:27.170788+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('0cb2a5d8-1691-4721-a430-ff245a549ce7', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'FROTO'), 25.000000, 116.5983, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T17:29:11.975957+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('ae5d2c6f-796d-465f-83c3-26a683a0097e', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'DOAS'), 3.000000, 166.4000, '2026-08-26T06:48:06.941158+00:00', '2026-08-26T06:48:06.941158+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('52771dcd-b05e-4fe9-b0be-e99742250584', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'THYAO'), 112.000000, 313.4684, '2026-02-21T11:47:34.761920+00:00', '2026-08-21T12:38:39.962878+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('ca5ad5aa-37f3-4970-9007-bd0a4d44644b', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'ASELS'), 319.000000, 316.7686, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T22:38:18.700450+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('c689d531-4b5f-4c11-ba78-646ba43ac614', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'TUPRS'), 150.000000, 218.0579, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T17:29:11.975957+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('b307bff0-449f-4d9a-9033-6c2335d2715e', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'SISE'), 501.000000, 46.3840, '2026-02-21T11:47:34.761920+00:00', '2026-08-31T12:45:23.967322+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('293d221a-69a8-4813-a2f2-8f89c62d2057', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'NVDA'), 26.000000, 190.6431, '2026-02-21T11:47:34.761920+00:00', '2026-08-20T22:41:48.270074+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.portfolio_positions ("id", "investment_account_id", "product_id", "quantity", "average_buy_price", "opened_at", "updated_at") VALUES ('93ce7d58-a1c9-4a22-91ec-0b529abea201', 'fe8ce0fe-1e8b-4591-b4ad-c095d869b9e3', (SELECT id FROM investment.investment_products WHERE symbol = 'AKBNK'), 4.000000, 72.8500, '2026-08-31T12:54:31.936614+00:00', '2026-08-31T12:54:31.936614+00:00') ON CONFLICT DO NOTHING;
 
 -- investment.watchlist_items (6)
 INSERT INTO investment.watchlist_items ("id", "user_id", "product_id", "created_at") VALUES ('6bffa58d-2b86-441e-a31d-216b19c08343', '28bfbc42-ef4f-423c-be80-224900637af7', (SELECT id FROM investment.investment_products WHERE symbol = 'AKBNK'), '2026-08-26T06:48:28.863414+00:00') ON CONFLICT DO NOTHING;
@@ -38,11 +40,10 @@ INSERT INTO investment.watchlist_items ("id", "user_id", "product_id", "created_
 INSERT INTO investment.watchlist_items ("id", "user_id", "product_id", "created_at") VALUES ('907ae215-241e-4b78-a2d7-90bb61b7515b', '28bfbc42-ef4f-423c-be80-224900637af7', (SELECT id FROM investment.investment_products WHERE symbol = 'ALARK'), '2026-08-26T06:49:53.469881+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.watchlist_items ("id", "user_id", "product_id", "created_at") VALUES ('b0982339-05b7-4294-8838-9204e719749b', '28bfbc42-ef4f-423c-be80-224900637af7', (SELECT id FROM investment.investment_products WHERE symbol = 'AKSEN'), '2026-08-26T06:49:54.443153+00:00') ON CONFLICT DO NOTHING;
 
--- banking.accounts (2)
-INSERT INTO banking.accounts ("id", "user_id", "account_number", "iban", "account_type", "currency_code", "balance", "status", "created_at", "updated_at", "interest_rate", "term_days", "last_accrued_at") VALUES ('0834dd97-dbaa-4777-b98f-661486c577f0', '28bfbc42-ef4f-423c-be80-224900637af7', '1119386289466', 'TR0000011193862894660000000', 'vadesiz', 'TRY', 132770.8800, 'active', '2026-08-20T21:45:41.796338+00:00', '2026-08-26T08:41:27.183041+00:00', NULL, NULL, NULL) ON CONFLICT DO NOTHING;
-INSERT INTO banking.accounts ("id", "user_id", "account_number", "iban", "account_type", "currency_code", "balance", "status", "created_at", "updated_at", "interest_rate", "term_days", "last_accrued_at") VALUES ('ae34d71a-776c-4607-81b6-00040e3d2595', '28bfbc42-ef4f-423c-be80-224900637af7', '2119386289466', 'TR000000000002119386289466', 'vadeli', 'TRY', 0.0000, 'active', '2026-09-01T10:48:32.406935+00:00', '2026-09-01T10:48:32.406935+00:00', 38.000, 1, NULL) ON CONFLICT DO NOTHING;
+-- banking.accounts (1)
+INSERT INTO banking.accounts ("id", "user_id", "account_number", "iban", "account_type", "currency_code", "balance", "status", "created_at", "updated_at", "interest_rate", "term_days", "last_accrued_at") VALUES ('0834dd97-dbaa-4777-b98f-661486c577f0', '28bfbc42-ef4f-423c-be80-224900637af7', '1119386289466', 'TR0000011193862894660000000', 'vadesiz', 'TRY', 132785.3800, 'active', '2026-08-20T21:45:41.796338+00:00', '2026-08-20T21:51:29.844017+00:00', NULL, NULL, NULL) ON CONFLICT DO NOTHING;
 
--- banking.transactions (96)
+-- banking.transactions (95)
 INSERT INTO banking.transactions ("id", "reference_number", "transaction_type", "status", "amount", "currency_code", "description", "created_at", "completed_at", "failed_at", "category", "counterparty") VALUES ('5e9632e1-1069-4c8e-8fb2-ecb0d499cefa', 'SEED-4F69EFE693', 'maas', 'completed', 57922.5600, 'TRY', 'İşveren', '2026-05-23T23:37:33.900718+00:00', '2026-05-23T23:37:33.900718+00:00', NULL, NULL, 'İşveren') ON CONFLICT DO NOTHING;
 INSERT INTO banking.transactions ("id", "reference_number", "transaction_type", "status", "amount", "currency_code", "description", "created_at", "completed_at", "failed_at", "category", "counterparty") VALUES ('d7e26834-10f5-4c7e-a04f-f66efbe99b2f', 'SEED-545DD9C5EE', 'harcama', 'completed', 266.9800, 'TRY', 'İETT / Benzin', '2026-05-23T23:37:33.900718+00:00', '2026-05-23T23:37:33.900718+00:00', NULL, 'Ulaşım', 'İETT / Benzin') ON CONFLICT DO NOTHING;
 INSERT INTO banking.transactions ("id", "reference_number", "transaction_type", "status", "amount", "currency_code", "description", "created_at", "completed_at", "failed_at", "category", "counterparty") VALUES ('c54eaabf-8272-4d50-a535-19cf3f52df69', 'SEED-533B348524', 'harcama', 'completed', 111.1300, 'TRY', 'İETT / Benzin', '2026-05-24T23:37:33.900718+00:00', '2026-05-24T23:37:33.900718+00:00', NULL, 'Ulaşım', 'İETT / Benzin') ON CONFLICT DO NOTHING;
@@ -138,9 +139,8 @@ INSERT INTO banking.transactions ("id", "reference_number", "transaction_type", 
 INSERT INTO banking.transactions ("id", "reference_number", "transaction_type", "status", "amount", "currency_code", "description", "created_at", "completed_at", "failed_at", "category", "counterparty") VALUES ('955a6c9a-b772-43ec-8f82-333e97fe660c', 'SEED-477A2377BE', 'harcama', 'completed', 507.7500, 'TRY', 'Migros', '2026-08-18T23:37:33.900718+00:00', '2026-08-18T23:37:33.900718+00:00', NULL, 'Market', 'Migros') ON CONFLICT DO NOTHING;
 INSERT INTO banking.transactions ("id", "reference_number", "transaction_type", "status", "amount", "currency_code", "description", "created_at", "completed_at", "failed_at", "category", "counterparty") VALUES ('c9271891-de1a-4417-b43e-82652de6e5fd', 'TRF-764BA6E79A74', 'havale', 'completed', 1500.0000, 'TRY', 'test havale', '2026-08-20T21:46:00.041776+00:00', '2026-08-20T21:46:00.040636+00:00', NULL, NULL, NULL) ON CONFLICT DO NOTHING;
 INSERT INTO banking.transactions ("id", "reference_number", "transaction_type", "status", "amount", "currency_code", "description", "created_at", "completed_at", "failed_at", "category", "counterparty") VALUES ('c589f7cd-bfb1-44a6-ad1f-966cba4dabba', 'TRF-3F86046FA94E', 'havale', 'completed', 300.0000, 'TRY', NULL, '2026-08-20T21:51:29.844889+00:00', '2026-08-20T21:51:29.844017+00:00', NULL, NULL, NULL) ON CONFLICT DO NOTHING;
-INSERT INTO banking.transactions ("id", "reference_number", "transaction_type", "status", "amount", "currency_code", "description", "created_at", "completed_at", "failed_at", "category", "counterparty") VALUES ('957b24ae-7858-4b76-92fd-2060df1ab48a', 'TRF-F13962409EDD', 'havale', 'completed', 12.0000, 'TRY', NULL, '2026-08-26T08:41:27.185738+00:00', '2026-08-26T08:41:27.183041+00:00', NULL, NULL, NULL) ON CONFLICT DO NOTHING;
 
--- banking.account_transactions (96)
+-- banking.account_transactions (95)
 INSERT INTO banking.account_transactions ("id", "transaction_id", "account_id", "direction", "amount", "balance_before", "balance_after", "counterparty_name", "counterparty_iban", "description", "created_at") VALUES ('17285a2c-d0df-4aef-b8e0-cadeb1550568', 'd7e26834-10f5-4c7e-a04f-f66efbe99b2f', '0834dd97-dbaa-4777-b98f-661486c577f0', 'DEBIT', 266.9800, 106117.5600, 105850.5800, 'İETT / Benzin', NULL, 'Ulaşım', '2026-05-23T23:37:33.900718+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO banking.account_transactions ("id", "transaction_id", "account_id", "direction", "amount", "balance_before", "balance_after", "counterparty_name", "counterparty_iban", "description", "created_at") VALUES ('c0b2b1ef-382a-4d71-b1f9-2ba720560ca2', '5e9632e1-1069-4c8e-8fb2-ecb0d499cefa', '0834dd97-dbaa-4777-b98f-661486c577f0', 'CREDIT', 57922.5600, 48195.0000, 106117.5600, 'İşveren', NULL, 'Maaş', '2026-05-23T23:37:33.900718+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO banking.account_transactions ("id", "transaction_id", "account_id", "direction", "amount", "balance_before", "balance_after", "counterparty_name", "counterparty_iban", "description", "created_at") VALUES ('7dedec18-841b-497b-bc18-a8028460dfdc', 'c54eaabf-8272-4d50-a535-19cf3f52df69', '0834dd97-dbaa-4777-b98f-661486c577f0', 'DEBIT', 111.1300, 105850.5800, 105739.4500, 'İETT / Benzin', NULL, 'Ulaşım', '2026-05-24T23:37:33.900718+00:00') ON CONFLICT DO NOTHING;
@@ -236,7 +236,6 @@ INSERT INTO banking.account_transactions ("id", "transaction_id", "account_id", 
 INSERT INTO banking.account_transactions ("id", "transaction_id", "account_id", "direction", "amount", "balance_before", "balance_after", "counterparty_name", "counterparty_iban", "description", "created_at") VALUES ('e2ac331e-ff7e-4f09-a4c3-6020f0578d8a', '955a6c9a-b772-43ec-8f82-333e97fe660c', '0834dd97-dbaa-4777-b98f-661486c577f0', 'DEBIT', 507.7500, 134323.4600, 133815.7100, 'Migros', NULL, 'Market', '2026-08-18T23:37:33.900718+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO banking.account_transactions ("id", "transaction_id", "account_id", "direction", "amount", "balance_before", "balance_after", "counterparty_name", "counterparty_iban", "description", "created_at") VALUES ('fdb975bc-4107-4568-9a02-290087aa27d0', 'c9271891-de1a-4417-b43e-82652de6e5fd', '0834dd97-dbaa-4777-b98f-661486c577f0', 'DEBIT', 1502.5000, 50000.0000, 48497.5000, NULL, 'TR0000012988559321820000000', 'test havale', '2026-08-20T21:46:00.040636+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO banking.account_transactions ("id", "transaction_id", "account_id", "direction", "amount", "balance_before", "balance_after", "counterparty_name", "counterparty_iban", "description", "created_at") VALUES ('98982b9a-4b9e-43b2-9858-baa0235b0957', 'c589f7cd-bfb1-44a6-ad1f-966cba4dabba', '0834dd97-dbaa-4777-b98f-661486c577f0', 'DEBIT', 302.5000, 48497.5000, 48195.0000, NULL, 'TR0000012988559321820000000', NULL, '2026-08-20T21:51:29.844017+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO banking.account_transactions ("id", "transaction_id", "account_id", "direction", "amount", "balance_before", "balance_after", "counterparty_name", "counterparty_iban", "description", "created_at") VALUES ('ef7b68eb-d7bf-4974-93f1-82a2aaaa30dd', '957b24ae-7858-4b76-92fd-2060df1ab48a', '0834dd97-dbaa-4777-b98f-661486c577f0', 'DEBIT', 14.5000, 132785.3800, 132770.8800, NULL, 'TR0000015479276074410000000', NULL, '2026-08-26T08:41:27.183041+00:00') ON CONFLICT DO NOTHING;
 
 -- banking.savings_goals (3)
 INSERT INTO banking.savings_goals ("id", "user_id", "name", "target_amount", "current_amount", "currency_code", "icon", "color", "deadline", "created_at", "updated_at") VALUES ('412b5b3c-21ec-47bc-bb5b-0d3fb43bddff', '28bfbc42-ef4f-423c-be80-224900637af7', 'Acil Durum Fonu', 120000.0000, 42500.0000, 'TRY', '🛟', '#0ea5e9', '2027-06', '2026-08-20T23:37:33.985213+00:00', '2026-08-20T23:37:33.985218+00:00') ON CONFLICT DO NOTHING;
@@ -272,9 +271,9 @@ INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key"
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-6291C137A4894D80', '28bfbc42-ef4f-423c-be80-224900637af7', 'ui-THYAO-1787315919439', 'CONFIRMED', 'BUY', 'THYAO', 12.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "THYAO", "quantity": 12.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "de406e38-102d-49cb-ab69-522abcde73f3", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 5.47, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.27, "currency": "TRY"}], "currency": "TRY", "net_amount": 3650.74, "gross_amount": 3645.0, "price_certainty": "INDICATIVE", "reference_price": 303.75}, "warnings": [], "expires_at": "2026-08-21T12:53:39.950162Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-6291C137A4894D80", "missing_fields": [], "confirmation_required": true}', '2026-08-21T12:53:39.950162+00:00', '2026-08-21T12:38:39.961513+00:00', NULL, 'de406e38-102d-49cb-ab69-522abcde73f3', '2026-08-21T12:38:39.951896+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-9213BF51D1C81D47', '28bfbc42-ef4f-423c-be80-224900637af7', 'idem_7fa2667d01e1fd35806d0613', 'CONFIRMED', 'BUY', 'MRVL', 2.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "MRVL", "quantity": 2.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "af350923-1518-44af-8c1d-6b27ba381faf", "blockers": [], "estimate": {"fx": {"rate": 48.0616, "to_currency": "TRY", "from_currency": "USD"}, "fees": [{"type": "COMMISSION", "amount": 0.75, "currency": "USD"}], "taxes": [{"type": "BSMV", "amount": 0.04, "currency": "USD"}], "currency": "USD", "net_amount": 502.81, "gross_amount": 502.02, "price_certainty": "INDICATIVE", "reference_price": 251.01}, "warnings": ["Varsayım: User wants to buy 2 lots of MRVL"], "expires_at": "2026-08-21T13:25:03.065806Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-9213BF51D1C81D47", "missing_fields": [], "confirmation_required": true}', '2026-08-21T13:25:03.065806+00:00', '2026-08-21T13:10:52.834200+00:00', NULL, 'af350923-1518-44af-8c1d-6b27ba381faf', '2026-08-21T13:10:03.066658+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-7DFAA4C3B14509A4', '28bfbc42-ef4f-423c-be80-224900637af7', 'idem_1b6624eaab3ebb359534f38e', 'CONFIRMED', 'BUY', 'DOAS', 3.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "DOAS", "quantity": 3.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "206103e8-d4f6-4458-8362-7b9e9ee1b665", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 0.75, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.04, "currency": "TRY"}], "currency": "TRY", "net_amount": 499.99, "gross_amount": 499.2, "price_certainty": "INDICATIVE", "reference_price": 166.4}, "warnings": ["Varsayım: User wants to buy 3 lots of DOAS."], "expires_at": "2026-08-26T07:02:22.168974Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-7DFAA4C3B14509A4", "missing_fields": [], "confirmation_required": true}', '2026-08-26T07:02:22.168974+00:00', '2026-08-26T06:48:06.937972+00:00', NULL, '206103e8-d4f6-4458-8362-7b9e9ee1b665', '2026-08-26T06:47:22.171608+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-B7893ACBBDFBC344', '28bfbc42-ef4f-423c-be80-224900637af7', 'idem_f11ed41a15ae5d495cb3609d', 'PENDING_USER_CONFIRMATION', 'BUY', 'THYAO', 2.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "THYAO", "quantity": 2.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "e244cff2-8524-40b4-b1db-9df3b3729e00", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 0.93, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.05, "currency": "TRY"}], "currency": "TRY", "net_amount": 618.48, "gross_amount": 617.5, "price_certainty": "INDICATIVE", "reference_price": 308.75}, "warnings": ["Varsayım: User wants to buy 2 shares of THYAO"], "expires_at": "2026-08-26T08:34:24.907572Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-B7893ACBBDFBC344", "missing_fields": [], "confirmation_required": true}', '2026-08-26T08:34:24.907572+00:00', NULL, NULL, 'e244cff2-8524-40b4-b1db-9df3b3729e00', '2026-08-26T08:19:24.910740+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-C37E1E81AD0398F4', '28bfbc42-ef4f-423c-be80-224900637af7', 'idem_eaeee8cb863b3bba9f18ef81', 'PENDING_USER_CONFIRMATION', 'BUY', 'THYAO', 3.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "THYAO", "quantity": 3.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "cfbe514a-a747-4b18-9383-d3dbc8767a15", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 1.4, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.07, "currency": "TRY"}], "currency": "TRY", "net_amount": 935.97, "gross_amount": 934.5, "price_certainty": "INDICATIVE", "reference_price": 311.5}, "warnings": ["Varsayım: User wants to buy 3 lots of THYAO"], "expires_at": "2026-08-26T11:33:44.946259Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-C37E1E81AD0398F4", "missing_fields": [], "confirmation_required": true}', '2026-08-26T11:33:44.946259+00:00', NULL, NULL, 'cfbe514a-a747-4b18-9383-d3dbc8767a15', '2026-08-26T11:18:44.951530+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-4DB4BA68696E19EB', '28bfbc42-ef4f-423c-be80-224900637af7', 'idem_87d6a909eca2871ac3dee33a', 'CONFIRMED', 'SELL', 'ASELS', 5.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "ASELS", "quantity": 5.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "SELL", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "a7924dbd-d1dc-4b8e-8da9-e5b78191f85e", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 3.02, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.15, "currency": "TRY"}], "currency": "TRY", "net_amount": 2009.33, "gross_amount": 2012.5, "price_certainty": "INDICATIVE", "reference_price": 402.5}, "warnings": ["Varsayım: User refers to Aselsan (ticker ASELS) when saying \"bundan\""], "expires_at": "2026-08-26T11:34:55.140128Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-4DB4BA68696E19EB", "missing_fields": [], "confirmation_required": true}', '2026-08-26T11:34:55.140128+00:00', '2026-08-26T11:20:39.970685+00:00', NULL, 'a7924dbd-d1dc-4b8e-8da9-e5b78191f85e', '2026-08-26T11:19:55.142069+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-046ECD131BFB7169', '28bfbc42-ef4f-423c-be80-224900637af7', 'ui-BJKAS-1788180281308', 'CONFIRMED', 'BUY', 'BJKAS', 1000.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "BJKAS", "quantity": 1000.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "e52c2d0c-e53a-4ffa-ab2d-080e05f8db80", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 3.39, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.17, "currency": "TRY"}], "currency": "TRY", "net_amount": 2263.56, "gross_amount": 2260.0, "price_certainty": "INDICATIVE", "reference_price": 2.26}, "warnings": [], "expires_at": "2026-08-31T12:59:41.486160Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-046ECD131BFB7169", "missing_fields": [], "confirmation_required": true}', '2026-08-31T12:59:41.486160+00:00', '2026-08-31T12:44:41.511074+00:00', NULL, 'e52c2d0c-e53a-4ffa-ab2d-080e05f8db80', '2026-08-31T12:44:41.490588+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-77BF7BEF51E2C511', '28bfbc42-ef4f-423c-be80-224900637af7', 'ui-SISE-1788180323877', 'CONFIRMED', 'BUY', 'SISE', 1.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "SISE", "quantity": 1.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "8238693c-b027-4a4a-b4ae-62785cfdcac3", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 0.06, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.0, "currency": "TRY"}], "currency": "TRY", "net_amount": 39.92, "gross_amount": 39.86, "price_certainty": "INDICATIVE", "reference_price": 39.86}, "warnings": [], "expires_at": "2026-08-31T13:00:23.938441Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-77BF7BEF51E2C511", "missing_fields": [], "confirmation_required": true}', '2026-08-31T13:00:23.938441+00:00', '2026-08-31T12:45:23.963408+00:00', NULL, '8238693c-b027-4a4a-b4ae-62785cfdcac3', '2026-08-31T12:45:23.940708+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO investment.transaction_proposals ("id", "user_id", "idempotency_key", "status", "transaction_type", "symbol", "quantity", "source_account_id", "destination_account_id", "order_type", "payload", "expires_at", "confirmed_at", "cancelled_at", "audit_id", "created_at") VALUES ('PROP-1C7A65556AFBDA68', '28bfbc42-ef4f-423c-be80-224900637af7', 'idem_161e63c75cd02bf3843a9d90', 'CONFIRMED', 'BUY', 'AKBNK', 4.000000, 'TR-0003-28BFBC42', NULL, 'MARKET', '{"impact": null, "status": "PENDING_USER_CONFIRMATION", "summary": {"symbol": "AKBNK", "quantity": 4.0, "order_type": "MARKET", "time_in_force": "DAY", "transaction_type": "BUY", "source_account_id": "TR-0003-28BFBC42", "destination_account_id": null}, "audit_id": "b99da8c9-6088-4a3f-ac8c-0032c9b49f3c", "blockers": [], "estimate": {"fx": null, "fees": [{"type": "COMMISSION", "amount": 0.44, "currency": "TRY"}], "taxes": [{"type": "BSMV", "amount": 0.02, "currency": "TRY"}], "currency": "TRY", "net_amount": 291.86, "gross_amount": 291.4, "price_certainty": "INDICATIVE", "reference_price": 72.85}, "warnings": ["Varsayım: User wants to BUY 4 lots of AKBNK"], "expires_at": "2026-08-31T13:08:24.622320Z", "disclosures": ["Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.", "Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.", "Yatırım kararlarınız kendi sorumluluğunuzdadır."], "proposal_id": "PROP-1C7A65556AFBDA68", "missing_fields": [], "confirmation_required": true}', '2026-08-31T13:08:24.622320+00:00', '2026-08-31T12:54:31.930297+00:00', NULL, 'b99da8c9-6088-4a3f-ac8c-0032c9b49f3c', '2026-08-31T12:53:24.624876+00:00') ON CONFLICT DO NOTHING;
 
 -- ai.conversations (53)
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('e80c9e4e-8509-492d-9252-a663b0101c4b', '28bfbc42-ef4f-423c-be80-224900637af7', 'probe-trade-2', 'THYAO''dan 10 adet almak istiyorum, hesap kimliği TR-DEMO-00…', 'active', '2026-08-20T12:23:47.599300+00:00', '2026-08-20T12:23:47.599965+00:00') ON CONFLICT DO NOTHING;
@@ -322,16 +321,16 @@ INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('c0e9893c-49ca-4d74-b7ff-54f190924d30', '28bfbc42-ef4f-423c-be80-224900637af7', '2243e61e-472a-490f-8dae-12ce28787411', 'aselsan hissesi alıcam', 'active', '2026-08-25T11:25:04.396444+00:00', '2026-08-25T11:27:48.687265+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('249fd51e-7ea4-4243-91c4-32d652a7ddfa', '28bfbc42-ef4f-423c-be80-224900637af7', 'd4f64b98-643a-4907-a2a6-3cb934c8cf8b', 'aselsan hissesi var mı', 'active', '2026-08-25T12:48:32.902990+00:00', '2026-08-25T12:51:48.068072+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('0672792b-edd3-461a-8548-1ee30cae02a7', '28bfbc42-ef4f-423c-be80-224900637af7', '6f76d776-b209-4a06-890f-c52ace6f581a', 'aga bana thyao göstersene biraz', 'active', '2026-08-26T06:42:13.659111+00:00', '2026-08-26T06:47:52.166633+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('49ebc059-c1f6-466b-b184-8aca58790d7b', '28bfbc42-ef4f-423c-be80-224900637af7', 'd27ffba4-770d-45fa-8ee7-9f321c582407', 'thyao hissesi ne kadar', 'active', '2026-08-26T08:19:13.723610+00:00', '2026-08-26T08:19:29.496641+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('2bec4935-c92d-4ef2-8558-8af9a1cdf0c4', '28bfbc42-ef4f-423c-be80-224900637af7', '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29', 'şuan türk hava yolları piyasası ne durumda', 'active', '2026-08-26T11:17:42.031157+00:00', '2026-08-26T11:21:34.771163+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('a72c02f5-a9bd-410e-986d-8d4685edc590', '28bfbc42-ef4f-423c-be80-224900637af7', '4d01d210-61fe-47cc-b993-8037f6a44934', 'naber', 'active', '2026-08-27T12:20:03.768204+00:00', '2026-08-27T12:20:03.769225+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('688c50e1-4d82-4225-8858-a2e6a8d73c25', '28bfbc42-ef4f-423c-be80-224900637af7', 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4', 'akbankı yorumlar mısın', 'active', '2026-08-31T07:39:03.677310+00:00', '2026-08-31T07:49:14.103137+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('8c13c429-661a-4f99-9144-354577818210', '28bfbc42-ef4f-423c-be80-224900637af7', '8253405e-6807-450f-bfe4-d8d9e45341ee', 'portföyüm hakkında yorum yapar mısın', 'active', '2026-08-31T07:49:50.692638+00:00', '2026-08-31T07:49:50.693682+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('0c2acf13-febe-486f-8054-090a992bd7f6', '28bfbc42-ef4f-423c-be80-224900637af7', 'docs-test', 'Yuklediğim bilançoda EBITDA marjı ne olmuş?', 'active', '2026-08-31T12:04:29.949136+00:00', '2026-08-31T12:04:29.951257+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('abbf45d9-bd04-4d7f-a390-171c08b1a711', '28bfbc42-ef4f-423c-be80-224900637af7', 'docs-test2', 'Yuklediğim bilançoda EBITDA marjı ne olmuş?', 'active', '2026-08-31T12:05:49.916831+00:00', '2026-08-31T12:05:49.918122+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('f89a3240-72ac-407a-9498-6fea34ed4188', '28bfbc42-ef4f-423c-be80-224900637af7', 'docs-test3', 'Yuklediğim bilançoda EBITDA marjı ne olmuş?', 'active', '2026-08-31T12:07:33.450896+00:00', '2026-08-31T12:07:33.452207+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('ff7635e4-52c4-408c-9eab-985cdf0418ba', '28bfbc42-ef4f-423c-be80-224900637af7', 'analiz-1', 'THYAO artar mi almali miyim? savas cikarsa bu hisse nasil e…', 'active', '2026-08-31T12:33:37.787298+00:00', '2026-08-31T12:33:37.788905+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.conversations ("id", "user_id", "thread_id", "title", "status", "created_at", "updated_at") VALUES ('c1d5be3b-eedf-4573-a9b7-a74c45498139', '28bfbc42-ef4f-423c-be80-224900637af7', '7063bf01-5184-4bc2-9406-8dc36f92da87', 'thyao alınır mı nasıl sence hissenin durumu', 'active', '2026-08-31T12:50:47.641933+00:00', '2026-08-31T12:54:04.960182+00:00') ON CONFLICT DO NOTHING;
 
--- ai.messages (350)
+-- ai.messages (342)
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('749d506d-d78c-47ef-994c-e82a8609c86b', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'probe-trade-2'), 'user', 'THYAO''dan 10 adet almak istiyorum, hesap kimliği TR-DEMO-0001, piyasa emri', '{}', '2026-08-20T12:23:47.601461+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('0d817823-335a-44e2-b7c7-13ba97421d5a', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'probe-trade-2'), 'assistant', '**Varsayım:** Kullanıcı 10 adet THYAO hissesini piyasa emriyle TR‑DEMO‑0001 hesabından satın almak istiyor.  
 
@@ -1918,147 +1917,6 @@ INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "cr
 - Yatırım kararlarınız kendi sorumluluğunuzdadır.
 
 Onayınıza hazırladım.', '{"target_agent": "TRANSACTION_AGENT", "primary_intent": "TRANSACTION_REQUEST", "compliance_verdict": "REVISE"}', '2026-08-26T06:47:52.167893+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('58c8e6e2-9aa9-44a6-b8fe-d3ed442b790b', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'd27ffba4-770d-45fa-8ee7-9f321c582407'), 'user', 'thyao hissesi ne kadar', '{}', '2026-08-26T08:19:13.724668+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('185001df-8b52-489b-ab84-d2d1c2796db8', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'd27ffba4-770d-45fa-8ee7-9f321c582407'), 'assistant', '**THYAO Hisse Fiyatı**
-
-Türk Hava Yolları A.O. (THYAO) hissesi şu anda **308,75 TL** seviyesinde işlem görüyor. Gün içinde **8,25 TL** artışla **%2,75** yükseliş kaydetmiş.
-
-**Fiyatlar 15 dakika gecikmeli; 26 Ağustos 08:19 itibarıyla.**
-
-**Öne çıkan gözlemler:**
-- Günlük işlem hacmi 23.776.915 adettir.
-- Fiyat/Kazanç (F/K) verisi mevcut değildir; fiyat/defter değeri (P/B) 19,04’tür.
-- Temettü verimi %2,29 olarak rapor edilmiştir.
-- 52 haftalık en yüksek fiyat 355,50 TL, en düşük fiyat 262,75 TL’dir.
-- Veriler 15 dakika gecikmeli olduğundan anlık fiyat hareketleri farklı olabilir.
-
-Başka bir hisse hakkında bilgi almak ya da farklı bir metriği incelemek isterseniz, yardımcı olmaktan memnuniyet duyarım.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_DATA_AGENT", "context_topic": null, "primary_intent": "MARKET_PRICE_QUERY", "compliance_verdict": "REVISE"}', '2026-08-26T08:19:13.725668+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('9f163652-c757-4807-8960-f4169560de6f', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'd27ffba4-770d-45fa-8ee7-9f321c582407'), 'user', '2 adet satın almak istiyorum', '{}', '2026-08-26T08:19:29.496641+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b0c78abe-a092-463c-a87a-031e5ea11beb', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'd27ffba4-770d-45fa-8ee7-9f321c582407'), 'assistant', '**THYAO** hissesini 2 adet alım için hazırladım.
-
-- **İşlem tipi:** Alım (BUY)
-- **Miktar:** 2 adet
-- **Sipariş tipi:** Piyasa (MARKET)
-- **Geçerlilik süresi:** Gün içinde (DAY)
-
-**Tahmini maliyetler**
-
-- Referans fiyat: **308,75 TL**
-- Brüt tutar: **617,5 TL**
-- Komisyon: **0,93 TL**
-- BSMV: **0,05 TL**
-- Net tutar (tahmini): **618,48 TL**
-
-Bu teklif **26 Ağustos 08:34** itibarıyla geçerlidir.
-
-**Açıklamalar**
-- Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.
-- Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.
-- Yatırım kararlarınız kendi sorumluluğunuzdadır.
-
-Onayınıza hazırladım.
-Onaylamak ya da başka bir işlem/hesaplama görmek ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir. Belirtilen tutarlar gösterge niteliğindedir."], "target_agent": "TRANSACTION_AGENT", "context_topic": "THYAO", "primary_intent": "TRANSACTION_REQUEST", "compliance_verdict": "REVISE"}', '2026-08-26T08:19:29.497641+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('1036db85-e6a6-404a-9e5e-59a7a1ba91da', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'user', 'şuan türk hava yolları piyasası ne durumda', '{}', '2026-08-26T11:17:42.037156+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('34f6726d-6e34-4a8a-9587-4c1c32f29113', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'assistant', '**Türk Hava Yolları (THY) hakkında güncel gelişmeler**
-
-- **İstanbul Havalimanı** hâlâ Avrupa’nın en yoğun havalimanı konumunda; günlük ortalama 1.665 uçuşla bu sıralamayı sürdürüyor. Bu durum, THY’nin ana hub’ı olan İstanbul’da yüksek yolcu ve uçuş trafiğine işaret ediyor.
- [İstanbul Havalimanı Avrupa''daki en yoğun havalimanı olmayı sürdürüyor](https://www.aa.com.tr/tr/ekonomi/istanbul-havalimani-avrupadaki-en-yogun-havalimani-olmayi-surduruyor/4034479) – Anadolu Ajansı, 22 Ağustos 2026
-
-- **Uçuş frekansları**: THY, geniş gövdeli filosunu destekleyerek Doğu Asya, Güneydoğu Asya ve Okyanusya bölgelerinde uçuş frekanslarını önümüzdeki yıllarda %15‑20 artırmayı hedefliyor. Bu strateji, bölgesel pazar payını genişletme ve uzun vadeli büyüme planlarını yansıtıyor.
- [THY, Asya-Pasifik''te uçuş frekanslarını yüzde 15-20 artırmayı hedefliyor](https://www.aa.com.tr/tr/ekonomi/thy-asya-pasifikte-ucus-frekanslarini-yuzde-15-20-artirmayi-hedefliyor/4033717) – Anadolu Ajansı, 21 Ağustos 2026
-
-- **Finansal performans**: THY, yılın ilk yarısında konsolide net karını 18 milyar 864 milyon TL olarak açıkladı. Bu rakam, şirketin kârlılık seviyesinin güçlü olduğunu gösteriyor.
- [THY yılın ilk yarısında 18 milyar 864 milyon lira kar etti](https://www.patronlardunyasi.com/thy-yilin-ilk-yarisinda-18-milyar-864-milyon-lira-kar-etti) – Patronlar Dünyası, 5 Ağustos 2026
-
-- **Borsa İstanbul ortamı**: Jeopolitik gerilimler ve sıkı para politikası nedeniyle BIST dalgalı bir seyir izliyor. Yatırımcıların bir kısmı döviz bazlı getiri arayışıyla yabancı borsalara yönelmiş durumda; bu durum yerel hisse senetlerinin, özellikle THY gibi büyük şirketlerin, volatilite baskısı altında olabileceğini gösteriyor.
- [Borsa İstanbul’daki dalgalanma yatırımcıyı arayışa itti…](https://www.patronlardunyasi.com/borsa-istanbuldaki-dalgalanma-yatirimciyi-arayisa-itti-amerikan-hisselerine-4-1-milyar-dolarlik-turk-yatirimci-akini) – Patronlar Dünyası, 21 Ağustos 2026
-
-**Öne çıkan gözlemler**
-
-- THY’nin ana hub’ı olan İstanbul Havalimanı yoğun bir trafikle çalışıyor; bu, yolcu talebinin hâlâ yüksek olduğunu gösteriyor.
-- Asya‑Pasifik bölgesine yönelik frekans artışı, şirketin uluslararası büyüme stratejisinin bir parçası ve potansiyel gelir artışına işaret ediyor.
-- İlk yarı net karı 18,864 milyar TL seviyesinde, kârlılık açısından güçlü bir performans.
-- BIST’in genel dalgalı ortamı, THY hisselerinin kısa vadeli fiyat hareketlerinde belirsizlik yaratabilir; makroekonomik faktörler yakından izlenmeli.
-
-Başka bir konu hakkında daha detaylı bilgi isterseniz, hangi veriyi incelememi istediğinizi belirtmeniz yeterli.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_RESEARCH_AGENT", "context_topic": null, "primary_intent": "MARKET_RESEARCH", "compliance_verdict": "REVISE"}', '2026-08-26T11:17:42.038156+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('313f5fb4-42f6-43a1-9208-d4589e341f1e', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'user', 'ben bunun bistteki hissesinden bahsediyorum onun şuan değeri ne kadar', '{}', '2026-08-26T11:18:13.926263+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('e3aec80a-00dc-4ae4-b491-aa217bbd141c', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'assistant', 'Üzgünüm, şu anda **Türk Hava Yolları (THY) BIST hissesi** için güncel fiyat verisine ulaşamadım. Başka bir hisse ya da farklı bir bilgiyle yardımcı olmamı ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_DATA_AGENT", "context_topic": null, "primary_intent": "MARKET_DATA_QUERY", "compliance_verdict": "REVISE"}', '2026-08-26T11:18:13.927263+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('388a39a5-bb8e-445f-919d-ed03c2dc8e1f', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'user', 'THYAO fiyart', '{}', '2026-08-26T11:18:27.202992+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('55b8f804-00c3-46c1-8c38-fab6063cb27b', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'assistant', '**Fiyatlar 15 dakika gecikmeli; 26 Ağustos 11:18 itibarıyla.**
-
-- **THYAO (Türk Hava Yolları A.O.)** fiyatı **311,5 TL**.
-- Günlük değişim **+9,0 TL** (%2,98).
-- Günlük işlem hacmi **43.613.084** adet.
-
-**Diğer temel göstergeler**
-- Fiyat/Defter Değeri (PB): **19,01**
-- Temettü verimi: **%2,29**
-- 52‑haftalık en yüksek fiyat: **355,5 TL**, en düşük fiyat: **262,75 TL**
-- Piyasa değeri: **414.429.577.216 TL**
-
-**Öne çıkan gözlemler:**
-- Fiyat 15 dakika gecikmeli olduğu için anlık hareketleri yansıtmayabilir.
-- PB oranı 19 çevresinde, sektöre göre yüksek bir değer olarak görülüyor.
-- Temettü verimi %2,29, yıllık temettü beklentisi hakkında bilgi verir.
-- 52‑haftalık aralık, fiyatın son dönemde 262,75 TL‑355,5 TL arasında dalgalandığını gösteriyor.
-
-Başka bir göstergeyi incelemek isterseniz, söylemeniz yeterli.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_DATA_AGENT", "context_topic": null, "primary_intent": "MARKET_DATA", "compliance_verdict": "REVISE"}', '2026-08-26T11:18:27.203992+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b3e556e2-5d4c-4c24-b47f-977d781682a9', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'user', 'bundan 3 lot al', '{}', '2026-08-26T11:19:04.359791+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('3fdde393-2e91-49ed-ba43-bd7bdf4a1475', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'assistant', '**İşlem Teklifi – THYAO (Türk Hava Yolları A.O.)**
-
-- **İşlem tipi:** Alım (piyasa emri)
-- **Miktar:** 3 lot
-- **Referans fiyat:** 311,5 TL (gösterge niteliğinde)
-- **Brüt tutar:** 934,5 TRY
-- **Net tutar (tahmini):** 935,97 TRY
-- **Komisyon:** 1,40 TRY
-- **BSMV:** 0,07 TRY
-- **Emir süresi:** Gün (DAY)
-
-**Yukarıdaki tutarlar tahmini olup, gerçekleşen fiyat farklılık gösterebilir.**
-
-**Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.**
-**Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.**
-**Yatırım kararlarınız kendi sorumluluğunuzdadır.**
-
-Onayınıza hazırladım. İşlemi onaylamak ya da başka bir işlem oluşturmak ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir. Belirtilen tutarlar gösterge niteliğindedir."], "target_agent": "TRANSACTION_AGENT", "context_topic": "THYAO", "primary_intent": "TRANSACTION_REQUEST", "compliance_verdict": "REVISE"}', '2026-08-26T11:19:04.360791+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('79f1ba79-671b-4732-b810-18128dd5f122', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'user', 'tamam aselsan fiyatı ne kadar', '{}', '2026-08-26T11:19:36.987082+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('f214d0c6-faac-48fe-84a7-a226843169ea', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'assistant', '**Fiyatlar 15 dakika gecikmeli; 26 Ağustos 11:19 itibarıyla.**
-
-| Hisse | Fiyat | Değişim | % Değişim | Günlük hacim | F/K |
-|-------|------:|--------:|----------:|--------------:|----:|
-| ASELS | 402,5 TL | -1,25 TL | -%0,31 | 18.191.467 adet | 51,40 |
-
-**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**
-
-**Öne çıkan gözlemler:**
-- Fiyat 15 dakika gecikmeli, anlık hareketleri yansıtmayabilir.
-- F/K oranı 51,40, sektördeki ortalamalarla karşılaştırma gerektirir.
-- Günlük işlem hacmi 18 M''den fazla, likidite açısından aktif bir hisse.
-
-Başka bir hisse ya da ek veri görmek ister misiniz?', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_DATA_AGENT", "context_topic": null, "primary_intent": "MARKET_DATA", "compliance_verdict": "REVISE"}', '2026-08-26T11:19:36.988082+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('e901c1c5-872f-4f4b-a9ec-751a37a6be87', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'user', 'tamam 5 lot sat bundan', '{}', '2026-08-26T11:20:26.976517+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('fe78781d-4e74-46ff-a8f0-58d4e9d5de51', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'assistant', '**Satış Teklifi – ASELS (Aselsan)**
-
-| Sembol | Miktar (lot) | Referans Fiyat (TL) | Brüt Tutar (TRY) | Net Tutar (TRY) |
-|--------|--------------|---------------------|------------------|-----------------|
-| ASELS | 5 | 402,5 | 2.012,5 | 2.009,33 |
-
-**Komisyon:** 3,02 TRY
-**BSMV:** 0,15 TRY
-
-**Uyarı:** Varsayım: Kullanıcı “bundan” derken Aselsan (ASELS) hissesini kastetmiştir.
-
-**Açıklamalar**
-- Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.
-- Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.
-- Yatırım kararlarınız kendi sorumluluğunuzdadır.
-
-Onayınıza hazırladım.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir. Belirtilen tutarlar gösterge niteliğindedir."], "target_agent": "TRANSACTION_AGENT", "context_topic": "ASELS", "primary_intent": "TRANSACTION_REQUEST", "compliance_verdict": "REVISE"}', '2026-08-26T11:20:26.977517+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('9a95fa5b-cdb4-4009-a47d-7b96d85f0e8b', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'user', 'thy piyasa baksana', '{}', '2026-08-26T11:21:20.518901+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('639408ba-53ef-4642-8960-27832ff167c9', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "MARKET_DATA_AGENT", "context_topic": null, "primary_intent": "MARKET_DATA", "compliance_verdict": "BLOCK"}', '2026-08-26T11:21:20.519901+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('2781efd6-eefd-4a7f-a4e8-196137f53ced', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'user', 'nasılsın', '{}', '2026-08-26T11:21:34.771163+00:00') ON CONFLICT DO NOTHING;
-INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('961f627d-66ff-47a4-8235-a7ab13878dfd', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '155c01bd-8cfd-4af7-bccb-ae55c4f5cc29'), 'assistant', 'Şu anda yoğunluk sınırına takıldım ve yanıt üretemiyorum. Bu geçici bir durum — birkaç dakika sonra tekrar denerseniz kaldığımız yerden devam ederiz.', '{"disclosures": [], "target_agent": "SMALLTALK_AGENT", "context_topic": null, "primary_intent": "SMALLTALK", "compliance_verdict": "BLOCK"}', '2026-08-26T11:21:34.772163+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('e38498d7-9400-4f6f-bcf2-6362e023bdb0', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '4d01d210-61fe-47cc-b993-8037f6a44934'), 'user', 'naber', '{}', '2026-08-27T12:20:03.770072+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('164527cc-18ee-4263-adf7-2438b48658ba', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '4d01d210-61fe-47cc-b993-8037f6a44934'), 'assistant', 'Merhaba! İyiyim, siz nasılsınız?', '{"target_agent": "SMALLTALK_AGENT", "primary_intent": "SMALLTALK", "compliance_verdict": "PASS"}', '2026-08-27T12:20:03.770074+00:00') ON CONFLICT DO NOTHING;
 INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('64ba9425-d25b-46c7-947c-50335a7a1fb7', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'aaf12622-ffd5-46ba-bd6d-8e31eb2c74e4'), 'user', 'akbankı yorumlar mısın', '{}', '2026-08-31T07:39:03.681225+00:00') ON CONFLICT DO NOTHING;
@@ -2245,3 +2103,131 @@ INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "cr
 - **1H25** döneminde EBITDA marjı **0,172** (yani %17,2)
 
 Bu değerler yalnızca belirtilen iki yarı‑yıla ait olup, diğer dönemler veya ek kâr ölçütleri bu dosyada yer almamaktadır.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Piyasa verileri gecikmeli olabilir; anlık fiyatlardan farklılık gösterebilir."], "target_agent": "MARKET_RESEARCH_AGENT", "context_topic": null, "primary_intent": "DOCUMENT_QUERY", "compliance_verdict": "REVISE"}', '2026-08-31T12:07:33.453207+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('afc83f98-6191-4bf1-95c5-a6a556ff5876', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'analiz-1'), 'user', 'THYAO artar mi almali miyim? savas cikarsa bu hisse nasil etkilenir?', '{}', '2026-08-31T12:33:37.788905+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('df71acf7-be68-4e76-bca4-0f1fb08e81af', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = 'analiz-1'), 'assistant', '**Kimse size kazandırır diyemez.** Ben de diyemem.
+
+**Artış lehine**
+- Fiyat, 20 günlük hareketli ortalamanın %0,15 üzerinde (307,25 TL ≈ 306,80 TL).
+- Fiyat, 200 günlük hareketli ortalamanın %1,68 üzerinde (302,18 TL).
+- RSI 14 değeri 47,9, aşırı alım bölgesine henüz girmemiş.
+- Son 20 işlem gününün 7’sinde fiyat yükselerek kapanmış.
+- Günlük işlem hacmi, ortalamanın %115’i seviyesinde.
+- Hisse, 52‑haftalık aralığın %51,0 noktasında bulunuyor.
+
+**Düşüş lehine**
+- Fiyat, 50 günlük hareketli ortalamanın %3,71 altında (319,09 TL).
+- Teknik gösterge trendi “yatay” (SIDEWAYS), net bir yükseliş sinyali yok.
+- Yıllık volatilite %30,4, fiyat dalgalanmaları yüksek.
+- Tarihsel maksimum gerileme %21,21, geçmişte büyük düşüşler yaşanmış.
+- 52‑haftalık en düşük seviye 264,5 TL, hâlâ o seviyenin oldukça üstünde olsa da potansiyel destek sınırlı.
+
+**Bu ölçütler, fiyatı makroekonomik gelişmeler, şirket haberleri veya ani piyasa şokları gibi dışsal faktörlerden bağımsız olarak yansıtmaz.**
+
+Veriler belirgin bir yön eğilimi göstermemektedir.
+
+**Karar sizin.**
+
+
+### Savaş senaryosu
+
+- **Kanal:** Yakıt giderleri (havayolu şirketlerinin maliyet yapısının büyük bir kısmı), uluslararası yolcu talebi, döviz kuru riski.
+- **Basınç yönü:** Savaş ortamı yakıt fiyatlarını yükseltebilir, seyahat talebini düşürebilir ve döviz kurlarında dalgalanmalara yol açabilir.
+- **THYAO’ya özgü ölçüm:** Şirketin yakıt maliyet oranı yüksek (sektör ortalamasıyla benzer) ve gelirlerinin bir kısmı döviz cinsinden (uluslararası uçuşlar). Bu, fiyatı yakıt fiyatlarındaki artışa ve kur dalgalanmalarına karşı daha hassas kılar.
+- **Karşı yön:** Devlet destekleri veya stratejik havacılık görevleri, kriz dönemlerinde bazı havayolu şirketlerine ek kaynak sağlayabilir; bu, negatif etkileri kısmen dengeleyebilir.
+
+**Bu varsayımsal bir senaryo; gerçekleşip gerçekleşmeyeceğini kimse bilemez.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez."], "target_agent": "MARKET_DATA_AGENT", "context_topic": null, "primary_intent": "MARKET_DATA_ADVICE", "compliance_verdict": "REVISE"}', '2026-08-31T12:33:37.789905+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('77d3954f-350c-4797-a572-148d48a76cd9', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '7063bf01-5184-4bc2-9406-8dc36f92da87'), 'user', 'thyao alınır mı nasıl sence hissenin durumu', '{}', '2026-08-31T12:50:47.643501+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('54299378-b914-4ddc-adac-358365191b17', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '7063bf01-5184-4bc2-9406-8dc36f92da87'), 'assistant', '**Kimse size kazandırır diyemez. Ben de diyemem.**
+
+THYAO için teknik sinyallere baktım; son kapanış, hareketli ortalamalar, RSI, 52‑haftalık konum, işlem hacmi ve volatilite gibi ölçütleri inceledim.
+
+**Artış lehine**
+- Kapanış fiyatı 20‑günlük ortalamanın %0,15 üzerinde (307,25 TL vs 306,8 TL).
+- Kapanış fiyatı 200‑günlük ortalamanın %1,68 üzerinde (307,25 TL vs 302,18 TL).
+- Günlük işlem hacmi ortalamanın %115’i (1,15 kat).
+- 52‑haftalık aralığın %51,0’unda, yani orta seviyede bulunuyor.
+- RSI 47,9, aşırı alım bölgesinde değil.
+
+**Düşüş lehine**
+- Kapanış fiyatı 50‑günlük ortalamanın %3,71 altında (307,25 TL vs 319,09 TL).
+- Son 20 işlem gününde sadece 7 yükseliş günü, momentum zayıf.
+- Trend “yatay” olarak tanımlanıyor.
+- RSI 47,9, orta‑alt seviyede ve aşırı satım bölgesinde değil.
+- Tarihsel maksimum düşüş %21,2, volatilite yıllık %30,4.
+
+Bu ölçütler şirketin temel performansı, haber akışı veya makroekonomik faktörleri yansıtmaz.
+
+**Veriler ağırlıklı olarak kısa vadeli düşüş baskısına işaret ediyor.**
+
+**Karar sizin.**
+
+**Fiyatlar 15 dakika gecikmeli; 31 Ağustos 13:32 itibarıyla.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez."], "target_agent": "MARKET_DATA_AGENT", "context_topic": null, "primary_intent": "MARKET_ADVICE", "compliance_verdict": "REVISE"}', '2026-08-31T12:50:47.644501+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('a0cac6f1-7e38-4847-a47b-09bb6978e3ea', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '7063bf01-5184-4bc2-9406-8dc36f92da87'), 'user', 'bana samimi bir şekilde anlat ben malım anlamıyorum sence alınır mı', '{}', '2026-08-31T12:51:34.961164+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('a9bb3606-53c5-45b6-beb6-f8d5ad75c1f6', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '7063bf01-5184-4bc2-9406-8dc36f92da87'), 'assistant', '**Artış lehine**
+- Fiyat, 20 günlük hareketli ortalamanın %0,15 üzerinde (307,25 TL vs 306,80 TL).
+- Fiyat, 200 günlük hareketli ortalamanın %1,68 üzerinde (302,18 TL).
+- Son 20 işlem gününde 7 gün yükselerek kapandı.
+- Günlük işlem hacmi, ortalamanın %15,8 üstünde.
+
+**Düşüş lehine**
+- Fiyat, 50 günlük hareketli ortalamanın %3,71 altında (319,09 TL).
+- RSI 14‑lük periyotda 47,9, yani aşırı alım bölgesinin altında.
+- Yıllık volatilite %30,4, fiyat dalgalanmasının yüksek olduğunu gösteriyor.
+- Maksimum gerileme %21,2 seviyesinde.
+
+Bu ölçütler, şirketin temel performansı, haber akışı ve makroekonomik koşullar gibi faktörleri yansıtmaz.
+
+Veriler belirgin bir yön göstermiyor; hem yukarı hem de aşağı baskılar mevcut.
+
+**Karar sizin.**
+
+*(Kimse size kazandırır diyemez. Ben de diyemem.)*', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez."], "target_agent": "MARKET_DATA_AGENT", "context_topic": null, "primary_intent": "MARKET_RECOMMENDATION", "compliance_verdict": "REVISE"}', '2026-08-31T12:51:34.962164+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('39c85020-12ee-48c0-bb8d-f8f58e7777ac', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '7063bf01-5184-4bc2-9406-8dc36f92da87'), 'user', 'peki akbank nasıl şuan', '{}', '2026-08-31T12:52:24.203729+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('b8f74d9f-56df-443c-b3c4-46075f155135', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '7063bf01-5184-4bc2-9406-8dc36f92da87'), 'assistant', '**AKBNK (Akbank) teknik sinyalleri**
+
+**Artış lehine**
+- Fiyat, 20 günlük hareketli ortalamanın %6,03 üzerinde (72,85 TL vs 68,71 TL).
+- Fiyat, 50 günlük hareketli ortalamanın %2,92 üzerinde (70,78 TL).
+- Fiyat, 200 günlük hareketli ortalamanın %1,19 üzerinde (71,99 TL).
+- RSI 14‑lük periyot için %62,5; aşırı alım bölgesine henüz ulaşmadı.
+- Son 20 işlem gününde 10 gün yükselerek kapandı.
+- 52‑haftalık aralığın %55,0 seviyesinde, orta‑üst bir konumda.
+- Trend: **UPTREND** (yükseliş eğilimi).
+
+**Düşüş lehine**
+- Günlük işlem hacmi ortalamanın %86,8’i; düşük likidite riski.
+- Yıllık volatilite %42,5; fiyat dalgalanmaları yüksek.
+- Tarihsel maksimum düşüş %31,6; geçmişte büyük gerilemeler yaşanmış.
+- Fiyat, 52‑haftalık en yüksek seviyenin %19,2 altında (90,06 TL).
+
+Bu veriler, şirketin temel performansı, haber akışı ve makroekonomik faktörleri kapsamaz.
+
+**Bu dönemde veriler ağırlıklı olarak yükseliş tarafındaki baskıya işaret ediyor.**
+
+**Karar sizin.**
+
+**Yatırım tavsiyesi olarak değil, objektif kriterlerle taradım.**', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez."], "target_agent": "MARKET_DATA_AGENT", "context_topic": null, "primary_intent": "MARKET_DATA_QUERY", "compliance_verdict": "REVISE"}', '2026-08-31T12:52:24.204729+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('790712a3-aa63-477c-a17a-c9596de69257', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '7063bf01-5184-4bc2-9406-8dc36f92da87'), 'user', 'akbank alıcam abi ozaman ben', '{}', '2026-08-31T12:53:11.451352+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('76109dc9-ee6c-4097-bfd6-3530083aeafa', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '7063bf01-5184-4bc2-9406-8dc36f92da87'), 'assistant', 'Alım talebinizi netleştirelim: kaç adet Akbank hissesi almak istiyorsunuz ya da toplam olarak ne kadar (TL) harcamak istediğinizi belirtir misiniz?', '{"disclosures": [], "target_agent": "TRANSACTION_AGENT", "context_topic": null, "primary_intent": "TRANSACTION_REQUEST", "compliance_verdict": "PASS"}', '2026-08-31T12:53:11.452352+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('2c0ebb2d-abd7-46f5-b7a0-76f0d5189ee5', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '7063bf01-5184-4bc2-9406-8dc36f92da87'), 'user', '4 lot alıcam ya', '{}', '2026-08-31T12:54:04.960182+00:00') ON CONFLICT DO NOTHING;
+INSERT INTO ai.messages ("id", "conversation_id", "role", "content", "meta", "created_at") VALUES ('9afd7719-9aa1-4555-9441-4d16e0fab781', (SELECT id FROM ai.conversations WHERE user_id = '28bfbc42-ef4f-423c-be80-224900637af7' AND thread_id = '7063bf01-5184-4bc2-9406-8dc36f92da87'), 'assistant', '**İşlem Teklifi**
+
+- **İşlem tipi:** Alım (BUY)
+- **Hisse:** AKBNK
+- **Miktar:** 4 lot
+- **Emir tipi:** Piyasa (MARKET)
+- **Geçerlilik:** Gün içinde (DAY)
+
+**Tahmini tutarlar (gösterge niteliğindedir)**
+- Referans fiyat: 72,85 TRY
+- Brüt tutar: 291,40 TRY
+- Net tutar (komisyon ve vergi dahil): 291,86 TRY
+- Komisyon: 0,44 TRY
+- BSMV: 0,02 TRY
+
+**Açıklamalar**
+Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir.
+Belirtilen tutarlar gösterge niteliğindedir; gerçekleşen fiyat farklı olabilir.
+Yatırım kararlarınız kendi sorumluluğunuzdadır.
+
+Onayınıza hazırladım.', '{"disclosures": ["Bu içerik yatırım danışmanlığı değildir, genel bilgilendirme amaçlıdır. Geçmiş performans gelecekteki getiriyi garanti etmez.", "Bu bir işlem önerisidir; onaylanana kadar hiçbir emir iletilmemiştir. Belirtilen tutarlar gösterge niteliğindedir."], "target_agent": "TRANSACTION_AGENT", "context_topic": "AKBNK", "primary_intent": "TRANSACTION_REQUEST", "compliance_verdict": "REVISE"}', '2026-08-31T12:54:04.961182+00:00') ON CONFLICT DO NOTHING;

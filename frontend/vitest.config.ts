@@ -18,6 +18,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
+    // Saat dilimi testler için UTC'ye SABİT. Ekrandaki her saat
+    // `Europe/Istanbul`'a çevriliyor ve bunu doğrulayan testler, kendi
+    // makinesi zaten Istanbul olan birinde kırık kodu yeşil gösterirdi.
+    env: { TZ: 'UTC' },
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],

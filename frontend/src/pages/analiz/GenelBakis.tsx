@@ -6,6 +6,7 @@ import { toNumber, seriesName } from '../../lib/chartFormat'
 import { benchmarkName, toComparisonSeries } from '../../lib/riskFormat'
 import { formatMoney } from '../../lib/money'
 import PortfoyHaberleri from '../../components/analiz/PortfoyHaberleri'
+import { formatDateTime } from '../../lib/datetime'
 import { useAnalysis } from '../Analiz'
 
 /**
@@ -222,7 +223,7 @@ export default function GenelBakis() {
                 </div>
                 {analysis.activity.last_transaction_at && (
                     <p className="mt-3 text-xs text-slate-400">
-                        Son işlem: {new Date(analysis.activity.last_transaction_at).toLocaleString('tr-TR')}
+                        Son işlem: {formatDateTime(analysis.activity.last_transaction_at)}
                     </p>
                 )}
             </div>

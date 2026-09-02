@@ -21,7 +21,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
-COPY app.py embeddings.py store.py chunking.py ./
+COPY app.py embeddings.py store.py chunking.py corpus_seed.py ./
 
 # Bakım betikleri. Bu servis sistemdeki tek vector-db kredensiyelini tuttuğu
 # için korpusa dokunan her iş buradan çalışmak zorunda -- ve betikler image'a

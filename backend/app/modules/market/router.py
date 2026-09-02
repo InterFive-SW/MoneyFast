@@ -255,7 +255,14 @@ def list_instruments(
     min_pe: Optional[float] = Query(default=None),
     max_pb: Optional[float] = Query(default=None),
     sort_by: Optional[str] = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=200),
+    #: Tavan evrenin tamamını kapsıyor (1.014 enstrüman, ölçülen 426 KB).
+    #:
+    #: Sunucu tarafı sayfalama DEĞİL: süzgeç paneli (F/K, PD/DD, piyasa
+    #: değeri, değişim %) istemcide çalışıyor ve bir SAYFA üzerinde
+    #: çalıştırılsaydı "F/K'sı 10'un altı" sorgusu yalnızca o sayfaya düşen
+    #: eşleşmeleri gösterirdi -- `useInstruments`'ın kendi yorumunun zaten
+    #: uyardığı hata. Ekran sayfalamayı 15'erlik dilimlerle kendi yapıyor.
+    limit: int = Query(default=20, ge=1, le=1200),
     db: Session = Depends(get_db),
 ):
     """

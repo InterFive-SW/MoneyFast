@@ -27,6 +27,7 @@ import { useMarketStream } from '../hooks/useMarketStream'
 import { useWatchlist } from '../hooks/useWatchlist'
 import MarketBand from '../components/markets/MarketBand'
 import { BASE_CURRENCY, convert, formatMoney } from '../lib/money'
+import { formatDate, formatTime } from '../lib/datetime'
 
 /** Hesap türü etiketleri; ekranda görünen ad sunumun işi, kaydın değil. */
 const ACCOUNT_LABELS: Record<string, string> = {
@@ -106,7 +107,7 @@ function shortDate(value: string | null | undefined): string {
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime())
     ? 'veri yok'
-    : parsed.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: '2-digit' })
+    : formatDate(parsed, { day: '2-digit', month: 'short', year: '2-digit' })
 }
 
 /**
@@ -240,12 +241,8 @@ export default function Home() {
         // Gün görünümünde saat, diğerlerinde tarih. Gün içi bir seriyi
         // tarihle etiketlemek, bütün noktalara aynı adı vermek olurdu.
         label: active.intraday
-          ? new Date(point.at).toLocaleTimeString('tr-TR', {
-              hour: '2-digit', minute: '2-digit',
-            })
-          : new Date(point.at).toLocaleDateString('tr-TR', {
-              day: '2-digit', month: 'short',
-            }),
+          ? formatTime(point.at)
+          : formatDate(point.at, { day: '2-digit', month: 'short' }),
         value: point.value,
       }))
   }, [analysis, intradayAnalysis, active])

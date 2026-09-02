@@ -9,7 +9,25 @@ type SortKey = 'symbol' | 'price' | 'changePercent' | 'volume'
 type SortDir = 'asc' | 'desc'
 
 /** Açılışta gösterilen satır sayısı; gerisi "Tümünü Gör" ile gelir. */
-const PAGE_SIZE = 25
+/** Sayfa başına satır. */
+const PAGE_SIZE = 15
+
+/** Sayfalama düğmesi. Devre dışıyken tıklanamaz VE öyle görünür -- gri ama
+ *  basılabilen bir düğme, listenin bittiğini söylemez. */
+function PageButton({
+  label, disabled, onClick,
+}: { label: string; disabled: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded-lg border border-white/10 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:text-slate-200"
+    >
+      {label}
+    </button>
+  )
+}
 
 interface Props {
   instruments: MarketInstrument[]
@@ -115,22 +133,26 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
   }, [instruments, activeTab, query, sortKey, sortDir, showMarketTabs])
 
   /**
-   * Liste varsayılan olarak ilk sayfayla sınırlı.
+   * Sayfa sayfa, 15'erlik.
    *
-   * Evren iki borsaya çıkınca tek seferde ~90 satır basılıyordu; ekranın dibi
-   * görünmediği için liste sonsuza gidiyormuş gibi duruyordu. Kaç satır
-   * olduğu her zaman yazılır, böylece liste sonlu okunur.
+   * "Tümünü Gör" tek bir düğmeydi ve basıldığında bin satırı birden basıyordu
+   * -- dibi görünmeyen, kaydırıldıkça devam eden bir liste. Sayfalar hem
+   * listeyi sonlu gösteriyor hem de nerede olunduğunu söylüyor.
    */
-  const [expanded, setExpanded] = useState(false)
+  const [page, setPage] = useState(0)
 
-  // Süzgeç ya da sekme değişince liste yeniden başa sarılır: bir aramadan
-  // sonra "tümü" açık kalırsa kullanıcı yine dibi olmayan bir liste görür.
+  // Süzgeç ya da sekme değişince ilk sayfaya dönülür: yeni bir aramanın
+  // dördüncü sayfasında açılmak, sonucu bulunamadı sanmaktır.
   useEffect(() => {
-    setExpanded(false)
+    setPage(0)
   }, [activeTab, query, showMarketTabs])
 
-  const visibleRows = expanded ? rows : rows.slice(0, PAGE_SIZE)
-  const hiddenCount = rows.length - visibleRows.length
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  // Süzgeç ya da arama listeyi kısaltınca beşinci sayfada kalınmaz: var
+  // olmayan bir sayfa boş bir tablo gösterir ve kullanıcı bunu "sonuç yok"
+  // diye okur.
+  const current = Math.min(page, pageCount - 1)
+  const visibleRows = rows.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE)
 
   const columns: { key: SortKey; label: string; align: 'left' | 'right' }[] = [
     { key: 'symbol', label: 'Enstrüman', align: 'left' },
@@ -281,27 +303,26 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
       </div>
 
       {rows.length > 0 && (
-        <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-3">
           <span className="text-[11px] tabular-nums text-slate-400">
-            {rows.length} sonuçtan {visibleRows.length} tanesi gösteriliyor
+            {rows.length} sonuçtan {current * PAGE_SIZE + 1}–
+            {current * PAGE_SIZE + visibleRows.length} arası
           </span>
-          {hiddenCount > 0 ? (
-            <button
-              onClick={() => setExpanded(true)}
-              className="rounded-lg border border-white/10 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400/40 hover:text-white"
-            >
-              Tümünü Gör ({hiddenCount} daha)
-            </button>
-          ) : (
-            expanded && (
-              <button
-                onClick={() => setExpanded(false)}
-                className="rounded-lg border border-white/10 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400/40 hover:text-white"
-              >
-                Daha Az Göster
-              </button>
-            )
-          )}
+          <div className="flex items-center gap-1.5">
+            <PageButton
+              label="‹ Önceki"
+              disabled={current === 0}
+              onClick={() => setPage(current - 1)}
+            />
+            <span className="px-2 text-[11px] tabular-nums text-slate-400">
+              {current + 1} / {pageCount}
+            </span>
+            <PageButton
+              label="Sonraki ›"
+              disabled={current >= pageCount - 1}
+              onClick={() => setPage(current + 1)}
+            />
+          </div>
         </div>
       )}
     </div>

@@ -34,7 +34,7 @@ export default function StocksScreen() {
   // karşılığı olmayan sektörler süzgeçte görünürdü.
   // Süzgeç sunucuda: evren binin üzerinde enstrüman, istemcide ilk sayfayı
   // süzmek seçilen piyasanın yalnızca bir kısmını göstermek olurdu.
-  const { instruments, loading, sectors } = useInstruments(200, market.value)
+  const { instruments, loading, sectors } = useInstruments(1200, market.value)
 
   const filteredInstruments = useMemo(
     () => applyStockFilters(instruments, filters),

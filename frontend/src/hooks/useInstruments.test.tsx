@@ -134,19 +134,30 @@ describe('useInstruments', () => {
 describe('adapter fallbacks', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('falls back to BIST for an exchange nobody mapped', async () => {
+  it('labels an unmapped venue "Diğer" rather than claiming BIST', async () => {
     // Better than dropping the row: an unmapped venue still has a price.
+    // 'BIST' idi ve bu, satırı yanlış bir borsaya yazıyordu.
     mockApi([apiRow({ market: 'XETRA' })])
     const { result } = renderHook(() => useInstruments())
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.instruments[0].market).toBe('BIST')
+    expect(result.current.instruments[0].market).toBe('Diğer')
   })
 
-  it('falls back to BIST when the exchange is null', async () => {
+  it('labels a null venue "Diğer" too', async () => {
     mockApi([apiRow({ market: null })])
     const { result } = renderHook(() => useInstruments())
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.instruments[0].market).toBe('BIST')
+    expect(result.current.instruments[0].market).toBe('Diğer')
+  })
+
+  it.each([
+    ['FX', 'Döviz'],
+    ['COMEX', 'Altın'],
+  ])('maps %s to %s — the document names both', async (upstream, label) => {
+    mockApi([apiRow({ market: upstream })])
+    const { result } = renderHook(() => useInstruments())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.instruments[0].market).toBe(label)
   })
 
   it('shows an unmapped currency code rather than an empty unit', async () => {

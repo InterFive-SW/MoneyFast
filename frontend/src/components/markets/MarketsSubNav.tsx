@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 
 const TABS = [
   { to: '/investment/hisseler',  label: 'Hisseler' },
+  { to: '/investment/doviz-altin', label: 'Döviz & Altın' },
   { to: '/investment/fonlar',    label: 'Fonlar' },
   { to: '/investment/endeksler', label: 'Endeksler' },
   { to: '/investment/sektorler', label: 'Sektörler' },

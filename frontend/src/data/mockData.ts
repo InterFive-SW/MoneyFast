@@ -88,7 +88,7 @@ export interface NewsItem {
 export interface MarketInstrument {
   symbol:            string
   name:              string
-  market:            'BIST' | 'ABD' | 'Kripto'
+  market:            'BIST' | 'ABD' | 'Kripto' | 'Döviz' | 'Altın' | 'Diğer'
   price:             number
   unit:              string
   changePercent:     number

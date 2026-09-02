@@ -152,6 +152,40 @@ class TestPortfolioContract:
         assert body["as_of"].startswith(NOW.strftime("%Y-%m-%dT%H:%M"))
 
 
+class TestVenue:
+    """`exchange` UÇ NOKTADAN geçmeli, yalnızca `build_portfolio`'dan değil.
+
+    Alan bir dönem `str` olarak zorunluydu ve eşleşmeyen her piyasa "XIST"
+    ile dolduruluyordu -- yani döviz ve altın ajana "Borsa İstanbul'da işlem
+    görüyor" diye gidiyordu. None'a çevrildiğinde yanıt modeli 500 verdi ve
+    birim testler bunu görmedi, çünkü hepsi `build_portfolio`'yu doğrudan
+    çağırıp yanıt modelini atlıyor. Bu sınıf o boşluğu kapatıyor.
+    """
+
+    @pytest.mark.parametrize(
+        "holdings",
+        [[{**HOLDINGS[0], "symbol": "USDTRY", "market": "FX"}]],
+    )
+    def test_a_currency_pair_serialises_with_a_null_venue(self, ai_client):
+        response = ai_client.get(PORTFOLIO_URL)
+        assert response.status_code == 200
+        assert response.json()["positions"][0]["exchange"] is None
+
+    @pytest.mark.parametrize(
+        "holdings",
+        [[{**HOLDINGS[0], "symbol": "XAUUSD", "market": "COMEX"}]],
+    )
+    def test_gold_serialises_with_a_null_venue(self, ai_client):
+        response = ai_client.get(PORTFOLIO_URL)
+        assert response.status_code == 200
+        assert response.json()["positions"][0]["exchange"] is None
+
+    def test_a_listed_share_still_reports_its_mic(self, ai_client):
+        body = ai_client.get(PORTFOLIO_URL).json()
+        thyao = next(p for p in body["positions"] if p["symbol"] == "THYAO")
+        assert thyao["exchange"] == "XIST"
+
+
 class TestValuation:
     def test_try_position_values_at_price_times_quantity(self, ai_client):
         body = ai_client.get(PORTFOLIO_URL).json()

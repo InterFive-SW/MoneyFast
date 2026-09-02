@@ -24,7 +24,12 @@ class PositionOut(BaseModel):
     isin: Optional[str] = None
     name: str
     asset_class: str
-    exchange: str
+    #: ISO 10383 işlem yeri kodu, ya da None. Bir dönem zorunluydu ve
+    #: eşleşmeyen her piyasa "XIST" olarak dolduruluyordu; döviz paritelerinin
+    #: ve altının merkezî bir işlem yeri yok, dolayısıyla onlar ajana
+    #: "Borsa İstanbul'da işlem görüyor" diye gidiyordu. MCP sözleşmesi bu
+    #: alan için zaten None bekliyor.
+    exchange: Optional[str] = None
     quantity: float
     avg_cost: float
     instrument_currency: str

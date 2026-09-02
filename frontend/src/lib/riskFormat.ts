@@ -247,7 +247,7 @@ export function reliabilityNotice(raw: unknown): string | null {
  * olduğunu söylüyor.
  *
  * `UNKNOWN` bir uyuşmazlık DEĞİL: iki taraftan biri henüz yok. Rozet bunu
- * nötr tonla ve "anket bekliyor" diyerek gösteriyor, çünkü kırmızı bir
+ * nötr tonla ve "test bekliyor" diyerek gösteriyor, çünkü kırmızı bir
  * "bilinmiyor" doldurulmamış bir formu bir sorun gibi okutur.
  */
 export interface AlignmentBadge {
@@ -265,7 +265,7 @@ export const ALIGNMENT_BADGE: Record<string, AlignmentBadge> = {
         label: 'Beyanınızın altında',
         tone: 'bg-sky-500/10 text-sky-400',
     },
-    UNKNOWN: { label: 'Anket bekliyor', tone: 'bg-white/5 text-slate-400' },
+    UNKNOWN: { label: 'Test bekliyor', tone: 'bg-white/5 text-slate-400' },
 }
 
 export function alignmentBadge(alignment: string | null | undefined): AlignmentBadge {

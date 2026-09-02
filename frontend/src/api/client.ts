@@ -419,9 +419,44 @@ export interface RiskQuestion {
     options: { value: string; label: string }[];
 }
 
+/** Bir ürün grubu ve ona sorulan üç soru. Yapı yalnızca SUNUM meselesi:
+ *  puanlama düz soru listesi üzerinden çalışıyor ve bu gruplamadan habersiz. */
+export interface RiskQuestionGroup {
+    key: string;
+    label: string;
+    /** Grubun risk seviyesi, testin kendi yazdığı hâliyle. */
+    risk: string;
+    questions: RiskQuestion[];
+}
+
+export interface RiskQuestionSection {
+    key: string;
+    title: string;
+    helper: string | null;
+    questions: RiskQuestion[];
+    groups: RiskQuestionGroup[];
+}
+
 export interface RiskQuestionnaire {
     version: string;
-    questions: RiskQuestion[];
+    sections: RiskQuestionSection[];
+}
+
+/** Bir ürün grubunun yeterliliği ve GEREKÇESİ.
+ *
+ *  Gerekçe zorunlu: "uygun değil" tek başına kişi hakkında bir yargı gibi
+ *  okunuyor. Hangi beyandan çıktığı yazılı olunca hem öyle olmadığı hem de
+ *  kullanıcının cevabını değiştirerek sonucu değiştirebileceği görünüyor. */
+export interface RiskProductGroup {
+    key: string;
+    label: string;
+    risk: string;
+    knowledge: string;
+    frequency: string;
+    volume: string;
+    has_experience: boolean;
+    eligible: boolean;
+    reason: string;
 }
 
 /** Simülasyonun bir tarafı. Metriklerin tamamı değil, kıyaslanabilir olanlar. */
@@ -478,6 +513,9 @@ export interface RiskAssessmentResult {
     assessed_at: string;
     questionnaire_version: string;
     raw_score: number;
+    /** v1 ile doldurulmuş bir profilde BOŞ. Boş liste "hiçbiri uygun değil"
+     *  demek değil, "sorulmadı" demek. */
+    product_groups: RiskProductGroup[];
 }
 export type RiskFinding = NonNullable<RiskProfile['findings']>[0];
 export type RiskSuggestion = NonNullable<RiskProfile['suggestions']>[0];

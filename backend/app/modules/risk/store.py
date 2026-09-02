@@ -60,6 +60,10 @@ def record_assessment(
     profile.investment_horizon = scored["investment_horizon"]
     profile.latest_assessment_id = assessment.id
     profile.questionnaire_version = scored["version"]
+    # v1 sürümü ürün grubu üretmiyor. `.get` ile okunuyor ve gelmezse NULL
+    # kalıyor -- boş listeye çevirmek "soruldu, hiçbiri uygun çıkmadı" demek
+    # olurdu ve o kullanıcıya hiç sorulmadı.
+    profile.product_groups = scored.get("product_groups")
     profile.updated_at = datetime.now(timezone.utc)
 
     db.commit()

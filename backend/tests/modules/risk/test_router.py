@@ -649,14 +649,29 @@ class TestDelayedFlag:
 # --------------------------------------------------------------------------
 # Faz 2: risk tolerans anketi ve uyum karşılaştırması
 # --------------------------------------------------------------------------
-COMPLETE_ANSWERS = {
-    "horizon": "3_5y",
-    "drawdown_reaction": "hold",
-    "experience": "stocks",
-    "liquidity": "maybe",
-    "income_stability": "mostly",
-    "goal": "balanced",
-}
+def _complete_answers() -> dict:
+    """Uygunluk testi v2'nin tamamı, geçerli bir cevap kümesiyle.
+
+    Elle yazmak yerine tanımdan üretiliyor: on altı anahtarı testte
+    tekrarlamak, teste bir soru eklendiğinde sessizce eksik kalan bir
+    sabit bırakırdı.
+    """
+    from app.modules.risk import questionnaire_v2 as q
+
+    answers = {
+        "age_band": "31_50",
+        "education": "bachelor",
+        "horizon": "3_5y",
+        "risk_appetite": "moderate",
+    }
+    for group in q.PRODUCT_GROUPS:
+        answers[f"{group['key']}_knowledge"] = "limited"
+        answers[f"{group['key']}_frequency"] = "sometimes"
+        answers[f"{group['key']}_volume"] = "upto_50k"
+    return answers
+
+
+COMPLETE_ANSWERS = _complete_answers()
 
 
 class TestQuestionnaireEndpoint:
@@ -667,16 +682,34 @@ class TestQuestionnaireEndpoint:
         response = client.get("/api/risk/questionnaire")
         assert response.status_code == 200
         body = response.json()
-        assert len(body["questions"]) == 6
-        assert body["version"]
+        assert [s["key"] for s in body["sections"]] == [
+            "profile", "preferences", "knowledge"
+        ]
+        assert body["version"] == "v2"
+
+    def test_the_knowledge_section_arrives_as_a_matrix(self, client):
+        """Dört ürün grubu, grup başına üç soru. On altı soruyu tek listede
+        göstermek kimsenin dolduracağı bir form değil."""
+        knowledge = client.get("/api/risk/questionnaire").json()["sections"][2]
+        assert len(knowledge["groups"]) == 4
+        for group in knowledge["groups"]:
+            assert len(group["questions"]) == 3
+            assert group["label"] and group["risk"]
 
     def test_the_form_does_not_leak_the_scoring(self, client):
         """Seçeneklerin puanını göstermek anketi bir teste çevirir ve
         insanlar teste cevap verir, kendilerine değil."""
         body = client.get("/api/risk/questionnaire").json()
-        for question in body["questions"]:
-            for option in question["options"]:
-                assert set(option) == {"value", "label"}
+        options = []
+        for section in body["sections"]:
+            for question in section["questions"]:
+                options += question["options"]
+            for group in section["groups"]:
+                for question in group["questions"]:
+                    options += question["options"]
+        assert options
+        for option in options:
+            assert set(option) == {"value", "label"}
 
 
 class TestAssessmentEndpoint:
@@ -691,29 +724,54 @@ class TestAssessmentEndpoint:
 
         saved = SimpleNamespace(
             tolerance_level="Orta", investment_horizon="3-5 yıl",
-            updated_at=datetime.now(timezone.utc), questionnaire_version="v1",
+            updated_at=datetime.now(timezone.utc), questionnaire_version="v2",
+            product_groups=[{
+                "key": "deposit", "label": "Mevduat", "risk": "Çok düşük risk",
+                "knowledge": "limited", "frequency": "sometimes",
+                "volume": "upto_50k", "has_experience": True,
+                "eligible": True, "reason": "Koşul aranmıyor.",
+            }],
         )
         record = mocker.patch.object(store, "record_assessment", return_value=saved)
         body = as_user.post("/api/risk/assessment", json={"answers": COMPLETE_ANSWERS}).json()
         assert body["tolerance_level"] == "Orta"
         assert body["raw_score"] > 0
         assert record.call_args.args[2] == COMPLETE_ANSWERS
+        assert body["product_groups"][0]["key"] == "deposit"
+
+    def test_a_v1_profile_reports_no_product_groups_rather_than_none_eligible(
+        self, as_user, mocker
+    ):
+        """Boş liste "hiçbiri uygun değil" demek olurdu; o kullanıcıya hiç
+        sorulmadı."""
+        from app.modules.risk import store
+        from types import SimpleNamespace
+        from datetime import datetime, timezone
+
+        mocker.patch.object(store, "record_assessment", return_value=SimpleNamespace(
+            tolerance_level="Orta", investment_horizon="3-5 yıl",
+            updated_at=datetime.now(timezone.utc), questionnaire_version="v1",
+            product_groups=None,
+        ))
+        body = as_user.post("/api/risk/assessment", json={"answers": COMPLETE_ANSWERS}).json()
+        assert body["product_groups"] == []
 
     def test_a_partial_submission_is_refused(self, as_user):
         """Boşları sıfır sayıp puanlamak, yarıda bırakan birine temkinli bir
         tolerans atfeder — ve o tolerans sonra portföyüyle karşılaştırılır."""
         partial = dict(COMPLETE_ANSWERS)
-        del partial["goal"]
+        del partial["derivative_volume"]
         response = as_user.post("/api/risk/assessment", json={"answers": partial})
         assert response.status_code == 422
-        assert "goal" in response.json()["detail"]
+        assert "derivative_volume" in response.json()["detail"]
 
     def test_an_unknown_option_is_refused(self, as_user):
         response = as_user.post(
-            "/api/risk/assessment", json={"answers": {**COMPLETE_ANSWERS, "goal": "moon"}}
+            "/api/risk/assessment",
+            json={"answers": {**COMPLETE_ANSWERS, "risk_appetite": "moon"}},
         )
         assert response.status_code == 422
-        assert "goal=moon" in response.json()["detail"]
+        assert "risk_appetite=moon" in response.json()["detail"]
 
 
 class TestProfileCarriesTheDeclaration:

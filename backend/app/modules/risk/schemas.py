@@ -230,9 +230,38 @@ class QuestionOut(BaseModel):
     options: List[QuestionOptionOut]
 
 
+class QuestionGroupOut(BaseModel):
+    """Bir ürün grubu ve ona sorulan üç soru.
+
+    Bölüm 3 dört grup × üç soru; ekran bunu bir matris olarak çiziyor. Yapı
+    yalnızca SUNUM meselesi -- puanlama düz soru listesi üzerinden çalışıyor
+    ve bu gruplamadan habersiz.
+    """
+    key: str
+    label: str
+    #: Grubun risk seviyesi, testin kendi yazdığı hâliyle. Yeterlilik kuralı
+    #: da buna bağlı: mevduat için istenen kanıtla türev için istenen aynı
+    #: olamaz.
+    risk: str
+    questions: List[QuestionOut]
+
+
+class QuestionSectionOut(BaseModel):
+    """Testin bir bölümü.
+
+    On altı soruyu tek listede göstermek kimsenin dolduracağı bir form değil;
+    bölümler sihirbazın adımlarını veriyor.
+    """
+    key: str
+    title: str
+    helper: Optional[str] = None
+    questions: List[QuestionOut] = []
+    groups: List[QuestionGroupOut] = []
+
+
 class QuestionnaireOut(BaseModel):
     version: str
-    questions: List[QuestionOut]
+    sections: List[QuestionSectionOut]
 
 
 class AssessmentRequest(BaseModel):
@@ -275,8 +304,31 @@ class SuitabilityOut(BaseModel):
     statement: str = ""
 
 
+class ProductGroupOut(BaseModel):
+    """Bir ürün grubunun yeterliliği ve GEREKÇESİ.
+
+    Gerekçe zorunlu. "Uygun değil" tek başına kişi hakkında bir yargı gibi
+    okunuyor; hangi beyandan çıktığı yazılı olunca hem öyle olmadığı hem de
+    kullanıcının cevabını değiştirerek sonucu değiştirebileceği görünüyor.
+    """
+    key: str
+    label: str
+    risk: str
+    knowledge: str
+    frequency: str
+    volume: str
+    has_experience: bool
+    eligible: bool
+    reason: str
+
+
 class AssessmentResultOut(DeclaredProfileOut):
     raw_score: float
+    #: v1 ile doldurulmuş bir profilde boş. Eski bir cevap yeni kurallarla
+    #: yeniden puanlanmıyor, dolayısıyla o profilde ürün grubu yeterliliği
+    #: hiç ölçülmedi -- boş liste "hiçbiri uygun değil" demek değil,
+    #: "sorulmadı" demek.
+    product_groups: List[ProductGroupOut] = []
 
 
 # ---------------------------------------------------------------------------

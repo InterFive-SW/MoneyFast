@@ -7,7 +7,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user_id
 from app.modules.banking import service as banking_service
 from app.modules.investment import ai_service, market_service
-from . import profile, questionnaire, scenario, service, store
+from . import profile, questionnaire_v2 as questionnaire, scenario, service, store
 from . import returns as risk_returns
 from .deps import lookback_param, require_service_token
 from .schemas import (
@@ -300,20 +300,26 @@ def risk_summary_for_ai(
 @router.get(
     "/questionnaire",
     response_model=QuestionnaireOut,
-    summary="Risk tolerans anketi",
+    summary="Uygunluk testi",
 )
 async def get_questionnaire():
-    """Anketin kendisi. Kimlik doğrulaması istemez — sorularda kişisel veri yok
-    ve formu görmek için giriş yapmak zorunda kalmak, testi doldurma
-    ihtimalini düşürmekten başka bir işe yaramaz. Cevap GÖNDERMEK ise
-    oturuma bağlıdır."""
+    """Testin kendisi, bölümlenmiş hâliyle.
+
+    Kimlik doğrulaması istemez — sorularda kişisel veri yok ve formu görmek
+    için giriş yapmak zorunda kalmak, testi doldurma ihtimalini düşürmekten
+    başka bir işe yaramaz. Cevap GÖNDERMEK ise oturuma bağlıdır.
+
+    Yürürlükteki sürüm dönüyor. Eski bir cevabı olan kullanıcı da bunu görür:
+    v1 cevabı kaydında ve puanıyla duruyor, ama yeniden dolduracaksa
+    dolduracağı test bu.
+    """
     return questionnaire.as_payload()
 
 
 @router.post(
     "/assessment",
     response_model=AssessmentResultOut,
-    summary="Anketi gönder ve risk profilini güncelle",
+    summary="Uygunluk testini gönder ve risk profilini güncelle",
 )
 def submit_assessment(
     request: AssessmentRequest,
@@ -342,6 +348,7 @@ def submit_assessment(
     scored = questionnaire.score_answers(request.answers)
     saved = store.record_assessment(db, user_id, request.answers, scored)
     return AssessmentResultOut(
+        product_groups=saved.product_groups or [],
         tolerance_level=saved.tolerance_level,
         investment_horizon=saved.investment_horizon,
         assessed_at=saved.updated_at,

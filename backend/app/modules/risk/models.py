@@ -78,6 +78,16 @@ class RiskProfile(Base):
     #: always traceable to the answers behind it.
     latest_assessment_id: Mapped[str] = mapped_column(String, nullable=False)
     questionnaire_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: Ürün grubu başına yeterlilik, uygunluk testinin ürettiği hâliyle.
+    #:
+    #: Profilde denormalize duruyor, değerlendirme satırından okunmuyor:
+    #: `tolerance_level` da öyle ve aynı sebeple -- yürürlükteki profili
+    #: okumak her seferinde bir birleştirme gerektirmemeli.
+    #:
+    #: v1 ile doldurulmuş bir profilde NULL. Boş liste ile null aynı şey
+    #: değil: null "sorulmadı", boş liste "soruldu, hiçbiri uygun çıkmadı"
+    #: demek olurdu ve ikincisi o kullanıcı için doğru değil.
+    product_groups: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )

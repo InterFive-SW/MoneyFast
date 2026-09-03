@@ -45,5 +45,11 @@ coverage/
 frontend/dist/
 *.tsbuildinfo
 
+# Browser DevTools captures used to discover KAP's undocumented endpoints.
+# One-time diagnostics, 1,7 MB, and most of that is a base64 banner payload.
+# What they taught us is written down in docs/KAP_ENDPOINTS.md; the archives
+# themselves are not worth carrying in git history.
+docs/kap-har/
+
 # WSL, Windows'tan kopyalanan her dosyanın yanına bunu bırakıyor.
 *:Zone.Identifier

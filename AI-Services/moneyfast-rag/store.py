@@ -269,6 +269,40 @@ async def ingest(conn_factory, document: dict[str, Any], chunks: Sequence[tuple[
     return document_id, written
 
 
+#: Tek istekte sorulabilecek en fazla adres. Sınırsız bir liste, indeksli
+#: aramayı isteğe bağlı bir tablo taramasına çevirmenin en kolay yolu.
+MAX_URL_QUERY = 2_000
+
+
+async def known_urls(urls: list[str]) -> set[str]:
+    """Bu adreslerden hangileri kamuya açık derlemde zaten var.
+
+    `ingestor`'ın gövde indirmeden ÖNCE sorduğu soru -- backend'deki
+    `known-hashes` ile aynı desen, aynı gerekçe: pahalı olan listeleme değil,
+    bildirim başına bir istek olan gövde indirme.
+
+    Yalnızca `owner_user_id IS NULL` satırlarına bakıyor. Kullanıcının kendi
+    yüklediği bir belgenin adresi buraya cevap verseydi, bir kullanıcının
+    özel belgesinin varlığı servisler arası bir uçtan sızardı.
+    """
+    if not urls:
+        return set()
+    pool = await open_pool()
+    async with pool.connection() as conn:
+        cursor = await conn.execute(
+            """
+            SELECT source_url FROM rag.documents
+            WHERE owner_user_id IS NULL AND source_url = ANY(%(urls)s)
+            """,
+            {"urls": list(urls)[:MAX_URL_QUERY]},
+        )
+        rows = await cursor.fetchall()
+    # Havuz `dict_row` ile kuruluyor (bkz. `open_pool`), yani satırlar
+    # demet değil sözlük. Konumla okumak `KeyError: 0` veriyor ve uç 503
+    # dönüyordu -- ölçüldü.
+    return {row["source_url"] for row in rows if row.get("source_url")}
+
+
 async def delete_document(document_id: str, owner_user_id: str) -> bool:
     """Bir kullanıcının kendi belgesini siler. Chunk'lar CASCADE ile gider.
 

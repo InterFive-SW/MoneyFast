@@ -39,19 +39,23 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Iterable, Optional
 
 import httpx
 
 from .. import config
-from . import rss_source
+from . import courtesy, rss_source
 
 log = logging.getLogger("moneyfast.ingestor.kap")
+
+#: KAP yerel saatle yayımlıyor.
+ISTANBUL = ZoneInfo("Europe/Istanbul")
 
 #: Haber kaydının `source` alanı. Backend "hangileri bende var" sorusunu
 #: bununla süzüyor.
 #: `robots.txt` ÇEKİLEMİYOR: KAP o yola 666 döndürüyor (ölçüldü). Dolayısıyla
-#: uygulanacak bir direktif yok ve `rss_source._may_fetch`'in zaten uyguladığı
+#: uygulanacak bir direktif yok ve `courtesy.may_fetch`'in zaten uyguladığı
 #: kural geçerli -- "robots.txt yoksa bu, gelenek gereği izindir, hata
 #: değildir". Buraya yazılı, çünkü ileride biri "robots'u kontrol ettik mi"
 #: diye sorduğunda cevabın kodda durması gerekiyor.
@@ -88,7 +92,13 @@ DETAIL_LIMIT = 40
 #: Bir bildirimi kimliklendiren şey. `disclosureIndex` KAP'ın kendi kalıcı
 #: numarası; metinden türetilen bir hash, bildirim düzeltildiğinde (KAP bunu
 #: yapıyor, `isChanged` alanı var) aynı bildirimi ikinci kez yazdırırdı.
-_HASH_PREFIX = "KAP:"
+#:
+#: **Küçük harf, ve bu bir tercih değil.** `seeds/market/news.csv.gz` içindeki
+#: 27.541 satır bu biçimle üretildi ve tekil indeks `content_hash` üzerinde --
+#: `url` üzerinde değil. Önek büyük harfe dönerse tohumdaki her bildirim
+#: ikinci kez yazılır: panoda çift satır, kullanıcıda çift bildirim.
+#: `tests/test_kap_source.py` bir tohum özetini sabitliyor.
+_HASH_PREFIX = "kap:"
 
 
 def content_hash(index: int) -> str:
@@ -143,9 +153,12 @@ def _published(raw: Optional[str]) -> datetime:
     """
     for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
         try:
-            return datetime.strptime(raw or "", fmt).replace(tzinfo=timezone.utc)
+            naive = datetime.strptime(raw or "", fmt)
         except ValueError:
             continue
+        # KAP yerel saatle yayımlıyor ve bunu yükte hiçbir yerde söylemiyor.
+        # `tzinfo=utc` demek, damgayı üç saat ileri kaydırmak olurdu.
+        return naive.replace(tzinfo=ISTANBUL).astimezone(timezone.utc)
     log.warning("kap: unreadable publishDate %r", raw)
     return datetime.now(timezone.utc)
 
@@ -156,9 +169,16 @@ def _symbols(record: dict[str, Any]) -> list[str]:
     `relatedStocks` virgüllü bir liste olabiliyor (bir şirketin birden fazla
     pay sınıfı). Metinden çıkarım YOK -- bu kaynağın en değerli yanı zaten
     tahmine gerek bırakmaması.
+
+    Üç alan birden okunuyor: flight yükü `stockCode` (tekil), `byCriteria`
+    ucu `stockCodes` (çoğul) diyor. Aynı şeyin iki ucundaki iki adı, ve arşiv
+    yolu ikincisini kullanıyor. Ölçüldü: eşleşmelerin %37'si yalnızca
+    `relatedStocks` üzerinden geliyor -- aracı kurum kendi kodu altında başka
+    bir şirket hakkında bildirim veriyor.
     """
     found: list[str] = []
-    for value in (record.get("stockCode"), record.get("relatedStocks")):
+    for value in (record.get("stockCode"), record.get("stockCodes"),
+                  record.get("relatedStocks")):
         for part in str(value or "").split(","):
             code = part.strip().upper()
             if code and code.isalnum() and 3 <= len(code) <= 6:
@@ -168,9 +188,9 @@ def _symbols(record: dict[str, Any]) -> list[str]:
 
 def fetch_list(client: httpx.Client) -> list[dict[str, Any]]:
     """Bildirim listesi. Herhangi bir hatada [] döner, yükseltmez."""
-    if not rss_source._may_fetch(LIST_URL, client):
+    if not courtesy.may_fetch(LIST_URL, client):
         return []
-    rss_source._wait_for_host(LIST_URL)
+    courtesy.wait_for_host(LIST_URL)
     headers = {"User-Agent": config.user_agent(), "rsc": "1", "Accept": "*/*"}
     try:
         response = client.get(LIST_URL, headers=headers, timeout=config.request_timeout())
@@ -193,9 +213,9 @@ def fetch_detail(client: httpx.Client, index: int) -> str:
     olurdu.
     """
     url = DETAIL_URL.format(index=index)
-    if not rss_source._may_fetch(url, client):
+    if not courtesy.may_fetch(url, client):
         return ""
-    rss_source._wait_for_host(url)
+    courtesy.wait_for_host(url)
     try:
         response = client.get(
             url,

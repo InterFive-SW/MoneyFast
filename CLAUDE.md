@@ -337,8 +337,10 @@ Sıralama sabit olmasaydı aynı veri her seferinde farklı satır sırasıyla
 yazılır ve her export tam bir yeniden yazma gibi görünürdü — yani tam olarak
 kullanıcı başına ayırmanın önlediği çakışma.
 
-`market_quotes`, mumlar ve haberler dışa aktarılmaz: ingestor hepsini kendisi
-üretir. Mumlar bir dönem `seeds/market/candles.sql` olarak commit'leniyordu —
+`market_quotes` dışa aktarılmaz: bir kotasyon ŞU ANA dair bir iddiadır ve
+eski bir fiyatı güncelmiş gibi sunmak, yanlış bir fiyattan ayırt edilemez.
+Mum, temel veri ve KAP bildirimi ise tarihsel kayıt ve eskimiyor —
+`seeds/market/` altında commit'leniyorlar. Mumlar bir dönem `seeds/market/candles.sql` olarak commit'leniyordu —
 7,5 MB — çünkü günlük barlar yalnızca 19:15 cron'uydu ve sabah açılan bir
 klon akşama kadar boş grafik gösteriyordu. Artık ingestor açılışta
 `GET /api/market/candles/coverage`'a sorup **yalnızca eksik olanı** çekiyor:
@@ -346,6 +348,59 @@ ilk açılışta evrenin tamamı (ölçülen: 187 sembol, 37.199 bar, 36 saniye)
 yeniden başlatmada tek bir HTTP çağrısı. Bloklamaz — `fetch_candles` sembol
 başına çalıştığı için tek seferlik bir scheduler job'ı olarak kuyruğa girer. `dumps/` ise gitignore'da — `make db-dump` tam bir yedek alır
 (riskli bir işlemden önce) ve birine tam durumunu vermek için kullanılır.
+
+### KAP — bildirimler
+
+Haberin bir şirketi olmasını sağlayan kaynak. RSS beslemelerinin güvenilir
+bir hisse etiketi yok (`_tickers` yalnızca besleme kategorilerini okuyabiliyor,
+pratikte `related_symbols` boş geliyor); KAP bildiriminin ihraççısı makine
+okunur bir alanda, kalıcı bağlantısıyla birlikte yazılı.
+
+Kazıma değil: KAP bir JSON API sunuyor ve dürüst bir `User-Agent`'a
+`Referer` olmadan, oturum ısıtması olmadan cevap veriyor — varsayılmadı,
+ölçüldü (sahte referrer ile ve olmadan yanıtlar bayt bayt aynı).
+
+| Uç | Ne verir |
+|---|---|
+| `POST /tr/api/disclosure/members/byCriteria` | Tarih aralığındaki bildirimler. **2000'de kesiyor**, sayfalama yok → pencere ikiye bölünüyor |
+| `GET /tr/api/notification/attachment-detail/{index}` | Gövde (HTML listesi) + ek listesi |
+| `GET /tr/api/file/download/{objId}` | Ek. **PDF değil**: serileştirilmiş Java bayt dizisi |
+
+**Süzgeç izin listesi, `rss_source`'un tersi.** Orada kara liste doğru
+(kaçırılan haber görünmez, araya karışan futbol haberi görünür); burada hedef
+küme sayılabilir. `stockCodes` VE `relatedStocks` birlikte okunuyor:
+ölçüldü, eşleşmelerin %37'si yalnızca ikincisi üzerinden geliyor — aracı
+kurum kendi kodu altında başka bir şirket hakkında bildirim veriyor.
+
+**Tekilleştirme anahtarı bildirim numarasından türetiliyor**
+(`sha256("kap:{index}")`), metinden değil. Bunun asıl faydası şu: anahtar
+LİSTELEME yanıtından hesaplanabiliyor, dolayısıyla `POST
+/api/market/news/known-hashes` sayesinde hangi gövdenin çekilmeye değeceği,
+tek bir gövde indirilmeden biliniyor. Altı aylık taramayı yeniden
+başlatılabilir kılan şey bu.
+
+**Sözleşmeye dokunulmadı.** `document_type = FILING` zaten dondurulmuş
+`doc_types` enum'unda; `category = kap-disclosure` ve `source = KAP` iki
+süzgeç daha veriyor, ikisi de `ALLOWED_FILTERS`'ta. Yeni MCP tool'u yok,
+sürüm artışı yok.
+
+**Ekler kırılgan yer.** Java zarfı çözüldükten sonra `%PDF-` DOĞRULANIYOR
+(işaret baytları sınıf adının içinde de geçebiliyor) ve çözülemeyenler
+sayılıyor — belgelenmemiş, sürümsüz bir uç. Ayrıca bazı PDF'ler `ToUnicode`
+eşlemesi olmayan yazı tipleriyle üretilmiş ve `pypdf` bunlarda hata
+VERMİYOR, makul görünen anlamsız metin döndürüyor; sembol karakteri
+yoğunluğuyla eleniyor (bozuk 0,0617, okunabilenlerin hepsi ≤0,0001).
+
+**Okunamayan pencere, boş pencereden ayrı.** Gerçek bir taramada ölçüldü:
+aynı altı ay bir turda 28.508, kısıtlanmış bir turda 14.589 döndürdü ve
+ikisi de aynı satırı logladı. Artık okunamayan pencereler sayılıyor ve
+`windows_unread` olarak yüzeye çıkıyor.
+
+`seeds/market/news.csv.gz` altı aylık **başlıkları** taşıyor (27.541 satır,
+2,1 MB). Gövdeler ve ekler çalışma anında iniyor: panonun istediği tarihsel
+bir kayıt, korpusun istediği okunacak metin, ve ikincisi git'te taşınacak
+şey değil — vektörleriyle birlikte ~33 MB olurdu ve gzip blob'u
+delta'lanmadığı için bu, her yeniden dışa aktarmada kalıcı geçmiş demek.
 
 ## Teknoloji stack'i
 

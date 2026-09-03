@@ -8,7 +8,7 @@ single failing destination can take the run down with it.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 
 import httpx
 import pytest
@@ -306,6 +306,304 @@ class TestCli:
         assert started == [True]
 
 
+class TestNewsChunking:
+    def test_a_large_batch_is_split(self):
+        """Measured once already on candles: a single oversized POST timed
+        out, the sink returned None, and the cycle reported '0 written' with
+        no error anywhere. A six-month KAP backfill is ~15.000 rows."""
+        sizes = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            sizes.append(len(json.loads(request.content)["items"]))
+            return httpx.Response(200, json={"news_written": 1})
+
+        items = [
+            {"content_hash": str(i) * 64, "title": "t", "source": "KAP", "published_at": NOW}
+            for i in range(1100)
+        ]
+        result = sinks.push_news_to_backend(client_for(handler), items)
+        assert sizes == [500, 500, 100]
+        assert result["news_written"] == 3
+
+    def test_one_failed_batch_does_not_lose_the_others(self):
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(503, json={})
+            return httpx.Response(200, json={"news_written": 2})
+
+        items = [
+            {"content_hash": str(i) * 64, "title": "t", "source": "KAP", "published_at": NOW}
+            for i in range(600)
+        ]
+        assert sinks.push_news_to_backend(client_for(handler), items)["news_written"] == 2
+
+    def test_every_batch_failing_reports_nothing_delivered(self):
+        items = [{"content_hash": "a" * 64, "title": "t", "source": "s", "published_at": NOW}]
+        assert sinks.push_news_to_backend(client_for(recorder(status=503)), items) is None
+
+
+class TestCorpusBackfill:
+    """Panoya düşmek, sohbetin bulabilmesi demek değil.
+
+    Ölçüldü: panoda 28.984 KAP bildirimi varken derlemde 147 gövde vardı ve
+    THYAO'nun 47 bildiriminin sıfırı gömülüydü. Sebebi tasarımdı -- gövde
+    yalnızca YENİ gelenler için çekiliyordu, geriye dönük arşivin gövdesini
+    kimse çekmiyordu.
+    """
+
+    def _archive_row(self, i):
+        return {"content_hash": str(i) * 64, "title": f"THYAO — bildirim {i}",
+                "url": f"https://www.kap.org.tr/tr/Bildirim/{i}",
+                "related_symbols": ["THYAO"], "published_at": "2026-08-28T20:15:00+00:00"}
+
+    def test_only_disclosures_without_text_are_fetched(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_CORPUS_BUDGET", "10")
+        pages = [[self._archive_row(1), self._archive_row(2)], []]
+        monkeypatch.setattr(run.sinks, "fetch_news_archive",
+                            lambda c, s, l, o: pages.pop(0) if pages else [])
+        monkeypatch.setattr(
+            run.sinks, "fetch_embedded_urls",
+            lambda c, urls: {"https://www.kap.org.tr/tr/Bildirim/1"},
+        )
+        read = []
+        monkeypatch.setattr(run.kap_archive, "fetch_detail",
+                            lambda i, c: read.append(i) or {"disclosureBody": ["<p>x</p>"]})
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+        assert run.backfill_kap_corpus(None)["embedded"] == 1
+        assert read == ["2"], "the one already embedded must not be re-read"
+
+    def test_the_pass_is_budgeted(self, monkeypatch):
+        """Gövde başına bir istek, host başına iki saniye. Sınırsız bırakmak
+        tek turun saatlerce sürmesi demekti."""
+        monkeypatch.setenv("INGESTOR_KAP_CORPUS_BUDGET", "2")
+        pages = [[self._archive_row(i) for i in range(5)], []]
+        monkeypatch.setattr(run.sinks, "fetch_news_archive",
+                            lambda c, s, l, o: pages.pop(0) if pages else [])
+        monkeypatch.setattr(run.sinks, "fetch_embedded_urls", lambda c, urls: set())
+        monkeypatch.setattr(run.kap_archive, "fetch_detail",
+                            lambda i, c: {"disclosureBody": ["<p>x</p>"]})
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+        assert run.backfill_kap_corpus(None)["embedded"] == 2
+
+    def test_a_complete_corpus_fetches_nothing(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_news_archive",
+                            lambda c, s, l, o: [self._archive_row(1)] if o == 0 else [])
+        monkeypatch.setattr(
+            run.sinks, "fetch_embedded_urls",
+            lambda c, urls: {"https://www.kap.org.tr/tr/Bildirim/1"},
+        )
+
+        def refuse(*a, **k):
+            pytest.fail("nothing is missing; no body should be fetched")
+
+        monkeypatch.setattr(run.kap_archive, "fetch_detail", refuse)
+        assert run.backfill_kap_corpus(None) == {"fetched": 0, "embedded": 0}
+
+    def test_a_zero_budget_switches_the_job_off(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_CORPUS_BUDGET", "0")
+
+        def refuse(*a, **k):
+            pytest.fail("the job is switched off")
+
+        monkeypatch.setattr(run.sinks, "fetch_news_archive", refuse)
+        assert run.backfill_kap_corpus(None) == {"skipped": True}
+
+    def test_an_archive_row_without_a_link_is_not_asked_about(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_CORPUS_BUDGET", "5")
+        row = {**self._archive_row(1), "url": None}
+        pages = [[row], []]
+        asked = []
+        monkeypatch.setattr(run.sinks, "fetch_news_archive",
+                            lambda c, s, l, o: pages.pop(0) if pages else [])
+        monkeypatch.setattr(run.sinks, "fetch_embedded_urls",
+                            lambda c, urls: asked.append(urls) or set())
+        monkeypatch.setattr(run.kap_archive, "fetch_detail", lambda i, c: None)
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+        run.backfill_kap_corpus(None)
+        assert asked == [[]]
+
+    def test_a_row_whose_link_carries_no_index_is_skipped(self, monkeypatch):
+        """Bildirim numarası kalıcı bağlantının içinde; bağlantısı olmayan
+        bir satırın gövdesi çekilemez."""
+        def refuse(*a, **k):
+            pytest.fail("there is no disclosure index to fetch")
+
+        monkeypatch.setattr(run.kap_archive, "fetch_detail", refuse)
+        assert run._with_bodies([{"url": None, "title": "t", "related_symbols": [],
+                                  "published_at": NOW}], None) == []
+
+    def test_an_iso_publish_date_is_parsed_back(self, monkeypatch):
+        """Arşiv ucu ISO metin döndürüyor, yoklama ise datetime taşıyor. Ek
+        penceresi tarih aritmetiği yapıyor ve metinle çalışmıyor."""
+        monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
+        monkeypatch.setattr(run.kap_archive, "fetch_detail",
+                            lambda i, c: {"disclosureBody": ["<p>gövde</p>"]})
+        monkeypatch.setattr(run.kap_archive, "attachment_text", lambda d, c: "")
+        docs = run._with_bodies([{
+            "url": ".../1", "title": "t", "related_symbols": [],
+            "published_at": datetime.now(timezone.utc).isoformat(),
+        }], None)
+        assert docs and isinstance(docs[0]["published_at"], datetime)
+
+
+class TestArchiveAndCorpusLookups:
+    def test_the_archive_page_is_read_from_the_backend(self):
+        handler = recorder(body={"items": [{"content_hash": "a" * 64}]})
+        rows = sinks.fetch_news_archive(client_for(handler), "KAP", 200, 0)
+        assert len(rows) == 1
+        assert handler.calls[0].url.path.endswith("/market/news/archive")
+
+    def test_an_unavailable_archive_page_yields_nothing(self):
+        assert sinks.fetch_news_archive(client_for(recorder(status=503)), "KAP", 10, 0) == []
+
+    def test_the_corpus_is_asked_which_texts_it_holds(self):
+        handler = recorder(body={"known": ["https://x/1"]})
+        got = sinks.fetch_embedded_urls(client_for(handler), ["https://x/1", "https://x/2"])
+        assert got == {"https://x/1"}
+        assert handler.calls[0].url.path.endswith("/documents/known-urls")
+
+    def test_an_empty_list_asks_nothing(self):
+        def handler(request):
+            pytest.fail("nothing to ask about")
+
+        assert sinks.fetch_embedded_urls(client_for(handler), []) == set()
+
+    def test_a_failed_lookup_assumes_nothing_is_embedded(self):
+        """Güvenli yön: fazladan indirilen bir gövde `ON CONFLICT` ile
+        eleniyor, atlanan bir gövde sessiz bir boşluk bırakırdı."""
+        assert sinks.fetch_embedded_urls(client_for(recorder(status=503)), ["https://x/1"]) == set()
+
+
+class TestKapCatchUp:
+    def test_coverage_is_read_from_the_backend(self):
+        handler = recorder(body={"KAP": {"items": 5, "last": "2026-08-20", "last_index": 99}})
+        got = sinks.fetch_news_coverage(client_for(handler))
+        assert got["KAP"]["last_index"] == 99
+        assert handler.calls[0].url.path.endswith("/market/news/coverage")
+
+    def test_unavailable_coverage_reads_as_nothing_covered(self):
+        """The safe direction: the caller then does the complete thing."""
+        assert sinks.fetch_news_coverage(client_for(recorder(status=503))) == {}
+
+    def test_top_up_catches_the_gap_since_the_newest_held(self, monkeypatch):
+        monkeypatch.setattr(
+            run.sinks, "fetch_news_coverage",
+            lambda c: {"KAP": {"items": 10, "last": "2026-08-20", "last_index": 5}},
+        )
+        span = {}
+        monkeypatch.setattr(
+            run, "run_kap",
+            lambda client, since=None, until=None: span.update(since=since, until=until) or {},
+        )
+        run.topup_kap(None)
+        # A margin behind the watermark: overlap is free, a gap is not.
+        assert span["since"] == date(2026, 8, 20) - timedelta(days=run.KAP_TOPUP_MARGIN_DAYS)
+
+    def test_an_empty_store_is_the_backfill_s_question_not_the_top_up_s(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_news_coverage", lambda c: {})
+        assert run.topup_kap(None) == {"skipped": True}
+
+    def test_coverage_without_a_date_is_skipped(self, monkeypatch):
+        monkeypatch.setattr(
+            run.sinks, "fetch_news_coverage", lambda c: {"KAP": {"items": 3, "last": None}}
+        )
+        assert run.topup_kap(None) == {"skipped": True}
+
+    def test_an_already_current_store_fetches_nothing(self, monkeypatch):
+        today = datetime.now(run.ISTANBUL).date()
+        monkeypatch.setattr(
+            run.sinks, "fetch_news_coverage",
+            lambda c: {"KAP": {"items": 10, "last": (today + timedelta(days=5)).isoformat()}},
+        )
+
+        def refuse(*a, **k):
+            pytest.fail("nothing to catch up on")
+
+        monkeypatch.setattr(run, "run_kap", refuse)
+        assert run.topup_kap(None) == {"fetched": 0}
+
+    def test_the_backfill_reaches_back_the_configured_depth(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_BACKFILL_DAYS", "183")
+        span = {}
+        monkeypatch.setattr(
+            run, "run_kap",
+            lambda client, since=None, until=None: span.update(days=(until - since).days) or {},
+        )
+        run.backfill_kap(None)
+        assert span["days"] == 183
+
+
+class TestDisclosureCorpusPush:
+    def _doc(self, **over):
+        doc = {
+            "title": "THYAO — Bir şey",
+            "url": "https://www.kap.org.tr/tr/Bildirim/1",
+            "published_at": NOW,
+            "related_symbols": ["THYAO"],
+            "text": "İlgili şirketler: THYAO\nGövde metni",
+        }
+        doc.update(over)
+        return doc
+
+    def test_a_disclosure_is_filed_under_the_contract_s_own_enum(self):
+        """FILING is already in the frozen doc_types enum, so the model can
+        filter on it without the contract being reopened."""
+        handler = recorder(body={"status": "ingested"})
+        assert sinks.push_disclosures_to_rag(client_for(handler), [self._doc()]) == 1
+        body = json.loads(handler.calls[0].content)
+        assert body["document_type"] == "FILING"
+        assert body["category"] == "kap-disclosure"
+        assert body["source"] == "KAP"
+        assert body["ticker"] == "THYAO"
+        # `#ekler`: canlı akış aynı bildirimin GÖVDESİNİ dakikalar içinde
+        # çıplak adresle korpusa yazıyor. Aynı adresi kullansaydık
+        # `documents/known-urls` "bende var" der ve ekli bilançolar bir daha
+        # hiç okunmazdı. Parça hâlâ doğru KAP sayfasına çözülüyor.
+        assert body["source_url"] == "https://www.kap.org.tr/tr/Bildirim/1#ekler"
+
+    def test_a_duplicate_is_not_counted_as_written(self):
+        handler = recorder(body={"status": "duplicate"})
+        assert sinks.push_disclosures_to_rag(client_for(handler), [self._doc()]) == 0
+
+    def test_the_primary_filer_takes_the_single_ticker_column(self):
+        handler = recorder(body={"status": "ingested"})
+        sinks.push_disclosures_to_rag(
+            client_for(handler), [self._doc(related_symbols=["ASELS", "TUPRS"])]
+        )
+        assert json.loads(handler.calls[0].content)["ticker"] == "ASELS"
+
+    def test_an_index_wide_notice_is_kept_out_of_the_corpus(self):
+        """A document tagged to forty companies is about none of them, and
+        would compete for every one of their retrieval slots."""
+        def handler(request):
+            pytest.fail("too many issuers; this must not be embedded")
+
+        assert sinks.push_disclosures_to_rag(
+            client_for(handler), [self._doc(related_symbols=[f"S{i}" for i in range(9)])]
+        ) == 0
+
+    def test_a_disclosure_with_no_body_is_not_embedded(self):
+        def handler(request):
+            pytest.fail("nothing to embed")
+
+        assert sinks.push_disclosures_to_rag(client_for(handler), [self._doc(text="  ")]) == 0
+
+    def test_a_rag_outage_is_degraded_not_broken(self):
+        """The disclosure still reached the dashboard; the chatbot will
+        simply say it found no sources, which is true."""
+        assert sinks.push_disclosures_to_rag(client_for(recorder(status=503)), [self._doc()]) == 0
+
+    def test_a_disclosure_naming_no_issuer_still_embeds(self):
+        handler = recorder(body={"status": "ingested"})
+        assert sinks.push_disclosures_to_rag(
+            client_for(handler), [self._doc(related_symbols=[])]
+        ) == 1
+        assert json.loads(handler.calls[0].content)["ticker"] is None
+
+
 class TestCycles:
     def test_news_cycle_reports_both_destinations(self, monkeypatch):
         monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [{"title": "x"}])
@@ -355,6 +653,216 @@ class TestCycles:
         monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 0)
         run.run_news(None)
         assert seen["known"] == {7, 8}
+
+    def test_kap_cycle_pushes_matched_disclosures_to_the_backend(self, monkeypatch):
+        """Same sink as RSS: a disclosure IS market news, it just arrives with
+        an issuer attached and a permanent link."""
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "THYAO", "market": "BIST"},
+            {"symbol": "AAPL", "market": "NASDAQ"},
+        ])
+        seen = {}
+
+        def fake_fetch(universe, since, until, client):
+            seen["universe"] = universe
+            seen["span"] = (since, until)
+            return [{"title": "THYAO — bir şey"}]
+
+        monkeypatch.setattr(run.kap_archive, "fetch_all", fake_fetch)
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
+
+        assert run.run_kap(None, bodies=False) == {
+            "fetched": 1, "embedded": 0, "news_written": 1
+        }
+        assert seen["universe"] == {"THYAO"}, "only BIST instruments can appear on KAP"
+
+    def test_the_kap_poll_looks_back_over_a_window_not_a_point(self, monkeypatch):
+        """A disclosure filed while the previous cycle was mid-flight would
+        otherwise fall between two polls. Re-offering a stored one is free."""
+        monkeypatch.setenv("INGESTOR_KAP_WINDOW_DAYS", "3")
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        span = {}
+
+        def fake_fetch(universe, since, until, client):
+            span["days"] = (until - since).days
+            return []
+
+        monkeypatch.setattr(run.kap_archive, "fetch_all", fake_fetch)
+        run.run_kap(None, bodies=False)
+        assert span["days"] == 2
+
+    def test_an_explicit_range_overrides_the_window(self, monkeypatch):
+        from datetime import date
+
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        span = {}
+
+        def fake_fetch(universe, since, until, client):
+            span["range"] = (since, until)
+            return []
+
+        monkeypatch.setattr(run.kap_archive, "fetch_all", fake_fetch)
+        run.run_kap(None, since=date(2026, 3, 1), until=date(2026, 3, 10), bodies=False)
+        assert span["range"] == (date(2026, 3, 1), date(2026, 3, 10))
+
+    def test_a_kap_push_failure_still_reports_what_was_fetched(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.kap_archive, "fetch_all", lambda *a, **k: [{"title": "x"}])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: None)
+        assert run.run_kap(None, bodies=False) == {"fetched": 1, "embedded": 0}
+
+    def test_only_disclosures_the_backend_lacks_get_their_body_read(self, monkeypatch):
+        """The expensive pass is per-disclosure; in steady state almost
+        everything in the window is already held."""
+        items = [
+            {"content_hash": "a" * 64, "url": ".../1", "title": "t",
+             "published_at": NOW, "related_symbols": ["THYAO"]},
+            {"content_hash": "b" * 64, "url": ".../2", "title": "t",
+             "published_at": NOW, "related_symbols": ["THYAO"]},
+        ]
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.kap_archive, "fetch_all", lambda *a, **k: items)
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, src: {1})
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
+        read = []
+        monkeypatch.setattr(
+            run.kap_archive, "fetch_detail",
+            lambda index, client: read.append(index) or {"disclosureBody": ["<p>x</p>"]},
+        )
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+
+        assert run.run_kap(None)["embedded"] == 1
+        assert read == ["2"], "the already-held disclosure must not be re-read"
+
+    def test_an_incomplete_pass_says_so_in_its_result(self, monkeypatch):
+        """A throttled enumeration returns fewer disclosures and no error.
+        Without this the cycle reports a smaller number as if it were the
+        whole answer — measured for real at 14.589 against 28.508."""
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.kap_archive, "fetch_all", lambda *a, **k: [])
+        monkeypatch.setattr(run.kap_archive, "last_run_failures", 7)
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: 0)
+        assert run.run_kap(None, bodies=False)["windows_unread"] == 7
+
+    def test_the_body_pass_is_budgeted(self, monkeypatch):
+        """One request per body at two seconds a host. Unbounded, a first run
+        would spend hours before anything else got a turn."""
+        monkeypatch.setattr(run, "KAP_BODY_BUDGET", 2)
+        items = [
+            {"content_hash": str(i) * 64, "url": f".../{i}", "title": "t",
+             "published_at": NOW, "related_symbols": []}
+            for i in range(5)
+        ]
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.kap_archive, "fetch_all", lambda *a, **k: items)
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, src: set())
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        monkeypatch.setattr(
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>x</p>"]}
+        )
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+        assert run.run_kap(None)["embedded"] == 2
+
+    def test_bodies_can_be_switched_off_for_a_listing_only_pass(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.kap_archive, "fetch_all", lambda *a, **k: [
+            {"content_hash": "a" * 64, "url": ".../1", "title": "t",
+             "published_at": NOW, "related_symbols": []}])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
+
+        def refuse(*a, **k):
+            pytest.fail("bodies were switched off")
+
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", refuse)
+        assert run.run_kap(None, bodies=False)["embedded"] == 0
+
+    def test_every_issuer_is_named_in_the_text(self, monkeypatch):
+        """rag.documents.ticker is one column, so a two-company notice can
+        only be FILTERED by one of them. Naming both keeps it findable."""
+        monkeypatch.setattr(
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+        )
+        docs = run._with_bodies(
+            [{"url": ".../7", "title": "ASELS — birleşme", "published_at": NOW,
+              "related_symbols": ["ASELS", "TUPRS"]}],
+            None,
+        )
+        assert docs[0]["text"].startswith("İlgili şirketler: ASELS, TUPRS")
+        assert "gövde" in docs[0]["text"]
+
+    def test_a_recent_disclosure_gets_its_attachments_read(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
+        monkeypatch.setattr(
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+        )
+        monkeypatch.setattr(run.kap_archive, "attachment_text", lambda d, c: "[Rapor.pdf]\nek metni")
+        docs = run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": datetime.now(timezone.utc),
+              "related_symbols": []}],
+            None,
+        )
+        assert "ek metni" in docs[0]["text"]
+
+    def test_an_old_disclosure_does_not_pay_for_its_attachments(self, monkeypatch):
+        """One request per attachment. Over a six-month backfill that would
+        be a third of the wall clock spent on filings nobody will ask about."""
+        monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
+        monkeypatch.setattr(
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+        )
+
+        def refuse(detail, client):
+            pytest.fail("an old disclosure must not download attachments")
+
+        monkeypatch.setattr(run.kap_archive, "attachment_text", refuse)
+        old = datetime.now(timezone.utc) - timedelta(days=200)
+        docs = run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": old, "related_symbols": []}], None
+        )
+        assert docs[0]["text"].endswith("gövde")
+
+    def test_attachments_can_be_switched_off_entirely(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "0")
+        monkeypatch.setattr(
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>g</p>"]}
+        )
+
+        def refuse(detail, client):
+            pytest.fail("the window is closed")
+
+        monkeypatch.setattr(run.kap_archive, "attachment_text", refuse)
+        assert run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": datetime.now(timezone.utc),
+              "related_symbols": []}], None
+        )
+
+    def test_a_disclosure_with_no_readable_attachment_keeps_its_body(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
+        monkeypatch.setattr(
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+        )
+        monkeypatch.setattr(run.kap_archive, "attachment_text", lambda d, c: "")
+        docs = run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": datetime.now(timezone.utc),
+              "related_symbols": []}], None
+        )
+        assert docs[0]["text"].endswith("gövde")
+
+    def test_a_disclosure_whose_body_is_unreadable_is_skipped(self, monkeypatch):
+        monkeypatch.setattr(run.kap_archive, "fetch_detail", lambda index, client: None)
+        assert run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": NOW, "related_symbols": []}], None
+        ) == []
+
+    def test_an_empty_body_is_skipped(self, monkeypatch):
+        monkeypatch.setattr(run.kap_archive, "fetch_detail", lambda index, client: {})
+        assert run._with_bodies(
+            [{"url": ".../1", "title": "t", "published_at": NOW, "related_symbols": []}], None
+        ) == []
 
     def test_candle_cycle_reports_new_bars(self, monkeypatch):
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
@@ -415,7 +923,13 @@ class TestBackendNewsPush:
     def test_articles_are_posted_to_the_backend(self):
         handler = recorder(body={"news_written": 2})
         items = [{"content_hash": "a" * 64, "title": "T", "source": "D", "published_at": NOW}]
-        assert sinks.push_news_to_backend(client_for(handler), items) == {"news_written": 2}
+        assert sinks.push_news_to_backend(client_for(handler), items) == {
+            "quotes_written": 0, "candles_written": 0, "news_written": 2,
+            # Backend'in çözdüğü sembol haritası, parçalar boyunca birikerek.
+            # Onsuz `run_news` RAG'a boş harita iletiyor ve korpustaki her
+            # RSS belgesi tickersız kalıyor.
+            "news_symbols": {},
+        }
         assert handler.calls[0].url.path.endswith("/market/news/ingest")
 
     def test_backend_failure_is_swallowed(self):
@@ -484,6 +998,13 @@ class TestScheduler:
             # bir klonda geri doldurma haklı olarak atlıyor ve bu iş
             # olmasaydı 19:15 cron'una kadar hiçbir şey çalışmazdı.
             "candle-topup": "date",
+            # Mum ikilisiyle aynı ayrım: biri "hiç arşiv var mı", diğeri
+            # "elimizdeki en yeni bildirim eski mi" sorusunu cevaplıyor.
+            "kap-topup": "date",
+            "kap-backfill": "date",
+            # Listeleme ile gövde arasındaki açığı kapatıyor: ayrı bir soru,
+            # ayrı bir iş.
+            "kap-corpus": "interval",
         }
         assert warmed == ["q", "n"]
         assert started == [True]

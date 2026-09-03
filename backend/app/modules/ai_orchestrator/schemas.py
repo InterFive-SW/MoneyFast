@@ -23,6 +23,10 @@ class ChatTurn(BaseModel):
 
     role: Literal["user", "assistant"]
     content: str = Field(..., min_length=1, max_length=MESSAGE_MAX_CHARS)
+    #: Bu turda gösterilen kaynaklar. Orchestrator'a geri gidiyor çünkü
+    #: "bana kaynakça verir misin" sorusunun cevabı ÖNCEKİ turun kaynakları;
+    #: onlar olmadan o soru bir aramaya dönüşüyor ve boş dönüyor.
+    sources: list[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ChatRequest(BaseModel):
@@ -63,6 +67,16 @@ class ChatResponse(BaseModel):
     # that can emit widget JSON can emit a fabricated transaction proposal.
     widget: Optional[Dict[str, Any]] = None
     context_topic: Optional[str] = None
+
+    #: Cevabın dayandığı kaynaklar. Widget'la aynı kural: aracın
+    #: döndürdüğünden kurulur, modelden istenmez.
+    #:
+    #: Bu satır isteğe bağlı tesisat DEĞİL. `/chat` yolunda yanıt
+    #: `ChatResponse(**response.json())` ile kuruluyor ve bilinmeyen
+    #: anahtarları DÜŞÜRÜYOR; `/chat/stream` ise SSE satırını olduğu gibi
+    #: geçiriyor. Burayı atlamak, alanın akışta görünüp tamponlu yolda
+    #: kaybolması demek olurdu -- ayıklaması çok zor bir asimetri.
+    sources: list[Dict[str, Any]] = Field(default_factory=list)
     conversation_id: Optional[str] = None
 
     #: Whether this turn made it into the user's history, and if not, why.
@@ -106,6 +120,9 @@ class MessageOut(BaseModel):
     #: Read back from `Message.meta` so a reopened bubble keeps the notices it
     #: was first shown with.
     disclosures: list[str] = Field(default_factory=list)
+    #: Aynı gerekçe. Bir kaynak tarihsel bir olgu -- o belge vardı ve bu
+    #: cevap ona dayanıyordu -- dolayısıyla widget'ların aksine eskimiyor.
+    sources: list[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ConversationDetailOut(ConversationSummary):

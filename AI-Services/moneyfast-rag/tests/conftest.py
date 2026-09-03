@@ -64,6 +64,7 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "calls": [],
         "ingest_result": ("doc-1", 2),
         "ping": True,
+        "known_urls": set(),
     }
 
     async def _match_chunks(query_vector, owner_user_id, **kwargs):
@@ -74,6 +75,13 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             {"vector": query_vector, "owner_user_id": owner_user_id, **kwargs}
         )
         return state["rows"]
+
+    async def _known_urls(urls):
+        state["calls"].append({"known_urls": list(urls)})
+        result = state["known_urls"]
+        if isinstance(result, Exception):
+            raise result
+        return result
 
     async def _index_snapshot():
         return state["snapshot"]
@@ -100,6 +108,7 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(store, "match_chunks", _match_chunks)
     monkeypatch.setattr(store, "delete_document", _delete_document)
     monkeypatch.setattr(store, "index_snapshot", _index_snapshot)
+    monkeypatch.setattr(store, "known_urls", _known_urls)
     monkeypatch.setattr(store, "ping", _ping)
     monkeypatch.setattr(store, "ingest", _ingest)
     monkeypatch.setattr(store, "open_pool", _open_pool)

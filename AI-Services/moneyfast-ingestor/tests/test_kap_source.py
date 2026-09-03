@@ -25,8 +25,11 @@ _RealClient = httpx.Client
 
 @pytest.fixture(autouse=True)
 def no_robots(monkeypatch):
-    monkeypatch.setattr(kap_source.rss_source, "_may_fetch", lambda url, client: True)
-    monkeypatch.setattr(kap_source.rss_source, "_wait_for_host", lambda url: None)
+    # Nezaket yardımcıları `courtesy`'de: gecikme HOST başına ve iki kaynak
+    # kendi sayaçlarını tutsaydı her biri ayrı ayrı "yeterince bekledim"
+    # diye karar verirdi.
+    monkeypatch.setattr(kap_source.courtesy, "may_fetch", lambda url, client: True)
+    monkeypatch.setattr(kap_source.courtesy, "wait_for_host", lambda url: None)
 
 
 def client_for(handler):
@@ -105,14 +108,21 @@ class TestSymbols:
 
 
 class TestPublishedAt:
-    def test_the_kap_format_is_read(self):
+    def test_the_kap_format_is_read_as_istanbul_local_time(self):
+        """KAP yerel saatle yayımlıyor ve bunu yükte hiçbir yerde söylemiyor.
+
+        Damgayı `tzinfo=utc` ile işaretlemek, her bildirimi üç saat ileri
+        kaydırıyordu: 14:59 İstanbul = 11:59 UTC.
+        """
         assert kap_source._published("01.09.2026 14:59:55") == datetime(
-            2026, 9, 1, 14, 59, 55, tzinfo=timezone.utc
+            2026, 9, 1, 11, 59, 55, tzinfo=timezone.utc
         )
 
     @pytest.mark.parametrize("raw", ["01.09.2026 14:59", "01.09.2026"])
     def test_shorter_forms_are_read_too(self, raw):
-        assert kap_source._published(raw).date() == datetime(2026, 9, 1).date()
+        assert kap_source._published(raw).astimezone(kap_source.ISTANBUL).date() == (
+            datetime(2026, 9, 1).date()
+        )
 
     def test_an_unreadable_date_falls_back_to_now(self):
         """Bildirim listede görünüyorsa yayımlanmıştır. Onu düşürmek, KAP'ın
@@ -123,6 +133,18 @@ class TestPublishedAt:
 
 
 class TestContentHash:
+    def test_the_prefix_matches_the_committed_seed(self):
+        """`seeds/market/news.csv.gz` içindeki 27.541 satır bu biçimle
+        üretildi ve tekil indeks `content_hash` üzerinde -- `url` üzerinde
+        değil. Önek büyük harfe dönerse tohumdaki her bildirim ikinci kez
+        yazılır: panoda çift satır, kullanıcıda çift bildirim.
+
+        Bu satır o tohumdan alınmış gerçek bir özet."""
+        assert kap_source.content_hash(1566628) == (
+            "aab043daa3657042dcc723bc9b719952d32cef5d8a8f713678cab294732006b5"
+        )
+
+
     def test_identity_comes_from_kaps_own_number(self):
         """Metinden türetilen bir hash, bildirim düzeltildiğinde (KAP bunu
         yapıyor, `isChanged` alanı var) aynı bildirimi ikinci kez yazdırırdı."""
@@ -176,7 +198,7 @@ class TestFetchList:
         assert "_rsc" not in kap_source.LIST_URL
 
     def test_robots_denial_stops_the_fetch(self, monkeypatch):
-        monkeypatch.setattr(kap_source.rss_source, "_may_fetch", lambda url, client: False)
+        monkeypatch.setattr(kap_source.courtesy, "may_fetch", lambda url, client: False)
         handler = responder()
         assert kap_source.fetch_list(client_for(handler)) == []
         assert handler.calls == []
@@ -202,7 +224,7 @@ class TestFetchDetail:
         assert str(handler.calls[0].url).endswith("/Bildirim/1656735")
 
     def test_robots_denial_stops_the_fetch(self, monkeypatch):
-        monkeypatch.setattr(kap_source.rss_source, "_may_fetch", lambda url, client: False)
+        monkeypatch.setattr(kap_source.courtesy, "may_fetch", lambda url, client: False)
         assert kap_source.fetch_detail(client_for(responder()), 1) == ""
 
     def test_a_bad_status_yields_an_empty_body(self):

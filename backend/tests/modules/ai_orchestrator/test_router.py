@@ -273,7 +273,7 @@ def test_stream_falls_back_to_the_client_history_when_nothing_is_stored(client, 
     )
 
     sent = instance.stream.call_args.kwargs["json"]
-    assert sent["conversation_history"] == [{"role": "user", "content": "THYAO"}]
+    assert sent["conversation_history"] == [{"role": "user", "content": "THYAO", "sources": []}]
 
 
 # --------------------------------------------------------------------------

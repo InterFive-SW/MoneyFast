@@ -1,5 +1,6 @@
 // src/components/chat/MessageBubble.tsx
 import { formatTime } from '../../lib/datetime';
+import { isSafeHref } from '../../lib/safeHref'
 import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload, PortfolioWidgetPayload } from '../../types/chat';
 import ChartWidget from './widgets/ChartWidget';
 import ActionWidget from './widgets/ActionWidget';
@@ -71,6 +72,48 @@ export default function MessageBubble({ message, animate = false }: MessageBubbl
           )}
           {message.widget && message.widget.type === 'portfolio' && (
             <PortfolioWidget payload={message.widget.payload as PortfolioWidgetPayload} />
+          )}
+
+          {/*
+            Kaynaklar. Bildirimlerin ÜSTÜNDE duruyor: yasal uyarı en sonda
+            kalmalı.
+
+            Etiket `Markdown`'dan GEÇMİYOR. Bir belge başlığı üçüncü taraf
+            metni ve içindeki `**` işaretlerinin kalın yazıya dönüşmesi,
+            kaynağın adını değiştirmek olurdu.
+
+            Adres `isSafeHref`'ten geçiyor. `Markdown` bu korumayı
+            `react-markdown`'dan bedavaya alıyor; elle kurulan bir `<a>`
+            almıyor.
+          */}
+          {!isUser && message.sources && message.sources.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-white/10 flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                Kaynaklar
+              </span>
+              {message.sources.map((source) => (
+                <p
+                  key={source.url ?? source.label}
+                  className="text-[11px] leading-snug text-slate-400"
+                >
+                  {isSafeHref(source.url) ? (
+                    <a
+                      href={source.url as string}
+                      target="_blank"
+                      rel="noopener noreferrer nofollow"
+                      className="text-brandBlue underline underline-offset-2 hover:opacity-80"
+                    >
+                      {source.label}
+                    </a>
+                  ) : (
+                    <span>{source.label}</span>
+                  )}
+                  {source.detail ? (
+                    <span className="text-slate-500"> — {source.detail}</span>
+                  ) : null}
+                </p>
+              ))}
+            </div>
           )}
 
           {/*

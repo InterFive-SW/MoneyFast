@@ -509,3 +509,23 @@ class TestDeleteDocument:
             params={"owner_user_id": "11111111-1111-1111-1111-111111111111"},
         )
         assert response.status_code == 503
+
+
+class TestKnownUrlsEndpoint:
+    def test_it_answers_which_texts_are_held(self, client, fake_store):
+        fake_store["known_urls"] = {"https://x/1"}
+        response = client.post("/documents/known-urls", json={"urls": ["https://x/1", "https://x/2"]})
+        assert response.status_code == 200
+        assert response.json() == {"known": ["https://x/1"]}
+
+    def test_a_retrieval_failure_is_503_not_an_empty_answer(self, client, fake_store):
+        """Boş bir cevap "hiçbiri gömülü değil" demek ve çağıran tarafı bütün
+        arşivi yeniden indirmeye gönderirdi."""
+        fake_store["known_urls"] = RuntimeError("down")
+        assert client.post("/documents/known-urls", json={"urls": ["https://x/1"]}).status_code == 503
+
+    def test_an_unbounded_list_is_refused(self, client, fake_store):
+        response = client.post(
+            "/documents/known-urls", json={"urls": [f"https://x/{i}" for i in range(2_001)]}
+        )
+        assert response.status_code == 422

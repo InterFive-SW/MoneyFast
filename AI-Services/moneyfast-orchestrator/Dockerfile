@@ -21,8 +21,11 @@ RUN apt-get update \
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
+# Her modül burada ADIYLA yazılı. Yeni bir dosya eklerken buraya da
+# eklenmezse servis import hatasıyla açılmıyor ve testler yeşil kalıyor --
+# testler dosya sisteminden değil, kaynak ağacından çalışıyor.
 COPY orchestrator.py prompts.py mcp_client.py api.py widgets.py \
-     agent_trace.py sanitize.py ./
+     sources.py agent_trace.py sanitize.py ./
 
 # ---------------------------------------------------------------------------
 # Stage 2: test. Fails the build on any test failure or a coverage drop.
@@ -39,10 +42,14 @@ RUN pip install --no-cache-dir -r requirements-test.txt
 
 COPY tests/ ./tests/
 
-# GROQ_API_KEY is required at import time by get_llm. A dummy value is enough:
-# the suite blocks sockets, so no request can leave the container even if a
-# mock were missed.
+# `get_llm` needs a key on its FIRST CALL (not at import — the import is lazy
+# for exactly that reason). A dummy value is enough: the suite blocks sockets,
+# so no request can leave the container even if a mock were missed.
+#
+# Both names: the suite's own fixture sets the provider-specific one, and
+# `LLM_API_KEY` is what a container gets from compose.
 ENV GROQ_API_KEY=test-key-not-used \
+    LLM_API_KEY=test-key-not-used \
     MCP_SERVER_URL=http://mcp-market-data:8000/sse
 
 # Runs as root on purpose: this stage writes coverage artefacts and never ships.

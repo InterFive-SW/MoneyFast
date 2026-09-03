@@ -706,6 +706,23 @@ class TestMetricNames:
         )
         assert "metrics" not in fake_backend.body()
 
+    @pytest.mark.parametrize(
+        "written,canonical",
+        [("ES", "CVAR"), ("expected_shortfall", "CVAR"), ("drawdown", "MAX_DRAWDOWN"),
+         ("sharpe_ratio", "SHARPE"), ("hhi", "CONCENTRATION"),
+         ("value_at_risk", "VAR"), ("correlation", "CORRELATION_MATRIX")],
+    )
+    async def test_another_name_for_the_same_measurement_is_folded(
+        self, fake_backend, sample_positions, written, canonical
+    ):
+        """Ölçüldü: planlayıcı `ES` gönderdi -- Expected Shortfall, CVaR'ın
+        standart adı -- ve tur düştü. Reddetmek, cevabı modelin hangi
+        eşanlamlıyı seçtiğine bağlı kılıyor."""
+        await risk_strategy_tools.calculate_portfolio_risk_metrics(
+            sample_positions, metrics=[written]
+        )
+        assert fake_backend.body()["metrics"] == [canonical]
+
     async def test_a_genuinely_unknown_metric_still_raises(
         self, fake_backend, sample_positions
     ):

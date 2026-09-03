@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.core import pdf_generator
 from app.modules.analytics import report
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -199,3 +200,49 @@ class TestReportEndpoints:
             analytics_client.get(REPORT_URL).json()
             == analytics_client.get(f"{REPORT_URL}/user-9", headers=report_auth).json()
         )
+
+
+class TestReportPdf:
+    """Belge SUNUCUDA üretiliyor.
+
+    Ekranın DOM'unu yazdırmak, raporun metnini ikinci bir yerde kurmak olurdu
+    ve iki yüzey er ya da geç ayrışırdı -- bu depoda defalarca ölçülen hata.
+    """
+
+    URL = "/api/analytics/report.pdf"
+
+    def test_it_returns_a_pdf_as_an_attachment(self, analytics_client, mocker):
+        mocker.patch.object(report, "build_report", return_value=TestReportEndpoints.SECTIONS)
+        response = analytics_client.get(self.URL)
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert "attachment;" in response.headers["content-disposition"]
+        assert response.content.startswith(b"%PDF")
+
+    def test_the_filename_carries_the_date(self, analytics_client, mocker):
+        mocker.patch.object(report, "build_report", return_value=TestReportEndpoints.SECTIONS)
+        disposition = analytics_client.get(self.URL).headers["content-disposition"]
+        assert "moneyfast-rapor-" in disposition and ".pdf" in disposition
+
+    def test_a_missing_font_is_a_503_rather_than_a_mangled_document(
+        self, analytics_client, mocker
+    ):
+        """Aksanları düşürülmüş Türkçe yanlış yazılmış Türkçedir. Kurulum
+        eksikliği kullanıcının düzeltebileceği bir şey de değil, o yüzden
+        4xx değil."""
+        mocker.patch.object(report, "build_report", return_value=TestReportEndpoints.SECTIONS)
+        mocker.patch.object(
+            pdf_generator, "generate_report_pdf",
+            side_effect=pdf_generator.UnicodeFontMissing("/yok"),
+        )
+        response = analytics_client.get(self.URL)
+        assert response.status_code == 503
+        assert "yazı tipi" in response.json()["detail"]
+
+    def test_the_pdf_and_the_json_read_the_same_builder(self, analytics_client, mocker):
+        spy = mocker.patch.object(
+            report, "build_report", return_value=TestReportEndpoints.SECTIONS
+        )
+        analytics_client.get(self.URL)
+        analytics_client.get(REPORT_URL)
+        assert spy.call_count == 2

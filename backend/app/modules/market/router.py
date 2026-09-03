@@ -1,16 +1,15 @@
 import asyncio
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user_id
+from app.core.deps import get_current_user_id, require_service_token
 from app.modules.investment import ai_service, market_service
 from . import service, stream, technicals
 from .schemas import (
@@ -43,24 +42,6 @@ router = APIRouter(tags=["market"])
 TICKER_STRIP = ["XU100", "USDTRY", "EURTRY", "XAUUSD"]
 
 
-def require_service_token(
-    authorization: Optional[str] = Header(default=None),
-) -> None:
-    """Guard for the service-to-service ingest endpoints.
-
-    These write market data the whole system then presents as fact, so they
-    are not open. When BACKEND_API_KEY is unset the guard refuses rather than
-    waving requests through: an ingest endpoint that silently became public
-    because an env var was missing is the kind of thing nobody notices.
-    """
-    expected = os.getenv("BACKEND_API_KEY")
-    if not expected:
-        raise HTTPException(
-            status_code=503,
-            detail="Ingest endpoint is not configured (BACKEND_API_KEY unset).",
-        )
-    if authorization != f"Bearer {expected}":
-        raise HTTPException(status_code=401, detail="Invalid service credentials.")
 
 
 @router.get("/tickers", response_model=List[MarketTicker])

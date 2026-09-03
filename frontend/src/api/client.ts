@@ -771,6 +771,23 @@ class ApiClient {
         return this.request<PortfolioReport>('/analytics/report');
     }
 
+    /**
+     * Aynı raporun indirilebilir hâli.
+     *
+     * Belge SUNUCUDA üretiliyor: ekranın DOM'unu yazdırmak, raporun metnini
+     * ikinci bir yerde kurmak olurdu ve iki yüzey er ya da geç ayrışırdı.
+     * `request` JSON çözdüğü için ayrı bir yol.
+     */
+    async downloadPortfolioReportPdf(): Promise<Blob> {
+        const response = await this.authedFetch(
+            `${this.baseUrl}/analytics/report.pdf`, { method: 'GET' },
+        );
+        if (!response.ok) {
+            throw new Error(`API Hatası: ${response.status} ${response.statusText}`);
+        }
+        return await response.blob();
+    }
+
     /** Kullanıcının kendi belirlediği hedef ağırlıklar. */
     getAllocationTarget() {
         return this.request<AllocationTarget>('/investment/allocation-target');

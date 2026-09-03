@@ -1,48 +1,18 @@
 """Request-level guards for the risk module.
 
-Only one thing lives here: the guard for the service-to-service endpoint the
-MCP tool server reads. It is separate from `core/deps.py` because that file is
-shared and, per CLAUDE.md, is not changed without the team.
+The service-token guard used to live here as a verbatim copy. It moved to
+`core/deps.py`: it was duplicated across four modules and knows nothing about
+risk, which is exactly what belongs in a shared file.
+
+What is left DOES know something about this module -- the window parameter
+validates against `LOOKBACKS`, this module's own set.
 """
 
-import os
-from typing import Optional
-
-from fastapi import Header, HTTPException, Query
+from fastapi import HTTPException, Query
 
 from .schemas import LOOKBACKS
 
 
-def require_service_token(
-    authorization: Optional[str] = Header(default=None),
-) -> None:
-    """Guard for `GET /profile/{user_id}`, which names its subject in the path.
-
-    Session-bound endpoints resolve the user from the bearer token and can
-    only ever return the caller's own data. This one cannot: the MCP tool
-    server calls it on behalf of a user it names, so without a guard anyone
-    who can reach the backend could read anyone's risk profile by guessing a
-    user id. The backend is also the public ingress, so "internal network
-    only" is not true of it.
-
-    An unset BACKEND_API_KEY refuses rather than waves requests through. An
-    endpoint that quietly became public because an env var was missing is the
-    kind of thing nobody notices.
-
-    This duplicates `market/router.py:require_service_token` verbatim. The
-    honest fix is one copy in `core/`, which is a shared file and therefore a
-    team decision -- importing a helper out of another module's router would
-    build exactly the cross-module dependency the module rules exist to
-    prevent, so the duplicate is the smaller of the two costs for now.
-    """
-    expected = os.getenv("BACKEND_API_KEY")
-    if not expected:
-        raise HTTPException(
-            status_code=503,
-            detail="Service endpoint is not configured (BACKEND_API_KEY unset).",
-        )
-    if authorization != f"Bearer {expected}":
-        raise HTTPException(status_code=401, detail="Invalid service credentials.")
 
 
 def lookback_param(lookback: str = Query("1Y")) -> str:

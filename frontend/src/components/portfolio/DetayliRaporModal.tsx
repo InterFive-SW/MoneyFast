@@ -42,6 +42,26 @@ function formatMoment(iso: string): string {
 export default function DetayliRaporModal({ onClose }: { onClose: () => void }) {
     const [report, setReport] = useState<Report | null>(null)
     const [error, setError] = useState('')
+    const [downloading, setDownloading] = useState(false)
+
+    async function downloadPdf() {
+        setDownloading(true)
+        try {
+            // Belge sunucuda üretiliyor: ekranın DOM'unu yazdırmak, raporun
+            // metnini ikinci bir yerde kurmak olurdu ve iki yüzey ayrışırdı.
+            const blob = await apiClient.downloadPortfolioReportPdf()
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = `moneyfast-rapor-${new Date().toISOString().slice(0, 10)}.pdf`
+            link.click()
+            URL.revokeObjectURL(url)
+        } catch {
+            setError('PDF indirilemedi.')
+        } finally {
+            setDownloading(false)
+        }
+    }
 
     useEffect(() => {
         apiClient
@@ -71,10 +91,11 @@ export default function DetayliRaporModal({ onClose }: { onClose: () => void }) 
                     </div>
                     <div className="flex shrink-0 gap-2">
                         <button
-                            onClick={() => window.print()}
-                            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+                            onClick={downloadPdf}
+                            disabled={downloading || !report}
+                            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
                         >
-                            Yazdır / PDF
+                            {downloading ? 'Hazırlanıyor…' : 'PDF indir'}
                         </button>
                         <button
                             onClick={onClose}

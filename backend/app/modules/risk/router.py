@@ -10,7 +10,8 @@ from app.modules.investment import ai_service, allocation, market_service
 from app.modules.investment import service as investment_service
 from . import profile, questionnaire_v2 as questionnaire, scenario, service, store
 from . import returns as risk_returns
-from .deps import lookback_param, require_service_token
+from app.core.deps import require_service_token
+from .deps import lookback_param
 from .schemas import (
     AssessmentRequest,
     AssessmentResultOut,

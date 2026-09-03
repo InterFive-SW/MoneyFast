@@ -119,3 +119,130 @@ def generate_user_data_pdf(user_data: Dict[str, Any], portfolio_summary: Dict[st
     except Exception as e:
         logger.error(f"PDF olusturma surecinde kritik hata: {str(e)}")
         raise
+
+
+#: Türkçe yazabilen font. `fpdf`'in gömülü çekirdek fontları (Helvetica,
+#: Times) latin-1 ve ı, ş, ğ harflerini TAŞIMIYOR -- yukarıdaki KVKK dışa
+#: aktarımı bu yüzden "Kisisel", "Olusturulma" diye yazmak zorunda kalmış.
+#:
+#: Backend imajına `fonts-dejavu-core` paketiyle geliyor (bkz. Dockerfile).
+#: Dosya bulunamazsa PDF ÜRETİLMİYOR: aksanları düşürülmüş Türkçe, yanlış
+#: yazılmış Türkçedir ve kullanıcıya gösterilen bir belgede sessizce bozuk
+#: metin, hiç belge olmamasından kötüdür.
+DEJAVU_DIR = "/usr/share/fonts/truetype/dejavu"
+DEJAVU_REGULAR = f"{DEJAVU_DIR}/DejaVuSans.ttf"
+DEJAVU_BOLD = f"{DEJAVU_DIR}/DejaVuSans-Bold.ttf"
+
+
+class UnicodeFontMissing(RuntimeError):
+    """Türkçe yazabilen font kurulu değil."""
+
+
+class ReportPDF(FPDF):
+    """Detaylı rapor şablonu.
+
+    `MoneyFastPDF`'ten AYRI ve bilerek: o, KVKK dışa aktarımı için yazılmış,
+    kendi başlığını ("Kisisel Veriler ve Portfoy Ozeti") her sayfaya basıyor
+    ve latin-1 fontla çalışıyor. İkisini tek sınıfa sıkıştırmak, birinin
+    başlığını değiştiren birinin diğerini bozmasına açık olurdu.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        if not (os.path.exists(DEJAVU_REGULAR) and os.path.exists(DEJAVU_BOLD)):
+            raise UnicodeFontMissing(DEJAVU_REGULAR)
+        self.add_font("DejaVu", "", DEJAVU_REGULAR)
+        self.add_font("DejaVu", "B", DEJAVU_BOLD)
+        self.set_auto_page_break(auto=True, margin=20)
+
+    def header(self) -> None:
+        logo_path = "/app/assets/logo-inline.png"
+        if os.path.exists(logo_path):
+            self.image(logo_path, x=10, y=8, w=32)
+        self.set_font("DejaVu", "B", 15)
+        self.set_text_color(26, 31, 46)
+        self.cell(0, 12, "Detaylı Rapor", align="R", new_x="LMARGIN", new_y="NEXT")
+        self.set_draw_color(226, 232, 240)
+        self.line(10, self.get_y() + 1, 200, self.get_y() + 1)
+        self.ln(6)
+
+    def footer(self) -> None:
+        self.set_y(-15)
+        self.set_font("DejaVu", "", 8)
+        self.set_text_color(160, 174, 192)
+        self.cell(0, 10, f"MoneyFast · Sayfa {self.page_no()}/{{nb}}", align="C")
+
+
+def generate_report_pdf(report: Dict[str, Any]) -> bytes:
+    """Raporu PDF'e basar ve baytları döndürür.
+
+    Metin ÜRETMİYOR. Bölüm başlıkları, cümleleri ve satırları
+    `analytics/report.py`'de bir kez kuruluyor; burası yalnızca onları
+    sayfaya yerleştiriyor. Ekran, sohbet ve PDF aynı metni okumalı, ve
+    PDF'in kendi cümlesini kurması bu kuralın en kolay kırıldığı yer olurdu.
+
+    Dosyaya değil BAYTA yazıyor: raporun diskte bir izi kalmıyor ve
+    pozisyonları, bakiyeyi, maaşı bir arada taşıyan bir belgenin geçici
+    dizinde unutulması, temizlenmesi hatırlanması gereken bir şey olurdu.
+    """
+    pdf = ReportPDF()
+    pdf.alias_nb_pages()
+    pdf.add_page()
+
+    pdf.set_font("DejaVu", "", 9)
+    pdf.set_text_color(113, 128, 150)
+    for line in _meta_lines(report):
+        pdf.cell(0, 5, line, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    for section in report.get("sections") or []:
+        pdf.set_font("DejaVu", "B", 12)
+        pdf.set_text_color(26, 31, 46)
+        pdf.set_fill_color(241, 245, 249)
+        pdf.cell(0, 9, f"  {section.get('title', '')}", fill=True,
+                 new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(2)
+
+        if section.get("summary"):
+            pdf.set_font("DejaVu", "B", 10)
+            pdf.set_text_color(45, 55, 72)
+            _wrapped(pdf, section["summary"], 5.5)
+            pdf.ln(1)
+
+        pdf.set_font("DejaVu", "", 9.5)
+        pdf.set_text_color(74, 85, 104)
+        for line in section.get("lines") or []:
+            _wrapped(pdf, f"·  {line}", 5)
+        pdf.ln(4)
+
+    return bytes(pdf.output())
+
+
+def _wrapped(pdf: FPDF, text: str, height: float) -> None:
+    """Sarmalanan bir metin bloğu, HER ZAMAN sol kenardan.
+
+    `multi_cell(0, ...)` "kalan genişliği kullan" demek ve imleç satırın
+    ortasındaysa kalan genişlik bir karaktere bile yetmiyor -- fpdf bunu
+    "Not enough horizontal space to render a single character" ile
+    reddediyor. Genişliği imlecin nerede olduğuna bırakmak yerine burada
+    sabitleniyor.
+    """
+    pdf.set_x(pdf.l_margin)
+    # Sola yaslı. `multi_cell` varsayılanı iki yana yaslı ve tek satıra
+    # sığmayan bir cümlede kelimeleri açıyor: "En  büyük  fark  BIST  Hisse".
+    pdf.multi_cell(pdf.w - pdf.l_margin - pdf.r_margin, height, text, align="L")
+
+
+def _meta_lines(report: Dict[str, Any]) -> list:
+    """Belgenin üretildiği an ve fiyatların ait olduğu an -- AYRI satırlar.
+
+    Raporu üretim saatiyle tarihlemek, fiyatları olduğundan taze göstermek
+    olurdu.
+    """
+    lines = [f"Oluşturulma: {report.get('generated_at', '')}"]
+    if report.get("is_delayed"):
+        lines.append(
+            f"Fiyatlar {report.get('delay_minutes', 0)} dakika gecikmeli; "
+            f"{report.get('as_of', '')} itibarıyla."
+        )
+    return lines

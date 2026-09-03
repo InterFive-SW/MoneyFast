@@ -74,10 +74,128 @@ MIN_NAME_LENGTH = 5
 #: Büyük harf şartı da kurtarmıyor -- şehir ve soyadları da büyük harfle
 #: yazılır. Evren 1.009 hisseye çıktığı için çakışma yüzeyi ayrıca büyük.
 #:
-#: Yakalamayı güvenle artırmanın yolu ELLE YAZILMIŞ bir kısa ad listesi
-#: (`EREGL: erdemir`, `THYAO: thy`) -- bu depoda BIST ve Nasdaq üyelik
-#: listelerinin yazıldığı biçimin aynısı: diff'te okunabilir, tarihli,
-#: sessizce değişmeyen. Ayrı bir iş olarak duruyor.
+#: Çözüm ELLE YAZILMIŞ bir liste ve aşağıda duruyor.
+
+
+#: Ticari kısa adlar: haberin yazdığı ad -> sembol.
+#:
+#: 3 Eylül 2026'da elle yazıldı. Otomatik türetme DENENDİ VE ÖLÇÜLDÜ:
+#: resmî unvanın ilk kelimesini kısa ad saymak korpusta felaket üretiyor --
+#: `turkiye` 551 haberde geçiyor ve sekiz bankaya bağlanırdı, `izmir` 21,
+#: `bursa` 19, `altin` 112, `zorlu` 8, `girisim` 12. Yüksek frekanslı
+#: tokenların neredeyse tamamı sıradan Türkçe kelime (`kredi`, `satis`,
+#: `konut`, `gunes`, `deniz`, `icecek`, `otomobil`). Frekans ayırt etmiyor.
+#:
+#: Bu yüzden liste ELLE ve şu kurala göre yazıldı: **bir kısa ad, ancak
+#: yalnızca o şirketi gösteriyorsa buraya girer.** "zorlu" giremez (sıfat),
+#: "zorlu enerji" girer. "emlak" giremez (sıradan ad), "emlak konut" girer.
+#: "altin" giremez, "koza altin" girer. "garanti" giremez (teminat anlamı),
+#: "garanti bbva" girer.
+#:
+#: BIST ve Nasdaq üyelik listeleriyle aynı disiplin (bkz. migration 0006,
+#: 0010): elle yazılmış, tarihli, diff'te okunabilir. Bir şirket adını
+#: değiştirdiğinde burası da değişir ve bu, sessizce bozulmaktan iyidir.
+#:
+#: Resmî unvanın çekirdeğiyle zaten eşleşen adlar BURAYA YAZILMAZ: "türk
+#: hava yolları" ve "tüpraş" NAME yoluyla bulunuyor. Buradakiler haberin
+#: kullandığı ama unvanda geçmeyen adlar.
+ALIASES: dict[str, tuple[str, ...]] = {
+    # Bankalar ve finans
+    "AKBNK": ("akbank",),
+    # "garanti bbva" BİLEREK YOK: "GARANTİ BBVA OPERASYONEL KİRALAMA" ayrı
+    # bir şirket ve kısa ad onun haberini bankaya bağlıyordu. Ölçüldü, on iki
+    # eşleşmenin bedeli budur -- ve bu modülün kuralı kaçırmayı yanlış
+    # bağlamaya tercih ediyor.
+    "GARAN": ("garanti bankasi",),
+    "ISCTR": ("is bankasi", "isbank"),
+    "YKBNK": ("yapi kredi",),
+    "HALKB": ("halkbank",),
+    "VAKBN": ("vakifbank",),
+    "ALBRK": ("albaraka",),
+    "SKBNK": ("sekerbank",),
+    "TSKB": ("tskb",),
+    "ISMEN": ("is yatirim",),
+    # Havacılık ve ulaştırma
+    "THYAO": ("thy",),
+    "PGSUS": ("pegasus",),
+    "TAVHL": ("tav havalimanlari",),
+    "CLEBI": ("celebi hava",),
+    # Sanayi ve savunma
+    "ASELS": ("aselsan",),
+    "OTKAR": ("otokar",),
+    "TTRAK": ("turk traktor",),
+    "FROTO": ("ford otosan",),
+    "TOASO": ("tofas",),
+    "KARSN": ("karsan",),
+    "ARCLK": ("arcelik",),
+    "VESTL": ("vestel",),
+    "EREGL": ("erdemir",),
+    "KRDMD": ("kardemir",),
+    "BRSAN": ("borusan",),
+    "CIMSA": ("cimsa",),
+    "OYAKC": ("oyak cimento",),
+    "SISE": ("sisecam",),
+    "PETKM": ("petkim",),
+    "GUBRF": ("gubretas",),
+    "HEKTS": ("hektas",),
+    "ALARK": ("alarko",),
+    "TKFEN": ("tekfen",),
+    "ENKAI": ("enka insaat",),
+    # Perakende ve tüketim
+    "BIMAS": ("bim magazalari",),
+    "MGROS": ("migros",),
+    "SOKM": ("sok marketler",),
+    "ULKER": ("ulker",),
+    "CCOLA": ("coca cola icecek",),
+    "AEFES": ("anadolu efes",),
+    "CRFSA": ("carrefoursa",),
+    "VAKKO": ("vakko",),
+    # Enerji ve holding
+    "ZOREN": ("zorlu enerji",),
+    "AKSEN": ("aksa enerji",),
+    "ODAS": ("odas enerji",),
+    "SMRTG": ("smart gunes",),
+    "KCHOL": ("koc holding",),
+    "SAHOL": ("sabanci holding",),
+    "DOHOL": ("dogan holding",),
+    "AGHOL": ("anadolu grubu",),
+    "DOAS": ("dogus otomotiv",),
+    # Gayrimenkul ve altın
+    "EKGYO": ("emlak konut",),
+    "KOZAL": ("koza altin",),
+    "KOZAA": ("koza anadolu",),
+    # Teknoloji ve iletişim
+    "TCELL": ("turkcell",),
+    "TTKOM": ("turk telekom",),
+    "LOGO": ("logo yazilim",),
+    "NETAS": ("netas",),
+    "ARENA": ("arena bilgisayar",),
+    # ABD -- Türkçe haberde bu şirketler ADIYLA anılıyor, koduyla değil
+    "AAPL": ("apple",),
+    "MSFT": ("microsoft",),
+    "NVDA": ("nvidia",),
+    "GOOGL": ("google", "alphabet"),
+    "AMZN": ("amazon",),
+    "TSLA": ("tesla",),
+    "META": ("meta platforms",),
+    "JPM": ("jpmorgan",),
+}
+
+#: Sembolden kısa adlara değil, kısa addan sembole: eşleştirme metinde ad
+#: arıyor. Çakışan bir kısa ad (iki şirkete birden yazılmış) burada sessizce
+#: birini eziyordu; bu yüzden kurulum sırasında hata veriyor.
+def _build_alias_index() -> dict[str, str]:
+    index: dict[str, str] = {}
+    for symbol, names in ALIASES.items():
+        for name in names:
+            folded = _NON_WORD.sub(" ", name.translate(_FOLD).lower()).strip()
+            if folded in index and index[folded] != symbol:
+                raise ValueError(
+                    f"kısa ad iki sembole birden yazılmış: {folded!r} -> "
+                    f"{index[folded]}, {symbol}"
+                )
+            index[folded] = symbol
+    return index
 
 
 def strip_markup(text: str) -> str:
@@ -161,6 +279,10 @@ def resolve_symbols(
 
     * **SYMBOL** -- kod, metinde BÜYÜK HARFLE ve tek başına geçiyor.
     * **NAME** -- resmî unvanın çekirdeği, metinde olduğu gibi geçiyor.
+    * **ALIAS** -- elle yazılmış ticari kısa ad (`ALIASES`). Haber "Aselsan"
+      yazıyor, unvan "ASELSAN ELEKTRONİK SANAYİ VE TİCARET A.Ş."; NAME yolu
+      bunu bulamaz. Liste elle, çünkü otomatik türetme ölçüldüğünde sıradan
+      Türkçe kelimeleri şirket sanıyordu.
       "türk hava yollari", "turk hava yollari ndan rekor" içinde bulunur;
       kesme işareti boşluğa çevrildiği için Türkçe ekler eşleşmeyi bozmaz.
     `basis` ayrı ayrı raporlanıyor çünkü kanıt güçleri farklı: bir kod
@@ -181,16 +303,33 @@ def resolve_symbols(
     """
     plain = strip_markup(text)
     folded_text = f" {fold(plain)} "
+    # Kısa adlar evrene bakmadan aranıyor: liste zaten sembol taşıyor ve
+    # evreni bir kez daha dolaşmak aynı işi iki kez yapmak olurdu.
+    alias_hits = {
+        symbol: alias
+        for alias, symbol in _ALIAS_INDEX.items()
+        if f" {alias} " in folded_text
+    }
     # Ticker taraması da temizlenmiş metin üzerinde: `<IMG SRC=...>` gibi
     # bir etiket büyük harfli, tek başına duran "kelimeler" üretir.
     tokens = set() if _is_shouting(plain) else _ticker_tokens(plain)
 
     found: dict[str, str] = {}
+    # Evrende OLMAYAN bir kısa ad kabul edilmiyor: liste elle yazıldığı için
+    # bir sembol borsadan çıktığında ya da yanlış yazıldığında burada
+    # sessizce hayalet bir bağ üretebilirdi.
+    known = {(_get(row, "symbol") or "").strip().upper() for row in universe}
+    for symbol, alias in alias_hits.items():
+        if symbol in known and not _shadowed(alias, symbol, universe, folded_text):
+            found[symbol] = "ALIAS"
+
     for row in universe:
         symbol = (_get(row, "symbol") or "").strip().upper()
         if not symbol:
             continue
 
+        # Kod eşleşmesi kısa addan GÜÇLÜ: aynı sembol her ikisiyle de
+        # bulunduysa kanıtın güçlüsü yazılır.
         if (
             len(symbol) >= MIN_TICKER_LENGTH
             and symbol in tokens
@@ -217,6 +356,31 @@ def resolve_symbols(
         {"symbol": symbol, "basis": basis}
         for symbol, basis in sorted(found.items())
     ]
+
+
+def _shadowed(
+    alias: str, symbol: str, universe: Iterable[Any], folded_text: str
+) -> bool:
+    """Kısa ad, metindeki DAHA UZUN bir resmî adın parçası mı.
+
+    "Garanti BBVA Operasyonel Kiralama" ayrı bir şirket ve "garanti bbva"
+    kısa adı onu bankaya bağlardı. Metinde kısa adı İÇEREN başka bir
+    şirketin resmî adı varsa, kısa ad susuyor: o haberi doğru şirkete
+    bağlamak NAME yolunun işi ve kanıtı daha güçlü.
+
+    Bu modülün kuralı: kaçırmak, yanlış bağlamaktan iyidir.
+    """
+    for row in universe:
+        other = (_get(row, "symbol") or "").strip().upper()
+        if other == symbol:
+            continue
+        core = core_name(_get(row, "name") or "")
+        if core and alias in core and f" {core} " in folded_text:
+            return True
+    return False
+
+
+_ALIAS_INDEX = _build_alias_index()
 
 
 def _get(row: Any, key: str) -> Any:

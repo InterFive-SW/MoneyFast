@@ -21,7 +21,7 @@ gövdenin sağlayıcı sınırına ne kadar yakın olduğu ölçülerek öğreni
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -102,6 +102,11 @@ def build_report(db: Session, user_id: Optional[str]) -> dict[str, Any]:
     held = {row.get("symbol") for row, _value in valued}
     own_quotes = {s: q for s, q in quotes.items() if s in held} or quotes
     as_of, delay_minutes, is_delayed, is_stale = market_service.freshness(own_quotes)
+    # Eski bir fiyat iki şey olabilir: piyasa kapalı (normal, son kapanış) ya
+    # da veri akışı durmuş (arıza). İkisi kullanıcıya farklı söylenmeli ve
+    # backend bunu tek başına bilemiyordu -- ingestor artık hangi piyasaların
+    # açık olduğunu bildiriyor.
+    stale_reason = _stale_reason(db, valued, own_quotes) if is_stale else None
     return {
         "generated_at": now.isoformat().replace("+00:00", "Z"),
         "currency_code": "TRY",
@@ -111,8 +116,53 @@ def build_report(db: Session, user_id: Optional[str]) -> dict[str, Any]:
         # Gözlem ESKİ mi. Beslemenin gecikmesinden AYRI: piyasa kapalıyken
         # son kapanış normaldir ve ona "gecikme" demek yanlış olur.
         "is_stale": bool(is_stale),
+        #: Eskiliğin SEBEBİ, biliniyorsa. None = bilinmiyor ve o zaman
+        #: kapalılık İDDİA EDİLMEZ.
+        "stale_reason": stale_reason,
         "sections": [section for section in sections if section is not None],
     }
+
+
+def _stale_reason(
+    db: Session, valued, quotes: dict[str, Any]
+) -> Optional[str]:
+    """Fiyatlar neden eski: piyasa kapalı mı, yoksa bilinmiyor mu.
+
+    Bakılan şey ESKİ OLAN enstrümanlar, tutulanların tamamı değil. Karışık
+    bir portföy -- taze BIST + kapalı ABD -- her ikisini de içeriyor ve
+    tutulanlara bakmak, açık olan BIST yüzünden sebebi hep "bilinmiyor"
+    yapıyordu.
+
+    "MARKET_CLOSED" yalnızca HER eski enstrümanın piyasası kapalıysa
+    dönüyor. Biri bile açıksa sebep bilinmiyor demektir: açık bir piyasada
+    eskiyen fiyat bir ARIZADIR ve ona "piyasa kapalı" demek, arızayı normal
+    diye göstermek olurdu.
+
+    Seans bilgisi yoksa ya da kendisi eskiyse None: ingestor durduğunda hem
+    fiyatlar hem seans kaydı eskiyor ve o durumda kapalılık iddia etmek yine
+    bilinmeyeni bir tespite çevirmek olur.
+    """
+    trading = market_service.open_markets(db)
+    if trading is None:
+        return None
+
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        minutes=market_service.STALE_AFTER_MINUTES
+    )
+    market_of = {row.get("symbol"): row.get("market") for row, _value in valued}
+    stale_markets = set()
+    for symbol, quote in quotes.items():
+        seen = quote.get("received_at") or quote.get("market_timestamp")
+        if seen is None:
+            continue
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        if seen < cutoff and market_of.get(symbol):
+            stale_markets.add(market_of[symbol])
+
+    if not stale_markets:
+        return None
+    return "MARKET_CLOSED" if stale_markets.isdisjoint(trading) else None
 
 
 def _overview_section(valued, cash, unpriced) -> dict[str, Any]:

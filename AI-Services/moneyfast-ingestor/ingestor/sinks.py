@@ -348,3 +348,27 @@ def fetch_missing_fundamentals(client: httpx.Client) -> set[str]:
     )
     response.raise_for_status()
     return set((response.json() or {}).get("symbols") or [])
+
+
+def push_sessions(client: httpx.Client, markets: set[str]) -> Optional[dict]:
+    """Hangi piyasaların açık olduğunu backend'e bildirir.
+
+    Saatler BURADA (`config.MARKET_HOURS`) ve burada kalıyor; backend'e kural
+    değil olgu gidiyor. İkinci bir saat listesi tutmak, iki listenin
+    ayrışmasına açık olurdu.
+
+    Başarısızlık turu DÜŞÜRMEZ: seans bilgisi fiyatın üstüne konan bir
+    açıklama, fiyatın kendisi değil.
+    """
+    try:
+        response = client.post(
+            f"{config.backend_url()}/market/sessions",
+            json={"open": sorted(markets)},
+            headers=_headers(),
+            timeout=config.request_timeout(),
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        log.warning("session state push failed: %s", exc)
+        return None

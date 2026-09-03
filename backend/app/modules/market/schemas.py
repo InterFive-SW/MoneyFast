@@ -519,3 +519,14 @@ class MarketCalendarOut(BaseModel):
     analysts: List[AnalystRow] = Field(default_factory=list)
     dividends: List[DividendRow] = Field(default_factory=list)
     earnings: List[EarningsRow] = Field(default_factory=list)
+
+
+class SessionStateRequest(BaseModel):
+    """Hangi piyasalar ŞU AN açık.
+
+    Liste TAM: burada olmayan her piyasa kapalı sayılır. Kısmi bir liste,
+    bildirilmeyen piyasanın durumunu belirsiz bırakırdı ve belirsizlik
+    "kapalı" diye okunurdu.
+    """
+
+    open: List[str] = Field(default_factory=list)

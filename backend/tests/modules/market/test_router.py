@@ -552,3 +552,32 @@ class TestCalendarEndpoint:
         )
         market_client.get(self.URL, params={"limit": 5})
         assert rows.call_args.kwargs["limit"] == 5
+
+
+class TestSessionStateEndpoint:
+    """Saatler ingestor'da kalıyor; backend'e kural değil OLGU geliyor."""
+
+    URL = "/api/market/sessions"
+
+    def test_the_open_set_is_recorded(self, client, mocker, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        spy = mocker.patch.object(market_service, "record_sessions", return_value=5)
+        response = client.post(
+            self.URL, headers={"Authorization": "Bearer secret"},
+            json={"open": ["BIST", "FX"]},
+        )
+        assert response.json() == {"markets": 5}
+        assert spy.call_args.args[1] == ["BIST", "FX"]
+
+    def test_an_empty_set_is_a_valid_report(self, client, mocker, monkeypatch):
+        """"Hepsi kapalı" da bir olgu; bildirilmezse backend eski bir kaydı
+        okumaya devam ederdi."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        spy = mocker.patch.object(market_service, "record_sessions", return_value=5)
+        client.post(self.URL, headers={"Authorization": "Bearer secret"},
+                    json={"open": []})
+        assert spy.call_args.args[1] == []
+
+    def test_it_is_guarded_like_the_other_service_endpoints(self, client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.post(self.URL, json={"open": []}).status_code == 401

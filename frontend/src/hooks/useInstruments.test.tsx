@@ -69,11 +69,36 @@ describe('useInstruments', () => {
     expect(result.current.instruments[0].pe).toBeUndefined()
   })
 
-  it('labels a missing sector rather than leaving it blank', async () => {
-    mockApi([apiRow({ sector: null })])
+  it('labels a stock with no sector rather than leaving it blank', async () => {
+    // Gerçek bir boşluk: sağlayıcı bir gün doldurabilir. Ölçüldü, 94
+    // enstrümanın dördünde sektör yok.
+    mockApi([apiRow({ sector: null, market: 'BIST' })])
     const { result } = renderHook(() => useInstruments())
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.instruments[0].sector).toBe('Bilinmiyor')
+  })
+
+  it.each(['FX', 'COMEX'])(
+    'leaves the sector blank for %s, where there is no such attribute',
+    async (market) => {
+      // Döviz paritesinin ve ons altının sektörü EKSİK DEĞİL, yok. Onlara
+      // "bilinmiyor" demek, bir gün öğrenilebilecek bir boşluk varmış gibi
+      // göstermek olurdu.
+      mockApi([apiRow({ sector: null, market })])
+      const { result } = renderHook(() => useInstruments())
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(result.current.instruments[0].sector).toBe('')
+    },
+  )
+
+  it('keeps a blank sector out of the filter options', async () => {
+    // Adı olmayan bir seçenek tıklanamaz ve listenin sonunda boş bir satır
+    // bırakırdı.
+    mockApi([apiRow({ sector: null, market: 'FX' }),
+             apiRow({ symbol: 'THYAO', sector: 'Ulaştırma', market: 'BIST' })])
+    const { result } = renderHook(() => useInstruments())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.sectors).toEqual(['Ulaştırma'])
   })
 
   it('treats a missing change as flat so sorting does not produce NaN', async () => {

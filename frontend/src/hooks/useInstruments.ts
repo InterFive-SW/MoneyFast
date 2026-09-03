@@ -35,6 +35,9 @@ const MARKET_LABELS: Record<string, MarketInstrument['market']> = {
 
 const CURRENCY_UNITS: Record<string, string> = { TRY: '₺', USD: '$', EUR: '€' };
 
+/** Sektör kavramının tanımlı OLMADIĞI piyasalar. */
+const SECTORLESS_MARKETS = new Set(['FX', 'COMEX']);
+
 export function adaptInstrument(row: ApiInstrument): MarketInstrument {
   return {
     symbol: row.symbol,
@@ -53,7 +56,18 @@ export function adaptInstrument(row: ApiInstrument): MarketInstrument {
     // traded today" rather than as the missing field it actually was.
     volume: row.volume ?? 0,
     marketCap: row.market_cap ?? 0,
-    sector: row.sector ?? 'Bilinmiyor',
+    // İKİ FARKLI YOKLUK, iki farklı cevap.
+    //
+    // Bir HİSSENİN sektörü yoksa bu gerçek bir boşluk -- sağlayıcı bir gün
+    // doldurabilir -- ve 'Bilinmiyor' doğru etiket. Ölçüldü: 94 enstrümanın
+    // 90'ında sektör var, dördünde yok.
+    //
+    // Döviz paritesinin ve ons altının ise sektörü EKSİK DEĞİL, YOK: sektör
+    // o enstrüman için tanımlı bir kavram değil. Onlara "bilinmiyor" demek,
+    // bir gün öğrenilebilecek bir boşluk varmış gibi göstermek olurdu. Bu
+    // deponun kendi kuralı: "aracın hiç döndürmediği bir alan için `veri
+    // yok` kullanılmaz, o sütun hiç yazılmaz."
+    sector: row.sector ?? (SECTORLESS_MARKETS.has(row.market ?? '') ? '' : 'Bilinmiyor'),
     week52Low: row.week52_low ?? 0,
     week52High: row.week52_high ?? 0,
     // Left undefined when the provider publishes nothing, which the column
@@ -98,7 +112,11 @@ export function useInstruments(limit = 1200, market?: string): InstrumentsState 
 
   const instruments = useLiveRows(fetched);
   const sectors = useMemo(
-    () => Array.from(new Set(instruments.map((row) => row.sector))).sort(),
+    // Boş sektör süzgeçte SEÇENEK OLMUYOR: adı olmayan bir seçenek
+    // tıklanamaz ve listenin sonunda boş bir satır bırakırdı.
+    () => Array.from(
+      new Set(instruments.map((row) => row.sector).filter(Boolean)),
+    ).sort(),
     [instruments],
   );
 

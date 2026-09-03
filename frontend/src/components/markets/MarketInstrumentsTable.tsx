@@ -265,7 +265,28 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
                   <div className="font-semibold text-white text-sm hover:text-emerald-500 transition-colors">{item.symbol}</div>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className="text-xs text-slate-400">{item.name}</span>
-                    <span className="text-[10px] font-medium text-slate-400 bg-slate-800/5 px-1.5 py-0.5 rounded">{item.sector}</span>
+                    {/* Sektörü olmayan enstrümanda rozet HİÇ çizilmiyor.
+                        Döviz ve altının sektörü eksik değil, yok. */}
+                    {item.sector && (
+                      <span className="text-[10px] font-medium text-slate-400 bg-slate-800/5 px-1.5 py-0.5 rounded">{item.sector}</span>
+                    )}
+                  </div>
+                  {/* Fiyat ve değişim, DAR EKRANDA adın altında.
+                      Tablo altı-yedi sütun ve telefonda fiyat sütunu sağa
+                      taşıyor: veri kayıp değil, yatay kaydırmanın arkasında --
+                      ama bir piyasa tablosunun asıl sayısı kaydırılmadan
+                      görünmeli. `sm`'den itibaren gizleniyor, çünkü orada
+                      kendi sütunlarında zaten var ve iki kez göstermek
+                      satırı bölerdi. */}
+                  <div className="mt-1 flex items-center gap-2 tabular-nums sm:hidden">
+                    <span className="text-sm font-medium text-slate-200">
+                      {formatPrice(item.price)} {item.unit}
+                    </span>
+                    <span
+                      className={`text-xs font-semibold ${item.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}
+                    >
+                      {item.changePercent > 0 ? '+' : ''}{item.changePercent.toFixed(2)}%
+                    </span>
                   </div>
                 </td>
                 <td className="py-3 pl-4 text-right tabular-nums text-sm font-medium text-slate-200">

@@ -34,7 +34,17 @@ _FOLD = str.maketrans({
 #: hiçbir yoldan eşleşmez, dolayısıyla Koç Holding haberleri hep kaçıyordu.
 #: "koc holding" ise hem eşleşir hem de "koç burcu" gibi sıradan metne
 #: bulaşmaz.
-_LEGAL_SUFFIX = re.compile(r"\s*(?:t\.?a\.?[soş]\.?|a\.?[soş]\.?|a\.?o\.?)\s*$")
+#:
+#: Ek hem kısaltılmış hem AÇIK yazılmış hâliyle atılır. Açık hâl bir dönem
+#: eksikti ve resmî adı öyle kayıtlı olan şirket kendi bildiriminde bile
+#: eşleşmiyordu: ürün kaydındaki "Türkiye Vakiflar Bankasi Türk Anonim
+#: Ortakligi" ile başlıktaki "TÜRKİYE VAKIFLAR BANKASI T.A.O." aynı şirket
+#: ama çekirdek adları farklı çıkıyordu. "Teknosa ... Anonim Sirketi" de
+#: aynı sebeple kaçıyordu.
+_LEGAL_SUFFIX = re.compile(
+    r"\s*(?:(?:turk\s+)?anonim\s+(?:sirketi|ortakligi)"
+    r"|t\.?a\.?[soş]\.?|a\.?[soş]\.?|a\.?o\.?)\s*$"
+)
 
 #: Kesme işareti Türkçede özel adlara gelen eki ayırır: "Aselsan'ın".
 #: Boşluğa çevrilince çekirdek ad yine bir alt dize olarak bulunabilir.

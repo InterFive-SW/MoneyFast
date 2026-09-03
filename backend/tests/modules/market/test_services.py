@@ -238,9 +238,18 @@ class TestNewsSymbolResolution:
     `related_symbols` 1.540 haberin 1.540'ında boştu.
     """
 
+    # `market`: KOD ile eşleşme yalnızca yerel piyasada geçerli
+    # (`LOCAL_TICKER_MARKETS`) -- alansız bir evren, kod dayanağını hiç
+    # kuramıyordu.
     UNIVERSE = [
-        SimpleNamespace(symbol="THYAO", name="Türk Hava Yolları A.O.", product_type="stock"),
-        SimpleNamespace(symbol="ASELS", name="Aselsan Elektronik", product_type="stock"),
+        SimpleNamespace(
+            symbol="THYAO", name="Türk Hava Yolları A.O.",
+            product_type="stock", market="BIST",
+        ),
+        SimpleNamespace(
+            symbol="ASELS", name="Aselsan Elektronik",
+            product_type="stock", market="BIST",
+        ),
     ]
 
     def _db(self):
@@ -276,6 +285,64 @@ class TestNewsSymbolResolution:
         db = self._db()
         news_service.upsert_news(db, [{
             "content_hash": "e" * 64, "title": "Türk Hava Yolları'ndan rekor",
+            "source": "KAP", "published_at": NOW, "related_symbols": ["ASELS"],
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["ASELS"]
+
+    def test_a_short_name_in_a_filings_body_is_not_its_subject(self):
+        """Bildirimin konusu başlıkta; gövdedeki adlar ilgili taraflardır.
+
+        Ölçülen vaka: "EMLAK KATILIM VARLIK KİRALAMA A.Ş. — Şirket Genel
+        Bilgi Formu" THYAO'ya bağlanmıştı, çünkü gövdedeki yönetim kurulu
+        listesinde bir üyenin başka görevi "THY Yönetim Kurulu Üyesi" olarak
+        yazılıydı. Kural arşivde 16 farklı (sembol, konu) çiftini düşürüyor
+        ve elle bakıldığında on altısı da yanlış.
+        """
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "1" * 64,
+            "title": "EMLAK KATILIM VARLIK KİRALAMA A.Ş. — Şirket Genel Bilgi Formu",
+            "summary": "Yönetim Kurulu Üyesi THY Yönetim Kurulu Üyesi Erkek",
+            "source": "KAP", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == []
+
+    def test_an_explicit_code_in_a_filings_body_still_counts(self):
+        """Kısıt YALNIZCA kısa ada; açık kod gövdede de güvenilir.
+
+        BISTECH devre kesici bildirimlerinin başlığı jeneriktir ve konu şirket
+        yalnızca gövdede, kendi koduyla yazılıdır. Metnin tamamını başlığa
+        indirgemek bu bildirimlerin 550'sini birden koparıyordu.
+        """
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "2" * 64,
+            "title": "BORSA İSTANBUL BISTECH DEVRE KESİCİ UYGULAMASI — Pay Bazında",
+            "summary": "Devre kesici uygulanan pay: THYAO",
+            "source": "KAP", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_a_news_story_still_reads_its_body(self):
+        """Kısıt bildirimlere ait. "Borsada bugün" başlıklı bir yazı gerçekten
+        gövdesinde saydığı hisseler hakkındadır ve başlığa indirgemek haber
+        tarafında etiketlemeyi geri götürürdü."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "3" * 64, "title": "Borsada bugün öne çıkanlar",
+            "summary": "THY günü yükselişle kapattı.",
+            "source": "Dünya", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_a_filing_that_declares_its_issuer_is_untouched(self):
+        """Kaynağın kendi verdiği etiket çıkarımdan önce gelir; kural yalnızca
+        çıkarım yolunda."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "4" * 64,
+            "title": "OTOKAR OTOMOTİV VE SAVUNMA SANAYİ A.Ş. — Genel Bilgi Formu",
+            "summary": "Yapı Kredi ile kredi sözleşmesi",
             "source": "KAP", "published_at": NOW, "related_symbols": ["ASELS"],
         }])
         assert self._stored(db)["related_symbols_m0"] == ["ASELS"]

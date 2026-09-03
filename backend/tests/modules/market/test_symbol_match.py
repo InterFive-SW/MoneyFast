@@ -433,3 +433,33 @@ class TestAliasTableIsChecked:
         bozulduğunda kırılsın diye var."""
         index = symbol_match._build_alias_index()
         assert len(index) == sum(len(v) for v in symbol_match.ALIASES.values())
+
+
+class TestSpelledOutLegalSuffix:
+    """Unvan eki açık yazıldığında da atılır.
+
+    Ürün kayıtlarındaki resmî ad ile bildirim başlığındaki ad aynı eki farklı
+    biçimde yazıyor: "Türkiye Vakiflar Bankasi Türk Anonim Ortakligi" ile
+    "TÜRKİYE VAKIFLAR BANKASI T.A.O.". Yalnızca kısaltma atıldığı sürece bu
+    ikisinin çekirdek adı farklı çıkıyor ve şirket kendi bildiriminde
+    eşleşmiyordu.
+    """
+
+    @pytest.mark.parametrize(
+        "written, core",
+        [
+            ("Türkiye Vakiflar Bankasi Türk Anonim Ortakligi", "turkiye vakiflar bankasi"),
+            ("TÜRKİYE VAKIFLAR BANKASI T.A.O.", "turkiye vakiflar bankasi"),
+            ("Teknosa Iç ve Dis Ticaret Anonim Sirketi", "teknosa ic ve dis ticaret"),
+            ("TEKNOSA İÇ VE DIŞ TİCARET A.Ş.", "teknosa ic ve dis ticaret"),
+        ],
+    )
+    def test_both_spellings_fold_to_the_same_core(self, written, core):
+        assert symbol_match.core_name(written) == core
+
+    def test_a_name_that_merely_contains_the_words_is_not_cut(self):
+        """Ek yalnızca SONDA atılır: ortasında geçen bir kelime unvan eki
+        değildir."""
+        assert symbol_match.core_name("Anonim Sirketi Yatirim Holding") == (
+            "anonim sirketi yatirim holding"
+        )

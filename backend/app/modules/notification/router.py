@@ -103,3 +103,17 @@ async def mark_all_notifications_as_read(
     db.commit()
     
     return {"message": "Tüm bildirimler okundu olarak işaretlendi."}
+
+
+@router.get("/health", summary="Notification modülü sağlık durumu")
+async def health():
+    """
+    Modülün ayakta olduğunu söyleyen uç.
+
+    Her modülde var (banking, analytics, market...) ve bir test üçünü birden
+    kontrol ediyor. Bu modül taslaktan gerçek bir modüle dönerken uç
+    kaybolmuş ve o test o gün bugündür kırık: bildirimlerin çalışıp
+    çalışmadığından bağımsız bir kırıklık, ama kırık bir test hiçbir şeyi
+    korumuyor.
+    """
+    return {"status": "ok", "module": "notification"}

@@ -1080,3 +1080,43 @@ class TestCalendarRows:
         ]
         out = market_service.calendar_rows(self._db(rows), limit=3)
         assert len(out["analysts"]) == 3
+
+
+class TestHoldersOf:
+    """Bir sembolü TUTAN kullanıcılar.
+
+    Sorgu bu modülde, çünkü pozisyonlar bu modülün: bildirim modülünün
+    portföy tablosunu okuması, modüllerin birbirinin ORM sınıfını import
+    etmemesi kuralının engellediği şey.
+    """
+
+    def _db(self, rows):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = rows
+        return db
+
+    def test_holders_are_grouped_by_symbol(self):
+        got = market_service.holders_of(
+            self._db([("ASELS", "u1"), ("ASELS", "u2"), ("THYAO", "u1")]),
+            ["ASELS", "THYAO"],
+        )
+        assert got == {"ASELS": {"u1", "u2"}, "THYAO": {"u1"}}
+
+    def test_no_symbols_makes_no_query(self):
+        db = MagicMock(spec=Session)
+        assert market_service.holders_of(db, []) == {}
+        assert not db.execute.called
+
+    def test_nobody_holding_is_an_empty_map(self):
+        assert market_service.holders_of(self._db([]), ["ASELS"]) == {}
+
+    def test_the_query_excludes_closed_positions_and_the_demo_account(self):
+        """Kapatılmış pozisyonun hissesiyle ilgili haber artık o kişiyi
+        ilgilendirmiyor; demo hesabının ise bildirilecek kimsesi yok --
+        `user_id` alanında gerçek bir kullanıcı değil "demo" yazıyor ve
+        `notifications`'ın foreign key'i ihlal oluyordu."""
+        db = self._db([])
+        market_service.holders_of(db, ["ASELS"])
+        statement = str(db.execute.call_args.args[0])
+        assert "quantity" in statement
+        assert "account_number" in statement

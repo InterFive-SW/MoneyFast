@@ -31,6 +31,8 @@ interface Report {
     delay_minutes: number
     /** Gözlemin kendisi eski mi -- beslemenin gecikmesinden AYRI. */
     is_stale: boolean
+    /** Eskiliğin sebebi, BİLİNİYORSA. null = bilinmiyor, kapalılık iddia edilmez. */
+    stale_reason: string | null
     sections: Section[]
 }
 
@@ -47,7 +49,14 @@ interface Report {
  */
 function freshnessNote(report: Report): string {
     const at = formatMoment(report.as_of)
-    if (report.is_stale) return `Fiyatlar son işlem verisi; ${at} itibarıyla güncellendi.`
+    if (report.is_stale) {
+        // Sebep artık BİLİNEBİLİYOR: ingestor hangi piyasaların açık olduğunu
+        // bildiriyor. Bilinmediği sürece söylenmiyor.
+        if (report.stale_reason === 'MARKET_CLOSED') {
+            return `Piyasa kapalı; fiyatlar son kapanışa ait, ${at} itibarıyla.`
+        }
+        return `Fiyatlar son işlem verisi; ${at} itibarıyla güncellendi.`
+    }
     if (report.is_delayed) {
         return `Fiyatlar en az ${report.delay_minutes} dakika gecikmeli; ${at} itibarıyla.`
     }

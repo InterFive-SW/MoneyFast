@@ -261,6 +261,11 @@ def freshness_note(report: Dict[str, Any]) -> str:
     """
     at = report.get("as_of", "")
     if report.get("is_stale"):
+        if report.get("stale_reason") == "MARKET_CLOSED":
+            # Sebep artık BİLİNİYOR: ingestor hangi piyasaların açık olduğunu
+            # bildiriyor. Bilinmediği sürece bunu söylemek, bilinmeyeni bir
+            # tespite çevirmek olurdu.
+            return f"Piyasa kapalı; fiyatlar son kapanışa ait, {at} itibarıyla."
         return f"Fiyatlar son işlem verisi; {at} itibarıyla güncellendi."
     if report.get("is_delayed"):
         return (

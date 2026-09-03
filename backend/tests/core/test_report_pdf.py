@@ -114,6 +114,14 @@ class TestContent:
         assert "son işlem verisi" in page
         assert "gecikmeli" not in page
 
+    def test_a_known_closed_market_is_named(self):
+        """Sebep artık BİLİNİYOR: ingestor hangi piyasaların açık olduğunu
+        bildiriyor."""
+        note = pdf_generator.freshness_note(
+            {**REPORT, "is_stale": True, "stale_reason": "MARKET_CLOSED"}
+        )
+        assert "Piyasa kapalı" in note and "son kapanışa ait" in note
+
     def test_the_reason_is_not_asserted(self):
         """"Piyasa kapalı" demek, sistemin bilmediği bir şeyi iddia etmek
         olurdu: aynı eskime, ingestor durduğunda da olur."""

@@ -21,6 +21,7 @@ from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
+    Boolean,
     BigInteger,
     Date,
     DateTime,
@@ -476,6 +477,35 @@ class AllocationTarget(Base):
     #: 0..100. Toplamın 100 olması router'da doğrulanıyor: burada saklamak
     #: satır başına bir kısıt, toplam ise satırlar ARASI bir kural.
     target_percent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+
+class MarketSession(Base):
+    """Bir piyasanın ŞU AN işlem görüp görmediği.
+
+    Saatler burada DEĞİL, `ingestor`'da (`config.MARKET_HOURS`) -- ve orada
+    kalmalı: ikinci bir liste tutmak, bu depoda defalarca ayrışan türden bir
+    şey. Backend'e KURAL değil OLGU geliyor: ingestor her turda hangi
+    piyasaların açık olduğunu bildiriyor, backend onu okuyor.
+
+    Neden gerekli: fiyatın eski olması iki şey demek olabilir -- piyasa
+    kapalı (normal, son kapanış) ya da veri akışı durmuş (arıza). İkisi
+    kullanıcıya farklı şekilde söylenmeli ve backend tek başına ayırt
+    edemiyordu, o yüzden "son işlem verisi" gibi sebebi söylemeyen bir cümle
+    kurmak zorundaydı.
+
+    `updated_at` da saklanıyor: ingestor'ın kendisi durursa bu tablo da
+    eskiyor ve o zaman "kapalı" demek yine bilinmeyeni tespite çevirmek
+    olurdu.
+    """
+
+    __tablename__ = "market_sessions"
+    __table_args__ = ({"schema": SCHEMA},)
+
+    market: Mapped[str] = mapped_column(String(32), primary_key=True)
+    is_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )

@@ -25,6 +25,7 @@ from .models import (
     InvestmentAccount,
     InvestmentProduct,
     MarketCandle,
+    MarketSession,
     MarketQuote,
     PortfolioPosition,
     WatchlistItem,
@@ -1557,3 +1558,44 @@ def holders_of(db: Session, symbols: list[str]) -> dict[str, set[str]]:
     for symbol, user_id in rows:
         holders.setdefault(symbol, set()).add(user_id)
     return holders
+
+
+#: Seans bilgisinin ne kadar süre GEÇERLİ sayılacağı.
+#:
+#: `ingestor` her turda yazıyor (30 saniyede bir). Bu süreden eski bir kayıt,
+#: ingestor'ın durduğu anlamına gelir ve o durumda "piyasa kapalı" demek yine
+#: bilinmeyeni bir tespite çevirmek olurdu -- kapalı olan piyasa değil, veri
+#: akışı.
+SESSION_STATE_TTL_MINUTES = 10
+
+
+def record_sessions(db: Session, open_markets: list[str]) -> int:
+    """Hangi piyasaların açık olduğunu kaydeder. Liste TAM: burada olmayan
+    her piyasa kapalı işaretlenir."""
+    now = datetime.now(timezone.utc)
+    wanted = {str(m).upper() for m in open_markets}
+    known = {row.market for row in db.query(MarketSession).all()} | wanted
+    for market in known:
+        db.merge(MarketSession(
+            market=market, is_open=market in wanted, updated_at=now,
+        ))
+    db.commit()
+    return len(known)
+
+
+def open_markets(db: Session) -> Optional[set[str]]:
+    """Şu an işlem gören piyasalar, ya da BİLİNMİYORSA None.
+
+    None ile boş küme farklı şeyler: boş küme "hepsi kapalı", None ise
+    "ingestor bize söylemiyor". İkincisinde kapalılık iddia edilmemeli.
+    """
+    rows = db.query(MarketSession).all()
+    if not rows:
+        return None
+    freshest = max(row.updated_at for row in rows)
+    if freshest.tzinfo is None:
+        freshest = freshest.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - freshest).total_seconds() / 60
+    if age > SESSION_STATE_TTL_MINUTES:
+        return None
+    return {row.market for row in rows if row.is_open}

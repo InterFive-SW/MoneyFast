@@ -464,6 +464,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analytics/report.pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Detaylı rapor (PDF)
+         * @description Aynı rapor, indirilebilir belge olarak.
+         *
+         *     METİN ÜRETMİYOR: bölümler `report.build_report`'tan geliyor ve PDF
+         *     yalnızca onları sayfaya yerleştiriyor. Ekran, sohbet ve PDF aynı metni
+         *     okumalı.
+         *
+         *     Font kurulu değilse 503: aksanları düşürülmüş Türkçe yanlış yazılmış
+         *     Türkçedir ve kullanıcıya gösterilen bir belgede sessizce bozuk metin, hiç
+         *     belge olmamasından kötüdür. Kurulum eksikliği de kullanıcının
+         *     düzeltebileceği bir şey değil, o yüzden 4xx değil.
+         */
+        get: operations["portfolio_report_pdf_api_analytics_report_pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analytics/report/{user_id}": {
         parameters: {
             query?: never;
@@ -2314,6 +2343,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Açık piyasaları bildir (servisler arası)
+         * @description Hangi piyasaların şu an işlem gördüğünü kaydeder.
+         *
+         *     Saatler burada DEĞİL, `ingestor`'da -- ve orada kalıyor. Backend'e KURAL
+         *     değil OLGU geliyor: ikinci bir saat listesi tutmak, bu depoda defalarca
+         *     ayrışan türden bir şey olurdu.
+         *
+         *     Bu olmadan backend, eski bir fiyatın "piyasa kapalı" mı yoksa "veri akışı
+         *     durdu" mu olduğunu ayırt edemiyordu ve kullanıcıya sebebi söylemeyen bir
+         *     cümle kurmak zorundaydı.
+         */
+        post: operations["record_sessions_api_market_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notification/me/notifications": {
         parameters: {
             query?: never;
@@ -2373,6 +2430,32 @@ export interface paths {
          *     Bu işlem genellikle 'Tümünü Okundu İşaretle' butonuna basıldığında tetiklenir ve sayaç (badge) sıfırlanır.
          */
         post: operations["mark_all_notifications_as_read_api_notification_me_notifications_mark_all_read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notification/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Notification modülü sağlık durumu
+         * @description Modülün ayakta olduğunu söyleyen uç.
+         *
+         *     Her modülde var (banking, analytics, market...) ve bir test üçünü birden
+         *     kontrol ediyor. Bu modül taslaktan gerçek bir modüle dönerken uç
+         *     kaybolmuş ve o test o gün bugündür kırık: bildirimlerin çalışıp
+         *     çalışmadığından bağımsız bir kırıklık, ama kırık bir test hiçbir şeyi
+         *     korumuyor.
+         */
+        get: operations["health_api_notification_health_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4785,6 +4868,13 @@ export interface components {
              * @default 0
              */
             delay_minutes: number;
+            /**
+             * Is Stale
+             * @default false
+             */
+            is_stale: boolean;
+            /** Stale Reason */
+            stale_reason?: string | null;
             /** Sections */
             sections?: components["schemas"]["ReportSection"][];
         };
@@ -5630,6 +5720,18 @@ export interface components {
             observation_count: number;
             /** Is Statistically Reliable */
             is_statistically_reliable: boolean;
+        };
+        /**
+         * SessionStateRequest
+         * @description Hangi piyasalar ŞU AN açık.
+         *
+         *     Liste TAM: burada olmayan her piyasa kapalı sayılır. Kısmi bir liste,
+         *     bildirilmeyen piyasanın durumunu belirsiz bırakırdı ve belirsizlik
+         *     "kapalı" diye okunurdu.
+         */
+        SessionStateRequest: {
+            /** Open */
+            open?: string[];
         };
         /** SimulationOut */
         SimulationOut: {
@@ -6985,6 +7087,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioReport"];
+                };
+            };
+        };
+    };
+    portfolio_report_pdf_api_analytics_report_pdf_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
                 };
             };
         };
@@ -9349,6 +9471,41 @@ export interface operations {
             };
         };
     };
+    record_sessions_api_market_sessions_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionStateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_my_notifications_api_notification_me_notifications_get: {
         parameters: {
             query?: {
@@ -9412,6 +9569,26 @@ export interface operations {
         };
     };
     mark_all_notifications_as_read_api_notification_me_notifications_mark_all_read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    health_api_notification_health_get: {
         parameters: {
             query?: never;
             header?: never;

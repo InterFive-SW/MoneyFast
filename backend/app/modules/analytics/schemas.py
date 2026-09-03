@@ -126,4 +126,7 @@ class PortfolioReport(BaseModel):
     #: Gözlemin kendisi eskidiyse. Piyasa kapalıyken normal (son kapanış),
     #: açıkken arıza işareti; ikisi de bildirilir ama yalnızca biri gecikmedir.
     is_stale: bool = False
+    #: Eskiliğin sebebi, BİLİNİYORSA. "MARKET_CLOSED" ya da None. None,
+    #: "sebep bilinmiyor" demek -- kapalılık iddia edilmez.
+    stale_reason: Optional[str] = None
     sections: List[ReportSection] = Field(default_factory=list)

@@ -119,6 +119,101 @@ class TestShape:
         report.build_report(wired, "user-1")
         assert spy.call_args.args[0]
 
+    def test_a_closed_market_is_named_as_the_reason(self, wired, mocker):
+        """Eski fiyat iki şey olabilir: piyasa kapalı (normal) ya da veri
+        akışı durmuş (arıza). İkisi kullanıcıya farklı söylenmeli."""
+        stale = NOW - timedelta(hours=18)
+        mocker.patch.object(
+            market_service, "holdings",
+            return_value=[holding("AAPL", market="NASDAQ")],
+        )
+        mocker.patch.object(
+            market_service, "latest_quotes",
+            return_value={"AAPL": {"price": 200.0, "received_at": stale}},
+        )
+        mocker.patch.object(
+            market_service, "freshness", return_value=(stale, 15, True, True)
+        )
+        mocker.patch.object(market_service, "open_markets", return_value={"BIST"})
+        out = report.build_report(wired, "user-1")
+        assert out["stale_reason"] == "MARKET_CLOSED"
+
+    def test_a_stale_price_on_an_OPEN_market_is_not_called_closed(
+        self, wired, mocker
+    ):
+        """Açık bir piyasada eskiyen fiyat bir ARIZADIR; ona "piyasa kapalı"
+        demek arızayı normal diye göstermek olurdu."""
+        stale = NOW - timedelta(hours=18)
+        mocker.patch.object(
+            market_service, "latest_quotes",
+            return_value={"THYAO": {"price": 100.0, "received_at": stale}},
+        )
+        mocker.patch.object(
+            market_service, "freshness", return_value=(stale, 15, True, True)
+        )
+        mocker.patch.object(market_service, "open_markets", return_value={"BIST"})
+        assert report.build_report(wired, "user-1")["stale_reason"] is None
+
+    def test_unknown_session_state_asserts_nothing(self, wired, mocker):
+        """Ingestor durduğunda hem fiyatlar hem seans kaydı eskiyor."""
+        stale = NOW - timedelta(hours=18)
+        mocker.patch.object(
+            market_service, "latest_quotes",
+            return_value={"THYAO": {"price": 100.0, "received_at": stale}},
+        )
+        mocker.patch.object(
+            market_service, "freshness", return_value=(stale, 15, True, True)
+        )
+        mocker.patch.object(market_service, "open_markets", return_value=None)
+        assert report.build_report(wired, "user-1")["stale_reason"] is None
+
+    def test_a_quote_without_a_timestamp_is_skipped(self, wired, mocker):
+        """Ne zaman görüldüğü bilinmeyen bir kotasyon, eskiliğin sebebi
+        hakkında bir şey söylemiyor."""
+        stale = NOW - timedelta(hours=18)
+        mocker.patch.object(
+            market_service, "latest_quotes",
+            return_value={"THYAO": {"price": 100.0}},
+        )
+        mocker.patch.object(
+            market_service, "freshness", return_value=(stale, 15, True, True)
+        )
+        mocker.patch.object(market_service, "open_markets", return_value={"FX"})
+        assert report.build_report(wired, "user-1")["stale_reason"] is None
+
+    def test_a_quote_whose_instrument_has_no_market_is_ignored(self, wired, mocker):
+        """Piyasası bilinmeyen bir enstrüman, fiyatların neden eski olduğu
+        hakkında bir şey söylemez. `_stale_reason` doğrudan çağrılıyor: rapor
+        yolu kotaları zaten tutulanlara süzüyor."""
+        mocker.patch.object(market_service, "open_markets", return_value={"FX"})
+        stale = NOW - timedelta(hours=18)
+        reason = report._stale_reason(
+            wired,
+            [({"symbol": "GIZLI", "market": None}, 1.0)],
+            {"GIZLI": {"received_at": stale}},
+        )
+        assert reason is None
+
+    def test_a_naive_timestamp_is_read_as_utc(self, wired, mocker):
+        stale = (NOW - timedelta(hours=18)).replace(tzinfo=None)
+        mocker.patch.object(
+            market_service, "latest_quotes",
+            return_value={"THYAO": {"price": 100.0, "received_at": stale}},
+        )
+        mocker.patch.object(
+            market_service, "freshness",
+            return_value=(NOW - timedelta(hours=18), 15, True, True),
+        )
+        mocker.patch.object(market_service, "open_markets", return_value={"FX"})
+        assert report.build_report(wired, "user-1")["stale_reason"] == "MARKET_CLOSED"
+
+    def test_a_fresh_report_has_no_reason_to_give(self, wired, mocker):
+        spy = mocker.patch.object(market_service, "open_markets", return_value=set())
+        out = report.build_report(wired, "user-1")
+        assert out["stale_reason"] is None
+        # Taze bir raporda seans bilgisi hiç SORULMUYOR.
+        assert not spy.called
+
     def test_the_price_time_is_separate_from_the_build_time(self, wired):
         """Belgenin üretildiği an ile fiyatların ait olduğu an farklı şeyler,
         ve aradaki fark bu ürünün açıklamak zorunda olduğu gecikme."""

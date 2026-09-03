@@ -1345,3 +1345,44 @@ class TestSmallTierTolerance:
     def test_a_handful_missing_from_a_large_tier_is_still_tolerated(self, monkeypatch):
         self._cycle(monkeypatch, total=400, returned=395, tier="bulk")
         assert run.current_interval_seconds("bulk") == run.config.quote_interval_seconds()
+
+
+class TestSessionState:
+    """Saatler burada kalıyor, backend'e OLGU gidiyor.
+
+    Backend eski bir fiyatın "piyasa kapalı" mı yoksa "veri akışı durdu" mu
+    olduğunu tek başına ayırt edemiyordu ve kullanıcıya sebebi söylemeyen bir
+    cümle kurmak zorundaydı.
+    """
+
+    def test_the_open_set_is_pushed(self):
+        handler = recorder(body={"markets": 5})
+        got = sinks.push_sessions(client_for(handler), {"BIST", "FX"})
+        assert got == {"markets": 5}
+        assert handler.calls[0].url.path.endswith("/market/sessions")
+        assert json.loads(handler.calls[0].content) == {"open": ["BIST", "FX"]}
+
+    def test_an_empty_set_is_still_reported(self):
+        """"Hepsi kapalı" da bir olgu. Bildirilmezse backend eski bir kaydı
+        okumaya devam ederdi."""
+        handler = recorder(body={"markets": 5})
+        sinks.push_sessions(client_for(handler), set())
+        assert json.loads(handler.calls[0].content) == {"open": []}
+
+    def test_a_failure_does_not_raise(self):
+        """Seans bilgisi fiyatın üstüne konan bir açıklama, fiyatın kendisi
+        değil: yazamamak turu düşürmemeli."""
+        def handler(request):
+            return httpx.Response(500, json={})
+
+        assert sinks.push_sessions(client_for(handler), {"BIST"}) is None
+
+    def test_the_cycle_reports_before_deciding_to_skip(self, monkeypatch):
+        """Kapalıyken tur atlanıyor ama bildirim ondan ÖNCE gidiyor."""
+        pushed = []
+        monkeypatch.setattr(run, "open_markets", lambda: set())
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.sinks, "push_sessions",
+                            lambda c, m: pushed.append(set(m)))
+        run.run_quotes(None)
+        assert pushed == [set()]

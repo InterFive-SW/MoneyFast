@@ -190,6 +190,10 @@ def run_quotes(
 
     if not force:
         trading = open_markets()
+        # Backend'e her turda bildiriliyor -- KAPALIYKEN DE, çünkü "hepsi
+        # kapalı" da bir olgu ve bildirilmezse backend eski bir kaydı okumaya
+        # devam ederdi.
+        sinks.push_sessions(client, trading)
         if not trading:
             log.info("all markets closed, skipping quote cycle")
             return {"skipped": True}

@@ -22,6 +22,7 @@ from .schemas import (
     MarketHeatmapOut,
     MarketTicker,
     NewsIngestRequest,
+    SessionStateRequest,
     NewsItem,
     PortfolioNewsOut,
     PortfolioTechnicalOut,
@@ -813,3 +814,25 @@ async def health_check():
     Market modülünün durumunu (health check) kontrol eder.
     """
     return {"status": "ok", "module": "market"}
+
+
+@router.post(
+    "/sessions",
+    summary="Açık piyasaları bildir (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def record_sessions(request: SessionStateRequest, db: Session = Depends(get_db)):
+    """
+    Hangi piyasaların şu an işlem gördüğünü kaydeder.
+
+    Saatler burada DEĞİL, `ingestor`'da -- ve orada kalıyor. Backend'e KURAL
+    değil OLGU geliyor: ikinci bir saat listesi tutmak, bu depoda defalarca
+    ayrışan türden bir şey olurdu.
+
+    Bu olmadan backend, eski bir fiyatın "piyasa kapalı" mı yoksa "veri akışı
+    durdu" mu olduğunu ayırt edemiyordu ve kullanıcıya sebebi söylemeyen bir
+    cümle kurmak zorundaydı.
+    """
+    written = market_service.record_sessions(db, request.open)
+    log.info("session state: %d markets, open=%s", written, sorted(request.open))
+    return {"markets": written}

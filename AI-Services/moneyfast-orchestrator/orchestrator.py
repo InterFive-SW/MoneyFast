@@ -974,6 +974,29 @@ def _first_ticker(state: MoneyFastState) -> Optional[str]:
 #: Dar arama bu kadar satır bulamazsa süzgeç kaldırılıp yeniden aranır.
 WIDEN_FLOOR = 3
 
+#: Ticker süzgeçli bir aramada benzerlik tabanı. 0,45 (bkz.
+#: `market_research_node`) süzgeçSİZ aramalar için ölçülmüştü: orada
+#: benzerlik, belgenin konuyla ilgili olduğunu söyleyen TEK sinyal. Ticker
+#: etiketi bunu doğrudan söylüyor -- etiketi taşıyan belge o şirket
+#: hakkındadır -- ve puan yalnızca sıralıyor. Ölçüldü, aynı sorgu biçimiyle:
+#:
+#:   THYAO  "THY yılın ilk yarısında 18,86 milyar lira kar etti"  0,135
+#:   ASELS  "Aselsan 125,1 milyon dolarlık satışı KAP'a bildirdi" 0,363
+#:   TCELL  (aynı biçimde sorgu, aynı türden haber)                0,729
+#:
+#: Puan sorgunun başlıkla sözcük örtüşmesini izliyor ("THYAO" yazan sorgu,
+#: "THY" yazan başlık), haberin alakasını değil. 0,45 burada uygulanınca
+#: ASELS ve THYAO'nun etiketli haberlerinin TAMAMI, ticker süzgeci arşiv
+#: etiketlendikten sonra bile, siliniyordu.
+#:
+#: Sıfır: taban süzgeç uygulandıktan sonra koruyacağı bir şeyi yok, her
+#: değer gerçek sonuç kesiyor -- aynı beş THYAO haberi "THYAO hakkında
+#: haber" ile 0,171, "THYAO son haberler" ile 0,014 alıyor. `top_k` ve
+#: tarih sonuç kümesini zaten sınırlıyor.
+TICKER_FILTERED_MIN_SIMILARITY = float(
+    os.getenv("RAG_TICKER_MIN_SIMILARITY", "0.0")
+)
+
 
 def _research_query(state: MoneyFastState) -> str:
     """Aramaya gidecek metin.
@@ -1016,18 +1039,32 @@ async def _narrow_then_widen(
     ile aynı yön.
     """
     if not ticker:
+        # Süzgeç `ticker`'dan (entity/carried_ticker'dan) gelmiyor olsa da
+        # planlayıcının kendi `arguments.filters.tickers`'ı bu çağrıyı yine
+        # ticker süzgeçli yapabilir; taban ona göre seçilir. `args` çağıranın
+        # -- kopyası değiştirilir, kendisi değil.
+        single_args = args
+        if (args.get("filters") or {}).get("tickers"):
+            single_args = {**args, "min_similarity": TICKER_FILTERED_MIN_SIMILARITY}
         single = await _run_tool(
-            state, "rag_semantic_market_search", args,
+            state, "rag_semantic_market_search", single_args,
             assumptions=assumptions, empty_when=lambda p: not p.get("results"),
         )
         # Bu dal da loglanıyor. Loglanmadığı sürece "hiç arama yapılmadı" ile
         # "arama yapıldı ve boş döndü" ayırt edilemiyordu ve boş dönen bir
         # tur, iz dosyası okunmadan teşhis edilemedi.
-        _log_search(args, single, "single")
+        _log_search(single_args, single, "single")
         return single
 
     base_filters = {k: v for k, v in (args.get("filters") or {}).items() if k != "tickers"}
-    narrow_args = {**args, "filters": {**base_filters, "tickers": [ticker]}}
+    # Dar geçiş HER ZAMAN ticker süzgeçli -- kendi süzgecini burada
+    # kuruyor -- dolayısıyla tabanı `args`'ın taşıdığından bağımsız olarak
+    # ticker tabanına sabitlenir.
+    narrow_args = {
+        **args,
+        "filters": {**base_filters, "tickers": [ticker]},
+        "min_similarity": TICKER_FILTERED_MIN_SIMILARITY,
+    }
     narrow = await _run_tool(
         state, "rag_semantic_market_search", narrow_args,
         assumptions=assumptions, empty_when=lambda p: not p.get("results"),
@@ -1151,7 +1188,7 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     result = await _narrow_then_widen(
         state, args, _first_ticker(state), plan.get("assumptions") or []
     )
-    return await _fold_in_own_documents(state, args, result)
+    return _slim_results(await _fold_in_own_documents(state, args, result))
 
 
 #: Kullanıcının kendi belgelerine ayrılan sonuç sayısı.
@@ -1239,6 +1276,65 @@ async def _fold_in_own_documents(
     # değil: "kaynak bulunamadı" demek yanlış olurdu.
     payload["status"] = "OK"
     return {**result, "specialist_output": payload}
+
+
+#: Arama sonucunun YAZARA giden alanları. Geri kalanı -- `chunk_id`,
+#: `doc_id`, `author`, `language`, `score` -- alma katmanının kendi
+#: muhasebesi; yazarın cümlesine giremez, çünkü NAMING kuralı iç adları
+#: kullanıcıya yasaklıyor. `sources.build`'in okuduğu dört alan --
+#: `title`, `publisher`, `published_at`, `url` -- burada kalıyor: atıf
+#: özelliği bu fonksiyonun ÇIKTISI üzerinde çalışıyor.
+_WRITER_RESULT_FIELDS = (
+    "title",
+    "snippet",
+    "publisher",
+    "published_at",
+    "url",
+    "tickers",
+    "doc_type",
+    "is_opinion",
+)
+
+
+def _slim_results(result: dict[str, Any]) -> dict[str, Any]:
+    """Kaynakların sentez gövdesine giden hâli: okunacak metin, iç kimlik değil.
+
+    `_slim_posture` ile aynı gerekçe ve aynı ölçülen sebep. Ticker süzgeci
+    olan bir arama arşiv etiketlenene kadar hep boş dönüyordu, dolayısıyla bu
+    gövdenin sekiz tam belgeyle ne kadar büyüdüğü hiç ölçülmemişti.
+    Ölçüldüğünde: "THYAO ile ilgili son haberler neler?" turunda 8.316 token
+    istendi, sınır 8.000 -- ve kullanıcı, ASELS'in cevaplandığı bir oturumda
+    THYAO için "veri tek seferde işleyebileceğimden büyük çıktı" cevabı aldı.
+
+    Düşen beş alanın hiçbirini yazar okumuyor: ikisi UUID, biri her satırda
+    `null`, biri süzgeçle zaten sabit, biri sıralaması bitmiş bir puan.
+    Sonuç başına ölçülen ~155 karakter.
+
+    Araç sözleşmesi DEĞİŞMİYOR: `_normalize_result` on üç alanın hepsini
+    üretmeye devam ediyor ve doğrudan çağıran onu olduğu gibi alıyor.
+    Kırpma yalnızca modele giden kopyada, tekilleştirme (`_fold_in_own_documents`,
+    `_narrow_then_widen`) `chunk_id`'yi kullanıp BİTTİKTEN sonra -- bu
+    fonksiyon ikisinin de sonunda çalışır.
+    """
+    payload = result.get("specialist_output") or {}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return result
+    rows = data.get("results")
+    if not isinstance(rows, list) or not rows:
+        return result
+    slim = [
+        {
+            key: row[key]
+            for key in _WRITER_RESULT_FIELDS
+            if isinstance(row, dict) and row.get(key) is not None
+        }
+        for row in rows
+    ]
+    return {
+        **result,
+        "specialist_output": {**payload, "data": {**data, "results": slim}},
+    }
 
 
 async def risk_node(state: MoneyFastState) -> dict[str, Any]:

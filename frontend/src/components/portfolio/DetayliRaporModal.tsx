@@ -29,7 +29,29 @@ interface Report {
     as_of: string
     is_delayed: boolean
     delay_minutes: number
+    /** Gözlemin kendisi eski mi -- beslemenin gecikmesinden AYRI. */
+    is_stale: boolean
     sections: Section[]
+}
+
+/**
+ * Fiyat tazeliğini anlatan tek cümle.
+ *
+ * İki durum var ve tek cümle ikisine birden yetmiyor: gözlem tazeyse
+ * beslemenin gecikmesi bildirilir; gözlem eskiyse fiyat son gözlemdir ve ona
+ * "gecikme" demek yanlış olur. Ölçüldü -- kapalı bir borsanın son kapanışı on
+ * sekiz saat yaşlanınca kullanıcıya "1095 dakika gecikmeli" deniyordu.
+ *
+ * NEDENİ söylenmiyor: "piyasa kapalı" demek sistemin bilmediği bir şeyi iddia
+ * etmek olurdu, çünkü aynı eskime ingestor durduğunda da olur.
+ */
+function freshnessNote(report: Report): string {
+    const at = formatMoment(report.as_of)
+    if (report.is_stale) return `Fiyatlar son işlem verisi; ${at} itibarıyla güncellendi.`
+    if (report.is_delayed) {
+        return `Fiyatlar en az ${report.delay_minutes} dakika gecikmeli; ${at} itibarıyla.`
+    }
+    return `Fiyatlar ${at} itibarıyla.`
 }
 
 function formatMoment(iso: string): string {
@@ -82,10 +104,7 @@ export default function DetayliRaporModal({ onClose }: { onClose: () => void }) 
                                 {/* Fiyatların ait olduğu an, belgenin üretildiği andan
                                     AYRI: raporu üretim saatiyle tarihlemek, fiyatları
                                     olduğundan taze göstermek olurdu. */}
-                                {report.is_delayed && (
-                                    <> Fiyatlar {report.delay_minutes} dakika gecikmeli;{' '}
-                                        {formatMoment(report.as_of)} itibarıyla.</>
-                                )}
+                                {' '}{freshnessNote(report)}
                             </p>
                         )}
                     </div>

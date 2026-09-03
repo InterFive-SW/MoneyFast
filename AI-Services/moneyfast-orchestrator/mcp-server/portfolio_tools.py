@@ -161,7 +161,15 @@ async def get_portfolio_positions(
             "CUSTODIAN_OF_RECORD".
         is_delayed (bool): True when quote data is not real time. If True, the answer
             MUST disclose the delay and MUST NOT be phrased as a live value.
-        delay_minutes (int): Quote delay. 0 when is_delayed is False.
+        delay_minutes (int): The PROVIDER'S OWN feed delay, a declared floor. NOT
+            how old the observation is -- the two used to be added together, and a
+            closed exchange's last close aged into "1095 dakika gecikmeli" while the
+            feed was not delayed at all. Read `is_stale` for the age.
+        is_stale (bool): The observation itself is old. Normal when the venue is
+            closed (this is its last close), a fault signal when it is trading.
+            Do NOT call it a delay, and do NOT assert WHY: the same age appears
+            when the ingestor stops, and the system cannot tell the two apart.
+            Say the prices are the last observed data and give the time.
         base_currency (str): Echo of the requested normalization currency.
 
         positions (list[dict]): One entry per position. Each entry:
@@ -289,6 +297,10 @@ def _normalize(payload: dict[str, Any], requested_currency: str) -> dict[str, An
     return {
         **freshness,
         "delay_minutes": int(delay_minutes),
+        # Sözleşmeye EKLEYEREK: taşımayan bir backend yanıtı hâlâ geçerli ve
+        # yokluk False değil None DEĞİL -- eski olup olmadığı bilinmiyorsa
+        # "eski değil" demek, bilinmeyeni bir tespite çevirmek olurdu.
+        "is_stale": payload.get("is_stale"),
         # Echo what the caller asked for, not what the backend echoed back: the
         # contract defines this field as the requested normalization currency.
         "base_currency": payload.get("base_currency", requested_currency),

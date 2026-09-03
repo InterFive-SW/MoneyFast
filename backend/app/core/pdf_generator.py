@@ -240,9 +240,31 @@ def _meta_lines(report: Dict[str, Any]) -> list:
     olurdu.
     """
     lines = [f"Oluşturulma: {report.get('generated_at', '')}"]
-    if report.get("is_delayed"):
-        lines.append(
-            f"Fiyatlar {report.get('delay_minutes', 0)} dakika gecikmeli; "
-            f"{report.get('as_of', '')} itibarıyla."
-        )
+    lines.append(freshness_note(report))
     return lines
+
+
+def freshness_note(report: Dict[str, Any]) -> str:
+    """Fiyat tazeliğini anlatan TEK cümle, üç yüzey için bir kez.
+
+    İki DURUM var ve tek cümle ikisine birden yetmiyor:
+
+    * Gözlem taze: besleme gecikmesi bildirilir ("15 dakika gecikmeli").
+    * Gözlem eski: fiyat son gözlemdir ve ona "gecikme" demek yanlış olur.
+      Ölçüldü -- kapalı bir borsanın son kapanışı on sekiz saat yaşlanınca
+      kullanıcıya "1095 dakika gecikmeli" deniyordu. Besleme o kadar
+      gecikmiyor; piyasa kapalı.
+
+    NEDENİ SÖYLENMİYOR. "Piyasa kapalı" demek, sistemin bilmediği bir şeyi
+    iddia etmek olurdu: aynı eskime, ingestor durduğunda da olur. Söylenen
+    şey her iki durumda da doğru -- fiyat şu ana ait değil, şu ana.
+    """
+    at = report.get("as_of", "")
+    if report.get("is_stale"):
+        return f"Fiyatlar son işlem verisi; {at} itibarıyla güncellendi."
+    if report.get("is_delayed"):
+        return (
+            f"Fiyatlar en az {report.get('delay_minutes', 0)} dakika gecikmeli; "
+            f"{at} itibarıyla."
+        )
+    return f"Fiyatlar {at} itibarıyla."

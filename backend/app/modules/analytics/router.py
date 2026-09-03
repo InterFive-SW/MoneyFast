@@ -56,7 +56,7 @@ def portfolio_analysis(
     """
     holdings = market_service.holdings(db, user_id=user_id)
     quotes = market_service.latest_quotes(db)
-    as_of, delay_minutes, _ = market_service.freshness(quotes)
+    as_of, delay_minutes, _, _stale = market_service.freshness(quotes)
     account = market_service.account(db, user_id=user_id)
 
     proposals = (

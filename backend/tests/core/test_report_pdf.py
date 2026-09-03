@@ -103,9 +103,36 @@ class TestContent:
         assert "987 dakika gecikmeli" in page
         assert REPORT["as_of"] in page and REPORT["generated_at"] in page
 
+    def test_a_stale_observation_is_not_called_a_delay(self):
+        """`STALE_AFTER_MINUTES` bu ayrımı baştan beri adlandırıyordu ve
+        hiçbir yerde kullanılmıyordu. Ölçülen sonuç: kapalı bir borsanın son
+        kapanışı on sekiz saat yaşlanınca kullanıcıya "1095 dakika gecikmeli"
+        deniyordu -- besleme o kadar gecikmiyor, piyasa kapalı."""
+        page = text_of(pdf_generator.generate_report_pdf(
+            {**REPORT, "is_stale": True}
+        ))
+        assert "son işlem verisi" in page
+        assert "gecikmeli" not in page
+
+    def test_the_reason_is_not_asserted(self):
+        """"Piyasa kapalı" demek, sistemin bilmediği bir şeyi iddia etmek
+        olurdu: aynı eskime, ingestor durduğunda da olur."""
+        note = pdf_generator.freshness_note({**REPORT, "is_stale": True})
+        assert "kapalı" not in note.lower()
+
+    def test_a_fresh_observation_reports_the_feed_delay(self):
+        note = pdf_generator.freshness_note(REPORT)
+        assert "en az 987 dakika gecikmeli" in note
+
+    def test_neither_flag_reports_only_the_time(self):
+        note = pdf_generator.freshness_note(
+            {**REPORT, "is_delayed": False, "is_stale": False}
+        )
+        assert note == f"Fiyatlar {REPORT['as_of']} itibarıyla."
+
     def test_a_fresh_report_carries_no_delay_line(self):
         page = text_of(pdf_generator.generate_report_pdf(
-            {**REPORT, "is_delayed": False}
+            {**REPORT, "is_delayed": False, "is_stale": False}
         ))
         assert "gecikmeli" not in page
 

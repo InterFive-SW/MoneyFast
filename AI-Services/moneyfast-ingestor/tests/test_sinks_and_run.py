@@ -501,10 +501,10 @@ class TestRateLimitBackoff:
     to be a browser."""
 
     def setup_method(self):
-        run._backoff_step = 0
+        run._backoff_steps.clear()
 
     def teardown_method(self):
-        run._backoff_step = 0
+        run._backoff_steps.clear()
 
     def test_interval_starts_at_the_configured_value(self):
         """Onbeş dakika: geri çekilme merdiveninin tabanı toplu turun kendisi.
@@ -521,21 +521,65 @@ class TestRateLimitBackoff:
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", _rate_limited)
         result = run.run_quotes(None, force=True)
         assert result == {"rate_limited": True}
-        assert run.current_interval_seconds() > 300
+        # Katman başına: `run_quotes` varsayılan olarak "all" turu.
+        assert run.current_interval_seconds("all") > 300
 
     def test_backoff_is_bounded(self, monkeypatch):
         for _ in range(10):
-            run._note_rate_limit()
-        assert run.current_interval_seconds() == 300 * run.config.BACKOFF_LADDER[-1]
+            run._note_rate_limit("bulk")
+        assert run.current_interval_seconds("bulk") == 300 * run.config.BACKOFF_LADDER[-1]
+
+    def test_one_tier_does_not_slow_the_other(self, monkeypatch):
+        """Bant katmanında dört sembol var ve geçici bir eksik onda sık.
+        487 sembollük toplu katmanın aralığını onun yüzünden genişletmek,
+        çalışan bir turu bozardı."""
+        run._note_rate_limit("band")
+        assert run.current_interval_seconds("band") > run.config.band_interval_seconds()
+        assert run.current_interval_seconds("bulk") == run.config.quote_interval_seconds()
+
+    def test_the_ladder_reaches_the_scheduler(self, monkeypatch):
+        """Merdiven bir dönem YALNIZCA bir log satırıydı: işler açılışta sabit
+        aralıkla kuruluyor ve `current_interval_seconds` hiçbir yerde
+        okunmuyordu. "widening the quote interval" uyarısı, hiç gerçekleşmeyen
+        bir eylemi bildiriyordu."""
+        calls = []
+
+        class Sched:
+            def reschedule_job(self, job_id, trigger, seconds):
+                calls.append((job_id, trigger, seconds))
+
+        monkeypatch.setattr(run, "_scheduler", Sched())
+        run._note_rate_limit("bulk")
+        assert calls and calls[0][0] == "quotes_bulk"
+        assert calls[0][2] == run.current_interval_seconds("bulk")
+
+    def test_a_reset_reschedules_too(self, monkeypatch):
+        calls = []
+
+        class Sched:
+            def reschedule_job(self, job_id, trigger, seconds):
+                calls.append(seconds)
+
+        monkeypatch.setattr(run, "_scheduler", Sched())
+        run._note_rate_limit("bulk")
+        run._note_success("bulk")
+        assert calls[-1] == run.config.quote_interval_seconds()
+
+    def test_no_scheduler_only_records(self, monkeypatch):
+        """Testler ve tek seferlik çalıştırmalar zamanlayıcısız: geri çekilme
+        yine kaydediliyor, yalnızca uygulanamıyor."""
+        monkeypatch.setattr(run, "_scheduler", None)
+        run._note_rate_limit("bulk")
+        assert run.current_interval_seconds("bulk") > run.config.quote_interval_seconds()
 
     def test_a_clean_cycle_resets_the_interval(self, monkeypatch):
-        run._note_rate_limit()
+        run._note_rate_limit("all")
         monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
         monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [])
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda p: [])
         monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": 0})
         run.run_quotes(None, force=True)
-        assert run.current_interval_seconds() == 300
+        assert run.current_interval_seconds("all") == 300
 
     def test_a_non_rate_limit_error_still_propagates(self, monkeypatch):
         """Only a 429 means "slow down". Everything else is a real fault and
@@ -626,7 +670,7 @@ class TestCycleBudget:
 
     def test_an_overrunning_cycle_is_logged(self, monkeypatch, caplog):
         monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
-        monkeypatch.setattr(run, "current_interval_seconds", lambda: 0)
+        monkeypatch.setattr(run, "current_interval_seconds", lambda tier="bulk": 0)
         monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [
             {"symbol": "THYAO", "data_symbol": "THYAO.IS", "market": "BIST"}])
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda products: [{"symbol": "THYAO"}])
@@ -738,10 +782,10 @@ class TestPartialBatches:
     while the backoff ladder sat at step zero."""
 
     def setup_method(self):
-        run._backoff_step = 0
+        run._backoff_steps.clear()
 
     def teardown_method(self):
-        run._backoff_step = 0
+        run._backoff_steps.clear()
 
     def _products(self, count):
         return [
@@ -772,7 +816,7 @@ class TestPartialBatches:
 
         run.run_quotes(None)
 
-        assert run.current_interval_seconds() == 300
+        assert run.current_interval_seconds("all") == 300
 
     def test_no_instruments_in_the_open_markets_is_a_skip(self, monkeypatch):
         monkeypatch.setattr(run, "open_markets", lambda: {"NASDAQ"})
@@ -1241,3 +1285,63 @@ class TestQuarterly:
         )
         monkeypatch.setattr(run.sinks, "push_quarterly", lambda c, rows: None)
         assert run.run_quarterly(None) == {"fetched": 0}
+
+
+class TestSmallTierTolerance:
+    """Oran tek başına dörtlük katmanda saçmalıyor.
+
+    Bant katmanında üç kur + altın var. BİRİ boş dönerse %25, ikisi %50 --
+    ikisi de `MISSING_TOLERANCE`'ı aşıyor ve tur "degraded" sayılıyordu.
+    Ölçüldü, canlı bir turda: "2/4 symbols came back empty" ve hemen
+    ardından "rate limited".
+
+    Toleransın kendi gerekçesi büyük bir evren için yazılmış ("a third of the
+    universe"); dörtlük bir kümede o cümlenin karşılığı yok.
+    """
+
+    def setup_method(self):
+        run._backoff_steps.clear()
+
+    def teardown_method(self):
+        run._backoff_steps.clear()
+
+    def _cycle(self, monkeypatch, total, returned, tier="band"):
+        products = [
+            {"symbol": f"S{i}", "data_symbol": f"S{i}", "market": "FX"}
+            for i in range(total)
+        ]
+        monkeypatch.setattr(run, "open_markets", lambda: {"FX"})
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: products)
+        monkeypatch.setattr(run.config, "is_band_product", lambda p: tier == "band")
+        monkeypatch.setattr(
+            run.yfinance_source, "fetch_quotes",
+            lambda p: [{"symbol": f"S{i}"} for i in range(returned)],
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": len(q)}
+        )
+        run.run_quotes(None, tier=tier)
+
+    def test_one_missing_of_four_is_not_a_provider_problem(self, monkeypatch):
+        self._cycle(monkeypatch, total=4, returned=3)
+        assert run.current_interval_seconds("band") == run.config.band_interval_seconds()
+
+    def test_two_missing_of_four_is_not_either(self, monkeypatch):
+        """Ölçülen tam durum: 2/4 boş döndü ve tur geri çekilmeye girdi."""
+        self._cycle(monkeypatch, total=4, returned=2)
+        assert run.current_interval_seconds("band") == run.config.band_interval_seconds()
+
+    def test_three_missing_of_four_still_counts(self, monkeypatch):
+        """Dördün üçü gerçekten bir sağlayıcı sorunudur."""
+        self._cycle(monkeypatch, total=4, returned=1)
+        assert run.current_interval_seconds("band") > run.config.band_interval_seconds()
+
+    def test_a_large_tier_is_unaffected_by_the_floor(self, monkeypatch):
+        """487'lik katmanda oran zaten çok daha önce devreye giriyor; taban
+        oradaki davranışı değiştirmemeli."""
+        self._cycle(monkeypatch, total=400, returned=200, tier="bulk")
+        assert run.current_interval_seconds("bulk") > run.config.quote_interval_seconds()
+
+    def test_a_handful_missing_from_a_large_tier_is_still_tolerated(self, monkeypatch):
+        self._cycle(monkeypatch, total=400, returned=395, tier="bulk")
+        assert run.current_interval_seconds("bulk") == run.config.quote_interval_seconds()

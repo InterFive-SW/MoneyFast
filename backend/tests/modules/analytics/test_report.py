@@ -84,6 +84,41 @@ class TestShape:
             assert section["summary"], section["key"]
             assert section["title"]
 
+    def test_freshness_is_measured_over_the_reported_instruments_only(
+        self, wired, mocker
+    ):
+        """Kapalı bir borsanın son kapanışı, kullanıcının sahip OLMADIĞI bir
+        enstrümanda duruyorsa raporu bayat göstermemeli.
+
+        Ölçüldü: BIST fiyatları otuz saniyelikken rapor "462 dakika
+        gecikmeli" diyordu, çünkü evrenin tamamı gönderiliyordu ve ABD
+        borsası on sekiz saattir kapalıydı.
+        """
+        stale = NOW - timedelta(hours=18)
+        mocker.patch.object(
+            market_service, "latest_quotes",
+            return_value={
+                "THYAO": {"price": 100.0, "received_at": NOW, "currency": "TRY"},
+                # Portföyde YOK, ve on sekiz saattir kapalı bir borsadan.
+                "AAPL": {"price": 200.0, "received_at": stale, "currency": "USD"},
+            },
+        )
+        spy = mocker.patch.object(
+            market_service, "freshness", return_value=(NOW, 15, True)
+        )
+        report.build_report(wired, "user-1")
+        assert set(spy.call_args.args[0]) == {"THYAO"}
+
+    def test_an_empty_portfolio_falls_back_to_the_whole_universe(self, wired, mocker):
+        """Hiç pozisyon yoksa süzgeç her şeyi eler; o durumda tazeliği hiç
+        bildirmemektense evrenin tamamından okumak doğru."""
+        mocker.patch.object(market_service, "holdings", return_value=[])
+        spy = mocker.patch.object(
+            market_service, "freshness", return_value=(NOW, 15, True)
+        )
+        report.build_report(wired, "user-1")
+        assert spy.call_args.args[0]
+
     def test_the_price_time_is_separate_from_the_build_time(self, wired):
         """Belgenin üretildiği an ile fiyatların ait olduğu an farklı şeyler,
         ve aradaki fark bu ürünün açıklamak zorunda olduğu gecikme."""

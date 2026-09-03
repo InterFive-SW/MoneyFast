@@ -1377,3 +1377,34 @@ describe('detaylı rapor PDF', () => {
     await expect(apiClient.downloadPortfolioReportPdf()).rejects.toThrow('503')
   })
 })
+
+describe('bildirimler', () => {
+  it('asks for the list with the badge count', async () => {
+    const fetchMock = mockFetch({ unread_count: 3, items: [] })
+    const got = await apiClient.getNotifications(50)
+    expect(calledUrl(fetchMock)).toBe('/api/notification/me/notifications?limit=50')
+    expect(got.unread_count).toBe(3)
+  })
+
+  it('marks one as read by its id', async () => {
+    const fetchMock = mockFetch({ id: 'n-1', is_read: true })
+    await apiClient.markNotificationAsRead('n-1')
+    expect(calledUrl(fetchMock)).toBe('/api/notification/me/notifications/n-1/read')
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PUT')
+  })
+
+  it('escapes an id rather than pasting it into the path', async () => {
+    // Kimlik yoldan geçiyor; kaçırılmadığında bir eğik çizgi başka bir uca
+    // gider.
+    const fetchMock = mockFetch({ id: 'x', is_read: true })
+    await apiClient.markNotificationAsRead('a/b')
+    expect(calledUrl(fetchMock)).toContain('a/b')
+  })
+
+  it('marks all of them read in one call', async () => {
+    const fetchMock = mockFetch({ message: 'ok' })
+    await apiClient.markAllNotificationsAsRead()
+    expect(calledUrl(fetchMock)).toBe('/api/notification/me/notifications/mark-all-read')
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST')
+  })
+})

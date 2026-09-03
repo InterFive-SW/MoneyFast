@@ -27,7 +27,7 @@ LOCAL_TICKER_MARKETS = {"BIST"}
 
 def upsert_news(
     db: Session, items: list[dict[str, Any]]
-) -> tuple[int, dict[str, list[str]]]:
+) -> tuple[int, dict[str, list[str]], list[dict[str, Any]]]:
     """Store articles, ignoring ones already held.
 
     Deduplicated on content_hash rather than URL: the same wire story is
@@ -44,9 +44,14 @@ def upsert_news(
     Harita, YAZILANLAR için değil TEKLİF EDİLENLER için dönüyor: backend'de
     zaten duran bir haber RAG'da eksik olabilir (iki yazma ayrı istekler) ve
     o durumda tek şansı budur.
+
+    Üçüncü dönen değer bunun TERSİ: yalnızca GERÇEKTEN eklenen ve bir sembole
+    bağlanan haberler. Bildirim üretimi buna bakıyor -- zaten duran bir haberi
+    yeniden bildirmek, akışı otuz saniyede bir tekrar eden bir gürültüye
+    çevirirdi.
     """
     if not items:
-        return 0, {}
+        return 0, {}, []
 
     universe = _tradable_universe(db)
     payload = [
@@ -68,17 +73,35 @@ def upsert_news(
     if matched:
         log.info("resolved symbols for %d of %d articles", matched, len(payload))
 
-    statement = insert(NewsItem).values(payload).on_conflict_do_nothing(
-        index_elements=["content_hash"]
+    # `RETURNING`: hangi satırların GERÇEKTEN eklendiğini söylüyor, kaç tane
+    # olduğunu değil. Bildirim yalnızca yeni haber için üretilmeli ve
+    # `rowcount` bunu ayırt etmiyordu -- her turda aynı haberi yeniden
+    # bildirmek, akışı otuz saniyede bir tekrar eden bir gürültüye çevirirdi.
+    statement = (
+        insert(NewsItem)
+        .values(payload)
+        .on_conflict_do_nothing(index_elements=["content_hash"])
+        .returning(NewsItem.id, NewsItem.content_hash)
     )
-    result = db.execute(statement)
+    inserted = db.execute(statement).all()
     db.commit()
     resolved = {
         row["content_hash"]: row["related_symbols"]
         for row in payload
         if row["related_symbols"]
     }
-    return result.rowcount or 0, resolved
+    by_hash = {row["content_hash"]: row for row in payload}
+    # Eklenen ve BİR SEMBOLE bağlanan haberler, bildirim için.
+    fresh = [
+        {
+            "id": str(news_id),
+            "title": by_hash[content_hash]["title"],
+            "symbols": by_hash[content_hash]["related_symbols"],
+        }
+        for news_id, content_hash in inserted
+        if by_hash.get(content_hash, {}).get("related_symbols")
+    ]
+    return len(inserted), resolved, fresh
 
 
 def _tradable_universe(db: Session) -> list[InvestmentProduct]:

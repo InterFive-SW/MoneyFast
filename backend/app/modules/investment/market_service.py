@@ -1496,3 +1496,43 @@ def watchlist_remove(db: Session, user_id: str, symbol: str) -> bool:
     )
     db.commit()
     return bool(deleted)
+
+
+def holders_of(db: Session, symbols: list[str]) -> dict[str, set[str]]:
+    """Bu sembolleri TUTAN kullanıcılar, sembol başına.
+
+    Pozisyonlar bu modülün; sorgusu da burada. Bildirim modülünün portföy
+    tablosunu okuması, modüllerin birbirinin ORM sınıfını import etmemesi
+    kuralının tam olarak engellediği şey.
+
+    Miktarı sıfır olan pozisyon SAYILMIYOR: kapatılmış bir pozisyonun
+    hissesiyle ilgili haber, artık o kişiyi ilgilendirmiyor.
+    """
+    if not symbols:
+        return {}
+    rows = db.execute(
+        select(InvestmentProduct.symbol, InvestmentAccount.user_id)
+        .select_from(PortfolioPosition)
+        .join(InvestmentProduct, InvestmentProduct.id == PortfolioPosition.product_id)
+        .join(
+            InvestmentAccount,
+            InvestmentAccount.id == PortfolioPosition.investment_account_id,
+        )
+        .where(
+            InvestmentProduct.symbol.in_(symbols),
+            PortfolioPosition.quantity > 0,
+            # DEMO hesabı DIŞARIDA. Anonim çağıranın gördüğü paylaşılan
+            # portföy; `user_id` alanında gerçek bir kullanıcı değil "demo"
+            # yazıyor ve bildirilecek kimsesi yok.
+            #
+            # Ölçüldü: dışarıda bırakılmadığında `notifications.user_id`'nin
+            # `users` tablosuna foreign key'i ihlal oluyor ve TEK bir geçersiz
+            # id partinin tamamını düşürüyordu -- ASELS haberi altı gerçek
+            # kullanıcıya da ulaşmıyordu.
+            InvestmentAccount.account_number != DEMO_ACCOUNT_NUMBER,
+        )
+    ).all()
+    holders: dict[str, set[str]] = {}
+    for symbol, user_id in rows:
+        holders.setdefault(symbol, set()).add(user_id)
+    return holders

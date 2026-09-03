@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_user_id, require_service_token
 from app.modules.investment import ai_service, market_service
+from app.modules.notification import service as notification_service
 from . import service, stream, technicals
 from .schemas import (
     IngestResult,
@@ -690,6 +691,58 @@ def fundamentals_missing(db: Session = Depends(get_db)):
     return {"symbols": market_service.symbols_without_fundamentals(db)}
 
 
+def _notify_holders(db: Session, fresh: list[dict]) -> int:
+    """Yeni gelen bir haber, o hisseyi TUTAN kullanıcılara bildirilir.
+
+    Yalnızca gerçekten eklenen haberler için: `upsert_news` içerik hash'inde
+    tekilleştiriyor ve zaten duran bir haberi yeniden bildirmek, akışı otuz
+    saniyede bir tekrar eden bir gürültüye çevirirdi.
+
+    Bir haber kullanıcının BİRDEN ÇOK hissesine dokunuyorsa yine TEK bildirim
+    yazılıyor: aynı yazıyı üç kez göstermek, üç ayrı haber varmış gibi
+    okunurdu.
+
+    İki modülü burada birleştirmenin sebebi: pozisyonların sorgusu onları
+    sahiplenen modülde (`market_service.holders_of`), satırın yazılması
+    bildirim modülünde, ve hiçbiri diğerinin tablosunu okumuyor.
+
+    Bildirim yazamamak haber yüklemesini DÜŞÜRMEZ: haber sistemin verisi,
+    bildirim onun üstüne konan bir kolaylık.
+    """
+    if not fresh:
+        return 0
+    symbols = sorted({s for item in fresh for s in item["symbols"]})
+    holders = market_service.holders_of(db, symbols)
+    if not holders:
+        return 0
+
+    per_user: dict[str, list[dict]] = {}
+    for item in fresh:
+        for user_id in {u for s in item["symbols"] for u in holders.get(s, set())}:
+            per_user.setdefault(user_id, []).append(item)
+
+    written = 0
+    for user_id, items in per_user.items():
+        capped = items[: notification_service.MAX_PER_USER_PER_BATCH]
+        if len(items) > len(capped):
+            log.info(
+                "notification batch capped for one user: %d -> %d",
+                len(items), len(capped),
+            )
+        for item in capped:
+            held = sorted(
+                s for s in item["symbols"] if user_id in holders.get(s, set())
+            )
+            written += notification_service.create_many(
+                db, [user_id],
+                title="Portföyünüzle ilgili haber",
+                description=f"{', '.join(held)}: {item['title']}"[:255],
+                type="INFO",
+                link_url="/analiz/genel",
+            )
+    return written
+
+
 @router.post(
     "/news/ingest",
     response_model=IngestResult,
@@ -697,10 +750,18 @@ def fundamentals_missing(db: Session = Depends(get_db)):
     dependencies=[Depends(require_service_token)],
 )
 def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db)):
-    written, symbols = service.upsert_news(db, [item.model_dump() for item in request.items])
+    written, symbols, fresh = service.upsert_news(
+        db, [item.model_dump() for item in request.items]
+    )
+    # `upsert_news` kendi commit'ini attı; bildirimler ayrı bir transaction.
+    # Bildirimi yazamamak haberi kaybetmemeli, o yüzden bu sırayla.
+    notified = _notify_holders(db, fresh)
+    if notified:
+        db.commit()
     log.info(
-        "ingested %d new news items of %d offered, %d symbol-tagged",
-        written, len(request.items), len(symbols),
+        "ingested %d new news items of %d offered, %d symbol-tagged, "
+        "%d notifications",
+        written, len(request.items), len(symbols), notified,
     )
     # Semboller geri veriliyor: çözümleme evrenin bulunduğu yerde yapılıyor
     # ve `ingestor` aynı haberi RAG'a da yazıyor. Sonucu geri vermezsek

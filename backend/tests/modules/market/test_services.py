@@ -148,15 +148,17 @@ class TestFreshness:
 class TestNewsStore:
     def test_empty_batch_makes_no_query(self):
         db = MagicMock(spec=Session)
-        assert news_service.upsert_news(db, []) == (0, {})
+        assert news_service.upsert_news(db, []) == (0, {}, [])
         assert db.execute.called is False
 
     def test_articles_are_deduplicated_on_content_hash(self):
         """Not on URL: the same wire story is republished under different
         links, and a feed that renumbers would re-import its whole history."""
         db = MagicMock(spec=Session)
-        db.execute.return_value = SimpleNamespace(rowcount=1)
-        written, _ = news_service.upsert_news(
+        # `RETURNING` ile eklenen satırlar dönüyor: kaç tane olduğu değil,
+        # HANGİLERİ. Bildirim yalnızca gerçekten eklenen haber için üretilmeli.
+        db.execute.return_value.all.return_value = [("id-1", "a" * 64)]
+        written, _, _fresh = news_service.upsert_news(
             db,
             [
                 {
@@ -170,13 +172,27 @@ class TestNewsStore:
         assert "ON CONFLICT" in statement.upper()
         assert "content_hash" in statement
 
-    def test_rowcount_none_reports_zero_rather_than_raising(self):
+    def test_a_batch_that_inserted_nothing_reports_zero(self):
+        """Hepsi zaten duruyorsa `RETURNING` boş döner -- ve bildirim de
+        üretilmez, ki tekrar eden bir gürültü çıkmasın."""
         db = MagicMock(spec=Session)
-        db.execute.return_value = SimpleNamespace(rowcount=None)
-        written, _ = news_service.upsert_news(
+        db.execute.return_value.all.return_value = []
+        written, _, fresh = news_service.upsert_news(
             db, [{"content_hash": "b" * 64, "title": "t", "source": "s", "published_at": NOW}]
         )
-        assert written == 0
+        assert written == 0 and fresh == []
+
+    def test_only_symbol_tagged_new_articles_reach_the_notifier(self, mocker):
+        """Hiçbir hisseye bağlanmayan haber bildirilecek kimseyi
+        göstermiyor; listeye hiç girmiyor."""
+        db = MagicMock(spec=Session)
+        mocker.patch.object(news_service, "_tradable_universe", return_value=[])
+        db.execute.return_value.all.return_value = [("id-1", "c" * 64)]
+        _written, _symbols, fresh = news_service.upsert_news(
+            db, [{"content_hash": "c" * 64, "title": "Genel piyasa yorumu",
+                  "source": "s", "published_at": NOW}]
+        )
+        assert fresh == []
 
 
 class TestNewsSymbolResolution:
@@ -193,7 +209,9 @@ class TestNewsSymbolResolution:
 
     def _db(self):
         db = MagicMock(spec=Session)
-        db.execute.return_value = SimpleNamespace(rowcount=1)
+        # `RETURNING` eklenen satırları döndürüyor; bu sınıfın konusu
+        # sembol çözümlemesi, dolayısıyla tek bir satır yeter.
+        db.execute.return_value.all.return_value = [("id-1", "d" * 64)]
         db.query.return_value.filter.return_value.all.return_value = self.UNIVERSE
         return db
 

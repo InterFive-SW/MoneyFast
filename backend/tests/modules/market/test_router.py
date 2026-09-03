@@ -204,7 +204,7 @@ class TestIngestWrites:
     def test_news_ingest_reports_only_new_rows(self, client, mocker, monkeypatch):
         """Re-running a feed must be a no-op. The count is what proves it."""
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
-        mocker.patch.object(market_module_service, "upsert_news", return_value=(0, {}))
+        mocker.patch.object(market_module_service, "upsert_news", return_value=(0, {}, []))
         response = client.post(
             "/api/market/news/ingest",
             headers={"Authorization": "Bearer secret"},
@@ -220,6 +220,33 @@ class TestIngestWrites:
             },
         )
         assert response.json()["news_written"] == 0
+
+    def test_notifications_are_committed_when_any_were_written(
+        self, client, mocker, monkeypatch
+    ):
+        """`upsert_news` kendi commit'ini atıyor, dolayısıyla bildirimler
+        AYRI bir transaction: bunlar commit edilmezse oturumla birlikte
+        kayboluyorlardı -- ölçüldü, satırlar hiç veritabanına ulaşmadı."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        mocker.patch.object(
+            market_module_service, "upsert_news",
+            return_value=(1, {}, [{"id": "n1", "title": "t", "symbols": ["ASELS"]}]),
+        )
+        mocker.patch.object(market_router, "_notify_holders", return_value=3)
+        db = MagicMock(spec=Session)
+        app.dependency_overrides[get_db] = lambda: db
+        try:
+            client.post(
+                "/api/market/news/ingest",
+                headers={"Authorization": "Bearer secret"},
+                json={"items": [{
+                    "content_hash": "c" * 64, "title": "Haber", "source": "Dünya",
+                    "published_at": NOW.isoformat(),
+                }]},
+            )
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+        db.commit.assert_called_once()
 
     def test_short_content_hash_is_rejected(self, client, monkeypatch):
         """The hash is the deduplication key shared with the rag service; a

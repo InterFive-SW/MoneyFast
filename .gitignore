@@ -31,7 +31,12 @@ dumps/
 coverage.xml
 junit.xml
 htmlcov/
-frontend/coverage/
+# Yola sabitli DEĞİL. `frontend/coverage/` idi ve `vitest --coverage` çıktıyı
+# çalıştırıldığı dizine yazıyor: komut bir kez `frontend/src` içinden
+# çalıştırıldığında dosyalar `frontend/src/coverage/` altına düştü ve kurala
+# takılmadan commit'e girdi. Aynı gerekçe her iki yer için de geçerli --
+# bunlar bir koşunun ÜRETTİĞİ şeyler.
+coverage/
 
 # Vite build output. The backend image runs `npm run build` itself in its
 # frontend-builder stage (backend/Dockerfile), so a committed dist/ is never

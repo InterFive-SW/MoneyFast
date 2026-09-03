@@ -13,7 +13,7 @@ from app.core.email import send_transaction_email, send_transaction_request_emai
 from app.modules.notification.models import Notification
 from . import ai_service, allocation, market_service, service
 from app.modules.analytics import service as analytics_service
-from .deps import require_service_token
+from app.core.deps import require_service_token
 from .models import AllocationTarget, TransactionProposal
 from .ai_schemas import (
     PortfolioPositionsOut, StageTransactionRequest, StageTransactionOut,

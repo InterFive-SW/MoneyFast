@@ -1,8 +1,8 @@
 """Shared request dependencies.
 
-Only one thing lives here so far, and it is here rather than in `auth/`
-because more than one module needs it: resolving the authenticated user from
-the bearer token.
+Two things live here, and both are here rather than in a module because more
+than one module needs them: resolving the authenticated user from the bearer
+token, and the guard for the service-to-service endpoints.
 
 The AI path needs this specifically. "MCP Tools Interface Definitions v2.1"
 says of `user_id`:
@@ -15,9 +15,10 @@ anyone's holdings by editing one JSON field, so the field does not exist in
 the request schema at all and the value is derived here instead.
 """
 
+import os
 from typing import Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
@@ -116,3 +117,44 @@ def get_optional_user_id(
         # rejected, so an expired session degrades to general questions
         # instead of a wall.
         return None
+
+
+def require_service_token(
+    authorization: Optional[str] = Header(default=None),
+) -> None:
+    """Guard for every endpoint that names its SUBJECT IN THE PATH.
+
+    Session-bound endpoints resolve the user from the bearer token and can
+    only ever return the caller's own data. These cannot: the MCP tool server
+    calls them on behalf of a user it names, so without a guard anyone who can
+    reach the backend could read anyone's holdings, risk profile, cash flow or
+    report by guessing a user id. The backend is also the public ingress, so
+    "internal network only" is not true of it.
+
+    Measured while three of them were open: an unauthenticated GET returned
+    another user's eleven positions and a total market value of 1.083.211,99
+    TRY, and two more handed over the symbols they hold.
+
+    An unset BACKEND_API_KEY refuses rather than waves requests through, and
+    with 503 rather than 401: nothing is wrong with the caller's credentials,
+    the deployment never configured any. An endpoint that quietly became
+    public because an env var was missing is the kind of thing nobody notices.
+
+    ONE COPY, HERE. It was duplicated verbatim in four modules -- market,
+    risk, investment, analytics -- and banking imported market's, which is
+    exactly the cross-module dependency the module rules exist to prevent.
+    Each copy carried the same comment saying the honest fix was one copy in
+    `core/` and that this was a team decision; the decision was taken.
+
+    `core/` is shared, so what lives here has to be genuinely domain-free:
+    this reads one env var and one header and knows nothing about portfolios,
+    risk or reports.
+    """
+    expected = os.getenv("BACKEND_API_KEY")
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="Service endpoint is not configured (BACKEND_API_KEY unset).",
+        )
+    if authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="Invalid service credentials.")

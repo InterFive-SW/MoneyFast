@@ -7,19 +7,24 @@ için analiz ekranı ile gösterge paneli portföyün değeri konusunda birbiriy
 çelişemez.
 """
 
+import logging
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
+from app.core import pdf_generator
 from app.core.database import get_db
-from app.core.deps import get_optional_user_id
+from app.core.deps import get_optional_user_id, require_service_token
 from app.modules.investment import ai_service, market_service
 from app.modules.investment.models import TransactionProposal
 
 from . import report, service
-from .deps import lookback_param, require_service_token
+from .deps import lookback_param
 from .schemas import PortfolioAnalysis, PortfolioReport
+
+log = logging.getLogger("moneyfast.analytics")
 
 router = APIRouter(tags=["analytics"])
 
@@ -131,6 +136,47 @@ def portfolio_report(
     sohbet aynı metni okusun diye.
     """
     return report.build_report(db, user_id)
+
+
+@router.get(
+    "/report.pdf",
+    summary="Detaylı rapor (PDF)",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+def portfolio_report_pdf(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    Aynı rapor, indirilebilir belge olarak.
+
+    METİN ÜRETMİYOR: bölümler `report.build_report`'tan geliyor ve PDF
+    yalnızca onları sayfaya yerleştiriyor. Ekran, sohbet ve PDF aynı metni
+    okumalı.
+
+    Font kurulu değilse 503: aksanları düşürülmüş Türkçe yanlış yazılmış
+    Türkçedir ve kullanıcıya gösterilen bir belgede sessizce bozuk metin, hiç
+    belge olmamasından kötüdür. Kurulum eksikliği de kullanıcının
+    düzeltebileceği bir şey değil, o yüzden 4xx değil.
+    """
+    data = report.build_report(db, user_id)
+    try:
+        content = pdf_generator.generate_report_pdf(data)
+    except pdf_generator.UnicodeFontMissing as exc:
+        log.error("report pdf unavailable, unicode font missing: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="PDF üretimi için gerekli yazı tipi kurulu değil.",
+        )
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="moneyfast-rapor-{stamp}.pdf"'
+        },
+    )
 
 
 @router.get(

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user_id, get_optional_user_id
-from app.modules.market.router import require_service_token
+from app.core.deps import require_service_token
 
 from . import payments, products, service
 from .models import AccountTransaction, BankTransaction

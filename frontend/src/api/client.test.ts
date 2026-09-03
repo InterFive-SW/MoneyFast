@@ -1353,3 +1353,27 @@ describe('hedef dağılım', () => {
     expect(JSON.parse(init.body as string)).toEqual({ targets: [] })
   })
 })
+
+describe('detaylı rapor PDF', () => {
+  it('asks the server for the document rather than printing the page', async () => {
+    // Belge SUNUCUDA üretiliyor: ekranın DOM'unu yazdırmak, raporun metnini
+    // ikinci bir yerde kurmak olurdu ve iki yüzey ayrışırdı.
+    const blob = new Blob(['%PDF-1.4'], { type: 'application/pdf' })
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200, blob: async () => blob,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const got = await apiClient.downloadPortfolioReportPdf()
+    expect(calledUrl(fetchMock)).toBe('/api/analytics/report.pdf')
+    expect(got).toBe(blob)
+  })
+
+  it('raises when the server cannot produce it', async () => {
+    // 503: yazı tipi kurulu değil. Sessizce boş bir dosya indirmek, bozuk
+    // bir belgeyi belge diye vermek olurdu.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false, status: 503, statusText: 'Service Unavailable',
+    }))
+    await expect(apiClient.downloadPortfolioReportPdf()).rejects.toThrow('503')
+  })
+})

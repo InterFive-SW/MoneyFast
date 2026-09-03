@@ -58,7 +58,7 @@ def configure_market_stream() -> None:
         db = SessionLocal()
         try:
             quotes = market_service.latest_quotes(db)
-            as_of, delay, is_delayed = market_service.freshness(quotes)
+            as_of, delay, is_delayed, is_stale = market_service.freshness(quotes)
             return {
                 "as_of": as_of.isoformat() if as_of else None,
                 "delay_minutes": delay,

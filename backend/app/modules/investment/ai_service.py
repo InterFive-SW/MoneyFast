@@ -185,7 +185,9 @@ def build_portfolio(
             "Kapatılmış pozisyonlar bu ortamda saklanmıyor; yalnızca açık pozisyonlar döndürüldü."
         )
 
-    live_as_of, live_delay, live_is_delayed = freshness or (None, 0, False)
+    live_as_of, live_delay, live_is_delayed, live_is_stale = (
+        freshness or (None, 0, False, False)
+    )
 
     rows: List[Dict[str, Any]] = []
     unpriced: List[str] = []
@@ -279,6 +281,9 @@ def build_portfolio(
         "source": VALUATION_SOURCE,
         "is_delayed": live_is_delayed,
         "delay_minutes": live_delay,
+        # Gözlem ESKİ mi -- beslemenin gecikmesinden ayrı bir şey. Piyasa
+        # kapalıyken normal (son kapanış), açıkken arıza işareti.
+        "is_stale": live_is_stale,
         "base_currency": base_currency,
         "positions": rows,
         "totals": {

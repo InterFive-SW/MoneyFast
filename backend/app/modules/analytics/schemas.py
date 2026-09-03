@@ -119,5 +119,11 @@ class PortfolioReport(BaseModel):
     #: gösterge paneli hepsi söylüyor.
     as_of: str = ""
     is_delayed: bool = False
+    #: Sağlayıcının BESLEME gecikmesi. Gözlemin yaşı DEĞİL -- ikisi bir dönem
+    #: toplanıyordu ve kapalı bir borsanın son kapanışı "1095 dakika
+    #: gecikmeli" diye raporlanıyordu.
     delay_minutes: int = 0
+    #: Gözlemin kendisi eskidiyse. Piyasa kapalıyken normal (son kapanış),
+    #: açıkken arıza işareti; ikisi de bildirilir ama yalnızca biri gecikmedir.
+    is_stale: bool = False
     sections: List[ReportSection] = Field(default_factory=list)

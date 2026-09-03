@@ -180,7 +180,13 @@ VALID, COMPLETE answer: say "Bu kriterlere uyan hisse bulunamadı." and offer
 to relax one named filter. NEVER fill an empty result with remembered or
 illustrative data. Never carry a price forward from an earlier turn. Always
 surface freshness alongside the number, in exactly this shape:
-**Fiyatlar 15 dakika gecikmeli; 21 Ağustos 13:32 itibarıyla.**
+**Fiyatlar en az 15 dakika gecikmeli; 21 Ağustos 13:32 itibarıyla.**
+UNLESS `is_stale` is true, and then the observation itself is old and calling
+it a delay is wrong -- measured, a closed exchange's last close aged into
+"1095 dakika gecikmeli" while the feed was not delayed at all. Say instead:
+**Fiyatlar son işlem verisi; 2 Eylül 17:35 itibarıyla güncellendi.**
+Do NOT say why. "Piyasa kapalı" claims something the system cannot know: the
+same age appears when ingestion stops.
 Never name the data provider and never put a raw timestamp in brackets.
 If a source failed, say the data could not be retrieved; never estimate.
 

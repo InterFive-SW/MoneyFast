@@ -372,8 +372,10 @@ def latest_quotes(db: Session, symbols: Optional[Iterable[str]] = None) -> dict[
     return out
 
 
-def freshness(quotes: dict[str, dict[str, Any]]) -> tuple[Optional[datetime], int, bool]:
-    """(as_of, delay_minutes, is_delayed) across a set of quotes.
+def freshness(
+    quotes: dict[str, dict[str, Any]]
+) -> tuple[Optional[datetime], int, bool, bool]:
+    """(as_of, delay_minutes, is_delayed, is_stale) across a set of quotes.
 
     `as_of` is when we OBSERVED the price, not the bar's own timestamp.
 
@@ -384,11 +386,17 @@ def freshness(quotes: dict[str, dict[str, Any]]) -> tuple[Optional[datetime], in
     The bar's close tracks the live price; its timestamp is a date, not a tick
     time.
 
-    Two components make up the disclosed delay:
+    İki BAĞIMSIZ şey bildiriliyor, toplamı değil:
 
-    * how long ago we observed it (`received_at` to now), and
-    * the provider's own feed delay, which we cannot observe and therefore
-      declare as a floor.
+    * `delay_minutes` -- sağlayıcının kendi besleme gecikmesi. Gözlenemiyor,
+      bu yüzden taban olarak BEYAN ediliyor ve her zaman aynı.
+    * `is_stale` -- gözlemin kendisi eskidiyse. Piyasa kapalıysa bu NORMAL
+      (son kapanış), açıksa bir arıza işareti. İkisi de bildirilir ama
+      yalnızca biri "gecikme"dir.
+
+    Toplanıyorlardı ve sonucu şuydu: kapalı bir borsanın son kapanışı on sekiz
+    saat yaşlanınca kullanıcıya "1095 dakika gecikmeli" deniyordu. Besleme o
+    kadar gecikmiyor -- piyasa kapalı.
 
     The oldest observation in the set wins, because a payload is only as
     current as its least current figure — taking the newest would let one
@@ -400,17 +408,30 @@ def freshness(quotes: dict[str, dict[str, Any]]) -> tuple[Optional[datetime], in
         if q.get("received_at") or q.get("market_timestamp")
     ]
     if not stamps:
-        return None, 0, True
+        return None, 0, True, True
 
     as_of = min(stamps)
     if as_of.tzinfo is None:
         as_of = as_of.replace(tzinfo=timezone.utc)
 
     staleness = max(0, int((datetime.now(timezone.utc) - as_of).total_seconds() // 60))
-    delay = staleness + PROVIDER_DELAY_FLOOR_MINUTES
+    # İKİSİ TOPLANMIYOR ve bu düzeltmenin özü.
+    #
+    # `delay` sağlayıcının kendi besleme gecikmesi -- gözlenemeyen, sabit bir
+    # taban. `staleness` ise bizim en son NE ZAMAN baktığımız. Toplamları
+    # hiçbir şeydir: ne beslemenin gecikmesi ne de anlamlı bir yaş.
+    #
+    # Toplanıyordu ve sonucu şuydu: borsa kapalıyken son kapanış on sekiz saat
+    # yaşlanıyor, toplam 1.095 dakika çıkıyor ve kullanıcıya "1095 dakika
+    # gecikmeli" deniyordu. Besleme o kadar gecikmiyor; piyasa kapalı.
+    #
+    # `STALE_AFTER_MINUTES` bu ayrımı BAŞTAN BERİ adlandırıyordu ("beyond
+    # this, a quote is not delayed, it is stale") ve hiçbir yerde
+    # kullanılmıyordu.
+    stale = staleness > STALE_AFTER_MINUTES
     # Always True for this provider: free-tier BIST data is delayed by design,
     # and claiming otherwise would be false in the ordinary case, not the edge.
-    return as_of, delay, True
+    return as_of, PROVIDER_DELAY_FLOOR_MINUTES, True, stale
 
 
 def upsert_quotes(db: Session, rows: list[dict[str, Any]]) -> int:

@@ -431,6 +431,10 @@ def portfolio_top_level_keys() -> frozenset[str]:
     return frozenset(
         {
             "as_of", "source", "is_delayed", "delay_minutes", "base_currency",
+            # v2.19: gözlemin YAŞI, beslemenin gecikmesinden ayrı bir alan.
+            # İkisi toplanıyordu ve kapalı bir borsanın son kapanışı
+            # "1095 dakika gecikmeli" diye raporlanıyordu.
+            "is_stale",
             "positions", "totals", "warnings",
         }
     )

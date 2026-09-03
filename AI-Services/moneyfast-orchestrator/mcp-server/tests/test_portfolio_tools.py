@@ -566,3 +566,36 @@ class TestAssetClassVocabulary:
     async def test_an_empty_list_means_no_filter(self, fake_backend):
         await portfolio_tools.get_portfolio_positions("u_123", asset_classes=[])
         assert "asset_classes" not in str(fake_backend.last.url)
+
+
+class TestStaleness:
+    """Gözlemin YAŞI ile beslemenin GECİKMESİ ayrı iki şey.
+
+    Toplanıyorlardı ve sonucu şuydu: kapalı bir borsanın son kapanışı on sekiz
+    saat yaşlanınca kullanıcıya "1095 dakika gecikmeli" deniyordu. Besleme o
+    kadar gecikmiyor -- piyasa kapalı.
+    """
+
+    async def test_the_flag_travels(self, fake_backend, portfolio_payload):
+        fake_backend.json("portfolio", {**portfolio_payload, "is_stale": True})
+        got = await portfolio_tools.get_portfolio_positions("u_123")
+        assert got["is_stale"] is True
+
+    async def test_a_backend_without_it_reports_unknown_not_false(
+        self, fake_backend, portfolio_payload
+    ):
+        """Sözleşme EKLEYEREK değişti. Alan gelmezse "eski değil" demek,
+        bilinmeyeni bir tespite çevirmek olurdu."""
+        fake_backend.json("portfolio", without(portfolio_payload, "is_stale"))
+        got = await portfolio_tools.get_portfolio_positions("u_123")
+        assert got["is_stale"] is None
+
+    def test_the_contract_forbids_calling_it_a_delay(self):
+        doc = " ".join(portfolio_tools.get_portfolio_positions.__doc__.split())
+        assert "Do NOT call it a delay" in doc
+
+    def test_the_contract_forbids_asserting_why(self):
+        """Aynı eskime ingestor durduğunda da olur; "piyasa kapalı" sistemin
+        bilmediği bir şeyi iddia etmek olurdu."""
+        doc = " ".join(portfolio_tools.get_portfolio_positions.__doc__.split())
+        assert "do NOT assert WHY" in doc

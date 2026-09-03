@@ -49,7 +49,7 @@ def wired(mocker):
                                 "currency": "TRY"}},
     )
     mocker.patch.object(
-        market_service, "freshness", return_value=(NOW - timedelta(minutes=18), 18, True)
+        market_service, "freshness", return_value=(NOW - timedelta(minutes=18), 15, True, False)
     )
     mocker.patch.object(
         market_service, "account",
@@ -104,7 +104,7 @@ class TestShape:
             },
         )
         spy = mocker.patch.object(
-            market_service, "freshness", return_value=(NOW, 15, True)
+            market_service, "freshness", return_value=(NOW, 15, True, False)
         )
         report.build_report(wired, "user-1")
         assert set(spy.call_args.args[0]) == {"THYAO"}
@@ -114,7 +114,7 @@ class TestShape:
         bildirmemektense evrenin tamamından okumak doğru."""
         mocker.patch.object(market_service, "holdings", return_value=[])
         spy = mocker.patch.object(
-            market_service, "freshness", return_value=(NOW, 15, True)
+            market_service, "freshness", return_value=(NOW, 15, True, False)
         )
         report.build_report(wired, "user-1")
         assert spy.call_args.args[0]
@@ -124,7 +124,10 @@ class TestShape:
         ve aradaki fark bu ürünün açıklamak zorunda olduğu gecikme."""
         out = report.build_report(wired, "user-1")
         assert out["as_of"] != out["generated_at"]
-        assert out["delay_minutes"] == 18 and out["is_delayed"] is True
+        # `delay_minutes` BESLEMENİN gecikmesi, gözlemin yaşı değil: ikisi bir
+        # dönem toplanıyordu ve kapalı bir borsanın son kapanışı "1095 dakika
+        # gecikmeli" diye raporlanıyordu.
+        assert out["delay_minutes"] == 15 and out["is_delayed"] is True
 
 
 class TestOverview:

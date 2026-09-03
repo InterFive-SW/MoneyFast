@@ -101,13 +101,16 @@ def build_report(db: Session, user_id: Optional[str]) -> dict[str, Any]:
     # kapalıydı.
     held = {row.get("symbol") for row, _value in valued}
     own_quotes = {s: q for s, q in quotes.items() if s in held} or quotes
-    as_of, delay_minutes, is_delayed = market_service.freshness(own_quotes)
+    as_of, delay_minutes, is_delayed, is_stale = market_service.freshness(own_quotes)
     return {
         "generated_at": now.isoformat().replace("+00:00", "Z"),
         "currency_code": "TRY",
         "as_of": (as_of or now).isoformat().replace("+00:00", "Z"),
         "is_delayed": bool(is_delayed),
         "delay_minutes": int(delay_minutes or 0),
+        # Gözlem ESKİ mi. Beslemenin gecikmesinden AYRI: piyasa kapalıyken
+        # son kapanış normaldir ve ona "gecikme" demek yanlış olur.
+        "is_stale": bool(is_stale),
         "sections": [section for section in sections if section is not None],
     }
 

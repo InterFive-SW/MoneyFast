@@ -37,7 +37,7 @@ def analytics_client(mocker, caller):
         return_value=[{"symbol": "THYAO", "quantity": 100.0, "price": 300.0, "avg_cost": 250.0}],
     )
     mocker.patch.object(market_service, "latest_quotes", return_value={})
-    mocker.patch.object(market_service, "freshness", return_value=(NOW, 15, True))
+    mocker.patch.object(market_service, "freshness", return_value=(NOW, 15, True, False))
     mocker.patch.object(
         market_service, "account", return_value=SimpleNamespace(id="a1", cash_balance=25000.0, currency_code="TRY")
     )

@@ -245,7 +245,13 @@ def classify_and_route_intent(
             descending.
         is_compound (bool): True when the message holds multiple separable requests
             requiring different agents.
-        sub_requests (list[str]): Self-contained restatements of each request.
+        sub_requests (list[dict]): One entry per request, each with `request` (a
+            self-contained restatement) and `agent` (the specialist for THAT
+            request alone). The agent travels with the request so a compound turn
+            costs ONE routing call rather than one per part -- measured, the
+            per-part version hit the provider's per-minute token limit and the
+            second half of the turn was lost to a 429.
+            Formerly a plain list of strings.
             Non-empty only when is_compound is True. Process sequentially; do not
             merge into a single agent call.
         entities (dict):

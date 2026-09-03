@@ -55,28 +55,20 @@ class LoginRequest(BaseModel):
     password: str = Field(..., description="Kullanıcının şifresi")
 
 
-class UserResponse(UserBase):
-    """Kullanıcı verilerini güvenli bir şekilde (şifresiz) döndürmek için şema."""
-
+class UserResponse(BaseModel):
     id: str
     tc_no: str
-    email: EmailStr
+    first_name: str
+    last_name: str
+    email: str
     phone_number: str
     is_active: bool
-    
-    # JSONB mimarisine uygun olarak, kategori ve kanala göre bildirim tercihlerini tutar.
-    notification_preferences: Dict[str, Dict[str, bool]] = Field(..., description="Kullanıcının detaylı bildirim tercihleri matrisi")
-
-    # Güvenlik Merkezi → İşlem Onay Limiti slider'ından ayarlanan eşik değeri.
-    # Bu değerin üzerindeki para transferlerinde ek doğrulama (SMS/2FA) istenir.
-    transaction_limit: int = Field(..., description="Ek doğrulama gerektiren transfer eşiği (₺)")
-
-    # Görünüm & Format sekmesinden ayarlanan kullanıcı tercihleri (dil, para
     # birimi, varsayılan dashboard şablonu). JSONB olarak saklandığı için
     # şema genişletmeye gerek kalmadan yeni tercih anahtarları eklenebilir.
     user_preferences: Dict[str, str] = Field(..., description="Kullanıcıya özgü görünüm ve bölgesel tercihler")
     
     created_at: datetime
+    profile_picture_url: Optional[str] = None
 
     #: Ekranlarda gösterilen müşteri numarası. Saklanmıyor, kullanıcı
     #: kimliğinden türetiliyor -- hesap numaralarının ve IBAN'ların zaten

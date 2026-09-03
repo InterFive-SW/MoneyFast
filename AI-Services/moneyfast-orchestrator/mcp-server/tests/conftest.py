@@ -96,13 +96,30 @@ ROUTES = {
     "/investment/portfolio/": "portfolio",
     "/investment/transactions/stage": "stage",
     "/risk/calculate": "risk",
+    "/analytics/report/": "report",
     "/risk/profile/": "risk_summary",
+    # v2.13. Üçü de kullanıcıyı yoldan alıyor, `risk/profile/` gibi.
+    "/risk/scenario": "scenario",
+    "/risk/stress": "stress",
+    "/risk/simulate": "simulate",
     "/market/instruments": "instruments",
+    # v2.11. Listed before the bare "/market/" fragments would matter; the
+    # paths do not overlap, but naming it keeps the mapping readable.
+    "/market/news/portfolio": "portfolio_news",
     "/market/technicals": "technicals",
+    # v2.14. `/market/fundamentals` ile `/market/fundamentals/ingest` ayrı
+    # yollar; ikincisine bu suite hiç dokunmuyor.
+    "/market/fundamentals": "fundamentals",
+    "/market/quarterly": "quarterly",
+    # v2.12. `/market/portfolio/technical` ile `/market/technicals` ayrı
+    # yollar; ilki bu satırdan ÖNCE eşleşmeli diye değil, hiç çakışmadıkları
+    # için ayrı yazılı.
+    "/market/portfolio/technical": "portfolio_technical",
     "/compliance/validate": "compliance",
     # v2.8 banking. `payments/stage` is listed BEFORE the investment stage
     # route would ever be consulted for it; the two paths do not overlap, but
     # naming both keeps the mapping explicit.
+    "/banking/cash-flow": "cash_flow",
     "/banking/bills/lookup": "lookup",
     "/banking/payments/stage": "payment_stage",
     # Served by the rag service on its own base URL, matched on path alone.
@@ -414,6 +431,10 @@ def portfolio_top_level_keys() -> frozenset[str]:
     return frozenset(
         {
             "as_of", "source", "is_delayed", "delay_minutes", "base_currency",
+            # v2.19: gözlemin YAŞI, beslemenin gecikmesinden ayrı bir alan.
+            # İkisi toplanıyordu ve kapalı bir borsanın son kapanışı
+            # "1095 dakika gecikmeli" diye raporlanıyordu.
+            "is_stale",
             "positions", "totals", "warnings",
         }
     )

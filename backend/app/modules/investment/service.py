@@ -23,6 +23,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from .models import (
+    AllocationTarget,
     CashMovement,
     InvestmentAccount,
     InvestmentProduct,
@@ -414,3 +415,167 @@ def _reference_price(proposal, native_amount: Optional[float], quantity: float) 
     if native_amount is None or not quantity:
         return 0.0
     return native_amount / quantity
+
+def block_funds(db: Session, proposal, account: InvestmentAccount) -> dict:
+    """
+    Finansal Güvenlik (Phase 1): İşlem 'PENDING' durumuna alınırken bakiye veya hisse blokajı.
+    
+    Alım işlemlerinde nakit anında düşülür (çift harcamayı önlemek için).
+    Satım işlemlerinde hisse adedi anında düşülür (çift satışı önlemek için).
+    
+    Hata fırlatırsa bakiye/hisse yetersiz demektir ve işlem reddedilir.
+    """
+    transaction_type = (proposal.transaction_type or "").upper()
+    estimate = (proposal.payload or {}).get("estimate") or {}
+    net_amount = estimate.get("net_amount")
+    
+    if net_amount is None:
+        raise SettlementError("Bu önerinin tutar bilgisi eksik, işlem uygulanamadı.")
+        
+    cash_amount = _cash_amount(estimate, account)
+    quantity = float(proposal.quantity or 0)
+    now = datetime.now(timezone.utc)
+    
+    if transaction_type in BUY_TYPES:
+        cash = float(account.cash_balance)
+        if cash_amount > cash:
+            currency = account.currency_code or "TRY"
+            raise SettlementError(
+                f"Bakiye yetersiz: işlem {cash_amount:,.2f} {currency} tutuyor, "
+                f"hesabınızda {cash:,.2f} {currency} var."
+            )
+        # Nakit blokajı
+        account.cash_balance = cash - cash_amount
+        record_cash_movement(
+            db, account, amount=-cash_amount, balance_before=cash, balance_after=float(account.cash_balance),
+            description=f"Alım İşlemi Blokesi — {proposal.symbol} x{quantity:g}",
+            reference=proposal.id, when=now
+        )
+        log.info("BLOCKED BUY cash for %s", proposal.id)
+        return {"cash_after": float(account.cash_balance), "cash_delta": -cash_amount}
+        
+    if transaction_type in SELL_TYPES:
+        product = _product(db, proposal.symbol)
+        position = _position(db, account.id, product.id)
+        held = float(position.quantity) if position is not None else 0.0
+        if quantity > held:
+            raise SettlementError(
+                f"Satılabilir miktar yetersiz: {proposal.symbol} için {held:g} adet var, "
+                f"{quantity:g} adet satılmak isteniyor."
+            )
+        # Hisse blokajı
+        remaining = held - quantity
+        if remaining <= DUST:
+            db.delete(position)
+        else:
+            position.quantity = remaining
+            position.updated_at = now
+        log.info("BLOCKED SELL shares for %s", proposal.id)
+        return {"cash_after": float(account.cash_balance), "cash_delta": 0.0}
+        
+    raise SettlementError(f"'{transaction_type or 'bilinmeyen'}' türü için blokaj adımı yok.")
+
+def finalize_settlement(db: Session, proposal, account: InvestmentAccount) -> dict:
+    """
+    Finansal Güvenlik (Phase 2 - Başarılı): 'PENDING' süresi dolduğunda işlemi tamamla.
+    
+    Alım işlemlerinde bloke edilen nakit karşılığında hisse teslim edilir.
+    Satım işlemlerinde bloke edilen hisse karşılığında nakit teslim edilir.
+    """
+    transaction_type = (proposal.transaction_type or "").upper()
+    estimate = (proposal.payload or {}).get("estimate") or {}
+    native_amount = float(estimate.get("net_amount", 0))
+    cash_amount = _cash_amount(estimate, account)
+    quantity = float(proposal.quantity or 0)
+    now = datetime.now(timezone.utc)
+    cash = float(account.cash_balance)
+    
+    if transaction_type in BUY_TYPES:
+        product = _product(db, proposal.symbol)
+        position = _position(db, account.id, product.id)
+        if position is None:
+            db.add(
+                PortfolioPosition(
+                    investment_account_id=account.id, product_id=product.id, quantity=quantity,
+                    average_buy_price=_reference_price(proposal, native_amount, quantity),
+                    opened_at=now, updated_at=now
+                )
+            )
+        else:
+            held = float(position.quantity)
+            new_quantity = held + quantity
+            position.average_buy_price = (
+                float(position.average_buy_price) * held + _reference_price(proposal, native_amount, quantity) * quantity
+            ) / new_quantity
+            position.quantity = new_quantity
+            position.updated_at = now
+        log.info("FINALIZED BUY shares for %s", proposal.id)
+        return {"cash_after": float(account.cash_balance), "cash_delta": 0.0}
+
+    if transaction_type in SELL_TYPES:
+        account.cash_balance = cash + cash_amount
+        record_cash_movement(
+            db, account, amount=cash_amount, balance_before=cash, balance_after=float(account.cash_balance),
+            description=f"Satım İşlemi (Gerçekleşen) — {proposal.symbol} x{quantity:g}",
+            reference=proposal.id, when=now
+        )
+        log.info("FINALIZED SELL cash for %s", proposal.id)
+        return {"cash_after": float(account.cash_balance), "cash_delta": cash_amount}
+
+    raise SettlementError("Bilinmeyen işlem türü.")
+
+def rollback_funds(db: Session, proposal, account: InvestmentAccount) -> None:
+    """
+    Finansal Güvenlik (Phase 2 - Başarısız): İşlem iptal olursa bloke edilen varlığı geri ver.
+    
+    Alım işlemlerinde düşülen nakit iade edilir.
+    Satım işlemlerinde düşülen hisse iade edilir.
+    """
+    transaction_type = (proposal.transaction_type or "").upper()
+    estimate = (proposal.payload or {}).get("estimate") or {}
+    cash_amount = _cash_amount(estimate, account)
+    quantity = float(proposal.quantity or 0)
+    now = datetime.now(timezone.utc)
+    cash = float(account.cash_balance)
+    
+    if transaction_type in BUY_TYPES:
+        account.cash_balance = cash + cash_amount
+        record_cash_movement(
+            db, account, amount=cash_amount, balance_before=cash, balance_after=float(account.cash_balance),
+            description=f"Alım İptali (İade) — {proposal.symbol} x{quantity:g}",
+            reference=proposal.id, when=now
+        )
+        log.info("ROLLED BACK BUY cash for %s", proposal.id)
+
+    elif transaction_type in SELL_TYPES:
+        product = _product(db, proposal.symbol)
+        position = _position(db, account.id, product.id)
+        if position is None:
+            db.add(
+                PortfolioPosition(
+                    investment_account_id=account.id, product_id=product.id, quantity=quantity,
+                    average_buy_price=_reference_price(proposal, float(estimate.get("net_amount", 0)), quantity),
+                    opened_at=now, updated_at=now
+                )
+            )
+        else:
+            position.quantity = float(position.quantity) + quantity
+            position.updated_at = now
+        log.info("ROLLED BACK SELL shares for %s", proposal.id)
+
+
+def allocation_targets(db: Session, user_id: Optional[str]) -> dict[str, float]:
+    """Kullanıcının kendi belirlediği hedef ağırlıklar, kova -> yüzde.
+
+    Burada, router'da değil: risk modülü de bunu okuyor ve modüller
+    birbirinin ORM sınıfını import etmiyor (bkz. CLAUDE.md shared/ kuralı).
+    Tabloyu sahibi olan modül okur, çağıran düz bir sözlük alır.
+    """
+    if not user_id:
+        return {}
+    rows = (
+        db.query(AllocationTarget)
+        .filter(AllocationTarget.user_id == user_id)
+        .all()
+    )
+    return {row.bucket: float(row.target_percent) for row in rows}

@@ -95,9 +95,19 @@ export default function AnalysisSummaryBar({
                     >
                         {/* Ölçek TERS ve bu şerit puanın görüldüğü ilk yer, o
                             yüzden yön sayının hemen yanında duruyor. */}
-                        {risk?.score ?? '—'}
-                        <span className="ml-1 text-xs font-medium text-slate-500">/ 100</span>
-                        <span className="ml-2 text-[10px] font-normal text-slate-500">
+                        {/* Puan ve "/ 100" BÖLÜNMEZ: ölçeğinden ayrı düşen bir
+                            sayı, 40,3'ü yüzde kırk gibi okutur. */}
+                        <span className="whitespace-nowrap">
+                            {risk?.score ?? '—'}
+                            <span className="ml-1 text-xs font-medium text-slate-500">
+                                / 100
+                            </span>
+                        </span>
+                        {/* Telefonda KENDİ SATIRINDA. Satır içi bırakıldığında
+                            iki kolonluk ızgarada büyük satır kutusunun içine
+                            sarıyor ve "40.3 / 100 100'e yakın daha sakin"
+                            okunamaz bir yığına dönüşüyordu. */}
+                        <span className="mt-0.5 block text-[10px] font-normal leading-normal text-slate-500 sm:mt-0 sm:ml-2 sm:inline">
                             100’e yakın daha sakin
                         </span>
                     </Cell>
@@ -105,8 +115,12 @@ export default function AnalysisSummaryBar({
                         <span className={LEVEL_TONE[level ?? ''] ?? 'text-slate-400'}>
                             {level ?? 'ölçülemedi'}
                         </span>
+                        {/* Rozet de telefonda kendi satırında: dar kolonda
+                            satır içi durduğunda kartın sağ kenarından taşıp
+                            kırpılıyordu -- "Beyanınızın üzerinde" yarım
+                            görünüyordu. `w-fit` genişliği metne bağlıyor. */}
                         <span
-                            className={`ml-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.tone}`}
+                            className={`mt-1 block w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold leading-normal sm:mt-0 sm:ml-2 sm:inline-block ${badge.tone}`}
                         >
                             {badge.label}
                         </span>

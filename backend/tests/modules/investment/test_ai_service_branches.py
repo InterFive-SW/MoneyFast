@@ -98,11 +98,21 @@ class TestExchangeMapping:
         )
         assert payload["positions"][0]["exchange"] == mic
 
-    def test_an_unknown_market_falls_back_rather_than_raising(self):
+    def test_an_unlisted_market_reports_no_venue_rather_than_inventing_one(self):
+        """Varsayılan "XIST"ti ve merkezî bir işlem yeri OLMAYAN enstrümanlar --
+        USDTRY, XAUUSD -- ajana "Borsa İstanbul'da işlem görüyor" diye
+        gidiyordu. Sözleşme bu alan için None bekliyor."""
         payload, _ = ai_service.build_portfolio(
             "u", holdings=[{**TRY_HOLDING, "market": "MOON"}]
         )
-        assert payload["positions"][0]["exchange"] == "XIST"
+        assert payload["positions"][0]["exchange"] is None
+
+    @pytest.mark.parametrize("market", ["FX", "COMEX"])
+    def test_gold_and_currency_pairs_have_no_venue(self, market):
+        payload, _ = ai_service.build_portfolio(
+            "u", holdings=[{**TRY_HOLDING, "market": market}]
+        )
+        assert payload["positions"][0]["exchange"] is None
 
     def test_a_holding_without_an_open_date_reports_an_empty_string(self):
         payload, _ = ai_service.build_portfolio(

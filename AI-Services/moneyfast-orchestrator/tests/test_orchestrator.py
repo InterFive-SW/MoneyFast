@@ -1023,6 +1023,455 @@ class TestPortfolioNode:
         assert out["specialist_output"]["data"] is None
 
 
+class TestPortfolioNewsBranch:
+    """İkinci araç: kullanıcının SAHİP OLDUĞU hisselere dair yayımlananlar.
+
+    Kesişim burada, belge aramasında değil: "portföyümdeki hisselerle ilgili
+    haber" hiçbir şirket adı içermiyor, dolayısıyla aramanın arayacağı bir şey
+    yok -- cevap, tutulanlarla yayımlananların kesişimi.
+    """
+
+    NEWS = {"window_days": 90, "holdings": [{"symbol": "AKBNK", "news_count": 1}],
+            "articles": [{"id": "n1", "title": "Akbank...", "held_symbols": ["AKBNK"]}]}
+
+    @pytest.mark.asyncio
+    async def test_the_plan_can_choose_the_news_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response('{"tool": "get_portfolio_news", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_news"] = self.NEWS
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["tools_used"] == ["get_portfolio_news"]
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_the_user_still_comes_from_state(self, fake_mcp, patched_llm, base_state):
+        """Aynı güvenlik değişmezi: model kimin haberlerinin okunacağını
+        seçemez."""
+        patched_llm.set_response(
+            '{"tool": "get_portfolio_news", "arguments": {"user_id": "u_someone_else"}}'
+        )
+        fake_mcp.responses["get_portfolio_news"] = self.NEWS
+        await orchestrator.portfolio_node(base_state)
+        assert fake_mcp.calls[0][1]["user_id"] == "u_123"
+
+    @pytest.mark.asyncio
+    async def test_no_currency_or_valuation_argument_leaks_into_a_news_call(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """`base_currency` ve `valuation_mode` pozisyon aracının alanları; bu
+        araç onları tanımıyor ve sözleşme fazladan alanı reddediyor."""
+        patched_llm.set_response('{"tool": "get_portfolio_news", "arguments": {"limit": 5}}')
+        fake_mcp.responses["get_portfolio_news"] = self.NEWS
+        await orchestrator.portfolio_node(base_state)
+        assert set(fake_mcp.calls[0][1]) == {"user_id", "limit"}
+
+    @pytest.mark.asyncio
+    async def test_a_named_period_is_forwarded(self, fake_mcp, patched_llm, base_state):
+        patched_llm.set_response(
+            '{"tool": "get_portfolio_news", "arguments": {"days": 7}}'
+        )
+        fake_mcp.responses["get_portfolio_news"] = self.NEWS
+        await orchestrator.portfolio_node(base_state)
+        assert fake_mcp.calls[0][1]["days"] == 7
+
+    @pytest.mark.asyncio
+    async def test_no_matching_article_is_empty_not_an_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Pencerede hiçbir şey eşleşmemiş olması TAM bir cevap. Hata demek,
+        kullanıcıya bir arıza bildirmek olurdu."""
+        patched_llm.set_response('{"tool": "get_portfolio_news", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_news"] = {
+            "window_days": 90, "holdings": [{"symbol": "AKBNK", "news_count": 0}],
+            "articles": [],
+        }
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_a_holdings_plan_still_reaches_the_positions_tool(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """İki araç tek ajanın arkasında; varsayılan yol değişmedi."""
+        patched_llm.set_response('{"tool": "get_portfolio_positions", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["tools_used"] == ["get_portfolio_positions"]
+
+
+class TestFundamentalsBranch:
+    """Üçüncü araç: şirketin İŞİ nasıl gidiyor.
+
+    Fiyat "ne ediyor", eğilim "nasıl gidiyor", bu ise "kârlı mı, borçlu mu".
+    Üçü de adı geçen bir enstrüman hakkında ve aynı ajanın arkasında; ayrı bir
+    uzman ajan açmak, aynı soruyu yönlendiricide üçe bölmeyi gerektirirdi.
+
+    Bu araç YENİ VERİ GETİRMEDİ: otuz beş alan zaten toplanıyordu ve
+    `/market/fundamentals` hepsini veriyordu, ama hiçbir MCP aracı ona
+    ulaşmıyordu -- ajanın bir şirket hakkında görebildiği her şey fiyat,
+    değişim, hacim ve dört orandan ibaretti.
+    """
+
+    PAYLOAD = {
+        "instruments": [
+            {"symbol": "AKBNK", "name": "Akbank", "currency": "TRY",
+             "fundamentals": {"profit_margin": 0.284, "debt_to_equity": None}},
+        ],
+        "not_found": [], "missing_data": [],
+    }
+
+    @pytest.mark.asyncio
+    async def test_a_business_question_reaches_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_company_fundamentals", "arguments": {"symbols": ["akbnk"]}}'
+        )
+        fake_mcp.responses["get_company_fundamentals"] = self.PAYLOAD
+        out = await orchestrator.market_data_node(base_state)
+        assert out["tools_used"] == ["get_company_fundamentals"]
+        assert fake_mcp.calls[0][1]["symbols"] == ["AKBNK"]
+
+    @pytest.mark.asyncio
+    async def test_the_router_ticker_is_used_when_the_plan_names_none(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response('{"tool": "get_company_fundamentals", "arguments": {}}')
+        fake_mcp.responses["get_company_fundamentals"] = self.PAYLOAD
+        out = await orchestrator.market_data_node(
+            {**base_state, "entities": {"tickers": ["THYAO"]}}
+        )
+        assert fake_mcp.calls[0][1]["symbols"] == ["THYAO"]
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_more_than_five_symbols_are_trimmed_before_the_call(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Sözleşmenin tavanı beş ve aşıldığında REDDEDİYOR. Turu bir 422'ye
+        çevirmek, kullanıcıya kendi sorusunun cevabı yerine hata göstermek
+        olurdu."""
+        patched_llm.set_response(json.dumps({
+            "tool": "get_company_fundamentals",
+            "arguments": {"symbols": ["A", "B", "C", "D", "E", "F", "G"]},
+        }))
+        fake_mcp.responses["get_company_fundamentals"] = self.PAYLOAD
+        await orchestrator.market_data_node(base_state)
+        assert len(fake_mcp.calls[0][1]["symbols"]) == 5
+
+    @pytest.mark.asyncio
+    async def test_blank_symbols_do_not_reach_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_company_fundamentals", "arguments": {"symbols": ["", "  ", "AKBNK"]}}'
+        )
+        fake_mcp.responses["get_company_fundamentals"] = self.PAYLOAD
+        await orchestrator.market_data_node(base_state)
+        assert fake_mcp.calls[0][1]["symbols"] == ["AKBNK"]
+
+    @pytest.mark.asyncio
+    async def test_no_symbol_anywhere_falls_through_to_the_price_path(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Tek sembol isteyen bir aracı boşa çağırmaktansa, adı geçen ne
+        varsa onunla cevaplamak."""
+        patched_llm.set_response('{"tool": "get_company_fundamentals", "arguments": {}}')
+        fake_mcp.responses["get_market_data"] = {"instruments": [{"symbol": "THYAO"}]}
+        out = await orchestrator.market_data_node({**base_state, "entities": {}})
+        assert out["tools_used"] == ["get_market_data"]
+
+    @pytest.mark.asyncio
+    async def test_nothing_found_is_empty_not_an_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_company_fundamentals", "arguments": {"symbols": ["YOKBU"]}}'
+        )
+        fake_mcp.responses["get_company_fundamentals"] = {
+            "instruments": [], "not_found": ["YOKBU"], "missing_data": [],
+        }
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+
+class TestPromptBudgetArithmetic:
+    """Üç tavan aynı anda dolduğunda sağlayıcının sınırını aşmamalı.
+
+    Ölçüldü: geçmiş tavanı 8.000 karakterken (~2.000 token) gövde bütçesine
+    SIĞAN bir tur bile 8.871 token istedi ve 8.000'lik sınıra takıldı.
+    `SYNTHESIS_PAYLOAD_CHARS`'ın yazılı hesabı geçmiş için ~1.500 token
+    ayırıyor; iki sayı birbirini tutmuyordu.
+    """
+
+    #: Sabit maliyet, `SYNTHESIS_PAYLOAD_CHARS`'ın yorumunda ölçülmüş hâliyle.
+    FIXED_CHARS = 17_903
+    #: Sağlayıcının istek başına sınırı, karaktere çevrilmiş (~4 karakter/token).
+    REQUEST_LIMIT_CHARS = 8_000 * 4
+
+    def test_the_three_caps_fit_inside_one_request(self):
+        worst_case = (
+            self.FIXED_CHARS
+            + orchestrator.HISTORY_MAX_CHARS
+            + orchestrator.SYNTHESIS_PAYLOAD_CHARS
+        )
+        assert worst_case <= self.REQUEST_LIMIT_CHARS, (
+            f"en kötü durum {worst_case} karakter, sınır "
+            f"{self.REQUEST_LIMIT_CHARS}"
+        )
+
+
+class TestPayloadFormatting:
+    """Girinti bütçenin üçte birini yiyordu.
+
+    Ölçüldü: aynı risk turu sıkıştırılmış hâlde 6.388, `indent=2` ile 8.707
+    karakter. Sekiz pozisyonlu bir portföyde tur bu yüzden sığmıyordu --
+    `main`'de de, bu daldaki eklemelerden bağımsız olarak.
+    """
+
+    PAYLOAD = {"a": {"b": [1, 2, 3], "c": "x"}, "d": [{"e": 1}, {"e": 2}]}
+
+    def test_the_payload_carries_no_indentation(self):
+        assert "\n" not in orchestrator._fit_payload(self.PAYLOAD)
+        assert ", " not in orchestrator._fit_payload(self.PAYLOAD)
+
+    def test_it_is_still_valid_json(self):
+        import json
+
+        assert json.loads(orchestrator._fit_payload(self.PAYLOAD)) == self.PAYLOAD
+
+    def test_turkish_characters_are_not_escaped(self):
+        """Kaçırılmış bir karakter hem gövdeyi büyütür hem de yazarın
+        okuduğu metni bozar."""
+        assert "Türkçe" in orchestrator._fit_payload({"k": "Türkçe"})
+
+    def test_an_oversized_payload_is_still_truncated(self):
+        big = {"k": "x" * (orchestrator.SYNTHESIS_PAYLOAD_CHARS + 500)}
+        assert len(orchestrator._fit_payload(big)) == orchestrator.SYNTHESIS_PAYLOAD_CHARS
+
+
+class TestSlimSummary:
+    """`_slim_posture` ile aynı gerekçe: yazarın ihtiyacı hazır cümleler,
+    ekranın ihtiyacı tam satırlar.
+
+    Ölçülen gerileme: v2.17 ile özete iki karşılaştırma daha eklendi ve
+    toplam sağlayıcının tek istek sınırını aştı -- "hedef dağılımımdan ne
+    kadar saptım" her seferinde "tek seferde işleyebileceğimden büyük çıktı"
+    cevabı veriyordu.
+    """
+
+    SUMMARY = {
+        "score": 83.4, "level": "Düşük",
+        "group_exposure": {
+            "assessed": True, "total_value": 100.0,
+            "groups": [{
+                "group": "equity", "label": "Ortaklık Payı (Hisse Senedi), "
+                "Eurobond, Dövizli Tahviller", "value": 95.0,
+                "share_percent": 95.0, "status": "COVERED", "eligible": True,
+                "reason": "Beyan ettiğiniz bilgi ve tecrübe bu grup için yeterli.",
+                "statement": "Portföyünüzün %95 kadarı bu grupta.",
+            }],
+        },
+        "allocation_drift": {
+            "has_target": True, "total_value": 100.0,
+            "statement": "En büyük fark BIST Hisse kovasında.",
+            "buckets": [
+                {"bucket": "bist_equity", "label": "BIST Hisse", "amount": 95.0,
+                 "current_percent": 95.0, "target_percent": 60.0,
+                 "gap_points": 35.0, "gap_amount": 35.0},
+                {"bucket": "gold", "label": "Altın", "amount": 0.0,
+                 "current_percent": 0.0, "target_percent": None,
+                 "gap_points": None, "gap_amount": None},
+            ],
+        },
+    }
+
+    def test_the_ready_sentences_survive(self):
+        slim = orchestrator._slim_summary(self.SUMMARY)
+        assert slim["allocation_drift"]["statement"].startswith("En büyük fark")
+        assert slim["group_exposure"]["statements"][0]
+
+    def test_only_the_sentences_travel(self):
+        """Satırlar EKRANIN ihtiyacı. Onları da göndermek denendi ve yetmedi:
+        sekiz pozisyonlu bir portföyde gövde 9.744'e çıkıp kırpıldı, istek
+        yine 8.128 token ile 8.000'lik sınırı aştı."""
+        slim = orchestrator._slim_summary(self.SUMMARY)
+        assert "buckets" not in slim["allocation_drift"]
+        assert "groups" not in slim["group_exposure"]
+        assert slim["group_exposure"]["statements"] == [
+            "Portföyünüzün %95 kadarı bu grupta."
+        ]
+
+    def test_the_duplicated_blocks_are_dropped(self):
+        """`metrics` ve `data_quality` aynı turda ölçüm aracının kendi
+        çıktısında da var ve istatistiklerin yetkili kaynağı o."""
+        slim = orchestrator._slim_summary(
+            {**self.SUMMARY, "metrics": {"hhi": 1}, "data_quality": {"ok": True}}
+        )
+        assert "metrics" not in slim and "data_quality" not in slim
+
+    def test_whether_a_target_exists_still_travels(self):
+        """`has_target` false, sıfır sapma DEĞİL: ölçülecek bir şey yok.
+        Cümle bunu söylüyor ama bayrak da gidiyor, çünkü ajanın sözleşmesi
+        onu adıyla okuyor."""
+        slim = orchestrator._slim_summary(self.SUMMARY)
+        assert slim["allocation_drift"]["has_target"] is True
+
+    def test_it_actually_gets_smaller(self):
+        import json
+
+        before = len(json.dumps(self.SUMMARY, ensure_ascii=False))
+        after = len(json.dumps(orchestrator._slim_summary(self.SUMMARY),
+                               ensure_ascii=False))
+        assert after < before
+
+    def test_a_summary_without_the_new_blocks_passes_through(self):
+        """Sözleşme yalnızca ekleyerek değişti; iki bloğu taşımayan bir yanıt
+        hâlâ geçerli."""
+        assert orchestrator._slim_summary({"score": 1.0}) == {"score": 1.0}
+
+    def test_non_object_blocks_are_left_alone(self):
+        payload = {"group_exposure": None, "allocation_drift": None}
+        assert orchestrator._slim_summary(payload) == payload
+
+
+class TestCashFlowBranch:
+    """Üçüncü araç: neye sahip olduğu değil, ne kazanıp ne harcadığı.
+
+    Köprü bu ajanda kuruluyor -- "bunu kaldırabilir miyim" hem pozisyonları
+    hem aylık artanı gerektiriyor ve iki ayrı ajan bunu tek turda
+    birleştiremez.
+    """
+
+    PAYLOAD = {
+        "has_data": True, "period_days": 90, "months_observed": 3.0,
+        "currency_code": "TRY", "income_total": 112406.75, "income_events": 4,
+        "expense_total": 67452.46, "net_total": 44954.29,
+        "monthly_income": 37468.92, "monthly_expense": 22484.15,
+        "monthly_net": 14984.76,
+        "categories": [{"category": "Kira", "amount": 28000.0,
+                        "monthly_amount": 9333.33, "share_percent": 41.5}],
+        "first_transaction_at": None, "last_transaction_at": None,
+    }
+
+    @pytest.mark.asyncio
+    async def test_a_budget_question_reaches_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_cash_flow_summary", "arguments": {}}'
+        )
+        fake_mcp.responses["get_cash_flow_summary"] = self.PAYLOAD
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["tools_used"] == ["get_cash_flow_summary"]
+        assert fake_mcp.calls[0][1]["user_id"] == base_state["user_id"]
+
+    @pytest.mark.asyncio
+    async def test_a_named_window_is_forwarded(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_cash_flow_summary", "arguments": {"days": 180}}'
+        )
+        fake_mcp.responses["get_cash_flow_summary"] = self.PAYLOAD
+        await orchestrator.portfolio_node(base_state)
+        assert fake_mcp.calls[0][1]["days"] == 180
+
+    @pytest.mark.asyncio
+    async def test_the_reporting_currency_is_not_forced_onto_this_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """`base_currency` ve `valuation_mode` pozisyon aracının alanları.
+        Bu araç onları tanımıyor ve gönderilirse sözleşme dışı bir çağrı
+        olurdu."""
+        patched_llm.set_response('{"tool": "get_cash_flow_summary", "arguments": {}}')
+        fake_mcp.responses["get_cash_flow_summary"] = self.PAYLOAD
+        await orchestrator.portfolio_node(base_state)
+        assert set(fake_mcp.calls[0][1]) <= {"user_id", "days"}
+
+    @pytest.mark.asyncio
+    async def test_no_banking_record_is_an_answer_not_an_empty_result(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Ölçüldü: 23 kullanıcının 3'ünde bankacılık hareketi var. EMPTY
+        sayılırsa ajan "veriye ulaşamadım" der; oysa söylenecek şey sistemde
+        bu kişiye ait kayıt olmadığı."""
+        patched_llm.set_response('{"tool": "get_cash_flow_summary", "arguments": {}}')
+        fake_mcp.responses["get_cash_flow_summary"] = {
+            **self.PAYLOAD, "has_data": False, "income_total": None,
+            "expense_total": None, "net_total": None, "monthly_net": None,
+            "income_events": 0, "categories": [],
+        }
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["specialist_output"]["status"] == "OK"
+
+
+class TestQuarterlyBranch:
+    """Dördüncü araç: adı konmuş bir ÇEYREK.
+
+    Diğer üçünün hiçbirinde seri yok -- fiyat anlık, eğilim türetilmiş, temel
+    veri anlık görüntü. "Son çeyrek kârı" sorusunu cevaplayabilen tek yol bu,
+    ve dokümandaki örnek senaryonun eksik yarısı tam olarak buydu.
+    """
+
+    PAYLOAD = {
+        "symbol": "AKBNK", "name": "Akbank", "currency": "TRY",
+        "periods": [
+            {"period_end": "2026-06-30", "label": "2026Q2", "net_income": 15_198_000_000},
+            {"period_end": "2026-03-31", "label": "2026Q1", "net_income": 14_100_000_000},
+        ],
+        "previous_is_adjacent": True, "year_ago_available": True,
+    }
+
+    @pytest.mark.asyncio
+    async def test_a_quarter_question_reaches_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_quarterly_financials", "arguments": {"symbol": "akbnk"}}'
+        )
+        fake_mcp.responses["get_quarterly_financials"] = self.PAYLOAD
+        out = await orchestrator.market_data_node(base_state)
+        assert out["tools_used"] == ["get_quarterly_financials"]
+        assert fake_mcp.calls[0][1]["symbol"] == "AKBNK"
+
+    @pytest.mark.asyncio
+    async def test_the_router_ticker_is_used_when_the_plan_names_none(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response('{"tool": "get_quarterly_financials", "arguments": {}}')
+        fake_mcp.responses["get_quarterly_financials"] = self.PAYLOAD
+        await orchestrator.market_data_node(
+            {**base_state, "entities": {"tickers": ["THYAO"]}}
+        )
+        assert fake_mcp.calls[0][1]["symbol"] == "THYAO"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_series_is_empty_not_an_error(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Ölçüldü: 40 hissenin 6'sında hiç çeyreklik veri yok. Hata değil."""
+        patched_llm.set_response(
+            '{"tool": "get_quarterly_financials", "arguments": {"symbol": "YENI"}}'
+        )
+        fake_mcp.responses["get_quarterly_financials"] = {
+            "symbol": "YENI", "name": "Yeni", "currency": "TRY", "periods": [],
+            "previous_is_adjacent": False, "year_ago_available": False,
+        }
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_no_symbol_anywhere_falls_through_to_the_price_path(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response('{"tool": "get_quarterly_financials", "arguments": {}}')
+        fake_mcp.responses["get_market_data"] = {"instruments": [{"symbol": "THYAO"}]}
+        out = await orchestrator.market_data_node({**base_state, "entities": {}})
+        assert out["tools_used"] == ["get_market_data"]
+
+
 class TestMarketResearchNode:
     @pytest.mark.asyncio
     async def test_happy_path(self, fake_mcp, patched_llm, base_state):
@@ -1091,26 +1540,292 @@ class TestMarketResearchNode:
 
 
 class TestRiskNode:
+    POSTURE = {
+        "base_currency": "TRY",
+        "positions": [{"symbol": "THYAO", "trend": "DOWNTREND"}],
+        "summary": {"below_sma_50": 2, "above_sma_50": 1,
+                    "weight_below_sma_50": 0.951,
+                    "statement": "3 pozisyonunuzun 2'si 50 günlük ortalamasının altında."},
+        "unconvertible": [],
+    }
+
+    SCENARIO = {
+        "factor": "USDTRY", "factor_name": "Dolar/TL", "shock_pct": 10.0,
+        "sensitivity": {"beta": -0.68, "r_squared": 0.001, "observation_count": 222},
+        "estimated_impact_pct": -6.8,
+        "statement": "Dolar/TL %10,0 yükselseydi ... — ancak geçmiş fiyat "
+                     "hareketi geleceği belirlemez.",
+        "assumptions": ["Etki doğrusal varsayıldı."], "warnings": [],
+    }
+
+    @pytest.mark.asyncio
+    async def test_a_factor_question_reaches_the_scenario_tool(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        patched_llm.set_response(
+            '{"tool": "run_portfolio_scenario", '
+            '"arguments": {"factor": "usdtry", "shock_pct": 10, "lookback": "1Y"}}'
+        )
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["run_portfolio_scenario"] = self.SCENARIO
+        out = await orchestrator.risk_node(base_state)
+        assert out["tools_used"] == ["run_portfolio_scenario"]
+        assert fake_mcp.calls[-1][1]["factor"] == "USDTRY"
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_an_unmeasurable_factor_turn_never_reaches_a_plan(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """ÖLÇÜLDÜ: reddi yalnızca senaryo dalına bağlamak yetmedi. Model
+        bunun yerine `get_portfolio_stress_test`'i seçti, araç düzgün çalıştı,
+        ve model döviz ile altın replaylerini FAİZ İÇİN VEKİL kullanıp "faiz
+        artışıyla ilişkili olası TL güçlenmesi..." diye bir okuma kurdu. Araç
+        sözleşmesi bunu yasaklıyordu ve yasak tutmadı."""
+        patched_llm.set_response(
+            '{"tool": "get_portfolio_stress_test", "arguments": {}}'
+        )
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_portfolio_stress_test"] = {
+            "worst_days": [{"date": "2026-03-01", "return_pct": -7.5}],
+            "replays": {"USDTRY": {"factor_move_pct": 0.89}},
+        }
+        out = await orchestrator.risk_node(
+            {**base_state, "user_message": "faizler artarsa portföyüm nasıl etkilenir"}
+        )
+        assert out["specialist_output"]["status"] == "UNSUPPORTED"
+        assert out["specialist_output"]["data"] is None
+        # Stres testi HİÇ çağrılmadı: çağrılsaydı verisi modele ulaşırdı.
+        assert "get_portfolio_stress_test" not in [n for n, _ in fake_mcp.calls]
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_risk_question_is_not_short_circuited(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """"Portföyüm ne kadar riskli" bir faktör sorusu değil; kesilseydi
+        çalışan bir yol kaybolurdu."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
+        out = await orchestrator.risk_node(
+            {**base_state, "user_message": "portföyüm ne kadar riskli"}
+        )
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_an_unmeasurable_factor_is_refused_before_the_call(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """En sık geleni FAİZ ve sistemde faiz serisi yok. Bir döviz
+        faktörünü vekil koymak, ölçülmemiş bir sayıyı ölçüm diye vermek
+        olurdu -- o yüzden çağrı hiç yapılmıyor."""
+        patched_llm.set_response(
+            '{"tool": "run_portfolio_scenario", "arguments": {"factor": "FAIZ"}}'
+        )
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "UNSUPPORTED"
+        assert [name for name, _ in fake_mcp.calls] == ["get_portfolio_positions"]
+
+    def test_the_limit_is_not_described_as_an_outage(self):
+        """ÖLÇÜLDÜ: aynı durum iki kez "veriler şu anda alınamadı, tekrar
+        denememi ister misiniz" diye anlatıldı. Tekrar denemek hiçbir zaman
+        işe yaramayacak ve öyle demek olmayan bir umut vermek."""
+        text = orchestrator.UNSUPPORTED_FACTOR_TR
+        assert "şu anda" not in text
+        assert "tekrar" not in text
+        assert "geçici bir sorun değil" in text
+
+    def test_the_limit_names_what_can_be_measured_instead(self):
+        assert "Dolar/TL" in orchestrator.UNSUPPORTED_FACTOR_TR
+        assert "BIST 100" in orchestrator.UNSUPPORTED_FACTOR_TR
+
+    def test_the_limit_uses_names_not_symbols(self):
+        """Sembol kullanıcıya sızmaz; `prompts.py`'deki NAMING kuralı."""
+        for symbol in orchestrator.SCENARIO_FACTORS:
+            assert symbol not in orchestrator.UNSUPPORTED_FACTOR_TR
+
+    @pytest.mark.asyncio
+    async def test_a_missing_factor_is_refused_the_same_way(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        patched_llm.set_response('{"tool": "run_portfolio_scenario", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "UNSUPPORTED"
+        assert out["specialist_output"]["user_message_tr"] == \
+            orchestrator.UNSUPPORTED_FACTOR_TR
+
+    @pytest.mark.asyncio
+    async def test_an_unnamed_shock_size_defaults_and_is_declared(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        patched_llm.set_response(
+            '{"tool": "run_portfolio_scenario", "arguments": {"factor": "XU100"}}'
+        )
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["run_portfolio_scenario"] = self.SCENARIO
+        await orchestrator.risk_node(base_state)
+        assert fake_mcp.calls[-1][1]["shock_pct"] == 10.0
+
+    @pytest.mark.asyncio
+    async def test_a_stress_question_reaches_the_stress_tool(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        patched_llm.set_response('{"tool": "get_portfolio_stress_test", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_portfolio_stress_test"] = {
+            "worst_days": [{"date": "2026-03-01", "return_pct": -7.5}], "replays": {},
+        }
+        out = await orchestrator.risk_node(base_state)
+        assert out["tools_used"] == ["get_portfolio_stress_test"]
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_a_stress_test_with_nothing_measured_is_empty(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        patched_llm.set_response('{"tool": "get_portfolio_stress_test", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_portfolio_stress_test"] = {"worst_days": [], "replays": {}}
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_a_trade_question_reaches_the_simulation(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        patched_llm.set_response(
+            '{"tool": "simulate_position_change", "arguments": {"changes": '
+            '[{"symbol": "thyao", "quantity_delta": 100}]}}'
+        )
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["simulate_position_change"] = {
+            "current": {"score": 35.5}, "hypothetical": {"score": 26.8},
+        }
+        out = await orchestrator.risk_node(base_state)
+        assert fake_mcp.calls[-1][1]["changes"] == [
+            {"symbol": "THYAO", "quantity_delta": 100.0}
+        ]
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_a_simulation_without_a_change_asks_rather_than_inventing_one(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """Değişikliği SUNUCU ÖNERMEZ. Kendi kendine bir miktar uydurmak, bir
+        öneri motoruna dönüşmenin ilk adımı olurdu."""
+        patched_llm.set_response(
+            '{"tool": "simulate_position_change", "arguments": {"changes": []}}'
+        )
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "NEEDS_INPUT"
+        assert out["specialist_output"]["missing_fields"] == ["changes"]
+        assert [name for name, _ in fake_mcp.calls] == ["get_portfolio_positions"]
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_change_row_is_dropped_not_guessed(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        patched_llm.set_response(
+            '{"tool": "simulate_position_change", "arguments": {"changes": '
+            '["THYAO", {"symbol": "AKBNK"}, {"quantity_delta": 5}, '
+            '{"symbol": "DOAS", "quantity_delta": -3}]}}'
+        )
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["simulate_position_change"] = {
+            "current": {"score": 1}, "hypothetical": {"score": 2},
+        }
+        await orchestrator.risk_node(base_state)
+        assert fake_mcp.calls[-1][1]["changes"] == [
+            {"symbol": "DOAS", "quantity_delta": -3.0}
+        ]
+
+    @pytest.mark.asyncio
+    async def test_at_most_ten_changes_are_forwarded(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """Sözleşmenin sınırı on; on birinciyi göndermek 422 döndürürdü."""
+        rows = [{"symbol": f"S{i}", "quantity_delta": 1} for i in range(15)]
+        patched_llm.set_response(json.dumps(
+            {"tool": "simulate_position_change", "arguments": {"changes": rows}}
+        ))
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["simulate_position_change"] = {
+            "current": {"score": 1}, "hypothetical": {"score": 2},
+        }
+        await orchestrator.risk_node(base_state)
+        assert len(fake_mcp.calls[-1][1]["changes"]) == 10
+
+    @pytest.mark.asyncio
+    async def test_an_empty_portfolio_short_circuits_before_any_what_if(
+        self, fake_mcp, patched_llm, base_state, empty_positions_payload
+    ):
+        """Ölçülecek pozisyon yoksa senaryo da yok; üç dal da bu kapının
+        arkasında."""
+        patched_llm.set_response(
+            '{"tool": "run_portfolio_scenario", "arguments": {"factor": "XU100"}}'
+        )
+        fake_mcp.responses["get_portfolio_positions"] = empty_positions_payload
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_the_technical_posture_travels_inside_the_metrics_payload(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """Kardeş anahtar değil, `data`'nın içinde: synthesis `data`'yı
+        okuyor ve yanına konan bir anahtarı her tüketicinin ayrıca öğrenmesi
+        gerekirdi."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_portfolio_technicals"] = self.POSTURE
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
+        out = await orchestrator.risk_node(base_state)
+        data = out["specialist_output"]["data"]
+        assert data["technical_posture"]["summary"]["weight_below_sma_50"] == 0.951
+        assert "get_portfolio_technicals" in out["tools_used"]
+
+    @pytest.mark.asyncio
+    async def test_a_missing_posture_costs_the_turn_nothing_else(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        """Best-effort: teknik görünüm turu zenginleştirir, ayakta tutmaz.
+        Onun yüzünden turu düşürmek, kısmi bir cevabı hiç cevaba çevirirdi."""
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_portfolio_technicals"] = MCPUnavailable("down")
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
+        out = await orchestrator.risk_node(base_state)
+        assert out["specialist_output"]["status"] == "OK"
+        assert "technical_posture" not in out["specialist_output"]["data"]
+        assert "get_portfolio_technicals" not in out["tools_used"]
+
     @pytest.mark.asyncio
     async def test_fetches_positions_before_computing_metrics(
         self, fake_mcp, patched_llm, base_state, positions_payload, risk_summary_payload
     ):
         """The risk tool has no position access by design, so the graph makes
-        three calls in a fixed order: holdings, the profile summary, then the
-        statistics."""
+        four calls in a fixed order: holdings, the profile summary, the
+        technical posture, then the statistics. The middle two are
+        best-effort; only the first and the last can fail the turn."""
         patched_llm.set_response('{"arguments": {"lookback": "3Y"}}')
         fake_mcp.responses["get_portfolio_positions"] = positions_payload
         fake_mcp.responses["get_risk_profile_summary"] = risk_summary_payload
+        fake_mcp.responses["get_portfolio_technicals"] = self.POSTURE
         fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
         out = await orchestrator.risk_node(base_state)
         assert [name for name, _ in fake_mcp.calls] == [
             "get_portfolio_positions",
             "get_risk_profile_summary",
+            "get_portfolio_technicals",
             "calculate_portfolio_risk_metrics",
         ]
         assert out["tools_used"] == [
             "get_portfolio_positions",
             "calculate_portfolio_risk_metrics",
+            "get_portfolio_technicals",
             "get_risk_profile_summary",
         ]
         assert out["specialist_output"]["status"] == "OK"
@@ -1605,13 +2320,27 @@ class TestSynthesisTrimming:
         }
 
     def test_every_result_keeps_its_url(self):
-        import json
+        """İki koruma birlikte çalışıyor ve sıra önemli.
 
-        trimmed = orchestrator._trimmed_for_synthesis(self._payload())
-        rendered = json.dumps(trimmed, ensure_ascii=False, indent=2)
-        assert len(rendered) < orchestrator.SYNTHESIS_JSON_LIMIT
+        `_fit_payload` ölçülmüş bütçenin sahibi, ama son çaresi gövdeyi
+        ORTASINDAN kesmek. Sonuç başına kırpma o noktaya hiç gelinmemesini
+        sağlıyor: sekiz sonuç bütçeye sığıyor ve HER birinin bağlantısı
+        sağ kalıyor.
+        """
+        rendered = orchestrator._fit_payload(
+            orchestrator._trimmed_for_synthesis(self._payload())
+        )
+        assert len(rendered) <= orchestrator.SYNTHESIS_PAYLOAD_CHARS
         for i in range(8):
-            assert f"/Bildirim/{i}" in rendered
+            assert f"/Bildirim/{i}" in rendered, "a citation was truncated away"
+
+    def test_without_the_snippet_cap_the_budget_would_cut_citations(self):
+        """Kırpmanın neden sonuç BAŞINA olduğunu sabitliyor: aynı gövde
+        yalnızca bütçeye verildiğinde sonraki kaynakların bağlantıları
+        gidiyor."""
+        rendered = orchestrator._fit_payload(self._payload())
+        assert len(rendered) <= orchestrator.SYNTHESIS_PAYLOAD_CHARS
+        assert "/Bildirim/7" not in rendered
 
     def test_no_result_is_dropped(self):
         trimmed = orchestrator._trimmed_for_synthesis(self._payload())
@@ -1673,7 +2402,9 @@ class TestSynthesisNode:
             {**base_state, "specialist_output": {"status": "EMPTY", "tool": "x"}}
         )
         user = patched_llm.calls[0][1].content
-        assert '"status": "EMPTY"' in user
+        # Girintisiz: gövde artık boşluksuz yazılıyor, bkz.
+        # TestPayloadFormatting -- bütçenin üçte biri girintiye gidiyordu.
+        assert '"status":"EMPTY"' in user
 
     @pytest.mark.asyncio
     async def test_oversized_payload_is_truncated(self, patched_llm, base_state):
@@ -1686,7 +2417,14 @@ class TestSynthesisNode:
         await orchestrator.synthesis_node({**base_state, "specialist_output": huge})
         user = patched_llm.calls[0][1].content
         embedded = user.split("Specialist output", 1)[1]
-        assert len(embedded) < 13000
+        # JSON dilimi + şablonun kendi bağlayıcı kuralları. Sınırlanan şey
+        # JSON; şablon bir kural eklendiğinde büyüyor ve payı burada açıkça
+        # ayrılmış -- testin ölçtüğü, gövdenin kırpıldığı.
+        #
+        # 2.000'di. Bileşik turlar için iki kural eklendi (4b, 4c) ve
+        # gövdeden sonra gelen metin 2.609 karaktere çıktı; pay ÖLÇÜLEN
+        # değere göre yükseltildi, kırpma iddiası gevşetilmedi.
+        assert len(embedded) < orchestrator.SYNTHESIS_PAYLOAD_CHARS + 2700
 
     @pytest.mark.asyncio
     async def test_the_writer_is_given_the_conversation(self, patched_llm, base_state):
@@ -3704,3 +4442,748 @@ class TestOwnDocumentsGetTheirOwnSlots:
         _, own = fake_mcp.calls[1]
         assert own["min_similarity"] < news["min_similarity"]
         assert own["min_similarity"] == orchestrator.OWN_DOCUMENT_MIN_SIMILARITY
+
+
+class TestConditionalHedgeSurvivesTheGate:
+    """Koşullu bir turun çekincesi kapının HER dalından çıkmalı.
+
+    `_keep_crisis` ile aynı ders: prompt tavsiyedir. Araç sözleşmesi
+    "`statement`'ı çekincesiyle birlikte olduğu gibi aktar" diyor ve ÖLÇÜLDÜ --
+    canlı bir turda model cümleyi yeniden yazdı ve kapanış çekincesini
+    düşürdü. Geriye kalan "portföyünüzün değeri yaklaşık %6,8 azalır" idi:
+    koşulsuz, çekincesiz, ve ölçümün söylemediği bir kesinlikte.
+    """
+
+    def _state(self, tool="run_portfolio_scenario", **extra):
+        return {"user_message": "dolar yükselirse", "tools_used": [tool], **extra}
+
+    def test_the_hedge_is_added_when_the_model_drops_it(self):
+        out = orchestrator._keep_crisis(
+            self._state(), {"final_output": "Portföyünüz yaklaşık %6,8 azalır."}
+        )
+        assert orchestrator.SCENARIO_HEDGE_TR in out["disclosures"]
+
+    def test_it_is_not_repeated_when_the_answer_already_carries_it(self):
+        out = orchestrator._keep_crisis(
+            self._state(),
+            {"final_output": "... — ancak geçmiş fiyat hareketi geleceği belirlemez."},
+        )
+        assert out.get("disclosures") in (None, [])
+
+    def test_it_is_not_repeated_when_a_disclosure_already_carries_it(self):
+        out = orchestrator._keep_crisis(
+            self._state(),
+            {"final_output": "x", "disclosures": ["Geçmiş fiyat hareketi geleceği belirlemez."]},
+        )
+        assert len(out["disclosures"]) == 1
+
+    @pytest.mark.parametrize("tool", sorted(orchestrator.HEDGED_TOOLS))
+    def test_every_conditional_tool_is_covered(self, tool):
+        out = orchestrator._keep_crisis(self._state(tool), {"final_output": "x"})
+        assert orchestrator.SCENARIO_HEDGE_TR in out["disclosures"]
+
+    def test_a_turn_that_used_no_conditional_tool_gets_nothing(self):
+        """Fiyat sorusuna koşullu bir çekince eklemek, orada olmayan bir
+        koşulluluk vaat ederdi."""
+        out = orchestrator._keep_crisis(
+            self._state("get_market_data"), {"final_output": "THYAO 291,75 TL."}
+        )
+        assert out.get("disclosures") in (None, [])
+
+    def test_a_blocked_turn_still_carries_it(self):
+        """Kapının BLOCK dalı dahil: engellenmiş bir turda da kullanıcı
+        sayının ne olduğunu bilmeli."""
+        out = orchestrator._keep_crisis(
+            self._state(), {"compliance_verdict": "BLOCK", "final_output": "..."}
+        )
+        assert orchestrator.SCENARIO_HEDGE_TR in out["disclosures"]
+
+    def test_it_sits_beside_the_crisis_notices_not_instead_of_them(self):
+        out = orchestrator._keep_crisis(
+            self._state(crisis_notices=["ALO 183"]), {"final_output": "x"}
+        )
+        assert "ALO 183" in out["disclosures"]
+        assert orchestrator.SCENARIO_HEDGE_TR in out["disclosures"]
+
+    def test_the_hedge_says_the_number_is_a_measurement(self):
+        """Genel uygunluk açıklaması bunun yerini tutmuyor: o içeriğin
+        danışmanlık olmadığını söylüyor, bu sayının tahmin olmadığını."""
+        assert "tahmin değil" in orchestrator.SCENARIO_HEDGE_TR
+        assert "geleceği belirlemez" in orchestrator.SCENARIO_HEDGE_TR
+
+
+class TestUnmeasurableFactorRouting:
+    """Ölçülemeyen makro faktör + kullanıcının kendi portföyü -> risk ajanı.
+
+    Kodda, çünkü ÖLÇÜLDÜ: "faizler artarsa portföyüm nasıl etkilenir" İKİ ayrı
+    denemede de EDUCATION_AGENT'a gitti -- yönlendirme kuralı prompt'a
+    yazıldıktan sonra da. Bu modülün kendi dersi: prompt tavsiyedir.
+
+    Yanlış cevabın iki zararı vardı. "Veriler alınamadı" bir KESİNTİ gibi
+    okunuyordu, oysa faiz serisi yapısal olarak yok; ve kullanıcıdan
+    pozisyonlarını YAPIŞTIRMASI isteniyordu, ki MCP sözleşmesi pozisyon
+    verisini kullanıcı beyanından almayı açıkça yasaklıyor.
+    """
+
+    @pytest.mark.parametrize("message", [
+        "faizler artarsa portföyüm nasıl etkilenir",
+        "faiz artışı pozisyonlarımı nasıl etkiler",
+        "enflasyon yükselirse portföyüm ne olur",
+        "TÜFE çıkarsa yatırımlarım etkilenir mi",
+    ])
+    def test_it_forces_the_agent_that_knows_the_limit(self, message):
+        assert orchestrator._forced_agent(message) == "RISK_STRATEGY_AGENT"
+
+    @pytest.mark.parametrize("message", [
+        "faiz nedir",
+        "enflasyon nasıl hesaplanır",
+        "merkez bankası faizi artırdı mı",
+    ])
+    def test_a_definition_question_is_left_alone(self, message):
+        """"Faiz nedir" bir tanım sorusu ve EDUCATION_AGENT'ın işi. Onu da
+        çekmek, tool'suz bir soruyu tool'lu bir ajana yollamak olurdu."""
+        assert orchestrator._forced_agent(message) is None
+
+    @pytest.mark.parametrize("message", [
+        "dolar yükselirse portföyüm ne olur",
+        "borsa düşerse pozisyonlarım ne kaybeder",
+        "altın çıkarsa portföyüm etkilenir mi",
+    ])
+    def test_a_measurable_factor_is_not_touched(self, message):
+        """Ölçülebilen faktörlerin yolu zaten doğru çalışıyor; onları da
+        zorlamak, çalışan bir yolun üstüne ikinci bir karar koymak olurdu."""
+        assert orchestrator._forced_agent(message) is None
+
+    def test_a_turn_about_nothing_financial_is_not_touched(self):
+        assert orchestrator._forced_agent("merhaba nasılsın") is None
+
+    @pytest.mark.asyncio
+    async def test_the_override_applies_in_the_router(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["classify_and_route_intent"] = {
+            "target_agent": "EDUCATION_AGENT", "confidence": 0.9, "safety_flags": [],
+        }
+        patched_llm.set_response('{"target_agent": "EDUCATION_AGENT", "confidence": 0.9}')
+        out = await orchestrator.router_node(
+            {**base_state, "user_message": "faizler artarsa portföyüm nasıl etkilenir"}
+        )
+        assert out["target_agent"] == "RISK_STRATEGY_AGENT"
+
+    @pytest.mark.asyncio
+    async def test_the_override_does_not_fire_when_the_router_already_agrees(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["classify_and_route_intent"] = {
+            "target_agent": "RISK_STRATEGY_AGENT", "confidence": 0.9, "safety_flags": [],
+        }
+        patched_llm.set_response('{"target_agent": "RISK_STRATEGY_AGENT", "confidence": 0.9}')
+        out = await orchestrator.router_node(
+            {**base_state, "user_message": "faizler artarsa portföyüm ne olur"}
+        )
+        assert out["target_agent"] == "RISK_STRATEGY_AGENT"
+
+    @pytest.mark.asyncio
+    async def test_the_override_survives_a_classifier_outage(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """ASIL burada gerekiyor. Sınıflandırıcı düştüğünde tur
+        EDUCATION_AGENT'a düşüyor ve o ajan hiçbir araç tutmuyor; ölçüldü,
+        sonuç "gerekli veriler alınamadı" oldu ve kullanıcı bunu bir kesinti
+        sandı. Oysa faiz serisinin yokluğunu söylemek için model gerekmiyor."""
+        fake_mcp.responses["classify_and_route_intent"] = {
+            "target_agent": "EDUCATION_AGENT", "confidence": 0.9, "safety_flags": [],
+        }
+        async def _down(_messages):
+            raise RuntimeError("rate limit")
+
+        patched_llm.ainvoke = _down
+        out = await orchestrator.router_node(
+            {**base_state, "user_message": "faizler artarsa portföyüm nasıl etkilenir"}
+        )
+        assert out["target_agent"] == "RISK_STRATEGY_AGENT"
+        assert any("router:" in e for e in out["errors"])
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_turn_still_degrades_to_education_on_outage(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Sınıflandırılmamış bir turu araçlı bir ajana yollamak, birinin
+        pozisyonlarını okuyan bir araca kör bir tur göndermek olurdu."""
+        fake_mcp.responses["classify_and_route_intent"] = {
+            "target_agent": "PORTFOLIO_AGENT", "confidence": 0.9, "safety_flags": [],
+        }
+        async def _down(_messages):
+            raise RuntimeError("rate limit")
+
+        patched_llm.ainvoke = _down
+        out = await orchestrator.router_node(base_state)
+        assert out["target_agent"] == "EDUCATION_AGENT"
+
+    @pytest.mark.asyncio
+    async def test_distress_reaches_a_human_even_when_the_classifier_fails(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Ana yolda `DISTRESS_SIGNAL` -> HUMAN_HANDOFF kontrolü vardı, hata
+        yolunda YOKTU: ön süzgecin ezilebilir olarak işaretlediği bir sıkıntı
+        sinyali, sınıflandırıcı düştüğünde EDUCATION_AGENT'a iniyordu."""
+        fake_mcp.responses["classify_and_route_intent"] = {
+            "target_agent": "EDUCATION_AGENT", "confidence": 0.9,
+            "safety_flags": ["DISTRESS_SIGNAL"],
+        }
+        async def _down(_messages):
+            raise RuntimeError("rate limit")
+
+        patched_llm.ainvoke = _down
+        out = await orchestrator.router_node(
+            {**base_state, "user_message": "her şeyi kaybettim, yaşamak istemiyorum"}
+        )
+        assert out["target_agent"] == "HUMAN_HANDOFF"
+
+    @pytest.mark.asyncio
+    async def test_distress_beats_the_override_on_the_outage_path_too(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["classify_and_route_intent"] = {
+            "target_agent": "EDUCATION_AGENT", "confidence": 0.9,
+            "safety_flags": ["DISTRESS_SIGNAL"],
+        }
+        async def _down(_messages):
+            raise RuntimeError("rate limit")
+
+        patched_llm.ainvoke = _down
+        out = await orchestrator.router_node({
+            **base_state,
+            "user_message": "faizler yüzünden portföyüm bitti, yaşamak istemiyorum",
+        })
+        assert out["target_agent"] == "HUMAN_HANDOFF"
+
+    @pytest.mark.asyncio
+    async def test_safety_still_wins_over_the_override(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Güvenlik devredilemez. Sıkıntı sinyali taşıyan bir tur, içinde
+        "faiz" ve "portföyüm" geçse bile insana gider."""
+        fake_mcp.responses["classify_and_route_intent"] = {
+            "target_agent": "EDUCATION_AGENT", "confidence": 0.9,
+            "safety_flags": ["DISTRESS_SIGNAL"],
+        }
+        patched_llm.set_response('{"target_agent": "EDUCATION_AGENT", "confidence": 0.9}')
+        out = await orchestrator.router_node({
+            **base_state,
+            "user_message": "faizler yüzünden portföyüm bitti, yaşamak istemiyorum",
+        })
+        assert out["target_agent"] == "HUMAN_HANDOFF"
+
+
+class TestProviderErrorsAreNamedCorrectly:
+    """Kalıcı bir hatayı geçici diye anlatmak, kullanıcıyı hiç sonuçlanmayacak
+    bir döngüde tutar.
+
+    Kullanıcı bunu bizden önce fark etti: "faizler artarsa portföyüm nasıl
+    etkilenir" her seferinde "yoğunluk sınırına takıldım, birkaç dakika sonra
+    deneyin" cevabı veriyordu, ama aynı oturumda sorulan başka sorular ANINDA
+    cevaplanıyordu. Sağlayıcı kaydı sebebi söylüyordu: 413, 8.393 token
+    istendi, sınır 8.000 -- yani beklemek hiçbir zaman işe yaramayacaktı.
+    """
+
+    def test_a_too_large_request_is_not_called_a_quota_problem(self):
+        exc = Exception(
+            "Error code: 413 - {'error': {'message': 'Request too large for model "
+            "`openai/gpt-oss-120b` ... on tokens per minute (TPM): Limit 8000, "
+            "Requested 8393, please reduce your message size and try again', "
+            "'code': 'rate_limit_exceeded'}}"
+        )
+        message = orchestrator._failure_message(exc)
+        assert message == orchestrator.TOO_LARGE_TR
+        assert message != orchestrator.RATE_LIMITED_TR
+
+    def test_the_size_message_does_not_tell_the_user_to_wait(self):
+        """Beklemek düzeltmiyor; "birkaç dakika sonra deneyin" demek yanlış."""
+        assert "Beklemek bunu değiştirmez" in orchestrator.TOO_LARGE_TR
+        assert "birkaç dakika" not in orchestrator.TOO_LARGE_TR
+
+    def test_a_real_quota_refusal_still_says_waiting_helps(self):
+        """Gerçek kota gerçekten geçici; o cümle kaybolmamalı."""
+        exc = Exception("Error code: 429 - rate limit reached, please try again")
+        assert orchestrator._failure_message(exc) == orchestrator.RATE_LIMITED_TR
+
+    def test_an_unrelated_failure_stays_generic(self):
+        assert orchestrator._failure_message(
+            Exception("connection reset by peer")
+        ) == orchestrator.GENERIC_FAILURE_TR
+
+    @pytest.mark.parametrize("text", [
+        "context length exceeded", "maximum context length is 8192",
+        "Request too large", "please reduce your message size",
+    ])
+    def test_every_size_wording_is_recognised(self, text):
+        assert orchestrator._failure_message(Exception(text)) == orchestrator.TOO_LARGE_TR
+
+
+class TestSynthesisPayloadFits:
+    """Gövde, sağlayıcının tek istek bütçesine sığmak zorunda.
+
+    `technical_posture` eklendiğinde risk turunun gövdesi 3.269 karakter
+    büyüdü ve toplam sınırı aştı. Bu bir GERİLEME düzeltmesi.
+    """
+
+    POSTURE = {
+        "base_currency": "TRY",
+        "summary": {"below_sma_50": 2, "statement": "3 pozisyonunuzun 2'si..."},
+        "positions": [
+            {"symbol": "AKBNK", "name": "Akbank", "currency": "TRY",
+             "trend": "UPTREND", "narrative": "AKBNK, 50 günlük...",
+             "signals": {f"f{i}": i for i in range(20)}},
+        ],
+        "unconvertible": ["AAPL"],
+    }
+
+    def test_the_writer_gets_the_sentences_not_the_indicator_block(self):
+        """Yirmi alanlık `signals` bloğu EKRANIN ihtiyacı. Yazara alan
+        adlarını göndermek, onları anmayı yasaklayan kuralın önüne yem
+        koymak."""
+        slim = orchestrator._slim_posture(self.POSTURE)
+        assert "signals" not in slim["positions"][0]
+        assert slim["positions"][0]["narrative"] == "AKBNK, 50 günlük..."
+        assert slim["summary"]["statement"] == "3 pozisyonunuzun 2'si..."
+
+    def test_the_trim_actually_shrinks_the_payload(self):
+        import json as _json
+        full = len(_json.dumps(self.POSTURE, ensure_ascii=False))
+        slim = len(_json.dumps(orchestrator._slim_posture(self.POSTURE), ensure_ascii=False))
+        assert slim < full
+
+    def test_holdings_left_out_of_the_weight_survive_the_trim(self):
+        """Kırpma, portföyün bir kısmını yok saymamalı."""
+        assert orchestrator._slim_posture(self.POSTURE)["unconvertible"] == ["AAPL"]
+
+    def test_an_empty_posture_does_not_crash_the_trim(self):
+        assert orchestrator._slim_posture({}) == {
+            "summary": {}, "positions": [], "unconvertible": [],
+        }
+
+    def test_a_payload_within_budget_is_untouched(self):
+        import json as _json
+        payload = {"status": "OK", "data": {"x": 1}}
+        assert orchestrator._fit_payload(payload) == _json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":")
+        )
+
+    def test_an_oversized_payload_is_cut_and_the_cut_is_logged(self, caplog):
+        """Sessiz kırpma, modele bozuk bir gövde verip sebebini gizlemek
+        olurdu."""
+        payload = {"rows": ["x" * 200 for _ in range(200)]}
+        with caplog.at_level("WARNING"):
+            out = orchestrator._fit_payload(payload)
+        assert len(out) == orchestrator.SYNTHESIS_PAYLOAD_CHARS
+        assert any("truncated" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_the_risk_turn_carries_the_slim_posture(
+        self, fake_mcp, patched_llm, base_state, positions_payload
+    ):
+        patched_llm.set_response("{}")
+        fake_mcp.responses["get_portfolio_positions"] = positions_payload
+        fake_mcp.responses["get_portfolio_technicals"] = self.POSTURE
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {"beta": 1.1}}
+        out = await orchestrator.risk_node(base_state)
+        posture = out["specialist_output"]["data"]["technical_posture"]
+        assert "signals" not in posture["positions"][0]
+        assert posture["summary"]["statement"] == "3 pozisyonunuzun 2'si..."
+
+
+class TestReportBranch:
+    """Dördüncü araç: hepsi birden.
+
+    Diğer üçü birer soruyu cevaplıyor; bu, "portföyümün genel durumu" gibi
+    hiçbirinin tek başına cevaplayamadığını.
+    """
+
+    PAYLOAD = {
+        "generated_at": "2026-09-03T08:00:00Z", "currency_code": "TRY",
+        "sections": [
+            {"key": "overview", "title": "Genel bakış",
+             "summary": "Toplam varlığınız 24.404,97 TRY."},
+            {"key": "drift", "title": "Hedef dağılımdan sapma",
+             "summary": "En büyük fark BIST Hisse kovasında."},
+        ],
+    }
+
+    @pytest.mark.asyncio
+    async def test_a_report_request_reaches_the_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response('{"tool": "get_portfolio_report", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_report"] = self.PAYLOAD
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["tools_used"] == ["get_portfolio_report"]
+        assert fake_mcp.calls[0][1] == {"user_id": base_state["user_id"]}
+
+    @pytest.mark.asyncio
+    async def test_the_position_tools_arguments_are_not_forced_onto_it(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """`base_currency` ve `valuation_mode` pozisyon aracının alanları."""
+        patched_llm.set_response('{"tool": "get_portfolio_report", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_report"] = self.PAYLOAD
+        await orchestrator.portfolio_node(base_state)
+        assert set(fake_mcp.calls[0][1]) == {"user_id"}
+
+    @pytest.mark.asyncio
+    async def test_a_report_with_no_sections_is_empty(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Bölümü olmayan bir rapor eksik değil, üretilememiş demektir: veri
+        yoksa bölüm yine geliyor ve yokluğunu kendisi söylüyor."""
+        patched_llm.set_response('{"tool": "get_portfolio_report", "arguments": {}}')
+        fake_mcp.responses["get_portfolio_report"] = {
+            **self.PAYLOAD, "sections": []
+        }
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+
+class TestCompoundTurns:
+    """Birden çok isteği olan tur, istek başına bir uzmana dağıtılır.
+
+    Ölçülen kusur: "AKBNK kaç lira ve portföyümün riski ne durumda" TEK bir
+    ajana gidiyordu ve cevap "AKBNK fiyatı şu anda alınamıyor. Portföyünüzün
+    riski hakkında da veri bulunamadı." oluyordu -- ikisi de fazlasıyla
+    mevcutken. Yönlendirici bir ajan seçmek zorunda kalınca, seçtiğinin aracı
+    diğer yarıyı cevaplayamıyor ve o yarı "veri yok" diye geçiyor.
+
+    Sözleşme bunu BAŞTAN BERİ tarif ediyordu (`is_compound`, `sub_requests`)
+    ve hiçbir şey okumuyordu.
+    """
+
+    REQUESTS = ["AKBNK kaç lira", "portföyümün riski ne durumda"]
+    AGENTS = ["MARKET_DATA_AGENT", "RISK_STRATEGY_AGENT"]
+
+    def _parts(self, requests, agents):
+        """Alt istekler, her biri kendi ajanıyla -- yönlendiricinin TEK
+        çağrısından geldiği hâliyle."""
+        return [{"request": r, "agent": a} for r, a in zip(requests, agents)]
+
+    def _specialists(self, mocker, outputs):
+        async def make(name):
+            async def node(state):
+                return {"specialist_output": outputs[name],
+                        "tools_used": [f"tool_{name}"]}
+            return node
+
+        nodes = {}
+        for name in outputs:
+            async def node(state, _n=name):
+                return {"specialist_output": outputs[_n],
+                        "tools_used": [f"tool_{_n}"]}
+            nodes[name] = node
+        mocker.patch.dict(orchestrator._SPECIALIST_NODES, nodes, clear=True)
+
+    @pytest.mark.asyncio
+    async def test_each_request_reaches_its_own_specialist(self, mocker, base_state):
+        self._specialists(mocker, {
+            "market_data": {"status": "OK", "data": {"price": 71.15}},
+            "risk": {"status": "OK", "data": {"score": 36.3}},
+        })
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(self.REQUESTS, self.AGENTS)}
+        )
+        parts = out["specialist_output"]["parts"]
+        assert [p["agent"] for p in parts] == [
+            "MARKET_DATA_AGENT", "RISK_STRATEGY_AGENT"
+        ]
+        assert parts[0]["output"]["data"]["price"] == 71.15
+        assert parts[1]["output"]["data"]["score"] == 36.3
+
+    @pytest.mark.asyncio
+    async def test_the_request_text_travels_with_its_answer(self, mocker, base_state):
+        """Sentez parçayı cevaplarken hangi soruya cevap verdiğini bilmeli."""
+        self._specialists(mocker, {
+            "market_data": {"status": "OK", "data": {}},
+            "risk": {"status": "OK", "data": {}},
+        })
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(self.REQUESTS, self.AGENTS)}
+        )
+        assert [p["request"] for p in out["specialist_output"]["parts"]] == self.REQUESTS
+
+    @pytest.mark.asyncio
+    async def test_each_specialist_sees_only_its_own_request(self, mocker, base_state):
+        """Uzmana turun tamamını vermek, tam olarak düzeltilen kusur olurdu."""
+        seen = []
+
+        async def spy(state):
+            seen.append(state["user_message"])
+            return {"specialist_output": {"status": "OK", "data": {}}, "tools_used": []}
+
+        mocker.patch.dict(
+            orchestrator._SPECIALIST_NODES,
+            {"market_data": spy, "risk": spy}, clear=True,
+        )
+        await orchestrator.compound_node({**base_state, "sub_requests": self._parts(self.REQUESTS, self.AGENTS)})
+        assert seen == self.REQUESTS
+
+    @pytest.mark.asyncio
+    async def test_one_failing_part_does_not_take_the_other_down(
+        self, mocker, base_state
+    ):
+        """Tek bir aracın hatasının turun tamamını "veriye ulaşamadım"a
+        çevirmesi, bu kusurun kendisiydi."""
+
+        async def boom(state):
+            raise RuntimeError("araç düştü")
+
+        async def fine(state):
+            return {"specialist_output": {"status": "OK", "data": {"price": 1}},
+                    "tools_used": []}
+
+        mocker.patch.dict(
+            orchestrator._SPECIALIST_NODES,
+            {"market_data": fine, "risk": boom}, clear=True,
+        )
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(self.REQUESTS, self.AGENTS)}
+        )
+        parts = out["specialist_output"]["parts"]
+        assert parts[0]["output"] is not None
+        assert parts[1]["output"] is None
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_an_agent_without_a_tool_carries_no_output(self, mocker, base_state):
+        """EDUCATION ve SMALLTALK'ın aracı yok: parça bir araç turu değil,
+        sentezin doğrudan cevaplayacağı bir soru."""
+        self._specialists(mocker, {"market_data": {"status": "OK", "data": {}}})
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(
+                ["enflasyon nedir", "AKBNK kaç lira"],
+                ["EDUCATION_AGENT", "MARKET_DATA_AGENT"],
+            )}
+        )
+        parts = out["specialist_output"]["parts"]
+        assert parts[0]["output"] is None and parts[0]["agent"] == "EDUCATION_AGENT"
+        assert parts[1]["output"] is not None
+
+    @pytest.mark.asyncio
+    async def test_every_part_reports_its_tools(self, mocker, base_state):
+        self._specialists(mocker, {
+            "market_data": {"status": "OK", "data": {}},
+            "risk": {"status": "OK", "data": {}},
+        })
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(self.REQUESTS, self.AGENTS)}
+        )
+        assert out["tools_used"] == ["tool_market_data", "tool_risk"]
+
+    @pytest.mark.asyncio
+    async def test_requests_beyond_the_cap_are_reported_not_dropped(
+        self, mocker, base_state
+    ):
+        """Sorulmuş ama işlenmemiş bir istek, hiç sorulmamış gibi
+        davranılacak bir şey değil."""
+        self._specialists(mocker, {
+            "market_data": {"status": "OK", "data": {}},
+            "risk": {"status": "OK", "data": {}},
+        })
+        out = await orchestrator.compound_node({
+            **base_state,
+            "sub_requests": self._parts(
+                [*self.REQUESTS, "bir de temettü ne zaman"],
+                [*self.AGENTS, "MARKET_DATA_AGENT"],
+            ),
+        })
+        assert len(out["specialist_output"]["parts"]) == orchestrator.MAX_SUB_REQUESTS
+        assert out["specialist_output"]["unanswered"] == ["bir de temettü ne zaman"]
+
+    @pytest.mark.asyncio
+    async def test_no_answerable_part_is_empty(self, mocker, base_state):
+        self._specialists(mocker, {})
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(
+                ["merhaba", "nasılsın"], ["EDUCATION_AGENT", "SMALLTALK_AGENT"],
+            )}
+        )
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_blank_requests_are_ignored(self, mocker, base_state):
+        self._specialists(mocker, {"market_data": {"status": "OK", "data": {}}})
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(
+                ["AKBNK kaç lira"], ["MARKET_DATA_AGENT"],
+            )}
+        )
+        assert len(out["specialist_output"]["parts"]) == 1
+
+
+class TestCompoundPayloadFits:
+    """Bileşik bir gövde ORTASINDAN kesilmiyor.
+
+    Kırpılmış JSON modele bozuk bir gövde vermek demek ve ondan okunan bir
+    sayı yanlış olabilir; eksik bir PARÇA ise söylenebilir bir şey.
+    """
+
+    def _payload(self, filler):
+        return {
+            "agent": "COMPOUND", "status": "OK", "unanswered": [],
+            "parts": [
+                {"request": "AKBNK kaç lira", "agent": "MARKET_DATA_AGENT",
+                 "output": {"data": {"x": "a"}}},
+                {"request": "riskim ne", "agent": "RISK_STRATEGY_AGENT",
+                 "output": {"data": {"x": filler}}},
+            ],
+        }
+
+    def test_a_payload_that_fits_is_untouched(self):
+        out = json.loads(orchestrator._fit_payload(self._payload("kısa")))
+        assert len(out["parts"]) == 2 and out["unanswered"] == []
+
+    def test_an_oversized_payload_drops_a_whole_part(self):
+        big = "x" * (orchestrator.SYNTHESIS_PAYLOAD_CHARS + 500)
+        out = json.loads(orchestrator._fit_payload(self._payload(big)))
+        assert len(out["parts"]) == 1
+        assert out["parts"][0]["request"] == "AKBNK kaç lira"
+
+    def test_the_dropped_request_is_reported_rather_than_lost(self):
+        """Sorulmuş ama işlenmemiş bir istek, hiç sorulmamış gibi
+        davranılacak bir şey değil."""
+        big = "x" * (orchestrator.SYNTHESIS_PAYLOAD_CHARS + 500)
+        out = json.loads(orchestrator._fit_payload(self._payload(big)))
+        assert out["unanswered"] == ["riskim ne"]
+
+    def test_a_first_part_that_alone_overflows_still_truncates(self):
+        """Parçaları düşürmek yetmezse kırpma devreye giriyor: gövdesiz bir
+        istek göndermektense kırpılmış bir gövde, ve uyarı log'da."""
+        payload = {"agent": "COMPOUND", "unanswered": [], "parts": [
+            {"request": "r1", "output": {"x": "y" * 20000}},
+            {"request": "r2", "output": {"x": "z"}},
+        ]}
+        assert len(orchestrator._fit_payload(payload)) == \
+            orchestrator.SYNTHESIS_PAYLOAD_CHARS
+
+    def test_a_single_part_too_large_still_truncates(self):
+        """Son parça da sığmıyorsa kırpma devreye giriyor: parçasız bir
+        gövde bırakmaktansa kırpılmış bir gövde, ve uyarı log'da."""
+        huge = {"agent": "COMPOUND", "parts": [
+            {"request": "r", "output": {"x": "y" * 20000}},
+        ]}
+        assert len(orchestrator._fit_payload(huge)) == \
+            orchestrator.SYNTHESIS_PAYLOAD_CHARS
+
+
+class TestCompoundDetection:
+    """Yönlendiricinin bileşiklik kararı."""
+
+    def _routed(self, patched_llm, response):
+        patched_llm.set_response(response)
+
+    @pytest.mark.asyncio
+    async def test_two_requests_are_carried(self, fake_mcp, patched_llm, base_state):
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": True,
+            "sub_requests": [
+                {"request": "AKBNK kaç lira", "agent": "MARKET_DATA_AGENT"},
+                {"request": "riskim ne", "agent": "RISK_STRATEGY_AGENT"},
+            ],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert [p["request"] for p in out["sub_requests"]] == [
+            "AKBNK kaç lira", "riskim ne"
+        ]
+        assert [p["agent"] for p in out["sub_requests"]] == [
+            "MARKET_DATA_AGENT", "RISK_STRATEGY_AGENT"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_hallucinated_agent_falls_back(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Uydurulmuş bir ajan adı gerçek bir uzmana ulaşmamalı."""
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": True,
+            "sub_requests": [
+                {"request": "a", "agent": "SUPER_AGENT"},
+                {"request": "b", "agent": "RISK_STRATEGY_AGENT"},
+            ],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert out["sub_requests"][0]["agent"] == "EDUCATION_AGENT"
+
+    @pytest.mark.asyncio
+    async def test_a_plain_string_entry_still_parses(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Model bazen düz metin listesi yazıyor. İsteği kaybetmektense
+        ajansız taşımak doğru: sentez onu yine cevaplıyor."""
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": True, "sub_requests": ["a", "b"],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert [p["request"] for p in out["sub_requests"]] == ["a", "b"]
+        assert all(p["agent"] == "EDUCATION_AGENT" for p in out["sub_requests"])
+
+    @pytest.mark.asyncio
+    async def test_a_single_sub_request_is_not_compound(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """`is_compound` true ama tek alt istek dönen bir sınıflandırma, turu
+        gereksiz yere ikinci bir yönlendirmeden geçirirdi."""
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": True,
+            "sub_requests": [{"request": "AKBNK kaç lira",
+                              "agent": "MARKET_DATA_AGENT"}],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert out["sub_requests"] == []
+
+    @pytest.mark.asyncio
+    async def test_sub_requests_without_the_flag_are_ignored(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": False, "sub_requests": ["a", "b"],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert out["sub_requests"] == []
+
+    @pytest.mark.asyncio
+    async def test_blank_entries_do_not_count_towards_compoundness(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": True,
+            "sub_requests": [{"request": "AKBNK kaç lira", "agent": "MARKET_DATA_AGENT"},
+                             {"request": "  ", "agent": "RISK_STRATEGY_AGENT"}],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert out["sub_requests"] == []
+
+
+class TestCompoundRouting:
+    def test_a_compound_turn_goes_to_the_compound_node(self, base_state):
+        assert orchestrator.route_after_router(
+            {**base_state, "sub_requests": [{"request": "a", "agent": "MARKET_DATA_AGENT"},
+             {"request": "b", "agent": "RISK_STRATEGY_AGENT"}],
+             "target_agent": "MARKET_DATA_AGENT"}
+        ) == "compound"
+
+    def test_safety_still_decides_first(self, base_state):
+        """Bileşik bir tur da olsa, sıkıntı sinyali taşıyan mesaj önce
+        insana gider."""
+        assert orchestrator.route_after_router({
+            **base_state,
+            "sub_requests": [{"request": "a", "agent": "MARKET_DATA_AGENT"}],
+            "safety_flags": ["DISTRESS_SIGNAL"],
+        }) == "handoff"
+
+    def test_a_single_request_turn_is_unaffected(self, base_state):
+        assert orchestrator.route_after_router(
+            {**base_state, "sub_requests": [], "target_agent": "MARKET_DATA_AGENT"}
+        ) == "market_data"

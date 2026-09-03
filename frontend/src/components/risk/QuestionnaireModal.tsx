@@ -2,11 +2,16 @@ import { useEffect } from 'react'
 import { useRiskQuestionnaire } from '../../hooks/useRiskQuestionnaire'
 
 /**
- * Risk tolerans anketi — tek soru, tek ekran.
+ * Uygunluk testi — adım adım.
  *
- * Altı soruyu tek bir forma dizmek insanların okumadan tıklamasına yol açar,
- * ve bu cevaplar sonra kendi portföyleriyle karşılaştırılıyor. Sıralı akış
- * daha uzun sürmüyor, sadece her sorunun okunmasını sağlıyor.
+ * On altı soru var ve hepsini tek forma dizmek insanların okumadan
+ * tıklamasına yol açar; bu cevaplar sonra kendi portföyleriyle
+ * karşılaştırılıyor. Her adımda iki-üç soru: yeterince kısa ki okunuyor,
+ * yeterince az ekran ki bitiriliyor.
+ *
+ * Bilgi bölümü tek bir 4×3 matris olarak da çizilebilirdi, ama on iki
+ * soruluk bir tablo dar ekranda okunmuyor. Grup başına kart hem masaüstünde
+ * hem telefonda aynı işi görüyor.
  *
  * Durum makinesi `hooks/useRiskQuestionnaire` içinde: kapsama kapısı orayı
  * sayıyor, buradaki JSX'i saymıyor.
@@ -14,7 +19,7 @@ import { useRiskQuestionnaire } from '../../hooks/useRiskQuestionnaire'
 interface QuestionnaireModalProps {
     open: boolean
     onClose: () => void
-    /** Anket kaydedildiğinde profil yeniden çekilsin diye. */
+    /** Test kaydedildiğinde profil yeniden çekilsin diye. */
     onSaved: () => void
 }
 
@@ -41,115 +46,162 @@ export default function QuestionnaireModal({
 
     if (!open) return null
 
-    const progress = survey.total > 0 ? (survey.answeredCount / survey.total) * 100 : 0
+    const progress =
+        survey.questionCount > 0
+            ? (survey.answeredCount / survey.questionCount) * 100
+            : 0
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
             <div
                 role="dialog"
                 aria-modal="true"
-                aria-label="Risk tolerans anketi"
-                className="w-full max-w-lg rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl"
+                aria-label="Uygunluk testi"
+                className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-slate-900 shadow-2xl"
             >
-                <div className="mb-4 flex items-start justify-between gap-4">
-                    <div>
-                        <h2 className="text-lg font-semibold text-white">
-                            Risk tolerans anketi
-                        </h2>
-                        <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                            Cevaplarınız bir uygunluk kararı için değil, ölçülen portföy
-                            riskinizle karşılaştırmak için kullanılır. İstediğiniz zaman
-                            değiştirebilirsiniz.
-                        </p>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        aria-label="Anketi kapat"
-                        className="shrink-0 rounded p-1 text-slate-500 transition-colors hover:text-slate-200"
-                    >
-                        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
-
-                <div className="mb-5 h-1 w-full overflow-hidden rounded-full bg-white/10">
-                    <div
-                        className="h-full rounded-full bg-brandBlue transition-all"
-                        style={{ width: `${progress}%` }}
-                    />
-                </div>
-
-                {survey.loading && (
-                    <p className="py-8 text-center text-sm text-slate-400">Anket yükleniyor…</p>
-                )}
-
-                {survey.error && (
-                    <p className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-                        {survey.error}
-                    </p>
-                )}
-
-                {survey.current && (
-                    <div>
-                        <p className="text-xs font-medium text-slate-500">
-                            Soru {survey.index + 1} / {survey.total}
-                        </p>
-                        <h3 className="mt-2 text-base font-medium leading-relaxed text-white">
-                            {survey.current.prompt}
-                        </h3>
-                        {survey.current.helper && (
-                            <p className="mt-1 text-xs leading-relaxed text-slate-500">
-                                {survey.current.helper}
+                {/* Başlık ve ilerleme — kaydırmadan sabit kalıyor ki kullanıcı
+                    ne kadar kaldığını her an görsün. */}
+                <div className="border-b border-white/10 p-5">
+                    <div className="flex items-start justify-between gap-4">
+                        <div>
+                            <h2 className="text-lg font-bold text-white">Uygunluk Testi</h2>
+                            <p className="mt-1 text-xs text-slate-400">
+                                Hangi ürün gruplarının size sunulabileceğini belirler.
+                                Cevaplarınız yalnızca sizin beyanınızdır.
                             </p>
-                        )}
-
-                        <div className="mt-4 flex flex-col gap-2">
-                            {survey.current.options.map((option) => {
-                                const chosen = survey.answers[survey.current!.key] === option.value
-                                return (
-                                    <button
-                                        key={option.value}
-                                        type="button"
-                                        onClick={() => survey.answer(survey.current!.key, option.value)}
-                                        className={`rounded-xl border px-4 py-3 text-left text-sm transition-colors ${
-                                            chosen
-                                                ? 'border-brandBlue bg-brandBlue/10 text-white'
-                                                : 'border-white/10 text-slate-300 hover:border-white/25 hover:bg-white/5'
-                                        }`}
-                                    >
-                                        {option.label}
-                                    </button>
-                                )
-                            })}
                         </div>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            aria-label="Kapat"
+                            className="rounded-lg px-2 py-1 text-slate-400 hover:bg-white/5 hover:text-white"
+                        >
+                            ✕
+                        </button>
                     </div>
-                )}
 
-                <div className="mt-6 flex items-center justify-between gap-3">
+                    {survey.total > 0 && (
+                        <div className="mt-4">
+                            <div className="mb-1.5 flex justify-between text-[11px] text-slate-400">
+                                <span>Adım {survey.step + 1} / {survey.total}</span>
+                                <span className="tabular-nums">
+                                    {survey.answeredCount} / {survey.questionCount} soru
+                                </span>
+                            </div>
+                            <div className="h-1 w-full overflow-hidden rounded-full bg-white/10">
+                                <div
+                                    className="h-full rounded-full bg-brandBlue transition-all"
+                                    style={{ width: `${progress}%` }}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-5">
+                    {survey.loading && (
+                        <p className="text-sm text-slate-400">Test yükleniyor…</p>
+                    )}
+
+                    {!survey.loading && survey.error && (
+                        <p className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-3 text-sm text-rose-300">
+                            {survey.error}
+                        </p>
+                    )}
+
+                    {!survey.loading && survey.current && (
+                        <div className="flex flex-col gap-6">
+                            <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <h3 className="text-base font-semibold text-white">
+                                        {survey.current.title}
+                                    </h3>
+                                    {/* Risk etiketi testin kendi yazdığı hâliyle.
+                                        Yeterlilik kuralı da buna bağlı, dolayısıyla
+                                        kullanıcının hangi grupta olduğunu görmesi
+                                        sonucu anlamasının yarısı. */}
+                                    {survey.current.risk && (
+                                        <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[11px] text-amber-300">
+                                            {survey.current.risk}
+                                        </span>
+                                    )}
+                                </div>
+                                {survey.current.helper && (
+                                    <p className="mt-1 text-xs text-slate-400">
+                                        {survey.current.helper}
+                                    </p>
+                                )}
+                            </div>
+
+                            {survey.current.questions.map((question) => (
+                                <fieldset key={question.key} className="border-0 p-0">
+                                    <legend className="mb-2 text-sm font-medium text-slate-200">
+                                        {question.prompt}
+                                    </legend>
+                                    {question.helper && (
+                                        <p className="mb-2 text-xs text-slate-500">
+                                            {question.helper}
+                                        </p>
+                                    )}
+                                    <div className="flex flex-wrap gap-2">
+                                        {question.options.map((option) => {
+                                            const chosen = survey.answers[question.key] === option.value
+                                            return (
+                                                <button
+                                                    key={option.value}
+                                                    type="button"
+                                                    aria-pressed={chosen}
+                                                    onClick={() => survey.answer(question.key, option.value)}
+                                                    className={`rounded-xl border px-3 py-2 text-left text-sm transition-colors ${
+                                                        chosen
+                                                            ? 'border-brandBlue bg-brandBlue/15 text-white'
+                                                            : 'border-white/10 bg-white/5 text-slate-300 hover:border-white/25 hover:text-white'
+                                                    }`}
+                                                >
+                                                    {option.label}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </fieldset>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                <div className="flex items-center justify-between gap-3 border-t border-white/10 p-5">
                     <button
                         type="button"
                         onClick={survey.back}
-                        disabled={survey.index === 0}
-                        className="rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:text-slate-200 disabled:opacity-40"
+                        disabled={survey.step === 0}
+                        className="rounded-xl px-3 py-2 text-sm text-slate-400 hover:text-white disabled:opacity-40"
                     >
                         Geri
                     </button>
-                    <button
-                        type="button"
-                        // Eksikken açık bir düğme, sunucudan 422 alıp onu
-                        // kullanıcıya hata diye göstermek demek.
-                        disabled={!survey.complete || survey.saving}
-                        onClick={() => {
-                            void survey.submit().then((ok) => {
-                                if (ok) onClose()
-                            })
-                        }}
-                        className="rounded-lg bg-brandBlue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                        {survey.saving ? 'Kaydediliyor…' : 'Tamamla'}
-                    </button>
+
+                    <p className="text-[11px] text-slate-500">
+                        Yarıda bırakırsanız kaldığınız yerden devam edersiniz.
+                    </p>
+
+                    {survey.isLastStep ? (
+                        <button
+                            type="button"
+                            onClick={() => void survey.submit().then((ok) => ok && onClose())}
+                            disabled={!survey.complete || survey.saving}
+                            className="rounded-xl bg-brandBlue px-4 py-2 text-sm font-semibold text-white hover:bg-brandBlue/90 disabled:opacity-40"
+                        >
+                            {survey.saving ? 'Kaydediliyor…' : 'Tamamla'}
+                        </button>
+                    ) : (
+                        <button
+                            type="button"
+                            onClick={survey.next}
+                            disabled={!survey.stepComplete}
+                            className="rounded-xl bg-brandBlue px-4 py-2 text-sm font-semibold text-white hover:bg-brandBlue/90 disabled:opacity-40"
+                        >
+                            İleri
+                        </button>
+                    )}
                 </div>
             </div>
         </div>

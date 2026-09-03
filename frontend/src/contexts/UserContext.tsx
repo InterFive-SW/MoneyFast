@@ -29,6 +29,8 @@ interface MeResponse {
   tc_no:      string
   email:      string
   phone_number?: string
+  profile_picture_url?: string
+  created_at?: string
   notification_preferences: Record<string, Record<string, boolean>>
   transaction_limit: number
   user_preferences: Record<string, string>
@@ -50,6 +52,10 @@ export interface UserProfile {
   email:     string
   /** Telefon numarası */
   phoneNumber?: string
+  /** Profil fotoğrafı URL'si */
+  profilePictureUrl?: string
+  /** Hesap oluşturma tarihi */
+  createdAt?: string
   /** PostgreSQL JSONB kaynaklı detaylı bildirim tercihleri matrisi (Kategori -> Kanal -> Durum) */
   notificationPreferences: Record<string, Record<string, boolean>>
   /** Güvenlik Merkezi → İşlem Onay Limiti (₺). Bu eşiğin üzerindeki
@@ -66,8 +72,19 @@ interface UserContextValue {
   profile:   UserProfile | null
   /** Profil verisi yüklenirken true */
   isLoading: boolean
-  /** Profil verisini yeniden çeken fonksiyon */
-  refetch:   () => void
+  /** 
+   * Profil verisini backend üzerinden yeniden senkronize eden asenkron fonksiyon.
+   * KRİTİK: Component'lerin (örn. AppearanceSettings) bu fonksiyonu await edebilmesi 
+   * için void yerine Promise<void> dönmelidir. Aksi halde race-condition oluşur ve 
+   * UI, global state güncellenmeden önce eski veriyi okuyabilir.
+   */
+  refetch:   () => Promise<void>
+  /**
+   * Sadece preferences kısmını local olarak güncelleyen fonksiyon.
+   * API isteği atıldıktan hemen sonra çağrılarak ekstra network isteği (refetch) yapmadan
+   * UI'ın anlık senkronizasyonu sağlanır.
+   */
+  updateUserPreferences: (prefs: Partial<Record<string, string>>) => void
 }
 
 // ─── Varsayılan (Fallback) Profil ─────────────────────────────────────────────
@@ -80,6 +97,8 @@ const FALLBACK_PROFILE: UserProfile = {
   tcNo:      '',
   initials:  'KL',
   email:     '',
+  profilePictureUrl: '',
+  createdAt: new Date().toISOString(),
   notificationPreferences: {
     security: { email: true, push: true, sms: true },
     transactions: { email: true, push: true, sms: false },
@@ -147,13 +166,17 @@ function buildProfile(data: Partial<MeResponse>, tcNo: string): UserProfile {
     initials,
     email: data.email ?? '',
     phoneNumber: data.phone_number,
-    notificationPreferences: data.notification_preferences ?? {
-      security: { email: true, push: true, sms: true },
-      transactions: { email: true, push: true, sms: false },
-      market: { email: false, push: true, sms: false },
-      reports: { email: true, push: false, sms: false },
-      marketing: { email: false, push: false, sms: false },
-    },
+    profilePictureUrl: data.profile_picture_url,
+    createdAt: data.created_at,
+    notificationPreferences: (data.notification_preferences && Object.keys(data.notification_preferences).length > 0) 
+      ? data.notification_preferences 
+      : {
+          security: { email: true, push: true, sms: true },
+          transactions: { email: true, push: true, sms: false },
+          market: { email: false, push: true, sms: false },
+          reports: { email: true, push: false, sms: false },
+          marketing: { email: false, push: false, sms: false },
+        },
     transactionLimit: data.transaction_limit ?? 50000,
     userPreferences: data.user_preferences ?? {
       currency: 'TRY',
@@ -214,8 +237,29 @@ export function UserProvider({ children }: UserProviderProps) {
     void fetchProfile()
   }, [fetchProfile])
 
+  const updateUserPreferences = useCallback((prefs: Partial<Record<string, string>>) => {
+    setProfile(prev => {
+      if (!prev) return prev
+      
+      const cleanPrefs: Record<string, string> = {}
+      for (const [k, v] of Object.entries(prefs)) {
+        if (v !== undefined) {
+          cleanPrefs[k] = v
+        }
+      }
+      
+      return {
+        ...prev,
+        userPreferences: {
+          ...prev.userPreferences,
+          ...cleanPrefs
+        }
+      }
+    })
+  }, [])
+
   return (
-    <UserContext.Provider value={{ profile, isLoading, refetch: fetchProfile }}>
+    <UserContext.Provider value={{ profile, isLoading, refetch: fetchProfile, updateUserPreferences }}>
       {children}
     </UserContext.Provider>
   )

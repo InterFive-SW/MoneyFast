@@ -15,12 +15,30 @@ type GetResponseType<T> = T extends {
     };
 } ? U : never;
 
+/** Aynısı, POST ile cevap veren uçlar için. `GetResponseType` yalnızca `get`
+ *  taşıyan yolları çözüyor ve POST-only bir uçta sessizce `never` veriyor --
+ *  o da alan erişiminde anlaşılmaz bir tip hatasına dönüşüyor. */
+type PostResponseType<T> = T extends {
+    post: {
+        responses: {
+            200: {
+                content: {
+                    'application/json': infer U;
+                };
+            };
+        };
+    };
+} ? U : never;
+
 // Export types based on the OpenAPI schema
 export type InvestmentBalance = GetResponseType<paths['/api/investment/portfolio/summary']>;
 export type PortfolioChartData = GetResponseType<paths['/api/investment/portfolio/chart']>;
 export type Position = GetResponseType<paths['/api/investment/positions']>[0];
 export type Order = GetResponseType<paths['/api/investment/orders']>[0];
 export type AssetAllocationItem = GetResponseType<paths['/api/investment/asset-allocation']>[0];
+export type AllocationTarget = GetResponseType<paths['/api/investment/allocation-target']>;
+export type AllocationDrift = GetResponseType<paths['/api/investment/allocation-drift']>;
+export type PortfolioReport = GetResponseType<paths['/api/analytics/report']>;
 export type StageTransactionRequest = components['schemas']['StageTransactionRequest'];
 export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
@@ -98,10 +116,36 @@ export interface BillLookup {
     found: boolean
     id?: string | null
     institution?: string | null
-    bill_type?: string | null
-    subscriber_no?: string | null
+    customer_no?: string | null
+    name?: string | null
     amount?: number | null
-    due_day?: number | null
+    due_date?: string | null
+    subscriber_no?: string | null
+    due_day?: string | null
+}
+
+// --- Notifications -----------------------------------------------------------
+
+/**
+ * REST polling tabanlı bildirim mimarisi için temel bildirim arayüzü.
+ * Backend'deki NotificationResponse şemasını temsil eder.
+ */
+export interface Notification {
+    id: string;
+    title: string;
+    description: string;
+    type: string;
+    link_url?: string | null;
+    is_read: boolean;
+    created_at: string;
+}
+
+/**
+ * Sayfalandırılmış veya sınırlanmış bildirim listesini ve okunmamış bildirim sayısını tutar.
+ */
+export interface NotificationListResponse {
+    unread_count: number;
+    items: Notification[];
 }
 
 export interface StagePaymentRequest {
@@ -174,6 +218,18 @@ export type MarketInstrument = NonNullable<
     GetResponseType<paths['/api/market/instruments']>['instruments']
 >[0];
 export type NewsItem = GetResponseType<paths['/api/market/news']>[0];
+/** Portföye dokunan haberler paneli. Sayı ve başlıklar aynı pencereden. */
+export type PortfolioNews = GetResponseType<paths['/api/market/news/portfolio']>;
+export type PortfolioNewsItem = PortfolioNews['items'][0];
+export type PortfolioNewsSymbol = PortfolioNews['symbols'][0];
+/** Portföy geneli teknik görünüm: pozisyon başına okuma + toplulaştırma. */
+export type PortfolioTechnical = GetResponseType<paths['/api/market/portfolio/technical']>;
+export type PortfolioTechnicalRow = PortfolioTechnical['positions'][0];
+/** Koşullu makro senaryo: ölçülen duyarlılık ve şokun yansıması. */
+export type ScenarioResult = PostResponseType<paths['/api/risk/scenario']>;
+/** Stres testi: gerçekten olan günler ve faktörlerin en sert pencereleri. */
+export type StressResult = GetResponseType<paths['/api/risk/stress']>;
+export type ScenarioFactor = 'USDTRY' | 'EURTRY' | 'XU100' | 'XAUUSD';
 /** Kullanıcının ankette beyan ettiği tolerans. Anket doldurulmadan `null`. */
 export interface DeclaredRiskProfile {
     tolerance_level: string;
@@ -366,9 +422,44 @@ export interface RiskQuestion {
     options: { value: string; label: string }[];
 }
 
+/** Bir ürün grubu ve ona sorulan üç soru. Yapı yalnızca SUNUM meselesi:
+ *  puanlama düz soru listesi üzerinden çalışıyor ve bu gruplamadan habersiz. */
+export interface RiskQuestionGroup {
+    key: string;
+    label: string;
+    /** Grubun risk seviyesi, testin kendi yazdığı hâliyle. */
+    risk: string;
+    questions: RiskQuestion[];
+}
+
+export interface RiskQuestionSection {
+    key: string;
+    title: string;
+    helper: string | null;
+    questions: RiskQuestion[];
+    groups: RiskQuestionGroup[];
+}
+
 export interface RiskQuestionnaire {
     version: string;
-    questions: RiskQuestion[];
+    sections: RiskQuestionSection[];
+}
+
+/** Bir ürün grubunun yeterliliği ve GEREKÇESİ.
+ *
+ *  Gerekçe zorunlu: "uygun değil" tek başına kişi hakkında bir yargı gibi
+ *  okunuyor. Hangi beyandan çıktığı yazılı olunca hem öyle olmadığı hem de
+ *  kullanıcının cevabını değiştirerek sonucu değiştirebileceği görünüyor. */
+export interface RiskProductGroup {
+    key: string;
+    label: string;
+    risk: string;
+    knowledge: string;
+    frequency: string;
+    volume: string;
+    has_experience: boolean;
+    eligible: boolean;
+    reason: string;
 }
 
 /** Simülasyonun bir tarafı. Metriklerin tamamı değil, kıyaslanabilir olanlar. */
@@ -425,6 +516,9 @@ export interface RiskAssessmentResult {
     assessed_at: string;
     questionnaire_version: string;
     raw_score: number;
+    /** v1 ile doldurulmuş bir profilde BOŞ. Boş liste "hiçbiri uygun değil"
+     *  demek değil, "sorulmadı" demek. */
+    product_groups: RiskProductGroup[];
 }
 export type RiskFinding = NonNullable<RiskProfile['findings']>[0];
 export type RiskSuggestion = NonNullable<RiskProfile['suggestions']>[0];
@@ -683,6 +777,53 @@ class ApiClient {
         return this.request<AssetAllocationItem[]>('/investment/asset-allocation');
     }
 
+    /**
+     * "Detaylı Rapor Oluştur": sistemin ölçtüğü her şey tek belgede.
+     *
+     * Bölüm cümleleri BACKEND'de kuruluyor ve olduğu gibi gösteriliyor;
+     * ekran, PDF ve sohbet aynı metni okumalı.
+     */
+    getPortfolioReport() {
+        return this.request<PortfolioReport>('/analytics/report');
+    }
+
+    /**
+     * Aynı raporun indirilebilir hâli.
+     *
+     * Belge SUNUCUDA üretiliyor: ekranın DOM'unu yazdırmak, raporun metnini
+     * ikinci bir yerde kurmak olurdu ve iki yüzey er ya da geç ayrışırdı.
+     * `request` JSON çözdüğü için ayrı bir yol.
+     */
+    async downloadPortfolioReportPdf(): Promise<Blob> {
+        const response = await this.authedFetch(
+            `${this.baseUrl}/analytics/report.pdf`, { method: 'GET' },
+        );
+        if (!response.ok) {
+            throw new Error(`API Hatası: ${response.status} ${response.statusText}`);
+        }
+        return await response.blob();
+    }
+
+    /** Kullanıcının kendi belirlediği hedef ağırlıklar. */
+    getAllocationTarget() {
+        return this.request<AllocationTarget>('/investment/allocation-target');
+    }
+
+    /**
+     * Hedefi tamamen değiştirir; boş liste hedefi kaldırır.
+     *
+     * Kısmi güncelleme yok: birleştirme, toplamı 100 olan bir hedefi sessizce
+     * 140'a çıkarabilirdi.
+     */
+    setAllocationTarget(targets: { bucket: string; targetPercent: number }[]) {
+        return this.put<AllocationTarget>('/investment/allocation-target', { targets });
+    }
+
+    /** Ölçülen ağırlık ile kullanıcının kendi hedefi arasındaki fark. */
+    getAllocationDrift() {
+        return this.request<AllocationDrift>('/investment/allocation-drift');
+    }
+
     /** Follow an instrument. Idempotent — starring twice is not an error. */
     addToWatchlist(symbol: string) {
         return this.post<Record<string, string>>(
@@ -825,11 +966,16 @@ class ApiClient {
      * Onay yalnızca burada, kullanıcının kendi eylemiyle verilir. Ajan bu uç
      * noktaya erişemez ve sohbette "evet" demek onay sayılmaz.
      */
-    confirmProposal(proposalId: string) {
-        return this.post<Record<string, string>>(
+    async confirmProposal(proposalId: string) {
+        const response = await this.post<Record<string, string>>(
             `/investment/transactions/${encodeURIComponent(proposalId)}/confirm`,
-            {},
+            {}
         );
+        // Trigger a notification refresh immediately so the user sees the PENDING transaction notification
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event("refreshNotifications"));
+        }
+        return response;
     }
 
     // Market endpoints
@@ -1060,6 +1206,46 @@ class ApiClient {
         return this.request<NewsItem[]>('/market/news');
     }
 
+    /**
+     * Kullanıcının tuttuğu hisselere bağlı haberler.
+     *
+     * Oturum zorunlu ve demo portföyüne düşmüyor: "portföyünüze dokunan
+     * haberler" başlığı altında başkasının hisselerinin haberlerini
+     * göstermek, izleme listesinin eskiden yaptığı hatanın aynısı olurdu.
+     */
+    getPortfolioNews() {
+        return this.request<PortfolioNews>('/market/news/portfolio');
+    }
+
+    /**
+     * Portföy geneli teknik görünüm.
+     *
+     * Hisse detay sayfasıyla AYNI motoru okuyor: iki yüzeyin aynı hisse için
+     * farklı bir eğilim göstermesi mümkün değil.
+     */
+    getPortfolioTechnical() {
+        return this.request<PortfolioTechnical>('/market/portfolio/technical');
+    }
+
+    /**
+     * Koşullu senaryo. Bir TAHMİN değil: geçmiş birlikte hareketin
+     * aritmetiği, koşula bağlanmış hâli.
+     */
+    runScenario(factor: ScenarioFactor, shockPct: number, lookback?: string) {
+        return this.post<ScenarioResult>('/api/risk/scenario', {
+            factor,
+            shock_pct: shockPct,
+            ...(lookback ? { lookback } : {}),
+        });
+    }
+
+    /** Stres testi: uydurulmuş bir kayıp senaryosu değil, olan günler. */
+    getStressTest(lookback?: string) {
+        return this.request<StressResult>(
+            `/risk/stress${lookback ? `?lookback=${encodeURIComponent(lookback)}` : ''}`,
+        );
+    }
+
     // Generic get method for backwards compatibility with UserContext
     async get<T>(url: string): Promise<T> {
         // Çift '/api' önekini (prefix) engellemek için url başındaki '/api' kısmını temizleriz.
@@ -1171,6 +1357,24 @@ class ApiClient {
         }
     }
 
+    async postForm<T>(url: string, data: FormData): Promise<T> {
+        const normalizedUrl = url.startsWith('/api') ? url.substring(4) : url;
+        const fullUrl = url.startsWith('http') ? url : `${this.baseUrl}${normalizedUrl}`;
+        try {
+            const response = await this.authedFetch(fullUrl, {
+                method: 'POST',
+                body: data, // no JSON.stringify, and no Content-Type header (browser sets it automatically with boundary)
+            });
+            if (!response.ok) {
+                throw new Error(await describeError(response));
+            }
+            return await response.json();
+        } catch (error) {
+            console.error(`[API Ağ Hatası] POST ${fullUrl} isteği başarısız oldu:`, error);
+            throw error;
+        }
+    }
+
     // Generic put method
     async put<T>(url: string, data?: any): Promise<T> {
         const normalizedUrl = url.startsWith('/api') ? url.substring(4) : url;
@@ -1250,6 +1454,33 @@ class ApiClient {
             throw new Error(await describeError(response));
         }
         return await response.json();
+    }
+
+    // ============================================================================
+    // Notifications
+    // ============================================================================
+    
+    /**
+     * Kullanıcının okunmamış veya tüm bildirimlerini sayfalandırılmış şekilde getirir.
+     * Bu fonksiyon, Header.tsx içerisinde tanımlanan setInterval ile periyodik (polling)
+     * olarak çağrılacak şekilde tasarlanmıştır.
+     */
+    async getNotifications(limit: number = 50): Promise<NotificationListResponse> {
+        return this.request<NotificationListResponse>(`/notification/me/notifications?limit=${limit}`);
+    }
+
+    /**
+     * Kullanıcının tıkladığı belirli bir bildirimi okundu olarak işaretler.
+     */
+    async markNotificationAsRead(id: string): Promise<Notification> {
+        return this.put<Notification>(`/notification/me/notifications/${id}/read`);
+    }
+
+    /**
+     * Okunmamış tüm bildirimleri tek seferde (batch) okundu olarak işaretler.
+     */
+    async markAllNotificationsAsRead(): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/notification/me/notifications/mark-all-read');
     }
 }
 

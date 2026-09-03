@@ -6,9 +6,12 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_user_id
 from app.modules.banking import service as banking_service
-from app.modules.investment import ai_service, market_service
-from . import profile, questionnaire, service, store
-from .deps import lookback_param, require_service_token
+from app.modules.investment import ai_service, allocation, market_service
+from app.modules.investment import service as investment_service
+from . import profile, questionnaire_v2 as questionnaire, scenario, service, store
+from . import returns as risk_returns
+from app.core.deps import require_service_token
+from .deps import lookback_param
 from .schemas import (
     AssessmentRequest,
     AssessmentResultOut,
@@ -18,9 +21,12 @@ from .schemas import (
     RiskRequest,
     RiskResponse,
     RiskSummaryOut,
+    ScenarioOut,
+    ScenarioRequest,
     SimulationOut,
     SimulationRequest,
     SnapshotOut,
+    StressOut,
 )
 
 router = APIRouter(tags=["risk"])
@@ -108,6 +114,10 @@ def _current_positions(db: Session, user_id: str):
                 # by_asset_class report {"EQUITY": 1.0} for every portfolio,
                 # including one holding nothing but gold.
                 "asset_class": row.get("product_type") or "EQUITY",
+                # Kova eşlemesi İŞLEM YERİNDEN okunuyor (`allocation.py`),
+                # para biriminden değil: altın dolarla fiyatlanıyor ama
+                # yabancı hisse değil.
+                "market": row.get("market"),
                 "sector": row.get("sector") or "UNCLASSIFIED",
                 # The key the risk engine actually reads.
                 "instrument_currency": row.get("currency") or "TRY",
@@ -161,6 +171,9 @@ def _measure(db: Session, user_id: str, lookback: str) -> dict:
     # yazar: o gün sayfa hiç açılmasa bile ölçüm gerçekten yapılmıştır.
     store.record_snapshot(db, user_id, lookback, scored, metrics, len(positions))
     declared = store.latest_profile(db, user_id)
+    # Nakit, kova dağılımının bir parçası: hedefini "%15 nakit" diye koyan
+    # birine nakdi saymadan sapma göstermek, o hedefi hiç ölçmemek olurdu.
+    account = market_service.account(db, user_id=user_id)
 
     return {
         "positions": positions,
@@ -171,6 +184,23 @@ def _measure(db: Session, user_id: str, lookback: str) -> dict:
         "declared": declared,
         "suitability": profile.suitability(
             scored["level"], declared.tolerance_level if declared else None
+        ),
+        # Aynı çizginin ikinci yarısı: `suitability` ölçülen risk seviyesini
+        # beyan edilen toleransla karşılaştırıyor, bu ise ÜRÜN GRUBU başına
+        # tutulan ağırlığı o grup için verilen bilgi/tecrübe beyanıyla.
+        "group_exposure": profile.group_exposure(
+            positions, getattr(declared, "product_groups", None)
+        ),
+        # Üçüncü karşılaştırma, aynı ailenin üçüncü üyesi: ölçülen KOVA
+        # ağırlıkları ile kullanıcının kendi girdiği hedef. Sayfada zaten
+        # vardı ve sohbete hiç ulaşmıyordu -- `suitability` ile aynı gerekçe:
+        # iki yüzey aynı şekli okumazsa ayrışır.
+        "allocation_drift": allocation.drift(
+            allocation.current_amounts(
+                [(row, float(row["market_value"])) for row in positions],
+                float(account.cash_balance) if account else 0.0,
+            ),
+            investment_service.allocation_targets(db, user_id),
         ),
         "warnings": warnings,
     }
@@ -247,6 +277,7 @@ def risk_profile(
         warnings=measured["warnings"],
         declared=_declared_payload(measured["declared"]),
         suitability=measured["suitability"],
+        group_exposure=measured["group_exposure"],
     )
 
 
@@ -283,6 +314,8 @@ def risk_summary_for_ai(
         level=measured["scored"]["level"],
         position_count=len(measured["positions"]),
         suitability=measured["suitability"],
+        group_exposure=measured["group_exposure"],
+        allocation_drift=measured["allocation_drift"],
         declared=_declared_payload(measured["declared"]),
         metrics=service.summarise_for_agent(measured["metrics"]),
         findings=profile.findings_from(
@@ -296,20 +329,26 @@ def risk_summary_for_ai(
 @router.get(
     "/questionnaire",
     response_model=QuestionnaireOut,
-    summary="Risk tolerans anketi",
+    summary="Uygunluk testi",
 )
 async def get_questionnaire():
-    """Anketin kendisi. Kimlik doğrulaması istemez — sorularda kişisel veri yok
-    ve formu görmek için giriş yapmak zorunda kalmak, testi doldurma
-    ihtimalini düşürmekten başka bir işe yaramaz. Cevap GÖNDERMEK ise
-    oturuma bağlıdır."""
+    """Testin kendisi, bölümlenmiş hâliyle.
+
+    Kimlik doğrulaması istemez — sorularda kişisel veri yok ve formu görmek
+    için giriş yapmak zorunda kalmak, testi doldurma ihtimalini düşürmekten
+    başka bir işe yaramaz. Cevap GÖNDERMEK ise oturuma bağlıdır.
+
+    Yürürlükteki sürüm dönüyor. Eski bir cevabı olan kullanıcı da bunu görür:
+    v1 cevabı kaydında ve puanıyla duruyor, ama yeniden dolduracaksa
+    dolduracağı test bu.
+    """
     return questionnaire.as_payload()
 
 
 @router.post(
     "/assessment",
     response_model=AssessmentResultOut,
-    summary="Anketi gönder ve risk profilini güncelle",
+    summary="Uygunluk testini gönder ve risk profilini güncelle",
 )
 def submit_assessment(
     request: AssessmentRequest,
@@ -338,6 +377,7 @@ def submit_assessment(
     scored = questionnaire.score_answers(request.answers)
     saved = store.record_assessment(db, user_id, request.answers, scored)
     return AssessmentResultOut(
+        product_groups=saved.product_groups or [],
         tolerance_level=saved.tolerance_level,
         investment_horizon=saved.investment_horizon,
         assessed_at=saved.updated_at,
@@ -370,6 +410,208 @@ def risk_history(
     )
 
 
+
+def _portfolio_series(db: Session, user_id: str, lookback: str):
+    """Portföyün gün gün değeri, taban para biriminde.
+
+    `value_series` ile: risk sayfası, analiz ekranı ve buradaki senaryo AYNI
+    seriden besleniyor. Ayrı kurulsalardı aynı portföy için farklı bir beta
+    çıkardı -- bu tam olarak bir kez oldu ve 0,0062 ile 0,7287 arasındaki fark
+    tarih hizalamasıydı.
+    """
+    # `_current_positions`, ham `holdings()` DEĞİL: seri `market_value`'yu
+    # taban para biriminde okuyor ve o dönüşüm orada yapılıyor. Ham hâlini
+    # vermek, her pozisyonun değerini sıfır saydırırdı -- alan yok.
+    positions, _rates, warnings = _current_positions(db, user_id)
+    limit = service.history_limit(lookback)
+    dates, values, excluded = risk_returns.value_series(
+        positions,
+        lambda symbol: market_service.candle_closes(db, symbol, limit=limit),
+    )
+    return warnings, dates[-limit:], values[-limit:], excluded
+
+
+def _factor_bars(db: Session, symbol: str, limit: int):
+    return market_service.candle_closes(db, symbol, limit=limit)
+
+
+@router.post(
+    "/scenario",
+    response_model=ScenarioOut,
+    summary="Koşullu senaryo: bir faktör oynasaydı portföy ne olurdu",
+)
+def run_scenario(
+    request: ScenarioRequest,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    Ölçülen duyarlılığa göre bir faktör şokunun portföye yansıması.
+
+    TAHMİN DEĞİL. Faktörün ne yapacağı hakkında hiçbir şey söylenmiyor;
+    yalnızca yapsaydı ne olacağı, geçmiş birlikte hareketin aritmetiğiyle.
+    Üretilen cümle koşullu kuruluyor ve çekincesi aynı cümlede duruyor --
+    ikisini ayırmak, ilk yarıyı tek başına bir beklenti hâline getirirdi.
+
+    Ölçülemeyen faktör 422 ile reddediliyor. En göze çarpanı FAİZ: sistemde
+    faiz SERİSİ yok, `TR_POLICY_RATE` bir sabit. "Faizler artarsa"yı USDTRY
+    gibi ölçüyormuş gibi cevaplamak, uydurulmuş bir sayıyı ölçüm diye vermek
+    olurdu.
+    """
+    return _scenario_payload(db, user_id, request)
+
+
+@router.post(
+    "/scenario/{user_id}",
+    response_model=ScenarioOut,
+    dependencies=[Depends(require_service_token)],
+    summary="Koşullu senaryo (MCP sözleşmesi)",
+)
+def run_scenario_for_ai(
+    user_id: str,
+    request: ScenarioRequest,
+    db: Session = Depends(get_db),
+):
+    """Yukarıdakiyle aynı ölçüm, kullanıcısı yoldan gelen hâli.
+
+    `GET /profile/{user_id}` ile aynı desen ve aynı sebep: bu uç noktanın
+    konusu çağıranın kendisi olmak zorunda değil, MCP araçları kullanıcıyı
+    doğrulanmış oturum zarfından alıp yola koyuyor. İkisi TEK bir yardımcıyı
+    çağırıyor, böylece ekran ile sohbetin aynı portföy için farklı bir
+    duyarlılık söylemesi mümkün değil.
+    """
+    return _scenario_payload(db, user_id, request)
+
+
+def _scenario_payload(db: Session, user_id: str, request: ScenarioRequest) -> dict:
+    """İki ucun ortak gövdesi."""
+    factor_name = scenario.FACTORS.get(request.factor)
+    if factor_name is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"«{request.factor}» için ölçülebilir bir fiyat serisi yok. "
+                f"Ölçülebilen faktörler: {', '.join(scenario.FACTORS)}."
+            ),
+        )
+
+    held_warnings, dates, values, excluded = _portfolio_series(db, user_id, request.lookback)
+    if len(values) < scenario.MIN_OBSERVATIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Senaryo için yeterli fiyat geçmişi olan bir pozisyon gerekiyor.",
+        )
+
+    bars = _factor_bars(db, request.factor, service.history_limit(request.lookback))
+    measured = scenario.sensitivity(dates, values, bars)
+    if measured is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{factor_name} ile portföyünüzün ortak işlem günü sayısı "
+                f"duyarlılık ölçmeye yetmiyor."
+            ),
+        )
+
+    impact_pct = scenario.impact(measured["beta"], request.shock_pct)
+    warnings = held_warnings + [
+        f"{symbol}: fiyat geçmişi yetersiz, hesaba katılmadı" for symbol in excluded
+    ]
+
+    return {
+        "factor": request.factor,
+        "factor_name": factor_name,
+        "shock_pct": request.shock_pct,
+        "lookback": request.lookback,
+        "sensitivity": measured,
+        "estimated_impact_pct": impact_pct,
+        # Son gözlenen portföy değeri üzerinden. Değerlenemeyen pozisyonlar
+        # seriye hiç girmiyor, dolayısıyla tutar onların dışında ve bu
+        # `warnings`'te yazılı.
+        "estimated_impact_value": values[-1] * impact_pct / 100,
+        "statement": scenario.narrate(
+            factor_name, request.shock_pct, measured, request.lookback
+        ),
+        # Gizlenmiş bir varsayım, olmayan bir kesinlik üretir.
+        "assumptions": [
+            "Duyarlılık, günlük getirilerin geçmiş birlikte hareketinden ölçüldü.",
+            "Etki doğrusal varsayıldı: ölçülen katsayı şok büyüklüğüyle çarpıldı.",
+            "Portföy bileşimi değişmiyor kabul edildi.",
+        ],
+        "warnings": warnings,
+    }
+
+
+@router.get(
+    "/stress",
+    response_model=StressOut,
+    summary="Stres testi: gerçekten olanlar",
+)
+def run_stress(
+    lookback: str = Depends(lookback_param),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    İki tür stres, ikisi de ölçüm.
+
+    1. **En kötü günler** — portföyün gerçekten yaşadığı en sert düşüşler,
+       tarihleriyle.
+    2. **Tarihsel replay** — her faktörün en sert oynadığı pencerede portföyün
+       ne yaptığı.
+
+    Uydurulmuş bir kayıp senaryosu yok. Varsayımsal bir tahminin aksine
+    bunların doğrulanabilir bir karşılığı var: o günler oldu.
+
+    Ölçülemeyen faktör listede YER ALMAZ, sıfırla görünmez -- sıfır bir
+    ölçümdür ve "o faktör portföyü hiç etkilemedi" demektir.
+    """
+    return _stress_payload(db, user_id, lookback)
+
+
+@router.get(
+    "/stress/{user_id}",
+    response_model=StressOut,
+    dependencies=[Depends(require_service_token)],
+    summary="Stres testi (MCP sözleşmesi)",
+)
+def run_stress_for_ai(
+    user_id: str,
+    lookback: str = Depends(lookback_param),
+    db: Session = Depends(get_db),
+):
+    """Yukarıdakiyle aynı ölçüm, kullanıcısı yoldan gelen hâli."""
+    return _stress_payload(db, user_id, lookback)
+
+
+def _stress_payload(db: Session, user_id: str, lookback: str) -> dict:
+    """İki ucun ortak gövdesi."""
+    held_warnings, dates, values, excluded = _portfolio_series(db, user_id, lookback)
+    replays: dict = {}
+    names: dict = {}
+    if len(values) >= scenario.MIN_OBSERVATIONS:
+        limit = service.history_limit(lookback)
+        for symbol, label in scenario.FACTORS.items():
+            replay = scenario.factor_replay(
+                dates, values, _factor_bars(db, symbol, limit)
+            )
+            if replay is not None:
+                replays[symbol] = replay
+                names[symbol] = label
+
+    return {
+        "lookback": lookback,
+        "observation_count": max(0, len(values) - 1),
+        "worst_days": scenario.worst_days(dates, values),
+        "replays": replays,
+        "factor_names": names,
+        "excluded_symbols": excluded,
+        "warnings": held_warnings + [
+            f"{symbol}: fiyat geçmişi yetersiz, hesaba katılmadı" for symbol in excluded
+        ],
+    }
+
+
 @router.post(
     "/simulate",
     response_model=SimulationOut,
@@ -390,6 +632,31 @@ def simulate(
     sunucu önermez**, kullanıcı verir; ve yanıt "daha iyi/daha kötü" demez,
     yalnızca iki ölçümü yan yana koyar. Yorumu okuyan yapar.
     """
+    return _simulate_payload(db, user_id, request)
+
+
+@router.post(
+    "/simulate/{user_id}",
+    response_model=SimulationOut,
+    dependencies=[Depends(require_service_token)],
+    summary="Varsayımsal değişikliğin risk etkisi (MCP sözleşmesi)",
+)
+def simulate_for_ai(
+    user_id: str,
+    request: SimulationRequest,
+    db: Session = Depends(get_db),
+):
+    """Yukarıdakiyle aynı karşılaştırma, kullanıcısı yoldan gelen hâli.
+
+    Bu uç nokta aylardır yazılı ve testliydi; hiçbir MCP aracı onu
+    çağırmıyordu. "Şu hisseden alsam riskim ne olur" sorusunun cevabı vardı
+    ve sohbetten erişilemiyordu.
+    """
+    return _simulate_payload(db, user_id, request)
+
+
+def _simulate_payload(db: Session, user_id: str, request: SimulationRequest) -> SimulationOut:
+    """İki ucun ortak gövdesi."""
     positions, rates, warnings = _current_positions(db, user_id)
     if not positions:
         raise HTTPException(

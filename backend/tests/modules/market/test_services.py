@@ -100,9 +100,12 @@ class TestFreshness:
 
         midnight = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
         quotes = {"A": {"market_timestamp": midnight, "received_at": NOW - timedelta(minutes=1)}}
-        _, delay, _ = market_service.freshness(quotes)
-        # One minute stale plus the declared provider floor — not eleven hours.
-        assert delay < 60
+        as_of, delay, _, is_stale = market_service.freshness(quotes)
+        # Gözlemden ölçülüyor, barın tarihinden değil: bir dakika önce
+        # görülmüş bir fiyat eski DEĞİL.
+        assert delay == market_service.PROVIDER_DELAY_FLOOR_MINUTES
+        assert is_stale is False
+        assert as_of > midnight
 
     def test_uses_the_oldest_observation_in_the_set(self):
         """A payload is only as current as its least current figure."""
@@ -112,17 +115,47 @@ class TestFreshness:
             "A": {"received_at": NOW - timedelta(minutes=5)},
             "B": {"received_at": NOW - timedelta(minutes=45)},
         }
-        as_of, delay, is_delayed = market_service.freshness(quotes)
-        assert delay >= 45 + market_service.PROVIDER_DELAY_FLOOR_MINUTES - 1
+        as_of, delay, is_delayed, is_stale = market_service.freshness(quotes)
+        assert as_of == NOW - timedelta(minutes=45)
+        # Gecikme BESLEMENİN, gözlemin yaşı değil. İkisi bir dönem
+        # toplanıyordu ve kapalı bir borsanın son kapanışı "1095 dakika
+        # gecikmeli" diye raporlanıyordu.
+        assert delay == market_service.PROVIDER_DELAY_FLOOR_MINUTES
+        assert is_delayed is True
+        # Kırk beş dakika henüz eski değil (eşik 60).
+        assert is_stale is False
+
+    def test_the_provider_floor_is_what_is_reported(self):
+        """We cannot observe the exchange's true tick time, so the feed's own
+        delay is declared rather than pretended away -- ve TEK BAŞINA
+        bildiriliyor, gözlemin yaşı eklenmeden."""
+        quotes = {"A": {"received_at": NOW}}
+        _, delay, is_delayed, _ = market_service.freshness(quotes)
+        assert delay == market_service.PROVIDER_DELAY_FLOOR_MINUTES
         assert is_delayed is True
 
-    def test_the_provider_floor_is_always_added(self):
-        """We cannot observe the exchange's true tick time, so the feed's own
-        delay is declared rather than pretended away."""
-        quotes = {"A": {"received_at": NOW}}
-        _, delay, is_delayed = market_service.freshness(quotes)
-        assert delay >= market_service.PROVIDER_DELAY_FLOOR_MINUTES
-        assert is_delayed is True
+    def test_an_old_observation_is_stale_rather_than_delayed(self):
+        """`STALE_AFTER_MINUTES` bu ayrımı baştan beri adlandırıyordu
+        ("beyond this, a quote is not delayed, it is stale") ve hiçbir yerde
+        kullanılmıyordu.
+
+        Ölçülen sonuç: kapalı bir borsanın son kapanışı on sekiz saat
+        yaşlanınca kullanıcıya "1095 dakika gecikmeli" deniyordu."""
+        from datetime import timedelta
+
+        quotes = {"A": {"received_at": NOW - timedelta(hours=18)}}
+        _, delay, _, is_stale = market_service.freshness(quotes)
+        assert is_stale is True
+        # Besleme on sekiz saat gecikmiyor; piyasa kapalı.
+        assert delay == market_service.PROVIDER_DELAY_FLOOR_MINUTES
+
+    @pytest.mark.parametrize("minutes,stale", [(59, False), (61, True)])
+    def test_the_threshold_is_the_named_constant(self, minutes, stale):
+        from datetime import timedelta
+
+        quotes = {"A": {"received_at": NOW - timedelta(minutes=minutes)}}
+        assert market_service.freshness(quotes)[3] is stale
+        assert market_service.STALE_AFTER_MINUTES == 60
 
     def test_a_fresh_quote_is_still_reported_as_delayed(self):
         """Free-tier BIST data is delayed by design. Claiming otherwise would
@@ -131,32 +164,37 @@ class TestFreshness:
 
     def test_falls_back_to_the_bar_timestamp_when_unobserved(self):
         quotes = {"A": {"market_timestamp": NOW}}
-        as_of, _, _ = market_service.freshness(quotes)
+        as_of, _, _, _ = market_service.freshness(quotes)
         assert as_of is not None
 
     def test_no_quotes_reports_delayed_rather_than_current(self):
-        as_of, delay, is_delayed = market_service.freshness({})
+        as_of, delay, is_delayed, is_stale = market_service.freshness({})
         assert as_of is None
         assert is_delayed is True
+        # Hiç kotasyon yoksa gözlem de yok: bunu "taze" saymak, olmayan bir
+        # fiyatı güncel ilan etmek olurdu.
+        assert is_stale is True
 
     def test_naive_timestamp_is_treated_as_utc(self):
         quotes = {"A": {"received_at": NOW.replace(tzinfo=None)}}
-        _, delay, _ = market_service.freshness(quotes)
+        _, delay, _, _ = market_service.freshness(quotes)
         assert delay >= 0
 
 
 class TestNewsStore:
     def test_empty_batch_makes_no_query(self):
         db = MagicMock(spec=Session)
-        assert news_service.upsert_news(db, []) == 0
+        assert news_service.upsert_news(db, []) == (0, {}, [])
         assert db.execute.called is False
 
     def test_articles_are_deduplicated_on_content_hash(self):
         """Not on URL: the same wire story is republished under different
         links, and a feed that renumbers would re-import its whole history."""
         db = MagicMock(spec=Session)
-        db.execute.return_value = SimpleNamespace(rowcount=1)
-        written = news_service.upsert_news(
+        # `RETURNING` ile eklenen satırlar dönüyor: kaç tane olduğu değil,
+        # HANGİLERİ. Bildirim yalnızca gerçekten eklenen haber için üretilmeli.
+        db.execute.return_value.all.return_value = [("id-1", "a" * 64)]
+        written, _, _fresh = news_service.upsert_news(
             db,
             [
                 {
@@ -170,13 +208,100 @@ class TestNewsStore:
         assert "ON CONFLICT" in statement.upper()
         assert "content_hash" in statement
 
-    def test_rowcount_none_reports_zero_rather_than_raising(self):
+    def test_a_batch_that_inserted_nothing_reports_zero(self):
+        """Hepsi zaten duruyorsa `RETURNING` boş döner -- ve bildirim de
+        üretilmez, ki tekrar eden bir gürültü çıkmasın."""
         db = MagicMock(spec=Session)
-        db.execute.return_value = SimpleNamespace(rowcount=None)
-        written = news_service.upsert_news(
+        db.execute.return_value.all.return_value = []
+        written, _, fresh = news_service.upsert_news(
             db, [{"content_hash": "b" * 64, "title": "t", "source": "s", "published_at": NOW}]
         )
-        assert written == 0
+        assert written == 0 and fresh == []
+
+    def test_only_symbol_tagged_new_articles_reach_the_notifier(self, mocker):
+        """Hiçbir hisseye bağlanmayan haber bildirilecek kimseyi
+        göstermiyor; listeye hiç girmiyor."""
+        db = MagicMock(spec=Session)
+        mocker.patch.object(news_service, "_tradable_universe", return_value=[])
+        db.execute.return_value.all.return_value = [("id-1", "c" * 64)]
+        _written, _symbols, fresh = news_service.upsert_news(
+            db, [{"content_hash": "c" * 64, "title": "Genel piyasa yorumu",
+                  "source": "s", "published_at": NOW}]
+        )
+        assert fresh == []
+
+
+class TestNewsSymbolResolution:
+    """Haberi portföydeki hisseye bağlayan yer.
+
+    Bu bağ olmadan "portföyünüzdeki hisseye dair haber" diye bir şey yok:
+    `related_symbols` 1.540 haberin 1.540'ında boştu.
+    """
+
+    UNIVERSE = [
+        SimpleNamespace(symbol="THYAO", name="Türk Hava Yolları A.O.", product_type="stock"),
+        SimpleNamespace(symbol="ASELS", name="Aselsan Elektronik", product_type="stock"),
+    ]
+
+    def _db(self):
+        db = MagicMock(spec=Session)
+        # `RETURNING` eklenen satırları döndürüyor; bu sınıfın konusu
+        # sembol çözümlemesi, dolayısıyla tek bir satır yeter.
+        db.execute.return_value.all.return_value = [("id-1", "d" * 64)]
+        db.query.return_value.filter.return_value.all.return_value = self.UNIVERSE
+        return db
+
+    def _stored(self, db):
+        return db.execute.call_args.args[0].compile().params
+
+    def test_a_company_named_in_the_headline_is_linked(self, mocker):
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "c" * 64, "title": "Türk Hava Yolları'ndan rekor",
+            "source": "Dünya", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_a_story_naming_no_company_is_linked_to_nothing(self):
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "d" * 64, "title": "Merkez Bankası faiz kararını açıkladı",
+            "source": "AA", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == []
+
+    def test_a_feed_supplied_ticker_is_kept_without_reading_the_text(self):
+        """KAP bildirimleri ihraççısıyla birlikte gelir. Kesin bilgiyi
+        metinden çıkarımla değiştirmek geriye gidiş olurdu."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "e" * 64, "title": "Türk Hava Yolları'ndan rekor",
+            "source": "KAP", "published_at": NOW, "related_symbols": ["ASELS"],
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["ASELS"]
+
+    def test_a_section_name_offered_as_a_ticker_is_dropped(self):
+        """Türkçe finans beslemeleri yazıları `BORSA` ve `FINANS` bölümlerine
+        koyuyor; ikisi de "3-6 harf" testini geçer ama enstrüman değildir.
+        Evrende karşılığı olmayan etiket düşer ve metinden çözümleme devreye
+        girer."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "f" * 64, "title": "Türk Hava Yolları'ndan rekor",
+            "source": "Dünya", "published_at": NOW,
+            "related_symbols": ["BORSA", "FINANS"],
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_only_stocks_are_offered_to_the_matcher(self):
+        """Bir haberin "USDTRY" ya da "XU100" ile ilişkilendirilmesi,
+        kullanıcıya şirket haberi vaat edip endeks haberi göstermek olurdu."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "0" * 64, "title": "x", "source": "s", "published_at": NOW,
+        }])
+        filter_arg = str(db.query.return_value.filter.call_args.args[0])
+        assert "product_type" in filter_arg
 
 
 class TestNewsArchive:
@@ -226,20 +351,6 @@ class TestNewsCoverage:
         statement = str(db.execute.call_args.args[0])
         assert "/Bildirim/[0-9]+$" in statement
         assert "::bigint" in statement
-
-
-class TestKnownHashes:
-    def test_an_empty_list_makes_no_query(self):
-        db = MagicMock(spec=Session)
-        assert news_service.known_hashes(db, []) == []
-        assert db.query.called is False
-
-    def test_it_returns_only_the_hashes_already_stored(self):
-        """The question the ingestor asks before spending a request on each
-        disclosure body."""
-        db = MagicMock(spec=Session)
-        db.query.return_value.filter.return_value.all.return_value = [("a" * 64,)]
-        assert news_service.known_hashes(db, ["a" * 64, "b" * 64]) == ["a" * 64]
 
 
 class TestProductLookups:

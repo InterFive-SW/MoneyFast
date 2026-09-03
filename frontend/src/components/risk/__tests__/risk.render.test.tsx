@@ -345,14 +345,21 @@ describe('Analiz > Risk — uyum karşılaştırması', () => {
     stubFetch({ ...PROFILE, declared: null, suitability: { alignment: 'UNKNOWN' } })
     const { container } = await mount()
     const text = container.textContent ?? ''
-    expect(text).toContain('Ankete başla')
+    expect(text).toContain('Teste başla')
     expect(text).toContain('Ölçülen Risk Metrikleri')
   })
 
-  it('anketin bir uygunluk kararı olmadığını söyler', async () => {
+  it('testin bir tavsiye olmadığını ve güncellenebileceğini söyler', async () => {
+    /* Bu metin eskiden "bu bir uygunluk değerlendirmesi DEĞİLDİR" diyordu ve
+       v1 için doğruydu: o anket yalnızca tolerans ölçüyordu. v2 bir uygunluk
+       testi ve ürün grubu kararı üretiyor -- eski cümle olduğu yerde
+       bırakılsaydı ekran, yaptığı şeyin tersini söylüyor olurdu. */
     stubFetch({ ...PROFILE, declared: null, suitability: { alignment: 'UNKNOWN' } })
     const { container } = await mount()
-    expect(container.textContent).toContain('uygunluk değerlendirmesi değildir')
+    const text = container.textContent ?? ''
+    expect(text).toContain('yatırım tavsiyesi değildir')
+    expect(text).toContain('istediğiniz zaman güncelleyebilirsiniz')
+    expect(text).not.toContain('uygunluk değerlendirmesi değildir')
   })
 
   it('beyan varsa ölçüm ile beyanı yan yana koyar', async () => {
@@ -414,12 +421,12 @@ describe('Analiz > Risk — uyum karşılaştırması', () => {
     ))
     const { container } = await mount()
     const start = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent === 'Ankete başla',
+      (b) => b.textContent === 'Teste başla',
     )
     expect(start).toBeDefined()
     await act(async () => { start!.click() })
     expect(container.querySelector('[role="dialog"]')).not.toBeNull()
-    expect(container.textContent).toContain('Risk tolerans anketi')
+    expect(container.textContent).toContain('Uygunluk Testi')
   })
 
   it('bozuk bir anket yanıtı sayfayı çökertmez', async () => {
@@ -427,7 +434,7 @@ describe('Analiz > Risk — uyum karşılaştırması', () => {
     stubFetch({ ...PROFILE, declared: null, suitability: { alignment: 'UNKNOWN' } })
     const { container } = await mount()
     const start = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent === 'Ankete başla',
+      (b) => b.textContent === 'Teste başla',
     )
     await act(async () => { start!.click() })
     expect(container.querySelector('[role="dialog"]')).not.toBeNull()

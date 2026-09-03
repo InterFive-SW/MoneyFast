@@ -1,5 +1,7 @@
+from datetime import date, datetime
+
 from pydantic import BaseModel
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 class MarketTicker(BaseModel):
     """
@@ -25,6 +27,41 @@ class NewsItem(BaseModel):
     relatedSymbols: List[str]
 
 
+class PortfolioNewsSymbol(BaseModel):
+    """Portföydeki bir sembol ve o pencerede ona dokunan haber sayısı."""
+    symbol: str
+    name: str
+    count: int
+
+
+class PortfolioNewsItem(NewsItem):
+    """Akış öğesi + haberin hangi pozisyonlara dokunduğu.
+
+    `relatedSymbols` haberin TÜM etiketlerini taşır; `heldSymbols` bunların
+    kullanıcının gerçekten tuttuğu alt kümesi. İkisi ayrı, çünkü "BIST 100
+    değer kaybetti" haberi dört şirketi anıyor olabilir ve kullanıcı bunlardan
+    yalnızca birine sahiptir -- panelde hangisi yüzünden listelendiği
+    okunabilir olmalı.
+    """
+    publishedAt: datetime
+    heldSymbols: List[str]
+
+
+class PortfolioNewsOut(BaseModel):
+    """Portföye dokunan haberler paneli.
+
+    Haber olmadığında da dönen bir gövde: `symbols` doludur, `items` boştur.
+    Sessizce kaybolan bir panel, veri yokluğunu özellik yokluğu gibi gösterir.
+    """
+    symbols: List[PortfolioNewsSymbol]
+    items: List[PortfolioNewsItem]
+    #: Sayıların ve başlıkların okunduğu pencere. Panel "son 30 günde" diye
+    #: yazabilsin diye dönüyor; sabiti arayüzde ikinci kez yazmak, birinin
+    #: değişip diğerinin kalmasına açık olurdu.
+    windowDays: int
+
+
+
 # ---------------------------------------------------------------------------
 # Service-to-service ingest contracts
 #
@@ -32,7 +69,9 @@ class NewsItem(BaseModel):
 # by the `ingestor` service, not by the React frontend, and the two change for
 # different reasons.
 # ---------------------------------------------------------------------------
-from datetime import datetime  # noqa: E402
+# `datetime` is imported at the top of the file: the read models above now
+# carry a timestamp too, and a second import here would only be a name the
+# linter reports as redefined.
 from typing import Optional  # noqa: E402
 
 from pydantic import Field  # noqa: E402
@@ -84,12 +123,23 @@ class NewsIngestRequest(BaseModel):
     items: List[NewsItemIn] = Field(default_factory=list)
 
 
-class KnownHashesRequest(BaseModel):
-    hashes: List[str] = Field(default_factory=list, max_length=5_000)
+class QuarterlyIn(BaseModel):
+    """Bir enstrümanın bir çeyreği.
+
+    Her sayısal alan Optional ve öyle kalıyor. Ölçüldü: 34 hissenin 16'sında
+    serinin bir yerinde eksik değer var ve sıfıra çevirmek "o çeyrek
+    raporlandı, kâr sıfır çıktı" demek olurdu.
+    """
+    symbol: str
+    period_end: date
+    total_revenue: Optional[int] = None
+    net_income: Optional[int] = None
+    pretax_income: Optional[int] = None
+    operating_expense: Optional[int] = None
 
 
-class KnownHashesOut(BaseModel):
-    known: List[str] = Field(default_factory=list)
+class QuarterlyIngestRequest(BaseModel):
+    items: List[QuarterlyIn] = Field(default_factory=list)
 
 
 class FundamentalsIn(BaseModel):
@@ -156,6 +206,13 @@ class IngestResult(BaseModel):
     candles_written: int = 0
     news_written: int = 0
     fundamentals_written: int = 0
+    quarterly_written: int = 0
+    #: Haber yüklemesinde çözülen semboller, `content_hash` -> semboller.
+    #: `ingestor` bunu RAG'a yazarken kullanıyor: çözümleme evrenin bulunduğu
+    #: yerde, yani BURADA yapılıyor ve sonucu geri vermezsek korpustaki kopya
+    #: etiketsiz kalıyor -- ölçüldü, 1.970 RSS belgesinin sıfırında ticker
+    #: vardı ve ajanın `tickers` filtresi onlarda hiç çalışmıyordu.
+    news_symbols: dict[str, List[str]] = {}
 
 
 class InstrumentOut(BaseModel):
@@ -298,6 +355,72 @@ class TechnicalSignalsOut(BaseModel):
     narrative: Optional[str] = None
 
 
+class PortfolioTechnicalRow(TechnicalSignalsOut):
+    """Bir pozisyonun teknik durumu, portföydeki yeriyle birlikte.
+
+    `TechnicalSignalsOut`'u genişletiyor: tek hisse sayfasıyla portföy paneli
+    aynı alanları okusun ki ikisi aynı hisse için farklı bir eğilim
+    gösteremesin.
+    """
+    name: str
+    #: Taban para birimine çevrilmiş pozisyon değeri. Kuru olmayan bir
+    #: pozisyonda None -- 1.0 varsayılmaz, o pozisyon ağırlık hesabına
+    #: girmez ve `unconvertible` içinde adı geçer.
+    value: Optional[float] = None
+
+
+class PortfolioTechnicalSummary(BaseModel):
+    """Toplulaştırma. Sayı ve değer AYRI, çünkü zıt yönü gösterebilirler."""
+    position_count: int
+    measured_count: int
+    unmeasured_symbols: List[str]
+    by_trend: dict[str, int]
+    below_sma_50: int
+    above_sma_50: int
+    weight_below_sma_50: Optional[float] = None
+    #: Ekranın ve sohbetin AYNI cümlesi. İki yüzeyin aynı ölçümü farklı
+    #: anlatması, kullanıcının hangisine güveneceğini bilememesi demekti.
+    statement: Optional[str] = None
+
+
+class PortfolioTechnicalOut(BaseModel):
+    base_currency: str = "TRY"
+    positions: List[PortfolioTechnicalRow]
+    summary: PortfolioTechnicalSummary
+    #: Para birimi çevrilemediği için ağırlık hesabına girmeyen pozisyonlar.
+    #: Sessizce düşürmek, portföyün bir kısmını yok saymak olurdu.
+    unconvertible: List[str] = []
+
+class QuarterOut(BaseModel):
+    """Bir çeyrek. Etiket türetiliyor, saklanmıyor."""
+    period_end: date
+    #: `2026Q2`. `period_end`'den türetiliyor; iki kez saklamak ikisinin
+    #: ayrışabileceği bir yer açardı.
+    label: str
+    total_revenue: Optional[int] = None
+    net_income: Optional[int] = None
+    pretax_income: Optional[int] = None
+    operating_expense: Optional[int] = None
+
+
+class QuarterlyOut(BaseModel):
+    """Bir enstrümanın çeyreklik serisi, en yeniden eskiye.
+
+    İki bayrak sunucuda hesaplanıyor, tüketende değil. Ölçüldü: sağlayıcının
+    dönemleri ardışık gelmiyor -- 40 hissenin 3'ünde 2025Q3 gelir tablosunda
+    hiç yok. "Son iki satırı al" diyen bir karşılaştırma o hisselerde 2025Q2
+    ile 2025Q4'ü kıyaslar ve bunu söylemez.
+    """
+    symbol: str
+    name: str
+    currency: str = "TRY"
+    periods: List[QuarterOut] = []
+    #: En yeni dönemin bir öncekiyle BİTİŞİK olup olmadığı. False ise
+    #: çeyreklik karşılaştırma yapılamaz.
+    previous_is_adjacent: bool = False
+    #: Geçen yılın aynı çeyreği elde mi -- tam dört çeyrek geride.
+    year_ago_available: bool = False
+
 class FundamentalsOut(BaseModel):
     """Bir enstrümanın saklanan tüm temel verisi.
 
@@ -396,3 +519,14 @@ class MarketCalendarOut(BaseModel):
     analysts: List[AnalystRow] = Field(default_factory=list)
     dividends: List[DividendRow] = Field(default_factory=list)
     earnings: List[EarningsRow] = Field(default_factory=list)
+
+
+class SessionStateRequest(BaseModel):
+    """Hangi piyasalar ŞU AN açık.
+
+    Liste TAM: burada olmayan her piyasa kapalı sayılır. Kısmi bir liste,
+    bildirilmeyen piyasanın durumunu belirsiz bırakırdı ve belirsizlik
+    "kapalı" diye okunurdu.
+    """
+
+    open: List[str] = Field(default_factory=list)

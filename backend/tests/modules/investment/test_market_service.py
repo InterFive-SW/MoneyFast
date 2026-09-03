@@ -1080,3 +1080,112 @@ class TestCalendarRows:
         ]
         out = market_service.calendar_rows(self._db(rows), limit=3)
         assert len(out["analysts"]) == 3
+
+
+class TestHoldersOf:
+    """Bir sembolü TUTAN kullanıcılar.
+
+    Sorgu bu modülde, çünkü pozisyonlar bu modülün: bildirim modülünün
+    portföy tablosunu okuması, modüllerin birbirinin ORM sınıfını import
+    etmemesi kuralının engellediği şey.
+    """
+
+    def _db(self, rows):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = rows
+        return db
+
+    def test_holders_are_grouped_by_symbol(self):
+        got = market_service.holders_of(
+            self._db([("ASELS", "u1"), ("ASELS", "u2"), ("THYAO", "u1")]),
+            ["ASELS", "THYAO"],
+        )
+        assert got == {"ASELS": {"u1", "u2"}, "THYAO": {"u1"}}
+
+    def test_no_symbols_makes_no_query(self):
+        db = MagicMock(spec=Session)
+        assert market_service.holders_of(db, []) == {}
+        assert not db.execute.called
+
+    def test_nobody_holding_is_an_empty_map(self):
+        assert market_service.holders_of(self._db([]), ["ASELS"]) == {}
+
+    def test_the_query_excludes_closed_positions_and_the_demo_account(self):
+        """Kapatılmış pozisyonun hissesiyle ilgili haber artık o kişiyi
+        ilgilendirmiyor; demo hesabının ise bildirilecek kimsesi yok --
+        `user_id` alanında gerçek bir kullanıcı değil "demo" yazıyor ve
+        `notifications`'ın foreign key'i ihlal oluyordu."""
+        db = self._db([])
+        market_service.holders_of(db, ["ASELS"])
+        statement = str(db.execute.call_args.args[0])
+        assert "quantity" in statement
+        assert "account_number" in statement
+
+
+class TestMarketSessions:
+    """Hangi piyasa ŞU AN açık.
+
+    Saatler `ingestor`'da ve orada kalıyor; backend'e kural değil OLGU
+    geliyor. İkinci bir saat listesi tutmak, bu depoda defalarca ayrışan
+    türden bir şey olurdu.
+    """
+
+    def _rows(self, rows):
+        db = MagicMock(spec=Session)
+        db.query.return_value.all.return_value = rows
+        return db
+
+    def _row(self, market, is_open, minutes_ago=0):
+        return SimpleNamespace(
+            market=market, is_open=is_open,
+            updated_at=datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
+        )
+
+    def test_only_the_open_markets_come_back(self):
+        db = self._rows([self._row("BIST", True), self._row("NASDAQ", False)])
+        assert market_service.open_markets(db) == {"BIST"}
+
+    def test_no_record_is_unknown_rather_than_all_closed(self):
+        """Boş küme "hepsi kapalı", None ise "ingestor bize söylemiyor".
+        İkincisinde kapalılık iddia edilmemeli."""
+        assert market_service.open_markets(self._rows([])) is None
+
+    def test_a_stale_record_is_unknown_too(self):
+        """Ingestor durduğunda hem fiyatlar hem bu kayıt eskiyor; o durumda
+        kapalı olan piyasa değil, veri akışı."""
+        db = self._rows([self._row("BIST", True, minutes_ago=30)])
+        assert market_service.open_markets(db) is None
+
+    def test_a_naive_record_timestamp_is_read_as_utc(self):
+        db = self._rows([SimpleNamespace(
+            market="BIST", is_open=True,
+            updated_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )])
+        assert market_service.open_markets(db) == {"BIST"}
+
+    def test_a_fresh_record_is_trusted(self):
+        db = self._rows([self._row("BIST", True, minutes_ago=1)])
+        assert market_service.open_markets(db) == {"BIST"}
+
+    def test_every_market_closed_is_an_answer_not_a_silence(self):
+        db = self._rows([self._row("BIST", False), self._row("FX", False)])
+        assert market_service.open_markets(db) == set()
+
+    def test_recording_marks_absent_markets_closed(self):
+        """Liste TAM: bildirilmeyen piyasa kapalıdır. Kısmi bir liste,
+        bildirilmeyenin durumunu belirsiz bırakırdı."""
+        db = MagicMock(spec=Session)
+        db.query.return_value.all.return_value = [
+            SimpleNamespace(market="NASDAQ"), SimpleNamespace(market="BIST"),
+        ]
+        market_service.record_sessions(db, ["BIST"])
+        written = {call.args[0].market: call.args[0].is_open
+                   for call in db.merge.call_args_list}
+        assert written == {"BIST": True, "NASDAQ": False}
+        db.commit.assert_called_once()
+
+    def test_a_market_reported_for_the_first_time_is_created(self):
+        db = MagicMock(spec=Session)
+        db.query.return_value.all.return_value = []
+        market_service.record_sessions(db, ["comex"])
+        assert db.merge.call_args.args[0].market == "COMEX"

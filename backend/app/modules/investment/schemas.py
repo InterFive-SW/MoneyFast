@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
 
 class InvestmentBreakdown(BaseModel):
@@ -139,3 +139,50 @@ class CashStatementOut(BaseModel):
     balance: float
     currency_code: str
     movements: List[CashMovementOut] = []
+
+
+class AllocationTargetItem(BaseModel):
+    """Bir kova için hedef ağırlık."""
+
+    bucket: str
+    label: str = ""
+    targetPercent: float = Field(ge=0, le=100)
+
+
+class AllocationTargetOut(BaseModel):
+    #: Hiç hedef girilmemişse boş liste. `hasTarget` ile birlikte okunuyor:
+    #: "hedef yok" ile "hedefi sıfırladım" farklı şeyler.
+    hasTarget: bool = False
+    targets: List[AllocationTargetItem] = Field(default_factory=list)
+    updatedAt: Optional[datetime] = None
+
+
+class AllocationTargetRequest(BaseModel):
+    targets: List[AllocationTargetItem] = Field(default_factory=list)
+
+
+class AllocationDriftBucket(BaseModel):
+    bucket: str
+    label: str
+    amount: float
+    #: Portföy boşken None, %0 değil: dağılımı olmayan bir portföye "her
+    #: kovada %0" demek, dağılımı varmış gibi göstermek olurdu.
+    currentPercent: Optional[float] = None
+    #: Hedef koyulmamış kovada None. %0 SAYILMAZ -- "hedefim yok" ile
+    #: "hedefim sıfır" farklı şeyler ve ikincisi eldeki her kuruşu sapma
+    #: gibi gösterirdi.
+    targetPercent: Optional[float] = None
+    gapPoints: Optional[float] = None
+    #: Hedefe ulaşmak için kaç lira fark var. Pozitif fazla, negatif eksik.
+    #: Bir emir DEĞİL: öneri akışını kullanıcı kendisi başlatır.
+    gapAmount: Optional[float] = None
+
+
+class AllocationDriftOut(BaseModel):
+    hasTarget: bool = False
+    totalValue: float = 0.0
+    buckets: List[AllocationDriftBucket] = Field(default_factory=list)
+    #: Kodda üretilen cümle. Sapmanın YÖNÜ yanlış okunursa kullanıcı
+    #: hedefinin tersine hareket eder; bu, prompt'a ya da arayüze
+    #: bırakılacak bir şey değil.
+    statement: str = ""

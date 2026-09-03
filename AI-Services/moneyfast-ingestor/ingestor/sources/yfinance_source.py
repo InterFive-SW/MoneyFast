@@ -408,3 +408,129 @@ def _int_or_none(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+# ── Çeyreklik finansallar ────────────────────────────────────────────────────
+#
+# `fetch_fundamentals` bir ANLIK GÖRÜNTÜ topluyor: alan başına tek güncel
+# değer, geçmiş yok. Bu yüzden "son çeyrek kârı önceki çeyreğe göre şu kadar
+# arttı" gibi bir cümle kurulamıyordu -- kıyaslanacak ikinci dönem hiç
+# saklanmıyordu.
+#
+# Bu toplayıcı dönem dönem saklıyor. Şema tasarlanmadan ÖNCE ölçüldü;
+# rakamlar aşağıdaki kararların hepsinin gerekçesi.
+
+#: Saklanan kalemler ve sağlayıcıdaki satır adları.
+#:
+#: Sağlayıcının gelir tablosu şirkete göre 33-52 satır arasında değişiyor.
+#: Derin örneklenen 12 sembolün HEPSİNDE bulunan yirmi kalemden yalnızca bu
+#: dördü saklanıyor; gerisi ya türetilebilir ya da bu kartın sorusunu
+#: cevaplamıyor. `EBITDA` ve `EBIT` bilerek dışarıda: 12 sembolün 10'unda var
+#: ve eksik olan ikisi banka -- banka muhasebesinde o kalem yok, sıfır değil.
+QUARTERLY_LINES = {
+    "total_revenue": "Total Revenue",
+    "net_income": "Net Income",
+    "pretax_income": "Pretax Income",
+    "operating_expense": "Operating Expense",
+}
+
+#: `Basic EPS` SAKLANMIYOR ve bu ölçülmüş bir karar. 34 hissede son çeyrekte
+#: 32 kez dolu, bir önceki çeyrekte yalnızca 3 kez. Seri olarak saklamak,
+#: neredeyse her zaman yarısı boş bir kolon açmak olurdu; hisse başına kâr
+#: zaten `instrument_fundamentals`'ta anlık değer olarak duruyor.
+
+#: Kaç çeyrek geriye yazılıyor. Sağlayıcı 5-7 dönem veriyor (ölçülen ortalama
+#: 5,5) ve hepsi alınıyor: fazlası zaten gelmiyor, azını almak yıllık
+#: karşılaştırmayı imkânsız kılardı -- geçen yılın aynı çeyreği beşinci
+#: sütunda.
+MAX_QUARTERS = 8
+
+
+def fetch_quarterly_financials(
+    products: Iterable[dict[str, str]]
+) -> list[dict[str, Any]]:
+    """Çeyreklik gelir tablosu satırları, enstrüman başına birden çok dönem.
+
+    Ölçülen kapsama (evrenden rastgele 40 BIST hissesi): 34'ünde veri var,
+    6'sında hiç yok. Veri olanların 33'ünde hem son çeyrek, hem bir önceki,
+    hem de bir yıl öncesi dolu -- yani hem çeyreklik hem yıllık karşılaştırma
+    yapılabiliyor. Boşluklar SERİNİN ESKİ UCUNDA toplanıyor.
+
+    DÖNEM SONU SAKLANIYOR, sıra değil. Ölçüldü: AKBNK, GARAN ve EREGL'de
+    2025Q3 gelir tablosunda hiç yok (nakit akışında var). "Son iki satırı al"
+    diyen bir karşılaştırma, o üç hissede 2025Q2 ile 2025Q4'ü kıyaslar ve
+    bunu söylemez. Bitişiklik dönem sonundan hesaplanmalı.
+
+    Rakamlar KÜMÜLATİF DEĞİL, her sütun kendi çeyreğinin rakamı. Türk
+    şirketlerinde kümülatif raporlama yaygın olduğu için ayrıca kontrol
+    edildi: AKBNK 53,9 → 48,4 → 67,3 → 75,5 → 71,0 milyar; artan değil.
+
+    `fetch_fundamentals` ile aynı paralellik ve aynı sebep: sağlayıcı toplu
+    bir uç sunmuyor. Ölçülen hız ~0,8 sn/sembol, dolayısıyla evrenin tamamı
+    tek iş parçacığıyla ~13 dakika.
+    """
+    import yfinance as yf
+
+    wanted = [p for p in products if p.get("data_symbol")]
+    if not wanted:
+        return []
+
+    def one(product: dict[str, str]) -> list[dict[str, Any]]:
+        # Tek sembolün TAMAMI korunuyor, yalnızca isteği değil. Sütunları
+        # sıralamak da sağlayıcının verdiği tiplere bağlı ve karışık bir
+        # dizin `TypeError` veriyor; bir sembolde patlayan sıralama, tur
+        # `ThreadPoolExecutor.map` üzerinden toplandığı için ÇEYREKLİK TURUN
+        # TAMAMINI düşürüyordu.
+        try:
+            return _quarters_for(yf, product)
+        except Exception as exc:
+            log.warning("quarterly financials failed for %s: %s",
+                        product["data_symbol"], exc)
+            return []
+
+    with ThreadPoolExecutor(max_workers=config.fundamentals_workers()) as pool:
+        return [row for rows in pool.map(one, wanted) for row in rows]
+
+
+def _quarters_for(yf: Any, product: dict[str, str]) -> list[dict[str, Any]]:
+    """Tek enstrümanın çeyrekleri. Hatayı çağıran yakalıyor."""
+    frame = yf.Ticker(product["data_symbol"]).quarterly_income_stmt
+    if frame is None or getattr(frame, "empty", True):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    # En yeniden eskiye; `MAX_QUARTERS` fazlasını kesiyor.
+    for column in sorted(frame.columns, reverse=True)[:MAX_QUARTERS]:
+        period_end = _to_utc(column)
+        if period_end is None:
+            continue
+        values = {
+            field: _int_or_none(_cell(frame, line, column))
+            for field, line in QUARTERLY_LINES.items()
+        }
+        # Hiçbir kalemi olmayan bir dönem YAZILMIYOR. Sütun var ama içi boş
+        # olabiliyor: ölçüldü, 34 hissenin 16'sında serinin bir yerinde NaN
+        # var. Boş bir satır saklamak, o çeyrek raporlanmış ama sıfır çıkmış
+        # gibi görünürdü.
+        if all(value is None for value in values.values()):
+            continue
+        rows.append({
+            "symbol": product["symbol"],
+            "period_end": period_end.date().isoformat(),
+            **values,
+        })
+    return rows
+
+
+def _cell(frame: Any, line: str, column: Any) -> Any:
+    """Bir hücre, ya da None. Eksik satır bir hata değil.
+
+    Sağlayıcının satır kümesi şirkete göre değişiyor -- bankada `EBITDA` yok,
+    havayolunda `Net Interest Income` yok -- dolayısıyla `KeyError` normal
+    işleyişin parçası.
+    """
+    try:
+        value = frame.loc[line, column]
+    except (KeyError, TypeError):
+        return None
+    return value

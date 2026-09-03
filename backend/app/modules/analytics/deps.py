@@ -1,4 +1,8 @@
-"""Request-level guards for the analytics module."""
+"""Request-level guards for the analytics module.
+
+The service-token guard used to live here as a verbatim copy; it moved to
+`core/deps.py`. What is left knows something about this module.
+"""
 
 from fastapi import HTTPException, Query
 
@@ -30,3 +34,5 @@ def lookback_param(lookback: str = Query("1Y")) -> str:
             ),
         )
     return upper
+
+

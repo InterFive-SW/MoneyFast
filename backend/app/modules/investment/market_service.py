@@ -10,7 +10,7 @@ import difflib
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterable, Optional
 
@@ -21,9 +21,11 @@ from sqlalchemy.orm import Session
 from .models import (
     IndexMembership,
     InstrumentFundamentals,
+    InstrumentQuarterly,
     InvestmentAccount,
     InvestmentProduct,
     MarketCandle,
+    MarketSession,
     MarketQuote,
     PortfolioPosition,
     WatchlistItem,
@@ -371,8 +373,10 @@ def latest_quotes(db: Session, symbols: Optional[Iterable[str]] = None) -> dict[
     return out
 
 
-def freshness(quotes: dict[str, dict[str, Any]]) -> tuple[Optional[datetime], int, bool]:
-    """(as_of, delay_minutes, is_delayed) across a set of quotes.
+def freshness(
+    quotes: dict[str, dict[str, Any]]
+) -> tuple[Optional[datetime], int, bool, bool]:
+    """(as_of, delay_minutes, is_delayed, is_stale) across a set of quotes.
 
     `as_of` is when we OBSERVED the price, not the bar's own timestamp.
 
@@ -383,11 +387,17 @@ def freshness(quotes: dict[str, dict[str, Any]]) -> tuple[Optional[datetime], in
     The bar's close tracks the live price; its timestamp is a date, not a tick
     time.
 
-    Two components make up the disclosed delay:
+    İki BAĞIMSIZ şey bildiriliyor, toplamı değil:
 
-    * how long ago we observed it (`received_at` to now), and
-    * the provider's own feed delay, which we cannot observe and therefore
-      declare as a floor.
+    * `delay_minutes` -- sağlayıcının kendi besleme gecikmesi. Gözlenemiyor,
+      bu yüzden taban olarak BEYAN ediliyor ve her zaman aynı.
+    * `is_stale` -- gözlemin kendisi eskidiyse. Piyasa kapalıysa bu NORMAL
+      (son kapanış), açıksa bir arıza işareti. İkisi de bildirilir ama
+      yalnızca biri "gecikme"dir.
+
+    Toplanıyorlardı ve sonucu şuydu: kapalı bir borsanın son kapanışı on sekiz
+    saat yaşlanınca kullanıcıya "1095 dakika gecikmeli" deniyordu. Besleme o
+    kadar gecikmiyor -- piyasa kapalı.
 
     The oldest observation in the set wins, because a payload is only as
     current as its least current figure — taking the newest would let one
@@ -399,17 +409,30 @@ def freshness(quotes: dict[str, dict[str, Any]]) -> tuple[Optional[datetime], in
         if q.get("received_at") or q.get("market_timestamp")
     ]
     if not stamps:
-        return None, 0, True
+        return None, 0, True, True
 
     as_of = min(stamps)
     if as_of.tzinfo is None:
         as_of = as_of.replace(tzinfo=timezone.utc)
 
     staleness = max(0, int((datetime.now(timezone.utc) - as_of).total_seconds() // 60))
-    delay = staleness + PROVIDER_DELAY_FLOOR_MINUTES
+    # İKİSİ TOPLANMIYOR ve bu düzeltmenin özü.
+    #
+    # `delay` sağlayıcının kendi besleme gecikmesi -- gözlenemeyen, sabit bir
+    # taban. `staleness` ise bizim en son NE ZAMAN baktığımız. Toplamları
+    # hiçbir şeydir: ne beslemenin gecikmesi ne de anlamlı bir yaş.
+    #
+    # Toplanıyordu ve sonucu şuydu: borsa kapalıyken son kapanış on sekiz saat
+    # yaşlanıyor, toplam 1.095 dakika çıkıyor ve kullanıcıya "1095 dakika
+    # gecikmeli" deniyordu. Besleme o kadar gecikmiyor; piyasa kapalı.
+    #
+    # `STALE_AFTER_MINUTES` bu ayrımı BAŞTAN BERİ adlandırıyordu ("beyond
+    # this, a quote is not delayed, it is stale") ve hiçbir yerde
+    # kullanılmıyordu.
+    stale = staleness > STALE_AFTER_MINUTES
     # Always True for this provider: free-tier BIST data is delayed by design,
     # and claiming otherwise would be false in the ordinary case, not the edge.
-    return as_of, delay, True
+    return as_of, PROVIDER_DELAY_FLOOR_MINUTES, True, stale
 
 
 def upsert_quotes(db: Session, rows: list[dict[str, Any]]) -> int:
@@ -687,6 +710,134 @@ def fundamentals_for(db: Session, symbol: str) -> Optional[dict[str, Any]]:
         out[field] = float(value) if isinstance(value, Decimal) else value
     return out
 
+
+# ── Çeyreklik finansallar ────────────────────────────────────────────────────
+
+
+def upsert_quarterly(db: Session, rows: list[dict[str, Any]]) -> int:
+    """Çeyreklik gelir tablosu satırlarını yazar; aynı dönem güncellenir.
+
+    Doğal anahtar (product_id, period_end): aynı çeyreğin yeniden çekilmesi
+    ikinci bir satır değil, güncelleme. Sağlayıcı yayımlanmış bir çeyreği
+    sonradan düzeltebiliyor ve iki sürümü yan yana saklamak, hangisinin
+    doğru olduğunu söyleyemeyen bir seri bırakırdı.
+    """
+    if not rows:
+        return 0
+
+    by_symbol = {
+        product.symbol: product.id for product in _tradable_universe_all(db)
+    }
+    payload = []
+    for row in rows:
+        product_id = by_symbol.get((row.get("symbol") or "").upper())
+        if product_id is None:
+            continue
+        payload.append({
+            "id": _uuid_str(),
+            "product_id": product_id,
+            "period_end": row["period_end"],
+            "total_revenue": row.get("total_revenue"),
+            "net_income": row.get("net_income"),
+            "pretax_income": row.get("pretax_income"),
+            "operating_expense": row.get("operating_expense"),
+            "updated_at": datetime.now(timezone.utc),
+        })
+    if not payload:
+        return 0
+
+    statement = insert(InstrumentQuarterly).values(payload)
+    statement = statement.on_conflict_do_update(
+        constraint="uq_instrument_quarterly_period",
+        set_={
+            "total_revenue": statement.excluded.total_revenue,
+            "net_income": statement.excluded.net_income,
+            "pretax_income": statement.excluded.pretax_income,
+            "operating_expense": statement.excluded.operating_expense,
+            "updated_at": statement.excluded.updated_at,
+        },
+    )
+    db.execute(statement)
+    db.commit()
+    return len(payload)
+
+
+def _tradable_universe_all(db: Session) -> list[InvestmentProduct]:
+    """Sembolden id'ye çevirmek için evren. `_tradable_universe` haber
+    modülünde ve yalnızca hisseleri alıyor; burada tür süzgeci yok."""
+    return db.query(InvestmentProduct).all()
+
+
+def _uuid_str() -> str:
+    import uuid
+
+    return str(uuid.uuid4())
+
+
+def quarter_label(period_end: date) -> str:
+    """`2026-06-30` -> `2026Q2`.
+
+    Saklanmıyor, türetiliyor: hiçbir zaman değişmeyecek ve tamamen dönem
+    sonundan çıkarılabilen bir değer için ikinci bir sütun, ikisinin
+    ayrışabileceği bir yer açardı.
+    """
+    return f"{period_end.year}Q{(period_end.month - 1) // 3 + 1}"
+
+
+def _quarter_index(period_end: date) -> int:
+    """Çeyreğin mutlak sırası. Bitişiklik bundan hesaplanıyor."""
+    return period_end.year * 4 + (period_end.month - 1) // 3
+
+
+def quarterly_for(
+    db: Session, symbol: str, limit: int = 8
+) -> Optional[dict[str, Any]]:
+    """Bir enstrümanın çeyreklik serisi, en yeniden eskiye.
+
+    `previous_is_adjacent` ve `year_ago_available` BURADA hesaplanıyor, tüketen
+    katmanda değil. Sebebi ölçülmüş: sağlayıcının dönemleri ardışık gelmiyor --
+    40 hissenin 3'ünde 2025Q3 gelir tablosunda hiç yok. "Son iki satırı al"
+    diyen bir karşılaştırma o hisselerde 2025Q2 ile 2025Q4'ü kıyaslar ve bunu
+    söylemez. Kuralı tek yerde tutmak, her tüketicinin aynı hatayı ayrı ayrı
+    yapmasını engelliyor.
+    """
+    product = get_product(db, symbol)
+    if product is None:
+        return None
+
+    rows = (
+        db.query(InstrumentQuarterly)
+        .filter(InstrumentQuarterly.product_id == product.id)
+        .order_by(InstrumentQuarterly.period_end.desc())
+        .limit(limit)
+        .all()
+    )
+    if not rows:
+        return None
+
+    periods = [
+        {
+            "period_end": row.period_end,
+            "label": quarter_label(row.period_end),
+            "total_revenue": row.total_revenue,
+            "net_income": row.net_income,
+            "pretax_income": row.pretax_income,
+            "operating_expense": row.operating_expense,
+        }
+        for row in rows
+    ]
+
+    indices = [_quarter_index(row.period_end) for row in rows]
+    return {
+        "symbol": product.symbol,
+        "name": product.name,
+        "currency": product.currency_code or "TRY",
+        "periods": periods,
+        # Bir önceki SATIR değil, bir önceki ÇEYREK mi.
+        "previous_is_adjacent": len(indices) > 1 and indices[0] - indices[1] == 1,
+        # Geçen yılın aynı çeyreği elimizde mi -- tam dört çeyrek geride.
+        "year_ago_available": any(index == indices[0] - 4 for index in indices[1:]),
+    }
 
 def calendar_rows(db: Session, limit: int = 40) -> dict[str, list[dict[str, Any]]]:
     """Analist konsensüsü, temettü ve bilanço takvimi — evren genelinde.
@@ -1367,3 +1518,84 @@ def watchlist_remove(db: Session, user_id: str, symbol: str) -> bool:
     )
     db.commit()
     return bool(deleted)
+
+
+def holders_of(db: Session, symbols: list[str]) -> dict[str, set[str]]:
+    """Bu sembolleri TUTAN kullanıcılar, sembol başına.
+
+    Pozisyonlar bu modülün; sorgusu da burada. Bildirim modülünün portföy
+    tablosunu okuması, modüllerin birbirinin ORM sınıfını import etmemesi
+    kuralının tam olarak engellediği şey.
+
+    Miktarı sıfır olan pozisyon SAYILMIYOR: kapatılmış bir pozisyonun
+    hissesiyle ilgili haber, artık o kişiyi ilgilendirmiyor.
+    """
+    if not symbols:
+        return {}
+    rows = db.execute(
+        select(InvestmentProduct.symbol, InvestmentAccount.user_id)
+        .select_from(PortfolioPosition)
+        .join(InvestmentProduct, InvestmentProduct.id == PortfolioPosition.product_id)
+        .join(
+            InvestmentAccount,
+            InvestmentAccount.id == PortfolioPosition.investment_account_id,
+        )
+        .where(
+            InvestmentProduct.symbol.in_(symbols),
+            PortfolioPosition.quantity > 0,
+            # DEMO hesabı DIŞARIDA. Anonim çağıranın gördüğü paylaşılan
+            # portföy; `user_id` alanında gerçek bir kullanıcı değil "demo"
+            # yazıyor ve bildirilecek kimsesi yok.
+            #
+            # Ölçüldü: dışarıda bırakılmadığında `notifications.user_id`'nin
+            # `users` tablosuna foreign key'i ihlal oluyor ve TEK bir geçersiz
+            # id partinin tamamını düşürüyordu -- ASELS haberi altı gerçek
+            # kullanıcıya da ulaşmıyordu.
+            InvestmentAccount.account_number != DEMO_ACCOUNT_NUMBER,
+        )
+    ).all()
+    holders: dict[str, set[str]] = {}
+    for symbol, user_id in rows:
+        holders.setdefault(symbol, set()).add(user_id)
+    return holders
+
+
+#: Seans bilgisinin ne kadar süre GEÇERLİ sayılacağı.
+#:
+#: `ingestor` her turda yazıyor (30 saniyede bir). Bu süreden eski bir kayıt,
+#: ingestor'ın durduğu anlamına gelir ve o durumda "piyasa kapalı" demek yine
+#: bilinmeyeni bir tespite çevirmek olurdu -- kapalı olan piyasa değil, veri
+#: akışı.
+SESSION_STATE_TTL_MINUTES = 10
+
+
+def record_sessions(db: Session, open_markets: list[str]) -> int:
+    """Hangi piyasaların açık olduğunu kaydeder. Liste TAM: burada olmayan
+    her piyasa kapalı işaretlenir."""
+    now = datetime.now(timezone.utc)
+    wanted = {str(m).upper() for m in open_markets}
+    known = {row.market for row in db.query(MarketSession).all()} | wanted
+    for market in known:
+        db.merge(MarketSession(
+            market=market, is_open=market in wanted, updated_at=now,
+        ))
+    db.commit()
+    return len(known)
+
+
+def open_markets(db: Session) -> Optional[set[str]]:
+    """Şu an işlem gören piyasalar, ya da BİLİNMİYORSA None.
+
+    None ile boş küme farklı şeyler: boş küme "hepsi kapalı", None ise
+    "ingestor bize söylemiyor". İkincisinde kapalılık iddia edilmemeli.
+    """
+    rows = db.query(MarketSession).all()
+    if not rows:
+        return None
+    freshest = max(row.updated_at for row in rows)
+    if freshest.tzinfo is None:
+        freshest = freshest.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - freshest).total_seconds() / 60
+    if age > SESSION_STATE_TTL_MINUTES:
+        return None
+    return {row.market for row in rows if row.is_open}

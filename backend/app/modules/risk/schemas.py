@@ -210,6 +210,36 @@ class RiskProfileOut(BaseModel):
     #: Always present. With no declaration it carries `alignment: "UNKNOWN"`
     #: and the call-to-action wording, so the page never has to guess.
     suitability: Optional["SuitabilityOut"] = None
+    #: Ürün grubu başına tutulan ağırlık ve o grup için verilen beyan.
+    #: `suitability`'nin ikinci yarısı: o, ölçülen risk seviyesini beyan
+    #: edilen toleransla karşılaştırıyor; bu, portföyün hangi SPK ürün
+    #: grubunda durduğunu o grup için beyan edilen bilgi ve tecrübeyle.
+    group_exposure: Optional["GroupExposureOut"] = None
+
+
+class GroupExposureRowOut(BaseModel):
+    """Bir ürün grubu -- ya da testin kapsamadığı varlıklar (`group: None`)."""
+
+    group: Optional[str] = None
+    label: str
+    value: float
+    share_percent: Optional[float] = None
+    status: str
+    #: Testte bu grup için yeterlilik çıkmış mı. None = hiç sorulmamış.
+    eligible: Optional[bool] = None
+    reason: Optional[str] = None
+    #: Kullanıcıya gösterilecek cümle, KODDA üretiliyor. SUI-001 "size uygun"
+    #: kalıbını engelliyor ve bu cümleler ondan bilerek kaçınıyor: kullanıcının
+    #: kendi beyanını aktarmak, onun hakkında karar vermekten farklı.
+    statement: str
+
+
+class GroupExposureOut(BaseModel):
+    #: Uygunluk testi hiç doldurulmamışsa False. Boş bir liste ile aynı şey
+    #: değil: biri "soruldu, kayıt yok", diğeri "hiç sorulmadı".
+    assessed: bool = False
+    total_value: float = 0.0
+    groups: List[GroupExposureRowOut] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +260,38 @@ class QuestionOut(BaseModel):
     options: List[QuestionOptionOut]
 
 
+class QuestionGroupOut(BaseModel):
+    """Bir ürün grubu ve ona sorulan üç soru.
+
+    Bölüm 3 dört grup × üç soru; ekran bunu bir matris olarak çiziyor. Yapı
+    yalnızca SUNUM meselesi -- puanlama düz soru listesi üzerinden çalışıyor
+    ve bu gruplamadan habersiz.
+    """
+    key: str
+    label: str
+    #: Grubun risk seviyesi, testin kendi yazdığı hâliyle. Yeterlilik kuralı
+    #: da buna bağlı: mevduat için istenen kanıtla türev için istenen aynı
+    #: olamaz.
+    risk: str
+    questions: List[QuestionOut]
+
+
+class QuestionSectionOut(BaseModel):
+    """Testin bir bölümü.
+
+    On altı soruyu tek listede göstermek kimsenin dolduracağı bir form değil;
+    bölümler sihirbazın adımlarını veriyor.
+    """
+    key: str
+    title: str
+    helper: Optional[str] = None
+    questions: List[QuestionOut] = []
+    groups: List[QuestionGroupOut] = []
+
+
 class QuestionnaireOut(BaseModel):
     version: str
-    questions: List[QuestionOut]
+    sections: List[QuestionSectionOut]
 
 
 class AssessmentRequest(BaseModel):
@@ -275,8 +334,31 @@ class SuitabilityOut(BaseModel):
     statement: str = ""
 
 
+class ProductGroupOut(BaseModel):
+    """Bir ürün grubunun yeterliliği ve GEREKÇESİ.
+
+    Gerekçe zorunlu. "Uygun değil" tek başına kişi hakkında bir yargı gibi
+    okunuyor; hangi beyandan çıktığı yazılı olunca hem öyle olmadığı hem de
+    kullanıcının cevabını değiştirerek sonucu değiştirebileceği görünüyor.
+    """
+    key: str
+    label: str
+    risk: str
+    knowledge: str
+    frequency: str
+    volume: str
+    has_experience: bool
+    eligible: bool
+    reason: str
+
+
 class AssessmentResultOut(DeclaredProfileOut):
     raw_score: float
+    #: v1 ile doldurulmuş bir profilde boş. Eski bir cevap yeni kurallarla
+    #: yeniden puanlanmıyor, dolayısıyla o profilde ürün grubu yeterliliği
+    #: hiç ölçülmedi -- boş liste "hiçbiri uygun değil" demek değil,
+    #: "sorulmadı" demek.
+    product_groups: List[ProductGroupOut] = []
 
 
 # ---------------------------------------------------------------------------
@@ -407,9 +489,138 @@ class RiskSummaryOut(BaseModel):
     #: Same shape the page reads, so the two surfaces cannot diverge.
     suitability: SuitabilityOut
     declared: Optional[DeclaredProfileOut] = None
+    #: Sayfanın okuduğu iki karşılaştırma daha. `suitability` ile aynı
+    #: gerekçeyle burada: iki yüzey aynı şekli okumazsa ayrışır, ve ikisi de
+    #: ÖLÇÜM ile KULLANICININ KENDİ BEYANINI yan yana koyuyor -- biri ürün
+    #: grubu beyanıyla, diğeri kendi girdiği hedef ağırlıkla.
+    group_exposure: Optional["GroupExposureOut"] = None
+    allocation_drift: Optional["AllocationDriftOut"] = None
     #: The subset the score is built from, so a stated figure is traceable.
     metrics: Dict[str, Any] = Field(default_factory=dict)
     #: What the score is made of, already in Turkish.
     findings: List[RiskFinding] = Field(default_factory=list)
     data_quality: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
+
+
+class AllocationDriftBucketOut(BaseModel):
+    bucket: str
+    label: str
+    amount: float
+    #: Portföy boşken None, %0 değil.
+    current_percent: Optional[float] = None
+    #: Hedef koyulmamış kovada None. %0 SAYILMAZ -- "hedefim yok" ile
+    #: "hedefim sıfır" farklı şeyler.
+    target_percent: Optional[float] = None
+    gap_points: Optional[float] = None
+    gap_amount: Optional[float] = None
+
+
+class AllocationDriftOut(BaseModel):
+    has_target: bool = False
+    total_value: float = 0.0
+    buckets: List[AllocationDriftBucketOut] = Field(default_factory=list)
+    #: Kodda üretilen cümle; ajan olduğu gibi aktarıyor. Sapmanın yönü yanlış
+    #: okunursa kullanıcı hedefinin tersine hareket eder.
+    statement: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Koşullu senaryo ve stres testi
+# ---------------------------------------------------------------------------
+
+
+class ScenarioRequest(BaseModel):
+    #: Ölçülebilir faktörlerden biri. Kapalı küme: her biri için GÜNLÜK bir
+    #: fiyat serisi gerekiyor ve faiz bilerek dışarıda -- sistemde faiz
+    #: SERİSİ yok, yalnızca bir sabit var.
+    factor: str
+    #: Yüzde olarak şok. Negatif de olabilir; "dolar %10 düşse" de bir soru.
+    #: Sınır ±%100: ölçülen bir günlük duyarlılığı bunun ötesine uzatmak,
+    #: doğrusal varsayımı taşıyamayacağı yere taşımak olur.
+    shock_pct: float = Field(..., ge=-100, le=100)
+    lookback: str = "1Y"
+
+    @field_validator("factor")
+    @classmethod
+    def _upper(cls, value: str) -> str:
+        return value.upper().strip()
+
+    @field_validator("lookback")
+    @classmethod
+    def _known_lookback(cls, value: str) -> str:
+        upper = value.upper()
+        if upper not in LOOKBACKS:
+            raise ValueError(f"lookback {value!r} geçersiz; beklenen: {', '.join(LOOKBACKS)}")
+        return upper
+
+
+class SensitivityOut(BaseModel):
+    """Ölçülen duyarlılık. `r_squared` ZORUNLU eşlikçi.
+
+    Tek başına bir beta, ilişkinin ne kadar gerçek olduğu hakkında hiçbir şey
+    söylemiyor: 0,42'lik bir beta, faktör değişkenliğin %3'ünü açıklıyorken de
+    çıkar.
+    """
+    beta: float
+    correlation: Optional[float] = None
+    r_squared: Optional[float] = None
+    observation_count: int
+    is_statistically_reliable: bool
+
+
+class ReplayOut(BaseModel):
+    """Faktörün en sert oynadığı pencere ve portföyün o günlerde yaptığı.
+
+    Bir model çıktısı değil: o günler gerçekten oldu.
+    """
+    start_date: datetime
+    end_date: datetime
+    factor_move_pct: float
+    portfolio_move_pct: float
+    trading_days: int
+
+
+class WorstDayOut(BaseModel):
+    date: datetime
+    return_pct: float
+
+
+class ScenarioOut(BaseModel):
+    factor: str
+    factor_name: str
+    shock_pct: float
+    lookback: str
+    base_currency: str = "TRY"
+    sensitivity: SensitivityOut
+    #: Şokun portföye tahmini yansıması, yüzde ve tutar olarak. Tutar,
+    #: değerlenebilen pozisyonların toplamı üzerinden.
+    estimated_impact_pct: float
+    estimated_impact_value: Optional[float] = None
+    #: Kullanıcıya gösterilecek KOŞULLU cümle, çekincesiyle birlikte tam
+    #: hâliyle. İkiye bölüp yalnızca ilk yarısını göstermek, koşulu düşürüp
+    #: iddiayı bırakmak olur.
+    statement: str
+    #: Varsayımlar gizlenmiyor: gizlenmiş bir varsayım olmayan bir kesinlik
+    #: üretir.
+    assumptions: List[str] = []
+    warnings: List[str] = []
+
+
+class StressOut(BaseModel):
+    """İki tür stres, ikisi de ÖLÇÜM.
+
+    Uydurulmuş bir kayıp senaryosu yok: biri faktörün en sert oynadığı gerçek
+    pencere, diğeri portföyün gerçekten yaşadığı en kötü günler.
+    """
+    lookback: str
+    base_currency: str = "TRY"
+    observation_count: int
+    worst_days: List[WorstDayOut] = []
+    #: Faktör başına tarihsel replay. Ölçülemeyen faktör listede YER ALMAZ,
+    #: sıfırla görünmez.
+    replays: dict[str, ReplayOut] = {}
+    factor_names: dict[str, str] = {}
+    excluded_symbols: List[str] = []
+    warnings: List[str] = []
+

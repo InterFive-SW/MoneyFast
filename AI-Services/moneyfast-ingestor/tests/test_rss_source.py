@@ -319,3 +319,62 @@ class TestTickerTagFiltering:
     def test_tags_that_all_fail_yield_nothing(self):
         entry = SimpleNamespace(tags=[{"term": "x"}, {"term": "12345"}])
         assert rss_source._tickers(entry) == []
+
+
+class TestSummaryCleaning:
+    """Özetten işaretlemeyi atmak.
+
+    İki yeri birden düzeltiyor. Sembol eşleştirmesi: temizlenmemiş metinde
+    `<img align="right">` özniteliği Align Technology'ye bağlanıyordu. Ve daha
+    önemlisi RAG: ingestor özeti korpusa `content` olarak gönderiyor, yani
+    gömme vektörleri haberin metni yerine HTML gürültüsünü de taşıyordu --
+    ölçüldü, korpustaki 876 parça işaretleme içeriyordu.
+    """
+
+    def test_tags_are_removed_whole(self):
+        """Etiketin İÇİ değil KENDİSİ gider: öznitelik adları ve URL'ler
+        haberin metni değildir."""
+        cleaned = rss_source.clean_summary(
+            '<img align="right" src="https://img.example.com/a.jpg" />Akaryakıt zamlandı.'
+        )
+        assert cleaned == "Akaryakıt zamlandı."
+
+    def test_entities_are_decoded_not_deleted(self):
+        """Silinseydi "Türkiye nin" kalırdı; çözülünce metin okunur kalıyor."""
+        assert rss_source.clean_summary("Türkiye&#039;nin ihracatı") == (
+            "Türkiye'nin ihracatı"
+        )
+
+    def test_double_escaped_entities_are_resolved(self):
+        """Ölçülen veride `LPG&amp;#039;nin` var: besleme çift kaçışlı
+        gönderiyor ve tek geçiş `&#039;`de bırakıyor."""
+        assert rss_source.clean_summary("LPG&amp;#039;nin fiyatı") == "LPG'nin fiyatı"
+
+    def test_an_ampersand_survives_as_itself(self):
+        assert rss_source.clean_summary("Marks &amp; Spencer") == "Marks & Spencer"
+
+    def test_whitespace_is_collapsed(self):
+        assert rss_source.clean_summary("bir\n\n  iki   üç") == "bir iki üç"
+
+    def test_empty_input_is_safe(self):
+        assert rss_source.clean_summary("") == ""
+        assert rss_source.clean_summary(None) == ""
+
+    def test_the_stored_summary_is_clean_but_the_hash_is_not(self, no_robots):
+        """Temizlik saklanan metne uygulanıyor, kimliğe DEĞİL.
+
+        Hash tanımı da değişseydi daha önce alınmış her haberin kimliği
+        değişir ve arşivin tamamı "yeni" sayılıp yeniden yazılırdı.
+        """
+        raw = '&lt;img align="right" /&gt;Havayolu şirketi kargo segmentinde büyüme bildirdi.'
+        xml = FEED_XML.replace(
+            "Havayolu şirketi kargo segmentinde büyüme bildirdi.", raw, 1
+        )
+        items = rss_source.fetch_feed(FEED_URL, client_for(feed_handler(body=xml)))
+        stored = items[0]["summary"] or ""
+        assert "<img" not in stored and "align" not in stored
+        assert stored == "Havayolu şirketi kargo segmentinde büyüme bildirdi."
+        # Kimlik ham metinden: temizlenmiş hâlinin hash'i FARKLI olmalı.
+        assert items[0]["content_hash"] != rss_source.content_hash(
+            items[0]["title"], stored
+        )

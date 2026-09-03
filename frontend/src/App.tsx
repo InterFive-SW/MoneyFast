@@ -41,6 +41,7 @@ import NewCardWizard        from './components/banking/NewCardWizard'
 import Investment           from './pages/Investment'
 import StocksScreen         from './pages/markets/StocksScreen'
 import StockDetail          from './pages/markets/StockDetail'
+import CurrencyGoldScreen  from './pages/markets/CurrencyGoldScreen'
 import FundsScreen          from './pages/markets/FundsScreen'
 import FundDetail           from './pages/markets/FundDetail'
 import IndicesScreen        from './pages/markets/IndicesScreen'
@@ -57,6 +58,8 @@ import SecuritySettings from './pages/settings/SecuritySettings'
 import NotificationSettings from './pages/settings/NotificationSettings'
 import AppearanceSettings from './pages/settings/AppearanceSettings'
 import PrivacySettings from './pages/settings/PrivacySettings'
+import ProfileDashboard from './pages/ProfileDashboard'
+
 export default function App() {
   return (
     /*
@@ -130,12 +133,14 @@ export default function App() {
                 <Route index                element={<Navigate to="hisseler" replace />} />
                 <Route path="hisseler"       element={<StocksScreen />}  />
                 <Route path="hisseler/:symbol" element={<StockDetail />} />
+                <Route path="doviz-altin"    element={<CurrencyGoldScreen />} />
                 <Route path="fonlar"         element={<FundsScreen />}   />
                 <Route path="fonlar/:code"   element={<FundDetail />}    />
                 <Route path="endeksler"      element={<IndicesScreen />} />
                 <Route path="sektorler"      element={<SectorsScreen />} />
                 <Route path="analizler"      element={<AnalysesScreen />} />
               </Route>
+              <Route path="profile" element={<ProfileDashboard />} />
               {/* Eski adresler yer imlerinde ve paylaşılan bağlantılarda
                   duruyor, o yüzden 404 değil yönlendirme.
 

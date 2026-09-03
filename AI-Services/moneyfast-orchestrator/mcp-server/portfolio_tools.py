@@ -24,6 +24,78 @@ from backend_client import (
 
 TOOL = "get_portfolio_positions"
 
+#: The only asset classes the backend classifies a holding into.
+ALLOWED_ASSET_CLASSES = frozenset(
+    {"EQUITY", "ETF", "MUTUAL_FUND", "BOND", "FX", "COMMODITY", "CRYPTO",
+     "DEPOSIT", "DERIVATIVE"}
+)
+
+#: What a planning model actually writes, folded onto those keys.
+#:
+#: The contract has always LISTED the allowed values, but nothing enforced
+#: them and an unrecognised one was passed straight through to a filter that
+#: matched nothing. Measured: asked "portföyümde döviz var mı", the model sent
+#: `asset_classes: ["döviz"]`, the backend returned `positions: []`, and the
+#: answer was "Portföyünüzde döviz sınıfına ait bir pozisyon bulunamadı." The
+#: user held 20 USDTRY at the time.
+#:
+#: That is worse than the `sort_by` failure this mirrors. An unreadable sort
+#: key produced "veriye ulaşamadım" -- visibly nothing. An unreadable asset
+#: class produces a confident, specific, FALSE statement about what someone
+#: owns. Hence: Turkish and lowercase spellings fold onto the canonical key,
+#: and anything else raises rather than filtering to nothing.
+_ASSET_CLASS_SYNONYMS = {
+    # hisse
+    "hisse": "EQUITY", "hisseler": "EQUITY", "hisse senedi": "EQUITY",
+    "hisse senetleri": "EQUITY", "stock": "EQUITY", "stocks": "EQUITY",
+    "equities": "EQUITY", "share": "EQUITY", "shares": "EQUITY",
+    # döviz
+    "döviz": "FX", "doviz": "FX", "kur": "FX", "para birimi": "FX",
+    "currency": "FX", "currencies": "FX", "forex": "FX",
+    # altın ve emtia -- altın bu sistemdeki TEK emtia, dolayısıyla ikisi
+    # aynı anahtara düşüyor. Ayrı bir "altın" sınıfı uydurmak, sözleşmede
+    # olmayan bir değeri varmış gibi göstermek olurdu.
+    "altın": "COMMODITY", "altin": "COMMODITY", "gold": "COMMODITY",
+    "emtia": "COMMODITY", "commodities": "COMMODITY",
+    # diğerleri
+    "tahvil": "BOND", "bonds": "BOND", "bono": "BOND",
+    "fon": "MUTUAL_FUND", "fonlar": "MUTUAL_FUND", "yatırım fonu": "MUTUAL_FUND",
+    "kripto": "CRYPTO", "crypto": "CRYPTO",
+    "mevduat": "DEPOSIT", "vadeli mevduat": "DEPOSIT",
+    "türev": "DERIVATIVE", "turev": "DERIVATIVE",
+}
+
+
+def _canonical_asset_classes(
+    asset_classes: Optional[list[str]],
+) -> Optional[list[str]]:
+    """Fold each requested class onto a canonical key, or raise naming the set.
+
+    Order is preserved and duplicates collapse: "hisse" and "EQUITY" in the
+    same call are one filter, not two.
+    """
+    if asset_classes is None:
+        return None
+    canonical: list[str] = []
+    for raw in asset_classes:
+        candidate = str(raw).strip()
+        upper = candidate.upper().replace(" ", "_").replace("-", "_")
+        if upper in ALLOWED_ASSET_CLASSES:
+            resolved = upper
+        elif candidate.lower() in _ASSET_CLASS_SYNONYMS:
+            resolved = _ASSET_CLASS_SYNONYMS[candidate.lower()]
+        else:
+            raise InvalidInputError(
+                f"{TOOL}: '{raw}' bir varlık sınıfı değil. "
+                f"Geçerli değerler: {', '.join(sorted(ALLOWED_ASSET_CLASSES))}."
+            )
+        if resolved not in canonical:
+            canonical.append(resolved)
+    # Boş liste FİLTRE YOK demek değil: çağıran bir şey süzmek istedi ve
+    # hiçbiri okunamadıysa yukarıda zaten hata verildi. Buraya boş liste
+    # ancak boş liste gönderildiyse ulaşır ve o da "süzme" demektir.
+    return canonical or None
+
 
 async def get_portfolio_positions(
     user_id: str,
@@ -67,7 +139,11 @@ async def get_portfolio_positions(
             Unentitled IDs are omitted and reported in warnings, not raised.
         asset_classes (list[str] | None): Filter. Allowed values: "EQUITY", "ETF",
             "MUTUAL_FUND", "BOND", "FX", "COMMODITY", "CRYPTO", "DEPOSIT",
-            "DERIVATIVE". Case-sensitive. Default None applies no filter.
+            "DERIVATIVE". Default None applies no filter. Turkish spellings are
+            accepted and folded onto these keys ("döviz" -> FX, "hisse" ->
+            EQUITY, "altın" -> COMMODITY); ANY other value raises rather than
+            filtering to nothing. Gold is this system's only commodity, so
+            "altın" and "emtia" are the same filter.
         include_closed (bool): If True, also returns zero-quantity positions held at
             any point in the last 90 days, for realized P&L questions. Default False.
         base_currency (str): ISO 4217 code used to normalize market_value, cost_basis,
@@ -85,7 +161,15 @@ async def get_portfolio_positions(
             "CUSTODIAN_OF_RECORD".
         is_delayed (bool): True when quote data is not real time. If True, the answer
             MUST disclose the delay and MUST NOT be phrased as a live value.
-        delay_minutes (int): Quote delay. 0 when is_delayed is False.
+        delay_minutes (int): The PROVIDER'S OWN feed delay, a declared floor. NOT
+            how old the observation is -- the two used to be added together, and a
+            closed exchange's last close aged into "1095 dakika gecikmeli" while the
+            feed was not delayed at all. Read `is_stale` for the age.
+        is_stale (bool): The observation itself is old. Normal when the venue is
+            closed (this is its last close), a fault signal when it is trading.
+            Do NOT call it a delay, and do NOT assert WHY: the same age appears
+            when the ingestor stops, and the system cannot tell the two apart.
+            Say the prices are the last observed data and give the time.
         base_currency (str): Echo of the requested normalization currency.
 
         positions (list[dict]): One entry per position. Each entry:
@@ -162,6 +246,11 @@ async def get_portfolio_positions(
     base_currency = base_currency or "TRY"
     valuation_mode = valuation_mode or "LAST_CLOSE"
 
+    # Süzgeç GÖNDERİLMEDEN önce kanonikleştiriliyor: okunamayan bir sınıf
+    # burada hata verir, aşağıda boş bir sonuç olarak değil. Boş sonuç
+    # "böyle bir varlığınız yok" diye cevaplanıyordu.
+    wanted_classes = _canonical_asset_classes(asset_classes)
+
     # GET /investment/portfolio/{user_id}/positions. List parameters are sent
     # as repeated keys (account_ids=a&account_ids=b); httpx renders bools as
     # true/false.
@@ -171,7 +260,7 @@ async def get_portfolio_positions(
         tool=TOOL,
         params={
             "account_ids": account_ids,
-            "asset_classes": asset_classes,
+            "asset_classes": wanted_classes,
             "include_closed": include_closed,
             "base_currency": base_currency,
             "valuation_mode": valuation_mode,
@@ -208,6 +297,10 @@ def _normalize(payload: dict[str, Any], requested_currency: str) -> dict[str, An
     return {
         **freshness,
         "delay_minutes": int(delay_minutes),
+        # Sözleşmeye EKLEYEREK: taşımayan bir backend yanıtı hâlâ geçerli ve
+        # yokluk False değil None DEĞİL -- eski olup olmadığı bilinmiyorsa
+        # "eski değil" demek, bilinmeyeni bir tespite çevirmek olurdu.
+        "is_stale": payload.get("is_stale"),
         # Echo what the caller asked for, not what the backend echoed back: the
         # contract defines this field as the requested normalization currency.
         "base_currency": payload.get("base_currency", requested_currency),

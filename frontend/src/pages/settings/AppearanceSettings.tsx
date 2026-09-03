@@ -16,7 +16,7 @@ import { useUser } from '../../contexts/UserContext'
  *   yapar; mock setTimeout DEĞİLDİR.
  */
 export default function AppearanceSettings() {
-  const { profile, refetch } = useUser()
+  const { profile, updateUserPreferences } = useUser()
 
   // Backend'den gelen tercihlerle başlat, fallback olarak varsayılanları kullan
   const [currency, setCurrency] = useState(profile?.userPreferences?.currency ?? 'TRY')
@@ -48,14 +48,21 @@ export default function AppearanceSettings() {
       // Gerçek API çağrısı: backend'deki user_preferences JSONB kolonuna yazar.
       // merge semantiği backend tarafından uygulanır — yalnızca gönderilen
       // anahtarlar güncellenir, diğerleri korunur.
-      await api.updateProfile({ 
-        user_preferences: { 
-          currency, 
-          language, 
-          default_template: defaultTemplate 
-        } 
-      })
-      await refetch()
+      const updatedPrefs = {
+        currency, 
+        language, 
+        default_template: defaultTemplate 
+      };
+      
+      await api.updateProfile({ user_preferences: updatedPrefs })
+      
+      // KRİTİK: API isteği başarılı döndükten SONRA global state güncellenir.
+      // Böylece `Dashboard.tsx` gibi diğer bileşenler (sayfalar) bu yeni state'i
+      // anında okuyarak arayüzü güncelleyebilir (re-render).
+      // Ekstra bir network request (`refetch`) atmamak için Context API içindeki 
+      // spesifik lokal state mutasyon fonksiyonu çağırılır.
+      updateUserPreferences(updatedPrefs)
+      
       setStatus({ type: 'success', message: 'Görünüm ayarlarınız başarıyla kaydedildi.' })
       setTimeout(() => setStatus(null), 3000)
     } catch (err: any) {

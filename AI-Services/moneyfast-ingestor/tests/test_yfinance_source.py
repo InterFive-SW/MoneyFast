@@ -14,6 +14,8 @@ import pytest
 
 from ingestor.sources import yfinance_source
 
+_REAL_TO_UTC = yfinance_source._to_utc
+
 PRODUCTS = [
     {"symbol": "TEST-THYAO", "data_symbol": "THYAO.IS"},
     {"symbol": "TEST-AAPL", "data_symbol": "AAPL"},
@@ -598,3 +600,153 @@ class TestNaNBarsAreSkipped:
         assert yfinance_source._finite_ohlc(
             {"Open": 1.0, "High": 2.0, "Low": 0.5, "Close": 1.5}
         ) == (1.0, 2.0, 0.5, 1.5)
+
+
+class TestQuarterlyFinancials:
+    """Çeyreklik gelir tablosu — anlık görüntünün tutamadığı seri.
+
+    Ölçülen kapsama (evrenden 40 BIST hissesi): 34'ünde veri var, 6'sında
+    hiç yok; veri olanların 33'ünde son çeyrek, bir öncesi ve bir yıl öncesi
+    dolu. Buradaki testlerin çoğu o ölçümde görülen kusurları koruyor.
+    """
+
+    def _frame(self, columns, rows):
+        """Sağlayıcının döndürdüğü biçim: satırlar kalem, sütunlar dönem."""
+        import pandas as pd
+
+        return pd.DataFrame.from_dict(rows, orient="index", columns=columns)
+
+    def _install(self, monkeypatch, frame_by_symbol):
+        import sys
+        from types import SimpleNamespace
+
+        def ticker(symbol):
+            value = frame_by_symbol.get(symbol)
+            if isinstance(value, Exception):
+                raise value
+            return SimpleNamespace(quarterly_income_stmt=value)
+
+        monkeypatch.setitem(
+            sys.modules, "yfinance",
+            SimpleNamespace(Ticker=ticker, download=lambda *a, **k: None),
+        )
+
+    def test_products_without_a_data_symbol_are_skipped(self):
+        assert yfinance_source.fetch_quarterly_financials([{"symbol": "X"}]) == []
+        assert yfinance_source.fetch_quarterly_financials([]) == []
+
+    def test_each_column_becomes_one_row(self, monkeypatch):
+        import pandas as pd
+
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            [pd.Timestamp("2026-06-30"), pd.Timestamp("2026-03-31")],
+            {"Total Revenue": [100, 90], "Net Income": [15, 19]},
+        )})
+        rows = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])
+
+        assert [row["period_end"] for row in rows] == ["2026-06-30", "2026-03-31"]
+        assert rows[0]["net_income"] == 15
+        assert rows[0]["symbol"] == PRODUCTS[0]["symbol"]
+
+    def test_the_newest_quarter_comes_first(self, monkeypatch):
+        """Sağlayıcı sütun sırasını garanti etmiyor; "son çeyrek" sorusunun
+        cevabı ilk satır olmalı."""
+        import pandas as pd
+
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            [pd.Timestamp("2025-12-31"), pd.Timestamp("2026-06-30")],
+            {"Net Income": [8, 15]},
+        )})
+        rows = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])
+        assert [row["period_end"] for row in rows] == ["2026-06-30", "2025-12-31"]
+
+    def test_a_missing_line_is_none_not_an_error(self, monkeypatch):
+        """Bankada bazı kalemler hiç yok; `KeyError` normal işleyişin parçası."""
+        import pandas as pd
+
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            [pd.Timestamp("2026-06-30")], {"Net Income": [15]},
+        )})
+        row = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])[0]
+        assert row["net_income"] == 15
+        assert row["total_revenue"] is None
+        assert row["operating_expense"] is None
+
+    def test_an_entirely_empty_quarter_is_not_stored(self, monkeypatch):
+        """Ölçüldü: 34 hissenin 16'sında serinin bir yerinde NaN var. Boş bir
+        satır saklamak, o çeyrek raporlanmış ama sıfır çıkmış gibi görünürdü."""
+        import pandas as pd
+
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            [pd.Timestamp("2026-06-30"), pd.Timestamp("2026-03-31")],
+            {"Net Income": [15, float("nan")]},
+        )})
+        rows = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])
+        assert [row["period_end"] for row in rows] == ["2026-06-30"]
+
+    def test_the_series_is_capped(self, monkeypatch):
+        import pandas as pd
+
+        columns = [pd.Timestamp("2026-06-30") - pd.DateOffset(months=3 * i)
+                   for i in range(yfinance_source.MAX_QUARTERS + 4)]
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            columns, {"Net Income": list(range(len(columns)))},
+        )})
+        rows = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])
+        assert len(rows) == yfinance_source.MAX_QUARTERS
+
+    def test_an_empty_frame_yields_nothing(self, monkeypatch):
+        """Ölçüldü: 40 hissenin 6'sında hiç çeyreklik veri yok."""
+        import pandas as pd
+
+        self._install(monkeypatch, {"THYAO.IS": pd.DataFrame()})
+        assert yfinance_source.fetch_quarterly_financials([PRODUCTS[0]]) == []
+
+    def test_a_none_frame_yields_nothing(self, monkeypatch):
+        self._install(monkeypatch, {"THYAO.IS": None})
+        assert yfinance_source.fetch_quarterly_financials([PRODUCTS[0]]) == []
+
+    def test_one_broken_symbol_does_not_take_the_cycle_down(self, monkeypatch):
+        import pandas as pd
+
+        self._install(monkeypatch, {
+            "THYAO.IS": RuntimeError("provider said no"),
+            "AAPL": self._frame([pd.Timestamp("2026-06-30")], {"Net Income": [7]}),
+        })
+        rows = yfinance_source.fetch_quarterly_financials([
+            PRODUCTS[0], {"symbol": "AAPL", "data_symbol": "AAPL"},
+        ])
+        assert [row["symbol"] for row in rows] == ["AAPL"]
+
+    def test_a_column_index_that_cannot_be_sorted_drops_only_that_symbol(
+        self, monkeypatch
+    ):
+        """Sıralama da sağlayıcının tiplerine bağlı ve karışık bir dizin
+        `TypeError` veriyor. Koruma isteği değil, sembolün TAMAMINI sarmalı --
+        aksi hâlde tek bozuk sembol `pool.map` üzerinden turun tamamını
+        düşürüyor."""
+        import pandas as pd
+
+        self._install(monkeypatch, {
+            "THYAO.IS": self._frame(
+                ["bilinmeyen", pd.Timestamp("2026-06-30")], {"Net Income": [1, 15]},
+            ),
+            "AAPL": self._frame([pd.Timestamp("2026-06-30")], {"Net Income": [7]}),
+        })
+        rows = yfinance_source.fetch_quarterly_financials([
+            PRODUCTS[0], {"symbol": "AAPL", "data_symbol": "AAPL"},
+        ])
+        assert [row["symbol"] for row in rows] == ["AAPL"]
+
+    def test_an_unparseable_period_end_is_skipped(self, monkeypatch):
+        """Tarihsiz bir çeyrek, bitişikliği hesaplanamayan bir çeyrektir."""
+        import pandas as pd
+
+        monkeypatch.setattr(yfinance_source, "_to_utc",
+                            lambda column: None if column.day == 31 else _REAL_TO_UTC(column))
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            [pd.Timestamp("2026-06-30"), pd.Timestamp("2026-03-31")],
+            {"Net Income": [15, 1]},
+        )})
+        rows = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])
+        assert [row["period_end"] for row in rows] == ["2026-06-30"]

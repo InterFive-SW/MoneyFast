@@ -2,6 +2,7 @@ import hashlib
 
 from fastapi import BackgroundTasks, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.security import (
     REFRESH_TOKEN_TYPE,
@@ -257,6 +258,10 @@ def update_user_profile(user_tc: str, payload: UserUpdateRequest, db: Session) -
     if payload.notification_preferences is not None:
         # JSONB alanı SQLAlchemy tarafından otomatik olarak json/dict nesnesine dönüştürülür
         user.notification_preferences = payload.notification_preferences
+        # KRİTİK: SQLAlchemy, JSONB veya Pickle türündeki mutasyonları (dict içi değişiklikleri) 
+        # otomatik olarak izleyemez (dirty tracking). ORM'in bu objede bir değişiklik olduğunu
+        # algılayıp UPDATE sorgusu oluşturabilmesi için flag_modified fonksiyonu çağrılmalıdır.
+        flag_modified(user, "notification_preferences")
     if payload.transaction_limit is not None:
         # Güvenlik Merkezi → İşlem Onay Limiti değeri. Pydantic şemasında
         # [0, 250_000] aralığına kısıtlandığı için ek validasyona gerek yoktur.
@@ -267,6 +272,10 @@ def update_user_profile(user_tc: str, payload: UserUpdateRequest, db: Session) -
         # anahtarları gönderebilir, geri kalanı korunur.
         merged = {**(user.user_preferences or {}), **payload.user_preferences}
         user.user_preferences = merged
+        # KRİTİK: SQLAlchemy, JSONB kolonlarındaki iç içe sözlük veya liste bazlı
+        # güncellemeleri kendi başına tespit edemez. Bu yüzden flag_modified ile
+        # state'i 'dirty' olarak işaretleyerek veritabanına kaydedilmesini zorluyoruz.
+        flag_modified(user, "user_preferences")
 
     db.commit()
     db.refresh(user)
@@ -396,3 +405,42 @@ def deactivate_account(user_tc: str, reason: str | None, db: Session) -> dict:
         )
     
     return {"message": "Hesabınız başarıyla kapatıldı."}
+
+import os
+import shutil
+from pathlib import Path
+from fastapi import UploadFile
+
+def upload_profile_picture(user_tc: str, file: UploadFile, db: Session) -> dict:
+    """Kullanıcının profil fotoğrafını yükler ve URL'sini veritabanına kaydeder."""
+    user = db.query(User).filter(User.tc_no == user_tc).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kullanıcı bulunamadı.",
+        )
+    
+    # MIME type kontrolü
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sadece resim dosyaları yüklenebilir.",
+        )
+        
+    uploads_dir = Path(__file__).parent.parent.parent.parent / "uploads" / "avatars"
+    os.makedirs(uploads_dir, exist_ok=True)
+    
+    # Benzersiz dosya adı
+    file_ext = file.filename.split(".")[-1] if "." in file.filename else "png"
+    new_filename = f"{user.id}_{hashlib.md5(file.filename.encode()).hexdigest()[:6]}.{file_ext}"
+    file_path = uploads_dir / new_filename
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    # URL oluştur (/uploads mount'u main.py'de yapıldı)
+    file_url = f"/uploads/avatars/{new_filename}"
+    user.profile_picture_url = file_url
+    db.commit()
+    
+    return {"profile_picture_url": file_url}

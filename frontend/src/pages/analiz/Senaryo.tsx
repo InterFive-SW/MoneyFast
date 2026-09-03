@@ -1,3 +1,4 @@
+import SenaryoPaneli from '../../components/analiz/SenaryoPaneli'
 import RiskHistoryPanel from '../../components/risk/RiskHistoryPanel'
 import SimulationPanel from '../../components/risk/SimulationPanel'
 import { useAnalysis } from '../Analiz'
@@ -14,6 +15,9 @@ export default function Senaryo() {
 
     return (
         <div className="flex flex-col gap-6">
+            {/* Makro: bir faktör oynasaydı, ve gerçekte ne olduğu. */}
+            <SenaryoPaneli lookback={lookback} />
+            {/* Mikro: bir alım/satım yapılsaydı. */}
             <SimulationPanel lookback={lookback} />
             <RiskHistoryPanel />
         </div>

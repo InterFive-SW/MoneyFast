@@ -58,7 +58,7 @@ def configure_market_stream() -> None:
         db = SessionLocal()
         try:
             quotes = market_service.latest_quotes(db)
-            as_of, delay, is_delayed = market_service.freshness(quotes)
+            as_of, delay, is_delayed, is_stale = market_service.freshness(quotes)
             return {
                 "as_of": as_of.isoformat() if as_of else None,
                 "delay_minutes": delay,
@@ -90,7 +90,20 @@ async def lifespan(_app: FastAPI):
 
 app.router.lifespan_context = lifespan
 
+# Yüklenen statik dosyaları (özellikle kullanıcı avatar'larını) dışa açmak için mount işlemi.
+# Bu klasör projenin kök dizinindeki 'uploads' dizinine işaret eder.
+# Güvenlik Notu: Yalnızca resim dosyalarına erişim sağlanacağından, 
+# executable (örn: .py, .sh) barındırılmaması önemlidir.
+import os
+from fastapi.staticfiles import StaticFiles
+
+uploads_dir = Path(__file__).parent.parent / "uploads"
+os.makedirs(uploads_dir / "avatars", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+
 _static_dir = Path(__file__).parent.parent / "frontend" / "dist"
+if not _static_dir.exists():
+    _static_dir = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 if _static_dir.exists():
     @app.get("/{full_path:path}", include_in_schema=False)

@@ -567,3 +567,87 @@ class TestAccrueInterestEndpoint:
         body = response.json()
         assert body["accrued"] == 1
         assert body["movements"][0]["amount"] == 5.21
+
+
+CASH_FLOW_URL = "/api/banking/cash-flow/user-1"
+CF_TOKEN = "TEST-service-key"
+
+
+@pytest.fixture()
+def cf_auth(monkeypatch):
+    monkeypatch.setenv("BACKEND_API_KEY", CF_TOKEN)
+    return {"Authorization": f"Bearer {CF_TOKEN}"}
+
+
+class TestCashFlowGuard:
+    """Bu uç maaşı, kirayı ve harcama kategorilerini taşıyor -- portföyden
+    daha hassas ve konusunu YOLDA adlandırıyor, dolayısıyla ilk günden
+    korumalı."""
+
+    def test_an_unsigned_request_is_refused(self, bank_client, cf_auth):
+        assert bank_client.get(CASH_FLOW_URL).status_code == 401
+
+    def test_a_user_session_token_does_not_open_it(self, bank_client, cf_auth):
+        """Oturum override'ı `/spending`'i açıyor; bunu AÇMAMALI. İkisi farklı
+        soruları cevaplıyor -- "benim harcamam" ile "bu kullanıcının
+        harcaması" -- ve yalnızca ikincisinin kimin verisini adlandırdığı
+        konusunda güvenilmesi gerekiyor."""
+        response = bank_client.get(
+            CASH_FLOW_URL, headers={"Authorization": "Bearer wrong"}
+        )
+        assert response.status_code == 401
+
+    def test_an_unconfigured_key_refuses_rather_than_opens(self, bank_client, monkeypatch):
+        monkeypatch.delenv("BACKEND_API_KEY", raising=False)
+        response = bank_client.get(CASH_FLOW_URL, headers={"Authorization": "Bearer x"})
+        assert response.status_code == 503
+
+
+class TestCashFlowEndpoint:
+    FLOW = {
+        "has_data": True, "period_days": 90, "months_observed": 3.0,
+        "currency_code": "TRY", "income_total": 112406.75, "income_events": 4,
+        "expense_total": 67452.46, "net_total": 44954.29,
+        "monthly_income": 37468.92, "monthly_expense": 22484.15,
+        "monthly_net": 14984.76,
+        "categories": [{"category": "Kira", "amount": 28000.0,
+                        "monthly_amount": 9333.33, "share_percent": 41.5}],
+        "first_transaction_at": None, "last_transaction_at": None,
+    }
+
+    def test_the_summary_is_returned(self, bank_client, cf_auth, mocker):
+        mocker.patch.object(service, "cash_flow", return_value=self.FLOW)
+        body = bank_client.get(CASH_FLOW_URL, headers=cf_auth).json()
+        assert body["monthly_net"] == 14984.76
+        assert body["categories"][0]["share_percent"] == 41.5
+
+    def test_the_default_window_is_ninety_days(self, bank_client, cf_auth, mocker):
+        """30 DEĞİL: maaş aylık yattığı için 30 günlük pencere hiç maaş
+        içermeyebiliyor. Ölçüldü -- 0 TL gelir, 6.697 TL gider."""
+        spy = mocker.patch.object(service, "cash_flow", return_value=self.FLOW)
+        bank_client.get(CASH_FLOW_URL, headers=cf_auth)
+        assert spy.call_args.kwargs["days"] == 90
+        assert service.CASH_FLOW_WINDOW_DAYS == 90
+
+    def test_a_named_window_is_passed_through(self, bank_client, cf_auth, mocker):
+        spy = mocker.patch.object(service, "cash_flow", return_value=self.FLOW)
+        bank_client.get(f"{CASH_FLOW_URL}?days=180", headers=cf_auth)
+        assert spy.call_args.kwargs["days"] == 180
+
+    @pytest.mark.parametrize("days", [6, 366])
+    def test_the_window_is_bounded(self, bank_client, cf_auth, days):
+        response = bank_client.get(f"{CASH_FLOW_URL}?days={days}", headers=cf_auth)
+        assert response.status_code == 422
+
+    def test_no_banking_records_serialises_with_nulls_not_zeros(
+        self, bank_client, cf_auth, mocker
+    ):
+        """Ölçüldü: 23 kullanıcının 3'ünde hareket var. Sıfır döndürmek "hiç
+        kazanmıyor ve hiç harcamıyor" tespiti olurdu."""
+        mocker.patch.object(
+            service, "cash_flow", return_value=service._empty_cash_flow(90),
+        )
+        body = bank_client.get(CASH_FLOW_URL, headers=cf_auth).json()
+        assert body["has_data"] is False
+        assert body["income_total"] is None and body["net_total"] is None
+        assert body["income_events"] == 0

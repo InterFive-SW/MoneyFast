@@ -9,7 +9,7 @@
 -- Synthetic data only (see CLAUDE.md). Do not hand-edit; re-export.
 
 -- public.users (1)
-INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences") VALUES ('37e9f55b-182c-40ec-9d7e-aa6d43fd1ba0', 'ardak451903@gmail.com', '$2b$12$W9hPigqhZYwqSlx4PHEwROPzh.oeN.kgHZ5H/fyOsYe3yZVnDTrCC', TRUE, '2026-08-27T11:47:43.831768+00:00', '13131313131', 'test', 'test', '+905451463502', TRUE, '{}', 50000, '{}') ON CONFLICT DO NOTHING;
+INSERT INTO public.users ("id", "email", "hashed_password", "is_active", "created_at", "tc_no", "first_name", "last_name", "phone_number", "is_verified", "notification_preferences", "transaction_limit", "user_preferences", "profile_picture_url") VALUES ('37e9f55b-182c-40ec-9d7e-aa6d43fd1ba0', 'ardak451903@gmail.com', '$2b$12$W9hPigqhZYwqSlx4PHEwROPzh.oeN.kgHZ5H/fyOsYe3yZVnDTrCC', TRUE, '2026-08-27T11:47:43.831768+00:00', '13131313131', 'test', 'test', '+905451463502', TRUE, '{}', 50000, '{}', NULL) ON CONFLICT DO NOTHING;
 
 -- investment.investment_accounts (1)
 INSERT INTO investment.investment_accounts ("id", "user_id", "account_number", "name", "currency_code", "cash_balance", "status", "created_at", "iban") VALUES ('003dc19b-5bcb-4eb5-a160-5622f74656b2', '37e9f55b-182c-40ec-9d7e-aa6d43fd1ba0', 'TR-37E9F55B182C', 'Yatırım Hesabı', 'TRY', 25000.0000, 'active', '2026-08-27T11:47:43.838631+00:00', NULL) ON CONFLICT DO NOTHING;

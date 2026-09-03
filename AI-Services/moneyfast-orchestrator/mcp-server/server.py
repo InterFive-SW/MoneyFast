@@ -45,11 +45,16 @@ from mcp.server.fastmcp import FastMCP
 
 import backend_client
 import compliance_tools
+import cash_flow_tools
+import report_tools
+import fundamentals_tools
 import market_data_tools
 import market_research_tools
+import news_tools
 import orchestrator_tools
 import portfolio_tools
 import risk_strategy_tools
+import scenario_tools
 import banking_tools
 import technical_tools
 import transaction_tools
@@ -67,10 +72,33 @@ SERVER_NAME = "moneyfast"
 #: DEĞİŞMEDİ -- o "şu an ne ediyor" sorusunun cevabı, hareketli ortalama ise
 #: başka bir soru ve başka bir başarısızlık biçimi var (geçmiş ister, ve
 #: geçmiş cevaplayamayacak kadar kısa olabilir).
-CONTRACT_VERSION = "v2.10"
+#: v2.11: `get_portfolio_news`. Sahiplik ile haber etiketinin KESİŞİMİ, bir
+#: arama değil -- `rag_semantic_market_search` genişletilmedi, çünkü o araç
+#: serbest metin sorgusu bekliyor ve "portföyümdeki hisselerle ilgili haber"
+#: sorgusu orada gürültü bandında (~0,39) puanlanıyor.
+#: v2.12: `get_portfolio_technicals`. `get_technical_signals` TEK sembol
+#: alıyor ve portföy geneli onun tekrarı değil: sayı ile değer ayrışabiliyor
+#: (ölçüldü -- üç pozisyonun ikisi ortalamasının altında ama değerin %95'i),
+#: ve bu ayrımı modele n tane tek-sembol çağrısından çıkarttırmak, her turda
+#: biraz farklı bir toplam üretirdi.
+#: v2.13: koşullu senaryo, stres testi ve pozisyon simülasyonu. Üçü de
+#: ÖLÇÜM: ikisi geçmiş getirilerin aritmetiği, biri gerçekten olan günler.
+#: `simulate_position_change` yeni bir yetenek değil -- `/risk/simulate`
+#: aylardır yazılmış ve testliydi, hiçbir araç onu çağırmıyordu.
+#: v2.14: `get_company_fundamentals`. YENİ VERİ DEĞİL -- 1.011 enstrümanda
+#: dolu duran otuz beş alan sohbete taşındı. `GET /market/fundamentals`
+#: hepsini zaten veriyordu ve yalnızca hisse detay sayfası okuyordu; ajanın
+#: bir şirket hakkında görebildiği her şey fiyat, değişim, hacim ve dört
+#: orandan ibaretti. `get_market_data`'nın donuk v2.2 şeması DEĞİŞMEDİ.
+#: v2.15: `get_quarterly_financials`. v2.14'ün sahip OLMADIĞI şey: SERİ.
+#: O araç alan başına tek güncel değer saklıyor; bu araç her çeyreği ayrı
+#: saklıyor ve "son çeyrek kârı" sorusunu cevaplayabilen tek yol. Sağlayıcı
+#: çeyrek atlıyor -- 40 hissenin 3'ünde 2025Q3 yok -- dolayısıyla bitişiklik
+#: bayrak olarak taşınıyor ve karşılaştırma ona bağlı.
+CONTRACT_VERSION = "v2.18"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Eleven tools across nine domains.
+MoneyFast tool server. Twenty tools across fourteen domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -80,12 +108,40 @@ Data:    get_portfolio_positions, get_market_data,
 Prices:  get_market_data is the ONLY source for the price or valuation of an
          instrument the user does not hold. A null fundamental means the
          provider does not publish it; report "veri yok", never 0.
+Quarter: get_quarterly_financials is the only tool with a SERIES. Name the
+         quarter in every figure, and compare two quarters ONLY when the
+         payload says they are adjacent -- the provider skips quarters.
+Company: get_company_fundamentals answers "how is the BUSINESS doing" --
+         margins, debt, cash flow, analyst consensus. It is a SNAPSHOT, not
+         a series: there is no previous period stored, so never say "son
+         çeyrek", "arttı" or "düştü" from it. A null field means the
+         provider does not publish it, never zero.
 Trend:   get_technical_signals answers "how is it DOING" as opposed to "what
          does it cost". Relay its `narrative` verbatim, caveat included; a
          null field there means the history is too short to compute it, and
          you must not describe an indicator that came back null.
+         get_portfolio_technicals is the same reading across every HOLDING,
+         plus one aggregate sentence. Its COUNT and its WEIGHT are separate
+         claims and can point opposite ways; never merge them.
+News:    get_portfolio_news is the ONLY tool that links news to what the
+         user OWNS. It reports a window; state the window whenever you
+         report that nothing was published. It carries no sentiment,
+         importance or ranking, and you must not supply one.
 Empty:   an empty list is a valid, complete answer. Never substitute
          remembered or illustrative data for it.
+What-if: run_portfolio_scenario answers "if X moved", simulate_position_change
+         answers "if I traded", get_portfolio_stress_test answers "what
+         already happened". All three are ARITHMETIC OVER PAST DATA, never a
+         forecast. Relay their statement with its caveat, report the
+         assumptions, and never say what a factor will do. There is NO
+         interest-rate series: rate scenarios cannot be measured and must not
+         be approximated with a currency.
+Budget:  get_cash_flow_summary is what someone EARNS and SPENDS, which is a
+         different question from what they OWN. Read `income_events` before
+         reporting a zero income -- monthly salary means a short window can
+         contain none, and "you have no income" is a false statement about
+         someone's salary. `monthly_net` is a measured leftover, never a
+         recommended investment amount.
 Gate:    validate_compliance_rules runs on every user-facing draft that
          references an instrument, a figure, a market view or a
          transaction. Fail closed.
@@ -105,6 +161,11 @@ DOMAIN_MODULES = (
     ("transaction", transaction_tools),
     ("banking", banking_tools),
     ("technical", technical_tools),
+    ("news", news_tools),
+    ("scenario", scenario_tools),
+    ("fundamentals", fundamentals_tools),
+    ("cash_flow", cash_flow_tools),
+    ("report", report_tools),
 )
 
 

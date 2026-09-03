@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { lookupTerm } from '../../lib/glossary'
 
 /**
@@ -19,11 +19,34 @@ interface TermProps {
     align?: 'left' | 'right'
 }
 
+/** Panelin yukarı açılabilmesi için tetikleyicinin üstünde gereken boşluk.
+ *  Ölçüldü: en uzun sözlük girdisi (risk puanı — başlık, açıklama, örnek ve
+ *  üç maddelik ölçek) bu civarda yer kaplıyor. */
+const NEEDED_ABOVE = 260
+
 export default function Term({ termKey, align = 'left' }: TermProps) {
     const entry = lookupTerm(termKey)
     const [open, setOpen] = useState(false)
+    // Panel varsayılan olarak YUKARI açılıyordu ve dikey taşma için bir
+    // seçenek yoktu. Sayfanın üstündeki bir tetikleyicide -- özet şeridindeki
+    // gibi -- kutu başlığın arkasına giriyor ve ilk satırları kırpılıyordu.
+    // Bileşen on iki yerde kullanılıyor; alttakiler sorunsuz görünüyordu, o
+    // yüzden hata aralıklı sanılıyordu.
+    const [placeBelow, setPlaceBelow] = useState(false)
     const wrapperRef = useRef<HTMLSpanElement>(null)
     const panelId = useId()
+
+    const measure = useCallback(() => {
+        const rect = wrapperRef.current?.getBoundingClientRect()
+        if (!rect) return
+        setPlaceBelow(rect.top < NEEDED_ABOVE)
+    }, [])
+
+    // Açılmadan ÖNCE ölçülüyor: boyayı bir kez yanlış yerde yapıp sonra
+    // düzeltmek, kullanıcının gördüğü bir sıçrama olurdu.
+    useLayoutEffect(() => {
+        if (open) measure()
+    }, [open, measure])
 
     useEffect(() => {
         if (!open) return
@@ -35,11 +58,17 @@ export default function Term({ termKey, align = 'left' }: TermProps) {
         }
         document.addEventListener('keydown', onKey)
         document.addEventListener('mousedown', onClickOutside)
+        // Sayfa kayarsa tetikleyicinin üstündeki boşluk değişir; açık bir
+        // panel yeniden ölçülmeli.
+        window.addEventListener('scroll', measure, true)
+        window.addEventListener('resize', measure)
         return () => {
             document.removeEventListener('keydown', onKey)
             document.removeEventListener('mousedown', onClickOutside)
+            window.removeEventListener('scroll', measure, true)
+            window.removeEventListener('resize', measure)
         }
-    }, [open])
+    }, [open, measure])
 
     if (!entry) return null
 
@@ -66,9 +95,9 @@ export default function Term({ termKey, align = 'left' }: TermProps) {
                 <span
                     id={panelId}
                     role="tooltip"
-                    className={`absolute bottom-full z-30 mb-2 w-72 rounded-xl border border-white/10 bg-slate-900 p-3 text-left shadow-2xl ${
-                        align === 'right' ? 'right-0' : 'left-0'
-                    }`}
+                    className={`absolute z-50 max-h-[60vh] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-white/10 bg-slate-900 p-3 text-left shadow-2xl ${
+                        placeBelow ? 'top-full mt-2' : 'bottom-full mb-2'
+                    } ${align === 'right' ? 'right-0' : 'left-0'}`}
                 >
                     <span className="block text-xs font-semibold text-white">{entry.title}</span>
                     <span className="mt-1 block text-[11px] leading-relaxed text-slate-300">

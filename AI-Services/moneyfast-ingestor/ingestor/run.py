@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from . import config, refresh_server, sinks
-from .sources import kap_source, rss_source, yfinance_source
+from .sources import kap_archive, kap_source, rss_source, yfinance_source
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -76,32 +76,89 @@ def market_is_open(moment: datetime | None = None) -> bool:
 #: missing means the provider is struggling and hammering it will not help.
 MISSING_TOLERANCE = 0.25
 
+#: Kaç sembolün eksik olması ORANI anlamlı kılar.
+#:
+#: Oran tek başına küçük katmanda saçmalıyor: bant katmanında dört sembol var
+#: (üç kur + altın) ve BİRİ boş dönerse %25, ikisi %50 -- ikisi de toleransı
+#: aşıyor. Ölçüldü, tek bir turda: "2/4 symbols came back empty" ve hemen
+#: ardından "rate limited". Toleransın kendi gerekçesi büyük bir evren için
+#: yazılmış ("a third of the universe"); dörtlük bir kümede o cümlenin
+#: karşılığı yok.
+#:
+#: Üç, çünkü dörtlük katmanda dördün üçünün boş dönmesi gerçekten bir
+#: sağlayıcı sorunudur; 487'lik katmanda oran zaten çok daha önce devreye
+#: giriyor (122 sembol).
+MISSING_FLOOR = 3
+
 #: Index into config.BACKOFF_LADDER. Widened on a rate limit, reset on a
 #: clean cycle.
-_backoff_step = 0
+#: KATMAN BAŞINA. Tek bir genel sayaçtı ve iki katman onu paylaşıyordu: bant
+#: katmanındaki geçici bir eksik, 487 sembollük toplu katmanın aralığını da
+#: genişletiyordu. İki katmanın ne büyüklüğü ne de ritmi aynı; sağlayıcının
+#: biri hakkında söylediği şey diğeri hakkında bir şey söylemiyor.
+_backoff_steps: dict[str, int] = {}
 
 
-def current_interval_seconds() -> int:
-    """The quote interval, widened while we are being rate limited."""
+#: Katman adından o katmanın taban aralığına.
+_TIER_BASE_SECONDS = {
+    "band": config.band_interval_seconds,
+    "bulk": config.quote_interval_seconds,
+    "all": config.quote_interval_seconds,
+}
+
+#: Aralığı gerçekten değiştirmek için zamanlayıcı gerekiyor. `start_scheduler`
+#: kuruyor; testler ve tek seferlik çalıştırmalar None bırakıyor ve o durumda
+#: geri çekilme yalnızca kaydediliyor.
+_scheduler = None
+_JOB_FOR_TIER = {"band": "quotes_band", "bulk": "quotes_bulk"}
+
+
+def current_interval_seconds(tier: str = "bulk") -> int:
+    """The quote interval for a tier, widened while we are being rate limited."""
     ladder = config.BACKOFF_LADDER
-    multiplier = ladder[min(_backoff_step, len(ladder) - 1)]
-    return config.quote_interval_seconds() * multiplier
+    multiplier = ladder[min(_backoff_steps.get(tier, 0), len(ladder) - 1)]
+    base = _TIER_BASE_SECONDS.get(tier, config.quote_interval_seconds)()
+    return base * multiplier
 
 
-def _note_rate_limit() -> None:
-    global _backoff_step
-    if _backoff_step < len(config.BACKOFF_LADDER) - 1:
-        _backoff_step += 1
+def _apply_interval(tier: str) -> None:
+    """Yeni aralığı ZAMANLAYICIYA uygular.
+
+    Bunu yapmadan önce merdiven yalnızca bir log satırıydı: işler açılışta
+    sabit aralıkla kuruluyor ve `current_interval_seconds` hiçbir yerde
+    okunmuyordu. "widening the quote interval to 2700s" uyarısı, hiç
+    gerçekleşmeyen bir eylemi bildiriyordu -- ve bu, fiyatların neden
+    tazelenmediğini arayan birini yanlış yere bakmaya gönderirdi.
+    """
+    job_id = _JOB_FOR_TIER.get(tier)
+    if _scheduler is None or job_id is None:
+        return
+    try:
+        _scheduler.reschedule_job(
+            job_id, trigger="interval", seconds=current_interval_seconds(tier)
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not reschedule %s: %s", job_id, exc)
+
+
+def _note_rate_limit(tier: str = "bulk") -> None:
+    step = _backoff_steps.get(tier, 0)
+    if step < len(config.BACKOFF_LADDER) - 1:
+        _backoff_steps[tier] = step + 1
+    _apply_interval(tier)
     log.warning(
-        "rate limited; widening the quote interval to %ds", current_interval_seconds()
+        "rate limited on %s; widening its interval to %ds",
+        tier, current_interval_seconds(tier),
     )
 
 
-def _note_success() -> None:
-    global _backoff_step
-    if _backoff_step:
-        log.info("rate limit cleared; back to %ds", config.quote_interval_seconds())
-    _backoff_step = 0
+def _note_success(tier: str = "bulk") -> None:
+    if _backoff_steps.get(tier):
+        _backoff_steps[tier] = 0
+        _apply_interval(tier)
+        log.info(
+            "rate limit cleared on %s; back to %ds", tier, current_interval_seconds(tier)
+        )
 
 
 def run_quotes(
@@ -133,6 +190,10 @@ def run_quotes(
 
     if not force:
         trading = open_markets()
+        # Backend'e her turda bildiriliyor -- KAPALIYKEN DE, çünkü "hepsi
+        # kapalı" da bir olgu ve bildirilmezse backend eski bir kaydı okumaya
+        # devam ederdi.
+        sinks.push_sessions(client, trading)
         if not trading:
             log.info("all markets closed, skipping quote cycle")
             return {"skipped": True}
@@ -154,7 +215,7 @@ def run_quotes(
         # A 429 from the provider is a request to slow down, not a reason to
         # try harder.
         if "429" in str(exc) or "rate" in str(exc).lower():
-            _note_rate_limit()
+            _note_rate_limit(tier)
             return {"rate_limited": True}
         raise
 
@@ -164,20 +225,26 @@ def run_quotes(
     # without the backoff ladder ever engaging.
     requested = sum(1 for p in products if p.get("data_symbol"))
     missing = requested - len(quotes)
-    degraded = requested > 0 and missing > requested * MISSING_TOLERANCE
+    # İKİ KOŞUL BİRDEN. Oran tek başına dörtlük bant katmanında saçmalıyor:
+    # bir sembol %25, iki sembol %50 eder ve ikisi de toleransı aşar.
+    degraded = (
+        requested > 0
+        and missing >= MISSING_FLOOR
+        and missing > requested * MISSING_TOLERANCE
+    )
 
     result = sinks.push_market_data(client, quotes, []) or {}
     if degraded:
         log.warning("%d/%d symbols came back empty", missing, requested)
-        _note_rate_limit()
+        _note_rate_limit(tier)
     else:
-        _note_success()
+        _note_success(tier)
     elapsed = time.monotonic() - started
     log.info(
         "quote cycle [%s]: %d fetched, %s written, %.2fs",
         tier, len(quotes), result.get("quotes_written", 0), elapsed,
     )
-    if elapsed > current_interval_seconds():
+    if elapsed > current_interval_seconds(tier):
         # Visible rather than silent: the scheduler will coalesce the overlap,
         # but a cycle that never fits its budget is a configuration problem.
         log.warning("quote cycle took longer than its interval")
@@ -191,6 +258,23 @@ def run_fundamentals(client: httpx.Client) -> dict:
     result = sinks.push_fundamentals(client, rows) or {}
     log.info("fundamentals cycle: %d fetched, %s written",
              len(rows), result.get("fundamentals_written", 0))
+    return {"fetched": len(rows), **result}
+
+
+def run_quarterly(client: httpx.Client) -> dict:
+    """Çeyreklik gelir tablosu. Temel veriden AYRI bir tur ve daha seyrek.
+
+    Anlık görüntü her gün tazeleniyor çünkü fiyata bağlı oranlar (F/K, PD/DD)
+    her gün değişiyor. Çeyreklik rakamlar ise üç ayda bir açıklanıyor;
+    günde bir çekmek, doksan gün boyunca aynı satırı doksan kez yazmak olurdu.
+
+    Ölçülen hız ~0,8 sn/sembol, dolayısıyla evrenin tamamı ~13 dakika.
+    """
+    products = sinks.fetch_products(client)
+    rows = yfinance_source.fetch_quarterly_financials(products)
+    result = sinks.push_quarterly(client, rows) or {}
+    log.info("quarterly cycle: %d rows fetched, %s written",
+             len(rows), result.get("quarterly_written", 0))
     return {"fetched": len(rows), **result}
 
 
@@ -434,13 +518,45 @@ def _last_trading_day(today: Optional[date] = None) -> str:
 
 def run_news(client: httpx.Client) -> dict:
     items = rss_source.fetch_all()
+
+    # KAP aynı lavaboya akıyor: bildirimler de haber öğesi biçiminde çıkıyor,
+    # dolayısıyla backend ve RAG için ikinci bir yol yok. Fark kaynakta --
+    # RSS haberlerinde sembolü metinden çıkarmak zorundayız (ölçülen isabet
+    # %3), bildirimlerde ihraççı KAP'ın kendi etiketinden geliyor.
+    known = sinks.fetch_known_news_ids(client, kap_source.SOURCE)
+    disclosures = kap_source.fetch_disclosures(known)
+    items = items + disclosures
+
+    # Sıra önemli: backend ÖNCE yazılıyor, çünkü sembolleri o çözüyor
+    # (enstrüman evreni orada, bu serviste değil) ve RAG'a giden kopya o
+    # etiketleri taşımalı. Ters sırada korpus etiketsiz kalırdı -- ölçüldü,
+    # sonuç geri alınmadığı için 1.970 RSS belgesinin sıfırında ticker vardı.
     backend_result = sinks.push_news_to_backend(client, items) or {}
-    embedded = sinks.push_news_to_rag(client, items)
+    symbols = backend_result.pop("news_symbols", None) or {}
+    embedded = sinks.push_news_to_rag(client, items, symbols)
     log.info(
-        "news cycle: %d fetched, %s stored, %d embedded",
-        len(items), backend_result.get("news_written", 0), embedded,
+        "news cycle: %d fetched (%d KAP), %s stored, %d embedded, %d symbol-tagged",
+        len(items), len(disclosures), backend_result.get("news_written", 0),
+        embedded, len(symbols),
     )
-    return {"fetched": len(items), "embedded": embedded, **backend_result}
+    return {
+        "fetched": len(items),
+        "kap": len(disclosures),
+        "embedded": embedded,
+        "tagged": len(symbols),
+        **backend_result,
+    }
+
+
+def _disclosure_index(url: Optional[str]) -> Optional[int]:
+    """Kalıcı bağlantının sonundaki bildirim numarası.
+
+    Numara ayrı bir sütunda saklanmıyor: bağlantı zaten atıf için tutuluyor
+    ve aynı bilgiyi ikinci bir yerde saklamak, ikisinin ayrışabileceği bir
+    yer açardı. Backend `known-ids` ucunda aynı okumayı yapıyor.
+    """
+    tail = (url or "").rstrip("/").rsplit("/", 1)[-1]
+    return int(tail) if tail.isdigit() else None
 
 
 def bist_universe(client: httpx.Client) -> set:
@@ -482,19 +598,24 @@ def run_kap(client: httpx.Client, since=None, until=None, bodies: bool = True) -
     # re-offering a stored one costs nothing (`ON CONFLICT DO NOTHING`).
     since = since or (until - timedelta(days=config.kap_window_days() - 1))
 
-    items = kap_source.fetch_all(bist_universe(client), since, until, client)
+    items = kap_archive.fetch_all(bist_universe(client), since, until, client)
 
     # Which bodies to read is decided BEFORE the listing is stored, because
     # storing it is what would make them all look already-known.
     fresh = []
     if bodies and items:
-        known = sinks.fetch_known_hashes(client, [i["content_hash"] for i in items])
-        fresh = [i for i in items if i["content_hash"] not in known][:KAP_BODY_BUDGET]
+        # Tek bir "elimizde ne var" ucu. Numara kalıcı bağlantının içinde,
+        # dolayısıyla ayrı bir hash sorgusu ikinci bir cevap kaynağı olurdu.
+        known = sinks.fetch_known_news_ids(client, kap_source.SOURCE)
+        fresh = [
+            item for item in items
+            if _disclosure_index(item.get("url")) not in known
+        ][:KAP_BODY_BUDGET]
 
     backend_result = sinks.push_news_to_backend(client, items) or {}
     embedded = sinks.push_disclosures_to_rag(client, _with_bodies(fresh, client))
 
-    unread = kap_source.last_run_failures
+    unread = kap_archive.last_run_failures
     log.info(
         "kap cycle %s..%s: %d matched, %s stored, %d bodies embedded%s",
         since, until, len(items), backend_result.get("news_written", 0), embedded,
@@ -636,15 +757,15 @@ def _with_bodies(items: list, client: httpx.Client) -> list:
         if "/" not in url:
             continue
         index = url.rsplit("/", 1)[-1]
-        detail = kap_source.fetch_detail(index, client)
+        detail = kap_archive.fetch_detail(index, client)
         if detail is None:
             continue
-        text = kap_source.body_text(detail)
+        text = kap_archive.body_text(detail)
         if not text:
             continue
         published = _as_datetime(item["published_at"])
         if _within_pdf_window(published):
-            attachments = kap_source.attachment_text(detail, client)
+            attachments = kap_archive.attachment_text(detail, client)
             if attachments:
                 text = f"{text}\n\n{attachments}"
         symbols = item.get("related_symbols") or []
@@ -689,6 +810,10 @@ def start_scheduler() -> None:
     from apscheduler.schedulers.blocking import BlockingScheduler
 
     scheduler = BlockingScheduler(timezone=ISTANBUL)
+    # Geri çekilme merdiveninin aralığı GERÇEKTEN değiştirebilmesi için.
+    # Bunsuz merdiven yalnızca bir log satırıydı.
+    global _scheduler
+    _scheduler = scheduler
 
     # Sohbetin anlık fiyat sorabilmesi için. Arka planda, kendi iş parçacığında;
     # zamanlayıcı ana iş parçacığında bloklamaya devam ediyor.
@@ -749,16 +874,10 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
-    # Deliberately NOT gated on market hours, unlike quotes: the disclosures
-    # that move a price most are filed after the close and before the open.
-    scheduler.add_job(
-        _job("kap", run_kap),
-        "interval",
-        minutes=config.kap_interval_minutes(),
-        id="kap",
-        max_instances=1,
-        coalesce=True,
-    )
+    # Canlı KAP akışı `run_news`'in içinde: `kap_source` her haber turunda
+    # listeyi çekiyor. Buraya ikinci bir aralıklı iş koymak, iki fetcher'ın
+    # aynı pencere için birbirinden habersiz KAP'a gitmesi demekti --
+    # `courtesy` istekleri aralar ama işi tekrarlamayı engelleyemez.
     # Aynı ikili, aynı gerekçe: `kap-topup` "elimizdeki en yeni bildirim
     # eski mi", `kap-backfill` "hiç arşiv var mı" sorusunu cevaplıyor.
     # `misfire_grace_time=None` zorunlu: run_date scheduler başlamadan

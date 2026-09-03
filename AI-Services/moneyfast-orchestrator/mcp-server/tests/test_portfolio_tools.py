@@ -475,3 +475,127 @@ class TestNullDefaults:
         fake_backend.json("portfolio", portfolio_payload)
         await portfolio_tools.get_portfolio_positions("u_123", base_currency=None)
         assert "base_currency=TRY" in str(fake_backend.last.url)
+
+
+class TestAssetClassVocabulary:
+    """Ölçülen kusur: ajan `["döviz"]` gönderdi, süzgeç hiçbir şeyle eşleşmedi,
+    boş sonuç "Portföyünüzde döviz sınıfına ait bir pozisyon bulunamadı." diye
+    cevaplandı -- kullanıcı o an 20 USDTRY tutuyordu.
+
+    `sort_by`'ın aynası, ama sonucu daha ağır: okunamayan bir sıralama anahtarı
+    "veriye ulaşamadım" veriyordu, yani görünür bir hiçlik. Okunamayan bir
+    varlık sınıfı, kullanıcının neye sahip olduğu hakkında kendinden emin ve
+    YANLIŞ bir cümle veriyor.
+    """
+
+    async def test_the_measured_failure_now_resolves(self, fake_backend):
+        await portfolio_tools.get_portfolio_positions("u_123", asset_classes=["döviz"])
+        assert "asset_classes=FX" in str(fake_backend.last.url)
+
+    @pytest.mark.parametrize(
+        "written,canonical",
+        [
+            ("hisse", "EQUITY"), ("hisse senedi", "EQUITY"), ("stocks", "EQUITY"),
+            ("doviz", "FX"), ("kur", "FX"), ("forex", "FX"),
+            ("altın", "COMMODITY"), ("altin", "COMMODITY"), ("emtia", "COMMODITY"),
+            ("tahvil", "BOND"), ("fon", "MUTUAL_FUND"), ("kripto", "CRYPTO"),
+            ("mevduat", "DEPOSIT"), ("türev", "DERIVATIVE"),
+        ],
+    )
+    async def test_turkish_spellings_fold_onto_the_contract_keys(
+        self, fake_backend, written, canonical
+    ):
+        await portfolio_tools.get_portfolio_positions("u_123", asset_classes=[written])
+        assert f"asset_classes={canonical}" in str(fake_backend.last.url)
+
+    async def test_gold_and_commodity_are_the_same_filter(self, fake_backend):
+        """Altın bu sistemdeki tek emtia. Ayrı bir sınıf uydurmak, sözleşmede
+        olmayan bir değeri varmış gibi göstermek olurdu."""
+        await portfolio_tools.get_portfolio_positions(
+            "u_123", asset_classes=["altın", "emtia"]
+        )
+        assert str(fake_backend.last.url).count("asset_classes=") == 1
+
+    async def test_canonical_values_pass_through(self, fake_backend):
+        await portfolio_tools.get_portfolio_positions(
+            "u_123", asset_classes=["EQUITY", "FX"]
+        )
+        query = str(fake_backend.last.url)
+        assert "asset_classes=EQUITY" in query and "asset_classes=FX" in query
+
+    async def test_case_and_spacing_are_tolerated(self, fake_backend):
+        await portfolio_tools.get_portfolio_positions(
+            "u_123", asset_classes=["mutual fund", " fx "]
+        )
+        query = str(fake_backend.last.url)
+        assert "asset_classes=MUTUAL_FUND" in query and "asset_classes=FX" in query
+
+    async def test_order_is_preserved_and_duplicates_collapse(self, fake_backend):
+        await portfolio_tools.get_portfolio_positions(
+            "u_123", asset_classes=["hisse", "EQUITY", "döviz"]
+        )
+        query = str(fake_backend.last.url)
+        assert query.index("asset_classes=EQUITY") < query.index("asset_classes=FX")
+        assert query.count("asset_classes=EQUITY") == 1
+
+    async def test_an_unreadable_class_raises_rather_than_filtering_to_nothing(
+        self, fake_backend
+    ):
+        with pytest.raises(InvalidInputError) as excinfo:
+            await portfolio_tools.get_portfolio_positions(
+                "u_123", asset_classes=["gayrimenkul"]
+            )
+        # Hata, geçerli kümeyi ADIYLA söylüyor: ajanın ikinci denemesi
+        # tahminle değil, listeyle yapılabilsin.
+        assert "gayrimenkul" in str(excinfo.value)
+        assert "EQUITY" in str(excinfo.value) and "FX" in str(excinfo.value)
+
+    async def test_nothing_reaches_the_backend_when_a_class_is_unreadable(
+        self, fake_backend
+    ):
+        with pytest.raises(InvalidInputError):
+            await portfolio_tools.get_portfolio_positions(
+                "u_123", asset_classes=["EQUITY", "saçmalık"]
+            )
+        assert fake_backend.attempts == 0
+
+    async def test_none_still_means_no_filter(self, fake_backend):
+        await portfolio_tools.get_portfolio_positions("u_123", asset_classes=None)
+        assert "asset_classes" not in str(fake_backend.last.url)
+
+    async def test_an_empty_list_means_no_filter(self, fake_backend):
+        await portfolio_tools.get_portfolio_positions("u_123", asset_classes=[])
+        assert "asset_classes" not in str(fake_backend.last.url)
+
+
+class TestStaleness:
+    """Gözlemin YAŞI ile beslemenin GECİKMESİ ayrı iki şey.
+
+    Toplanıyorlardı ve sonucu şuydu: kapalı bir borsanın son kapanışı on sekiz
+    saat yaşlanınca kullanıcıya "1095 dakika gecikmeli" deniyordu. Besleme o
+    kadar gecikmiyor -- piyasa kapalı.
+    """
+
+    async def test_the_flag_travels(self, fake_backend, portfolio_payload):
+        fake_backend.json("portfolio", {**portfolio_payload, "is_stale": True})
+        got = await portfolio_tools.get_portfolio_positions("u_123")
+        assert got["is_stale"] is True
+
+    async def test_a_backend_without_it_reports_unknown_not_false(
+        self, fake_backend, portfolio_payload
+    ):
+        """Sözleşme EKLEYEREK değişti. Alan gelmezse "eski değil" demek,
+        bilinmeyeni bir tespite çevirmek olurdu."""
+        fake_backend.json("portfolio", without(portfolio_payload, "is_stale"))
+        got = await portfolio_tools.get_portfolio_positions("u_123")
+        assert got["is_stale"] is None
+
+    def test_the_contract_forbids_calling_it_a_delay(self):
+        doc = " ".join(portfolio_tools.get_portfolio_positions.__doc__.split())
+        assert "Do NOT call it a delay" in doc
+
+    def test_the_contract_forbids_asserting_why(self):
+        """Aynı eskime ingestor durduğunda da olur; "piyasa kapalı" sistemin
+        bilmediği bir şeyi iddia etmek olurdu."""
+        doc = " ".join(portfolio_tools.get_portfolio_positions.__doc__.split())
+        assert "do NOT assert WHY" in doc

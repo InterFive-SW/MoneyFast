@@ -1,20 +1,19 @@
 import asyncio
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.modules.investment import market_service
+from app.core.deps import get_current_user_id, require_service_token
+from app.modules.investment import ai_service, market_service
+from app.modules.notification import service as notification_service
 from . import service, stream, technicals
 from .schemas import (
-    KnownHashesOut,
-    KnownHashesRequest,
     IngestResult,
     FundamentalsIngestRequest,
     CandleSeriesOut,
@@ -23,7 +22,12 @@ from .schemas import (
     MarketHeatmapOut,
     MarketTicker,
     NewsIngestRequest,
+    SessionStateRequest,
     NewsItem,
+    PortfolioNewsOut,
+    PortfolioTechnicalOut,
+    QuarterlyIngestRequest,
+    QuarterlyOut,
     QuoteIngestRequest,
     TechnicalSignalsOut,
     FundamentalsOut,
@@ -40,24 +44,6 @@ router = APIRouter(tags=["market"])
 TICKER_STRIP = ["XU100", "USDTRY", "EURTRY", "XAUUSD"]
 
 
-def require_service_token(
-    authorization: Optional[str] = Header(default=None),
-) -> None:
-    """Guard for the service-to-service ingest endpoints.
-
-    These write market data the whole system then presents as fact, so they
-    are not open. When BACKEND_API_KEY is unset the guard refuses rather than
-    waving requests through: an ingest endpoint that silently became public
-    because an env var was missing is the kind of thing nobody notices.
-    """
-    expected = os.getenv("BACKEND_API_KEY")
-    if not expected:
-        raise HTTPException(
-            status_code=503,
-            detail="Ingest endpoint is not configured (BACKEND_API_KEY unset).",
-        )
-    if authorization != f"Bearer {expected}":
-        raise HTTPException(status_code=401, detail="Invalid service credentials.")
 
 
 @router.get("/tickers", response_model=List[MarketTicker])
@@ -119,6 +105,90 @@ def get_market_news(
         for row in service.latest_news(db, limit=limit)
     ]
 
+
+
+@router.get(
+    "/news/portfolio",
+    response_model=PortfolioNewsOut,
+    summary="Portföye dokunan haberler (oturum sahibinin pozisyonları)",
+)
+def get_portfolio_news(
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=service.NEWS_WINDOW_DAYS, ge=1, le=365),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Kullanıcının tuttuğu hisselere bağlı haberler.
+
+    Oturum ZORUNLU, demo portföyüne düşülmüyor. Okuma uçlarının çoğu anonim
+    çağrıyı demo hesabına düşürüyor ve bu zararsız -- ama "portföyünüze
+    dokunan haberler" başlığı altında başkasının portföyünün haberlerini
+    göstermek, izleme listesinin eskiden yaptığı hatanın aynısı olurdu:
+    kullanıcının seçmediği bir listeyi onunmuş gibi sunmak.
+
+    Haberler YORUMLANMIYOR. Başlık, kaynak ve tarih veriliyor; bir haberin
+    olumlu ya da olumsuz olduğu söylenmiyor, çünkü bu bir piyasa görüşüdür ve
+    bu sistemin görüş tutma izni yok.
+    """
+    return _portfolio_news_payload(db, user_id, limit=limit, days=days)
+
+
+@router.get(
+    "/news/portfolio/{user_id}",
+    response_model=PortfolioNewsOut,
+    summary="Portföye dokunan haberler (MCP sözleşmesi)",
+    # Konusunu YOLDA adlandıran her uç gibi korunuyor. Oturum kapsamlı ikizi
+    # (`/news/portfolio`) kullanıcıyı token'dan çözer ve yalnızca çağıranın
+    # kendi verisini döndürebilir; bu döndüremez. Korumasızken bir kullanıcı
+    # id'si bilen herkes o kişinin TUTTUĞU SEMBOLLERİ okuyabiliyordu.
+    dependencies=[Depends(require_service_token)],
+)
+def get_portfolio_news_for_ai(
+    user_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=service.NEWS_WINDOW_DAYS, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """
+    Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+
+    `get_portfolio_positions`'ın deseni: MCP araçları kullanıcıyı doğrulanmış
+    oturum zarfından alıp yola koyar, bearer token taşımaz. İkisi TEK bir
+    yardımcıyı çağırıyor, böylece panel ile sohbetin kullanıcının neye sahip
+    olduğu ya da hangi haberin ona dokunduğu konusunda ayrışması mümkün değil.
+    """
+    return _portfolio_news_payload(db, user_id, limit=limit, days=days)
+
+
+def _portfolio_news_payload(db: Session, user_id: str, limit: int, days: int) -> dict:
+    """İki ucun ortak gövdesi."""
+    holdings = market_service.holdings(db, user_id=user_id)
+    symbols = service.held_symbols(holdings)
+    names = {holding["symbol"]: holding.get("name") or holding["symbol"] for holding in holdings}
+    rows, counts = service.portfolio_news(db, symbols, limit=limit, days=days)
+    held = set(symbols)
+    return {
+        "symbols": [
+            {"symbol": symbol, "name": names.get(symbol, symbol), "count": counts.get(symbol, 0)}
+            for symbol in symbols
+        ],
+        "items": [
+            {
+                "id": row.id,
+                "source": row.source,
+                "title": row.title,
+                "url": row.url or "#",
+                "time": _relative_time(row.published_at),
+                "publishedAt": row.published_at,
+                "sentiment": "neutral",
+                "relatedSymbols": list(row.related_symbols or []),
+                "heldSymbols": [s for s in (row.related_symbols or []) if s in held],
+            }
+            for row in rows
+        ],
+        "windowDays": days,
+    }
 
 
 @router.get(
@@ -350,6 +420,148 @@ def get_technicals(
     }
 
 
+
+@router.get(
+    "/portfolio/technical",
+    response_model=PortfolioTechnicalOut,
+    summary="Portföy geneli teknik görünüm",
+)
+def get_portfolio_technical(
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Her pozisyonun teknik durumu ve portföy geneli toplulaştırma.
+
+    `market` modülünde, `investment`ta değil. Teknik motor burada ve bu modül
+    zaten `investment.market_service`'i okuyor; uç noktayı investment'a koymak
+    iki modül arasında ÇİFT YÖNLÜ bir bağımlılık açardı (`market.technicals`
+    da `risk.returns`'ü okuyor, yani zincir zaten tek yönlü kurulu). Yolu
+    değil, bağımlılık yönünü korumak önemli.
+
+    Sayfadaki tek hisse görünümüyle aynı `compute`/`narrate` çağrılıyor: iki
+    yüzeyin aynı hisse için farklı bir eğilim söylemesi mümkün değil.
+    """
+    return _portfolio_technical_payload(db, user_id)
+
+
+@router.get(
+    "/portfolio/technical/{user_id}",
+    response_model=PortfolioTechnicalOut,
+    summary="Portföy geneli teknik görünüm (MCP sözleşmesi)",
+    dependencies=[Depends(require_service_token)],
+)
+def get_portfolio_technical_for_ai(user_id: str, db: Session = Depends(get_db)):
+    """
+    Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+
+    `get_portfolio_positions` ve `news/portfolio` ile aynı desen: MCP araçları
+    kullanıcıyı doğrulanmış oturum zarfından alıp yola koyar. İkisi TEK bir
+    yardımcıyı çağırıyor, böylece panelin ve sohbetin aynı portföy için farklı
+    bir eğilim söylemesi mümkün değil.
+    """
+    return _portfolio_technical_payload(db, user_id)
+
+
+def _portfolio_technical_payload(db: Session, user_id: str) -> dict:
+    """İki ucun ortak gövdesi."""
+    holdings = market_service.holdings(db, user_id=user_id)
+    rates = ai_service.fx_rates(market_service.latest_quotes(db))
+    # `holding_value`'ın varsayılanıyla aynı; ekranın para birimi ürün
+    # genelinde TRY ve ayrı bir sabit tanımlamak, ikisinin ayrışabileceği
+    # bir yer açardı.
+    base = "TRY"
+
+    rows, unconvertible = [], []
+    for holding in holdings:
+        symbol = holding["symbol"]
+        bars = market_service.candle_series(db, symbol, limit=technicals.BARS_NEEDED)
+        signals = technicals.compute(bars)
+        # Değer, taban para birimine çevrilmiş hâliyle. Çevrilemeyen pozisyon
+        # None kalır ve ağırlık hesabına girmez -- kuru olmayan bir pozisyonu
+        # 1.0 ile çevirmek, 15.098 TL'lik bir varlığı 315 TL saymak demekti.
+        value = ai_service.holding_value(holding, rates, base)
+        if value is None:
+            unconvertible.append(symbol)
+        rows.append(
+            {
+                "symbol": symbol,
+                "name": holding.get("name") or symbol,
+                "currency": holding.get("currency") or base,
+                "signals": signals,
+                "narrative": technicals.narrate(symbol, signals),
+                "value": value,
+            }
+        )
+
+    return {
+        "base_currency": base,
+        "positions": rows,
+        "summary": technicals.aggregate(rows),
+        "unconvertible": unconvertible,
+    }
+
+
+
+@router.get(
+    "/quarterly",
+    response_model=QuarterlyOut,
+    summary="Bir enstrümanın çeyreklik gelir tablosu serisi",
+)
+def get_quarterly(
+    symbol: str = Query(..., min_length=1),
+    limit: int = Query(default=8, ge=1, le=20),
+    db: Session = Depends(get_db),
+):
+    """
+    Çeyrek çeyrek gelir, net kâr, vergi öncesi kâr ve faaliyet gideri.
+
+    `/fundamentals` bir ANLIK GÖRÜNTÜ: alan başına tek güncel değer, geçmiş
+    yok. Bu uç seriyi veriyor ve "son çeyrek kârı önceki çeyreğe göre" gibi
+    bir cümleyi ilk kez mümkün kılan şey bu.
+
+    BİTİŞİKLİK YANITTA. Sağlayıcının dönemleri ardışık gelmiyor -- ölçüldü,
+    40 hissenin 3'ünde 2025Q3 gelir tablosunda hiç yok. "Son iki satırı al"
+    diyen bir tüketici o hisselerde 2025Q2 ile 2025Q4'ü kıyaslar ve bunu
+    söylemez; bu yüzden kural sunucuda hesaplanıp bayrak olarak gönderiliyor.
+
+    Verisi olmayan enstrüman 404 DEĞİL, boş bir seri döndürür: "bu şirket için
+    çeyreklik veri yok" bir cevaptır ve ölçülen kapsamada evrenin ~%15'i için
+    doğru cevap odur.
+    """
+    found = market_service.quarterly_for(db, symbol, limit=limit)
+    if found is None:
+        product = market_service.resolve_symbol(db, symbol)
+        return {
+            "symbol": product.symbol if product else symbol.upper(),
+            "name": (product.name if product else symbol.upper()) or symbol.upper(),
+            "currency": (product.currency_code if product else "TRY") or "TRY",
+            "periods": [],
+        }
+    return found
+
+
+@router.post(
+    "/quarterly/ingest",
+    response_model=IngestResult,
+    summary="Çeyreklik finansalları yükle (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def ingest_quarterly(request: QuarterlyIngestRequest, db: Session = Depends(get_db)):
+    """
+    Çeyreklik satırları yazar; aynı dönem güncellenir, ikinci satır açılmaz.
+
+    Sağlayıcı yayımlanmış bir çeyreği sonradan düzeltebiliyor ve iki sürümü
+    yan yana saklamak, hangisinin doğru olduğunu söyleyemeyen bir seri
+    bırakırdı.
+    """
+    written = market_service.upsert_quarterly(
+        db, [item.model_dump() for item in request.items]
+    )
+    log.info("ingested %d quarterly rows of %d offered", written, len(request.items))
+    return {"quotes_written": 0, "candles_written": 0, "news_written": 0,
+            "quarterly_written": written}
+
 @router.get(
     "/stream",
     summary="Canlı fiyat akışı (Server-Sent Events)",
@@ -413,6 +625,29 @@ def ingest_market_data(request: QuoteIngestRequest, db: Session = Depends(get_db
 
 
 @router.get(
+    "/news/known-ids",
+    summary="Kayıtlı bildirim numaraları (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def known_news_ids(
+    source: str = Query(..., min_length=2, max_length=40),
+    db: Session = Depends(get_db),
+):
+    """`ingestor`'ın "bunlardan hangileri bende zaten var" diye sorduğu uç.
+
+    KAP listesi her koşuda iki bin bildirim döndürüyor ve her birinin gövdesi
+    ayrı bir sayfada. Sormadan çekmek, aynı iki bin sayfayı on beş dakikada
+    bir yeniden istemek olurdu. `candles/coverage` ile aynı desen ve aynı
+    sebep: kaynağa neyi zaten aldığımızı sormak yerine ona söylemek.
+
+    Numara URL'den okunuyor, ayrı bir sütundan değil -- bildirimin adresi
+    `.../Bildirim/1656735` ve numara zaten orada. Bunun için şema büyütmek,
+    aynı bilgiyi ikinci kez saklamak olurdu.
+    """
+    return {"source": source, "ids": service.known_news_ids(db, source)}
+
+
+@router.get(
     "/candles/coverage",
     summary="Mum verisi kapsaması (servisler arası)",
     dependencies=[Depends(require_service_token)],
@@ -457,6 +692,58 @@ def fundamentals_missing(db: Session = Depends(get_db)):
     return {"symbols": market_service.symbols_without_fundamentals(db)}
 
 
+def _notify_holders(db: Session, fresh: list[dict]) -> int:
+    """Yeni gelen bir haber, o hisseyi TUTAN kullanıcılara bildirilir.
+
+    Yalnızca gerçekten eklenen haberler için: `upsert_news` içerik hash'inde
+    tekilleştiriyor ve zaten duran bir haberi yeniden bildirmek, akışı otuz
+    saniyede bir tekrar eden bir gürültüye çevirirdi.
+
+    Bir haber kullanıcının BİRDEN ÇOK hissesine dokunuyorsa yine TEK bildirim
+    yazılıyor: aynı yazıyı üç kez göstermek, üç ayrı haber varmış gibi
+    okunurdu.
+
+    İki modülü burada birleştirmenin sebebi: pozisyonların sorgusu onları
+    sahiplenen modülde (`market_service.holders_of`), satırın yazılması
+    bildirim modülünde, ve hiçbiri diğerinin tablosunu okumuyor.
+
+    Bildirim yazamamak haber yüklemesini DÜŞÜRMEZ: haber sistemin verisi,
+    bildirim onun üstüne konan bir kolaylık.
+    """
+    if not fresh:
+        return 0
+    symbols = sorted({s for item in fresh for s in item["symbols"]})
+    holders = market_service.holders_of(db, symbols)
+    if not holders:
+        return 0
+
+    per_user: dict[str, list[dict]] = {}
+    for item in fresh:
+        for user_id in {u for s in item["symbols"] for u in holders.get(s, set())}:
+            per_user.setdefault(user_id, []).append(item)
+
+    written = 0
+    for user_id, items in per_user.items():
+        capped = items[: notification_service.MAX_PER_USER_PER_BATCH]
+        if len(items) > len(capped):
+            log.info(
+                "notification batch capped for one user: %d -> %d",
+                len(items), len(capped),
+            )
+        for item in capped:
+            held = sorted(
+                s for s in item["symbols"] if user_id in holders.get(s, set())
+            )
+            written += notification_service.create_many(
+                db, [user_id],
+                title="Portföyünüzle ilgili haber",
+                description=f"{', '.join(held)}: {item['title']}"[:255],
+                type="INFO",
+                link_url="/analiz/genel",
+            )
+    return written
+
+
 @router.post(
     "/news/ingest",
     response_model=IngestResult,
@@ -464,9 +751,24 @@ def fundamentals_missing(db: Session = Depends(get_db)):
     dependencies=[Depends(require_service_token)],
 )
 def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db)):
-    written = service.upsert_news(db, [item.model_dump() for item in request.items])
-    log.info("ingested %d new news items of %d offered", written, len(request.items))
-    return {"quotes_written": 0, "candles_written": 0, "news_written": written}
+    written, symbols, fresh = service.upsert_news(
+        db, [item.model_dump() for item in request.items]
+    )
+    # `upsert_news` kendi commit'ini attı; bildirimler ayrı bir transaction.
+    # Bildirimi yazamamak haberi kaybetmemeli, o yüzden bu sırayla.
+    notified = _notify_holders(db, fresh)
+    if notified:
+        db.commit()
+    log.info(
+        "ingested %d new news items of %d offered, %d symbol-tagged, "
+        "%d notifications",
+        written, len(request.items), len(symbols), notified,
+    )
+    # Semboller geri veriliyor: çözümleme evrenin bulunduğu yerde yapılıyor
+    # ve `ingestor` aynı haberi RAG'a da yazıyor. Sonucu geri vermezsek
+    # korpustaki kopya etiketsiz kalır.
+    return {"quotes_written": 0, "candles_written": 0, "news_written": written,
+            "news_symbols": symbols}
 
 
 @router.get(
@@ -517,23 +819,6 @@ def news_archive(
 
 
 @router.post(
-    "/news/known-hashes",
-    response_model=KnownHashesOut,
-    summary="Bu haberlerden hangileri zaten kayıtlı (servisler arası)",
-    dependencies=[Depends(require_service_token)],
-)
-def news_known_hashes(request: KnownHashesRequest, db: Session = Depends(get_db)):
-    """Gövde indirmeden önce sorulan soru.
-
-    KAP bildirimlerinin anahtarı bildirim numarasından türetildiği için
-    listeleme yanıtından hesaplanabiliyor: hangi bildirimin gövdesini
-    çekmeye değeceği, tek bir gövde indirilmeden bilinebiliyor. Geçmişe
-    dönük taramayı yeniden başlatılabilir kılan şey bu.
-    """
-    return {"known": service.known_hashes(db, request.hashes)}
-
-
-@router.post(
     "/fundamentals/ingest",
     response_model=IngestResult,
     summary="Temel oranları yükle (servisler arası)",
@@ -576,3 +861,25 @@ async def health_check():
     Market modülünün durumunu (health check) kontrol eder.
     """
     return {"status": "ok", "module": "market"}
+
+
+@router.post(
+    "/sessions",
+    summary="Açık piyasaları bildir (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def record_sessions(request: SessionStateRequest, db: Session = Depends(get_db)):
+    """
+    Hangi piyasaların şu an işlem gördüğünü kaydeder.
+
+    Saatler burada DEĞİL, `ingestor`'da -- ve orada kalıyor. Backend'e KURAL
+    değil OLGU geliyor: ikinci bir saat listesi tutmak, bu depoda defalarca
+    ayrışan türden bir şey olurdu.
+
+    Bu olmadan backend, eski bir fiyatın "piyasa kapalı" mı yoksa "veri akışı
+    durdu" mu olduğunu ayırt edemiyordu ve kullanıcıya sebebi söylemeyen bir
+    cümle kurmak zorundaydı.
+    """
+    written = market_service.record_sessions(db, request.open)
+    log.info("session state: %d markets, open=%s", written, sorted(request.open))
+    return {"markets": written}

@@ -140,6 +140,34 @@ class TestNewsPush:
         assert sinks.push_news_to_rag(client_for(handler), items) == 1
 
 
+class TestKnownNewsIds:
+    """`ingestor` backend'e "bunlardan hangileri sende var" diye soruyor.
+
+    KAP listesi her koşuda iki bin bildirim döndürüyor ve her birinin gövdesi
+    ayrı bir sayfada. Sormadan çekmek, aynı iki bin sayfayı on beş dakikada
+    bir yeniden istemek olurdu.
+    """
+
+    def test_ids_come_back_as_a_set_of_numbers(self):
+        handler = recorder(body={"source": "KAP", "ids": [1, 2, 3]})
+        assert sinks.fetch_known_news_ids(client_for(handler), "KAP") == {1, 2, 3}
+
+    def test_the_source_is_passed_as_a_filter(self):
+        handler = recorder(body={"ids": []})
+        sinks.fetch_known_news_ids(client_for(handler), "KAP")
+        assert "source=KAP" in str(handler.calls[0].url)
+        assert handler.calls[0].url.path.endswith("/market/news/known-ids")
+
+    def test_a_failure_reads_as_nothing_stored(self):
+        """Boş küme "hiçbiri bende yok" demek ve koşu başına ayrıntı sınırı
+        bunun bir akına dönüşmesini engelliyor."""
+        assert sinks.fetch_known_news_ids(client_for(recorder(status=500)), "KAP") == set()
+
+    def test_a_missing_key_is_not_a_crash(self):
+        handler = recorder(body={"source": "KAP"})
+        assert sinks.fetch_known_news_ids(client_for(handler), "KAP") == set()
+
+
 class TestProductFetch:
     def test_symbol_map_comes_from_the_backend(self):
         """Asked for rather than configured here, so adding an instrument is a
@@ -341,7 +369,7 @@ class TestCorpusBackfill:
             lambda c, urls: {"https://www.kap.org.tr/tr/Bildirim/1"},
         )
         read = []
-        monkeypatch.setattr(run.kap_source, "fetch_detail",
+        monkeypatch.setattr(run.kap_archive, "fetch_detail",
                             lambda i, c: read.append(i) or {"disclosureBody": ["<p>x</p>"]})
         monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
         assert run.backfill_kap_corpus(None)["embedded"] == 1
@@ -355,7 +383,7 @@ class TestCorpusBackfill:
         monkeypatch.setattr(run.sinks, "fetch_news_archive",
                             lambda c, s, l, o: pages.pop(0) if pages else [])
         monkeypatch.setattr(run.sinks, "fetch_embedded_urls", lambda c, urls: set())
-        monkeypatch.setattr(run.kap_source, "fetch_detail",
+        monkeypatch.setattr(run.kap_archive, "fetch_detail",
                             lambda i, c: {"disclosureBody": ["<p>x</p>"]})
         monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
         assert run.backfill_kap_corpus(None)["embedded"] == 2
@@ -371,7 +399,7 @@ class TestCorpusBackfill:
         def refuse(*a, **k):
             pytest.fail("nothing is missing; no body should be fetched")
 
-        monkeypatch.setattr(run.kap_source, "fetch_detail", refuse)
+        monkeypatch.setattr(run.kap_archive, "fetch_detail", refuse)
         assert run.backfill_kap_corpus(None) == {"fetched": 0, "embedded": 0}
 
     def test_a_zero_budget_switches_the_job_off(self, monkeypatch):
@@ -392,7 +420,7 @@ class TestCorpusBackfill:
                             lambda c, s, l, o: pages.pop(0) if pages else [])
         monkeypatch.setattr(run.sinks, "fetch_embedded_urls",
                             lambda c, urls: asked.append(urls) or set())
-        monkeypatch.setattr(run.kap_source, "fetch_detail", lambda i, c: None)
+        monkeypatch.setattr(run.kap_archive, "fetch_detail", lambda i, c: None)
         monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
         run.backfill_kap_corpus(None)
         assert asked == [[]]
@@ -403,7 +431,7 @@ class TestCorpusBackfill:
         def refuse(*a, **k):
             pytest.fail("there is no disclosure index to fetch")
 
-        monkeypatch.setattr(run.kap_source, "fetch_detail", refuse)
+        monkeypatch.setattr(run.kap_archive, "fetch_detail", refuse)
         assert run._with_bodies([{"url": None, "title": "t", "related_symbols": [],
                                   "published_at": NOW}], None) == []
 
@@ -411,9 +439,9 @@ class TestCorpusBackfill:
         """Arşiv ucu ISO metin döndürüyor, yoklama ise datetime taşıyor. Ek
         penceresi tarih aritmetiği yapıyor ve metinle çalışmıyor."""
         monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
-        monkeypatch.setattr(run.kap_source, "fetch_detail",
+        monkeypatch.setattr(run.kap_archive, "fetch_detail",
                             lambda i, c: {"disclosureBody": ["<p>gövde</p>"]})
-        monkeypatch.setattr(run.kap_source, "attachment_text", lambda d, c: "")
+        monkeypatch.setattr(run.kap_archive, "attachment_text", lambda d, c: "")
         docs = run._with_bodies([{
             "url": ".../1", "title": "t", "related_symbols": [],
             "published_at": datetime.now(timezone.utc).isoformat(),
@@ -508,28 +536,6 @@ class TestKapCatchUp:
         assert span["days"] == 183
 
 
-class TestKnownHashes:
-    def test_the_backend_is_asked_which_are_already_held(self):
-        handler = recorder(body={"known": ["a" * 64]})
-        got = sinks.fetch_known_hashes(client_for(handler), ["a" * 64, "b" * 64])
-        assert got == {"a" * 64}
-        assert handler.calls[0].url.path.endswith("/market/news/known-hashes")
-
-    def test_an_empty_list_asks_nothing(self):
-        def handler(request):
-            pytest.fail("nothing to ask about; do not call the backend")
-
-        assert sinks.fetch_known_hashes(client_for(handler), []) == set()
-
-    def test_a_failed_lookup_assumes_nothing_is_held(self):
-        """The safe direction: the caller then does the complete thing rather
-        than skipping work it should have done."""
-        assert sinks.fetch_known_hashes(client_for(recorder(status=503)), ["a" * 64]) == set()
-
-    def test_a_malformed_answer_assumes_nothing_is_held(self):
-        assert sinks.fetch_known_hashes(client_for(recorder(body={})), ["a" * 64]) == set()
-
-
 class TestDisclosureCorpusPush:
     def _doc(self, **over):
         doc = {
@@ -552,7 +558,11 @@ class TestDisclosureCorpusPush:
         assert body["category"] == "kap-disclosure"
         assert body["source"] == "KAP"
         assert body["ticker"] == "THYAO"
-        assert body["source_url"].endswith("/Bildirim/1")
+        # `#ekler`: canlı akış aynı bildirimin GÖVDESİNİ dakikalar içinde
+        # çıplak adresle korpusa yazıyor. Aynı adresi kullansaydık
+        # `documents/known-urls` "bende var" der ve ekli bilançolar bir daha
+        # hiç okunmazdı. Parça hâlâ doğru KAP sayfasına çözülüyor.
+        assert body["source_url"] == "https://www.kap.org.tr/tr/Bildirim/1#ekler"
 
     def test_a_duplicate_is_not_counted_as_written(self):
         handler = recorder(body={"status": "duplicate"})
@@ -597,10 +607,52 @@ class TestDisclosureCorpusPush:
 class TestCycles:
     def test_news_cycle_reports_both_destinations(self, monkeypatch):
         monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [{"title": "x"}])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: set())
+        monkeypatch.setattr(run.kap_source, "fetch_disclosures", lambda known: [])
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
-        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i: 1)
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 1)
         result = run.run_news(None)
-        assert result == {"fetched": 1, "embedded": 1, "news_written": 1}
+        assert result == {"fetched": 1, "kap": 0, "embedded": 1, "tagged": 0,
+                          "news_written": 1}
+
+    def test_disclosures_ride_the_same_pipeline_as_news(self, monkeypatch):
+        """KAP için ikinci bir yol açılmadı: bildirimler de haber öğesi
+        biçiminde çıkıyor ve aynı lavaboya akıyor. Ayrı bir yol, backend'in
+        ve RAG'ın iki farklı biçim tanıması demekti."""
+        pushed = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [{"title": "haber"}])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: {1, 2})
+        monkeypatch.setattr(
+            run.kap_source, "fetch_disclosures", lambda known: [{"title": "bildirim"}]
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: pushed.update(backend=list(i)) or {"news_written": 2},
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i, s=None: pushed.update(rag=list(i), symbols=s) or 2,
+        )
+        result = run.run_news(None)
+        assert result["kap"] == 1
+        assert [x["title"] for x in pushed["backend"]] == ["haber", "bildirim"]
+        # Aynı liste ikisine de gidiyor.
+        assert pushed["rag"] == pushed["backend"]
+
+    def test_the_backend_is_asked_what_it_already_has(self, monkeypatch):
+        """Sormadan çekmek, aynı iki bin sayfayı on beş dakikada bir yeniden
+        istemek olurdu."""
+        seen = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: {7, 8})
+        monkeypatch.setattr(
+            run.kap_source, "fetch_disclosures",
+            lambda known: seen.update(known=known) or [],
+        )
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 0)
+        run.run_news(None)
+        assert seen["known"] == {7, 8}
 
     def test_kap_cycle_pushes_matched_disclosures_to_the_backend(self, monkeypatch):
         """Same sink as RSS: a disclosure IS market news, it just arrives with
@@ -616,7 +668,7 @@ class TestCycles:
             seen["span"] = (since, until)
             return [{"title": "THYAO — bir şey"}]
 
-        monkeypatch.setattr(run.kap_source, "fetch_all", fake_fetch)
+        monkeypatch.setattr(run.kap_archive, "fetch_all", fake_fetch)
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
 
         assert run.run_kap(None, bodies=False) == {
@@ -636,7 +688,7 @@ class TestCycles:
             span["days"] = (until - since).days
             return []
 
-        monkeypatch.setattr(run.kap_source, "fetch_all", fake_fetch)
+        monkeypatch.setattr(run.kap_archive, "fetch_all", fake_fetch)
         run.run_kap(None, bodies=False)
         assert span["days"] == 2
 
@@ -651,13 +703,13 @@ class TestCycles:
             span["range"] = (since, until)
             return []
 
-        monkeypatch.setattr(run.kap_source, "fetch_all", fake_fetch)
+        monkeypatch.setattr(run.kap_archive, "fetch_all", fake_fetch)
         run.run_kap(None, since=date(2026, 3, 1), until=date(2026, 3, 10), bodies=False)
         assert span["range"] == (date(2026, 3, 1), date(2026, 3, 10))
 
     def test_a_kap_push_failure_still_reports_what_was_fetched(self, monkeypatch):
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
-        monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: [{"title": "x"}])
+        monkeypatch.setattr(run.kap_archive, "fetch_all", lambda *a, **k: [{"title": "x"}])
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: None)
         assert run.run_kap(None, bodies=False) == {"fetched": 1, "embedded": 0}
 
@@ -671,12 +723,12 @@ class TestCycles:
              "published_at": NOW, "related_symbols": ["THYAO"]},
         ]
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
-        monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: items)
-        monkeypatch.setattr(run.sinks, "fetch_known_hashes", lambda c, h: {"a" * 64})
+        monkeypatch.setattr(run.kap_archive, "fetch_all", lambda *a, **k: items)
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, src: {1})
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
         read = []
         monkeypatch.setattr(
-            run.kap_source, "fetch_detail",
+            run.kap_archive, "fetch_detail",
             lambda index, client: read.append(index) or {"disclosureBody": ["<p>x</p>"]},
         )
         monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
@@ -689,8 +741,8 @@ class TestCycles:
         Without this the cycle reports a smaller number as if it were the
         whole answer — measured for real at 14.589 against 28.508."""
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
-        monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: [])
-        monkeypatch.setattr(run.kap_source, "last_run_failures", 7)
+        monkeypatch.setattr(run.kap_archive, "fetch_all", lambda *a, **k: [])
+        monkeypatch.setattr(run.kap_archive, "last_run_failures", 7)
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
         monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: 0)
         assert run.run_kap(None, bodies=False)["windows_unread"] == 7
@@ -705,18 +757,18 @@ class TestCycles:
             for i in range(5)
         ]
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
-        monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: items)
-        monkeypatch.setattr(run.sinks, "fetch_known_hashes", lambda c, h: set())
+        monkeypatch.setattr(run.kap_archive, "fetch_all", lambda *a, **k: items)
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, src: set())
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
         monkeypatch.setattr(
-            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>x</p>"]}
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>x</p>"]}
         )
         monkeypatch.setattr(run.sinks, "push_disclosures_to_rag", lambda c, d: len(d))
         assert run.run_kap(None)["embedded"] == 2
 
     def test_bodies_can_be_switched_off_for_a_listing_only_pass(self, monkeypatch):
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
-        monkeypatch.setattr(run.kap_source, "fetch_all", lambda *a, **k: [
+        monkeypatch.setattr(run.kap_archive, "fetch_all", lambda *a, **k: [
             {"content_hash": "a" * 64, "url": ".../1", "title": "t",
              "published_at": NOW, "related_symbols": []}])
         monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {})
@@ -725,14 +777,14 @@ class TestCycles:
         def refuse(*a, **k):
             pytest.fail("bodies were switched off")
 
-        monkeypatch.setattr(run.sinks, "fetch_known_hashes", refuse)
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", refuse)
         assert run.run_kap(None, bodies=False)["embedded"] == 0
 
     def test_every_issuer_is_named_in_the_text(self, monkeypatch):
         """rag.documents.ticker is one column, so a two-company notice can
         only be FILTERED by one of them. Naming both keeps it findable."""
         monkeypatch.setattr(
-            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
         )
         docs = run._with_bodies(
             [{"url": ".../7", "title": "ASELS — birleşme", "published_at": NOW,
@@ -745,9 +797,9 @@ class TestCycles:
     def test_a_recent_disclosure_gets_its_attachments_read(self, monkeypatch):
         monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
         monkeypatch.setattr(
-            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
         )
-        monkeypatch.setattr(run.kap_source, "attachment_text", lambda d, c: "[Rapor.pdf]\nek metni")
+        monkeypatch.setattr(run.kap_archive, "attachment_text", lambda d, c: "[Rapor.pdf]\nek metni")
         docs = run._with_bodies(
             [{"url": ".../1", "title": "t", "published_at": datetime.now(timezone.utc),
               "related_symbols": []}],
@@ -760,13 +812,13 @@ class TestCycles:
         be a third of the wall clock spent on filings nobody will ask about."""
         monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
         monkeypatch.setattr(
-            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
         )
 
         def refuse(detail, client):
             pytest.fail("an old disclosure must not download attachments")
 
-        monkeypatch.setattr(run.kap_source, "attachment_text", refuse)
+        monkeypatch.setattr(run.kap_archive, "attachment_text", refuse)
         old = datetime.now(timezone.utc) - timedelta(days=200)
         docs = run._with_bodies(
             [{"url": ".../1", "title": "t", "published_at": old, "related_symbols": []}], None
@@ -776,13 +828,13 @@ class TestCycles:
     def test_attachments_can_be_switched_off_entirely(self, monkeypatch):
         monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "0")
         monkeypatch.setattr(
-            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>g</p>"]}
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>g</p>"]}
         )
 
         def refuse(detail, client):
             pytest.fail("the window is closed")
 
-        monkeypatch.setattr(run.kap_source, "attachment_text", refuse)
+        monkeypatch.setattr(run.kap_archive, "attachment_text", refuse)
         assert run._with_bodies(
             [{"url": ".../1", "title": "t", "published_at": datetime.now(timezone.utc),
               "related_symbols": []}], None
@@ -791,9 +843,9 @@ class TestCycles:
     def test_a_disclosure_with_no_readable_attachment_keeps_its_body(self, monkeypatch):
         monkeypatch.setenv("INGESTOR_KAP_PDF_WINDOW_DAYS", "30")
         monkeypatch.setattr(
-            run.kap_source, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
+            run.kap_archive, "fetch_detail", lambda index, client: {"disclosureBody": ["<p>gövde</p>"]}
         )
-        monkeypatch.setattr(run.kap_source, "attachment_text", lambda d, c: "")
+        monkeypatch.setattr(run.kap_archive, "attachment_text", lambda d, c: "")
         docs = run._with_bodies(
             [{"url": ".../1", "title": "t", "published_at": datetime.now(timezone.utc),
               "related_symbols": []}], None
@@ -801,13 +853,13 @@ class TestCycles:
         assert docs[0]["text"].endswith("gövde")
 
     def test_a_disclosure_whose_body_is_unreadable_is_skipped(self, monkeypatch):
-        monkeypatch.setattr(run.kap_source, "fetch_detail", lambda index, client: None)
+        monkeypatch.setattr(run.kap_archive, "fetch_detail", lambda index, client: None)
         assert run._with_bodies(
             [{"url": ".../1", "title": "t", "published_at": NOW, "related_symbols": []}], None
         ) == []
 
     def test_an_empty_body_is_skipped(self, monkeypatch):
-        monkeypatch.setattr(run.kap_source, "fetch_detail", lambda index, client: {})
+        monkeypatch.setattr(run.kap_archive, "fetch_detail", lambda index, client: {})
         assert run._with_bodies(
             [{"url": ".../1", "title": "t", "published_at": NOW, "related_symbols": []}], None
         ) == []
@@ -872,7 +924,11 @@ class TestBackendNewsPush:
         handler = recorder(body={"news_written": 2})
         items = [{"content_hash": "a" * 64, "title": "T", "source": "D", "published_at": NOW}]
         assert sinks.push_news_to_backend(client_for(handler), items) == {
-            "quotes_written": 0, "candles_written": 0, "news_written": 2
+            "quotes_written": 0, "candles_written": 0, "news_written": 2,
+            # Backend'in çözdüğü sembol haritası, parçalar boyunca birikerek.
+            # Onsuz `run_news` RAG'a boş harita iletiyor ve korpustaki her
+            # RSS belgesi tickersız kalıyor.
+            "news_symbols": {},
         }
         assert handler.calls[0].url.path.endswith("/market/news/ingest")
 
@@ -942,9 +998,6 @@ class TestScheduler:
             # bir klonda geri doldurma haklı olarak atlıyor ve bu iş
             # olmasaydı 19:15 cron'una kadar hiçbir şey çalışmazdı.
             "candle-topup": "date",
-            # Piyasa saatlerine bağlı DEĞİL: fiyatı en çok etkileyen
-            # bildirimler kapanıştan sonra ve açılıştan önce yayımlanıyor.
-            "kap": "interval",
             # Mum ikilisiyle aynı ayrım: biri "hiç arşiv var mı", diğeri
             # "elimizdeki en yeni bildirim eski mi" sorusunu cevaplıyor.
             "kap-topup": "date",
@@ -969,10 +1022,10 @@ class TestRateLimitBackoff:
     to be a browser."""
 
     def setup_method(self):
-        run._backoff_step = 0
+        run._backoff_steps.clear()
 
     def teardown_method(self):
-        run._backoff_step = 0
+        run._backoff_steps.clear()
 
     def test_interval_starts_at_the_configured_value(self):
         """Onbeş dakika: geri çekilme merdiveninin tabanı toplu turun kendisi.
@@ -989,21 +1042,65 @@ class TestRateLimitBackoff:
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", _rate_limited)
         result = run.run_quotes(None, force=True)
         assert result == {"rate_limited": True}
-        assert run.current_interval_seconds() > 300
+        # Katman başına: `run_quotes` varsayılan olarak "all" turu.
+        assert run.current_interval_seconds("all") > 300
 
     def test_backoff_is_bounded(self, monkeypatch):
         for _ in range(10):
-            run._note_rate_limit()
-        assert run.current_interval_seconds() == 300 * run.config.BACKOFF_LADDER[-1]
+            run._note_rate_limit("bulk")
+        assert run.current_interval_seconds("bulk") == 300 * run.config.BACKOFF_LADDER[-1]
+
+    def test_one_tier_does_not_slow_the_other(self, monkeypatch):
+        """Bant katmanında dört sembol var ve geçici bir eksik onda sık.
+        487 sembollük toplu katmanın aralığını onun yüzünden genişletmek,
+        çalışan bir turu bozardı."""
+        run._note_rate_limit("band")
+        assert run.current_interval_seconds("band") > run.config.band_interval_seconds()
+        assert run.current_interval_seconds("bulk") == run.config.quote_interval_seconds()
+
+    def test_the_ladder_reaches_the_scheduler(self, monkeypatch):
+        """Merdiven bir dönem YALNIZCA bir log satırıydı: işler açılışta sabit
+        aralıkla kuruluyor ve `current_interval_seconds` hiçbir yerde
+        okunmuyordu. "widening the quote interval" uyarısı, hiç gerçekleşmeyen
+        bir eylemi bildiriyordu."""
+        calls = []
+
+        class Sched:
+            def reschedule_job(self, job_id, trigger, seconds):
+                calls.append((job_id, trigger, seconds))
+
+        monkeypatch.setattr(run, "_scheduler", Sched())
+        run._note_rate_limit("bulk")
+        assert calls and calls[0][0] == "quotes_bulk"
+        assert calls[0][2] == run.current_interval_seconds("bulk")
+
+    def test_a_reset_reschedules_too(self, monkeypatch):
+        calls = []
+
+        class Sched:
+            def reschedule_job(self, job_id, trigger, seconds):
+                calls.append(seconds)
+
+        monkeypatch.setattr(run, "_scheduler", Sched())
+        run._note_rate_limit("bulk")
+        run._note_success("bulk")
+        assert calls[-1] == run.config.quote_interval_seconds()
+
+    def test_no_scheduler_only_records(self, monkeypatch):
+        """Testler ve tek seferlik çalıştırmalar zamanlayıcısız: geri çekilme
+        yine kaydediliyor, yalnızca uygulanamıyor."""
+        monkeypatch.setattr(run, "_scheduler", None)
+        run._note_rate_limit("bulk")
+        assert run.current_interval_seconds("bulk") > run.config.quote_interval_seconds()
 
     def test_a_clean_cycle_resets_the_interval(self, monkeypatch):
-        run._note_rate_limit()
+        run._note_rate_limit("all")
         monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
         monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [])
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda p: [])
         monkeypatch.setattr(run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": 0})
         run.run_quotes(None, force=True)
-        assert run.current_interval_seconds() == 300
+        assert run.current_interval_seconds("all") == 300
 
     def test_a_non_rate_limit_error_still_propagates(self, monkeypatch):
         """Only a 429 means "slow down". Everything else is a real fault and
@@ -1094,7 +1191,7 @@ class TestCycleBudget:
 
     def test_an_overrunning_cycle_is_logged(self, monkeypatch, caplog):
         monkeypatch.setattr(run, "open_markets", lambda: {"BIST"})
-        monkeypatch.setattr(run, "current_interval_seconds", lambda: 0)
+        monkeypatch.setattr(run, "current_interval_seconds", lambda tier="bulk": 0)
         monkeypatch.setattr(run.sinks, "fetch_products", lambda client: [
             {"symbol": "THYAO", "data_symbol": "THYAO.IS", "market": "BIST"}])
         monkeypatch.setattr(run.yfinance_source, "fetch_quotes", lambda products: [{"symbol": "THYAO"}])
@@ -1206,10 +1303,10 @@ class TestPartialBatches:
     while the backoff ladder sat at step zero."""
 
     def setup_method(self):
-        run._backoff_step = 0
+        run._backoff_steps.clear()
 
     def teardown_method(self):
-        run._backoff_step = 0
+        run._backoff_steps.clear()
 
     def _products(self, count):
         return [
@@ -1240,7 +1337,7 @@ class TestPartialBatches:
 
         run.run_quotes(None)
 
-        assert run.current_interval_seconds() == 300
+        assert run.current_interval_seconds("all") == 300
 
     def test_no_instruments_in_the_open_markets_is_a_skip(self, monkeypatch):
         monkeypatch.setattr(run, "open_markets", lambda: {"NASDAQ"})
@@ -1497,3 +1594,316 @@ class TestFundamentalsBackfill:
 
     def test_an_empty_reply_is_an_empty_set(self):
         assert sinks.fetch_missing_fundamentals(client_for(recorder(body={}))) == set()
+
+
+class TestSymbolsReachTheCorpus:
+    """RSS haberlerinin korpustaki kopyası bir dönem ETİKETSİZ yazılıyordu.
+
+    Sebep akış sırası değil, sonucun geri alınmamasıydı: eşleştirme enstrüman
+    evreninin bulunduğu yerde -- backend'de -- yapılıyor, bu servisin evreni
+    yok ve olmamalı (veritabanı kredensiyeli taşımıyor). Backend çözüyordu,
+    dönüyordu, ve RAG'a giden kopya beslemenin kendi boş etiketini taşıyordu.
+    Ölçüldü: korpustaki 1.970 RSS belgesinin SIFIRINDA ticker vardı ve ajanın
+    `tickers` filtresi yalnızca KAP bildirimlerinde çalışıyordu -- onlar
+    etiketi kaynağından getirdiği için.
+    """
+
+    ITEM = {"content_hash": "a" * 64, "title": "Akbank'tan rekor", "source": "Dünya",
+            "published_at": "2026-09-01T10:00:00Z", "related_symbols": []}
+
+    def test_the_backend_resolution_reaches_the_document(self):
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(
+            client_for(handler), [dict(self.ITEM)], {"a" * 64: ["AKBNK"]}
+        )
+        assert seen["ticker"] == "AKBNK"
+
+    def test_without_a_resolution_the_feeds_own_tag_is_used(self):
+        """KAP bildirimi etiketini kaynağından getiriyor ve backend onu aynen
+        geri veriyor; harita gelmese de kaybolmamalı."""
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        item = {**self.ITEM, "related_symbols": ["EMVAR"]}
+        sinks.push_news_to_rag(client_for(handler), [item], None)
+        assert seen["ticker"] == "EMVAR"
+
+    def test_a_story_matching_nothing_is_written_without_a_ticker(self):
+        """Uydurma bir etiket, bir şirketin haberini başkasının sayfasına
+        koyardı. Etiketsiz belge metinden bulunabilir kalıyor."""
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(client_for(handler), [dict(self.ITEM)], {})
+        assert seen["ticker"] is None
+
+    def test_a_multi_tagged_story_keeps_its_first_symbol(self):
+        """Korpus şeması belge başına tek ticker taşıyor; gerisi metinden
+        bulunabilir kalıyor."""
+        seen = {}
+
+        def handler(request):
+            seen["ticker"] = json.loads(request.content)["ticker"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(
+            client_for(handler), [dict(self.ITEM)], {"a" * 64: ["AKBNK", "THYAO"]}
+        )
+        assert seen["ticker"] == "AKBNK"
+
+    def test_the_cycle_hands_the_backend_answer_to_the_corpus(self, monkeypatch):
+        """Turun kendisi: backend ne çözdüyse RAG'a o gidiyor, ve `news_symbols`
+        sonuç sözlüğüne SIZMIYOR -- o bir taşıma detayı, bir sayaç değil."""
+        pushed = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [dict(self.ITEM)])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: set())
+        monkeypatch.setattr(run.kap_source, "fetch_disclosures", lambda known: [])
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: {"news_written": 1, "news_symbols": {"a" * 64: ["AKBNK"]}},
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i, s=None: pushed.update(symbols=s) or 1,
+        )
+        result = run.run_news(None)
+        assert pushed["symbols"] == {"a" * 64: ["AKBNK"]}
+        assert result["tagged"] == 1
+        assert "news_symbols" not in result
+
+    def test_an_older_backend_without_the_field_still_works(self, monkeypatch):
+        """Alan eklenmeden önce yazılmış bir backend'e karşı tur düşmemeli."""
+        pushed = {}
+        monkeypatch.setattr(run.rss_source, "fetch_all", lambda: [dict(self.ITEM)])
+        monkeypatch.setattr(run.sinks, "fetch_known_news_ids", lambda c, s: set())
+        monkeypatch.setattr(run.kap_source, "fetch_disclosures", lambda known: [])
+        monkeypatch.setattr(run.sinks, "push_news_to_backend", lambda c, i: {"news_written": 1})
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i, s=None: pushed.update(symbols=s) or 1,
+        )
+        result = run.run_news(None)
+        assert pushed["symbols"] == {}
+        assert result["tagged"] == 0
+
+
+class TestDisclosuresAreTypedAsFilings:
+    """KAP bildirimi bir HABER değil, ihraççının kendi beyanı.
+
+    Ayrım ajanın işine yarıyor ve korpus şeması onu zaten taşıyor: arama
+    `doc_types` ile süzebiliyor ve sözleşmenin donuk kümesinde `FILING`
+    hazır duruyordu -- yeni bir tür icat etmek, dondurulmuş bir alana
+    belgelenmemiş bir değer koymak olurdu.
+
+    Ölçülen durum: korpustaki 858 KAP belgesinin tamamı `NEWS` yazıyordu, yani
+    "şirket şunu bildirdi" ile "bir gazete şunu yazdı" ayırt edilemiyordu.
+    """
+
+    def _typed(self, item):
+        seen = {}
+
+        def handler(request):
+            seen["type"] = json.loads(request.content)["document_type"]
+            return httpx.Response(200, json={"status": "ingested"})
+
+        sinks.push_news_to_rag(client_for(handler), [item])
+        return seen["type"]
+
+    BASE = {"content_hash": "a" * 64, "title": "Başlık",
+            "published_at": "2026-09-01T10:00:00Z", "related_symbols": []}
+
+    def test_a_kap_disclosure_is_a_filing(self):
+        assert self._typed({**self.BASE, "source": "KAP"}) == "FILING"
+
+    def test_a_press_article_stays_news(self):
+        assert self._typed({**self.BASE, "source": "Patronlar Dünyası"}) == "NEWS"
+
+    def test_a_source_that_is_missing_does_not_become_a_filing(self):
+        """Kaynağı bilinmeyen bir öğeyi birincil kaynak saymak, ona
+        hak etmediği bir güvenilirlik vermek olurdu."""
+        item = dict(self.BASE)
+        item["source"] = None
+        assert self._typed(item) == "NEWS"
+
+    def test_the_filing_sources_are_named_not_guessed(self):
+        assert "KAP" in sinks.FILING_SOURCES
+
+
+class TestQuarterly:
+    """Çeyreklik gelir tablosu turu — Faz B.
+
+    Anlık görüntüden ayrı ve daha seyrek: oranlar fiyata bağlı olduğu için
+    her gün değişiyor, çeyreklik rakamlar üç ayda bir açıklanıyor.
+    """
+
+    def test_nothing_to_push_is_not_a_request(self):
+        assert sinks.push_quarterly(client_for(recorder()), []) is None
+
+    def test_rows_reach_the_ingest_endpoint(self):
+        handler = recorder(body={"quarterly_written": 2})
+        got = sinks.push_quarterly(client_for(handler), [
+            {"symbol": "AKBNK", "period_end": "2026-06-30", "net_income": 15},
+            {"symbol": "AKBNK", "period_end": "2026-03-31", "net_income": 19},
+        ])
+        assert got == {"quarterly_written": 2}
+        assert handler.calls[0].url.path.endswith("/market/quarterly/ingest")
+
+    def test_rows_are_chunked(self, monkeypatch):
+        """Parçalanarak: bir parça düşerse diğerleri yazılmış kalıyor."""
+        monkeypatch.setattr(sinks, "QUARTERLY_CHUNK", 3)
+        handler = recorder(body={"quarterly_written": 1})
+        sinks.push_quarterly(client_for(handler), [
+            {"symbol": f"S{i}"} for i in range(7)
+        ])
+        assert [len(json.loads(call.content)["items"]) for call in handler.calls] == [3, 3, 1]
+
+    def test_a_failed_chunk_does_not_lose_the_others(self, monkeypatch):
+        """Seri birikimli: eksik parça bir sonraki turda tamamlanıyor. Anlık
+        görüntüden farkı bu -- orada eksik tur eksik veri demekti."""
+        monkeypatch.setattr(sinks, "QUARTERLY_CHUNK", 2)
+        seen = {"n": 0}
+
+        def handler(request):
+            seen["n"] += 1
+            if seen["n"] == 1:
+                return httpx.Response(500, json={})
+            return httpx.Response(200, json={"quarterly_written": 2})
+
+        got = sinks.push_quarterly(client_for(handler), [
+            {"symbol": f"S{i}"} for i in range(4)
+        ])
+        assert got == {"quarterly_written": 2}
+
+    def test_the_cycle_fetches_then_pushes(self, monkeypatch):
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [
+            {"symbol": "AKBNK", "data_symbol": "AKBNK.IS"},
+        ])
+        monkeypatch.setattr(
+            run.yfinance_source, "fetch_quarterly_financials",
+            lambda products: [{"symbol": "AKBNK", "period_end": "2026-06-30"}],
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_quarterly", lambda c, rows: {"quarterly_written": len(rows)},
+        )
+        assert run.run_quarterly(None) == {"fetched": 1, "quarterly_written": 1}
+
+    def test_an_empty_fetch_still_reports(self, monkeypatch):
+        """Hiç satır yoksa sink None döndürüyor; tur yine bir sonuç yazmalı."""
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(
+            run.yfinance_source, "fetch_quarterly_financials", lambda products: [],
+        )
+        monkeypatch.setattr(run.sinks, "push_quarterly", lambda c, rows: None)
+        assert run.run_quarterly(None) == {"fetched": 0}
+
+
+class TestSmallTierTolerance:
+    """Oran tek başına dörtlük katmanda saçmalıyor.
+
+    Bant katmanında üç kur + altın var. BİRİ boş dönerse %25, ikisi %50 --
+    ikisi de `MISSING_TOLERANCE`'ı aşıyor ve tur "degraded" sayılıyordu.
+    Ölçüldü, canlı bir turda: "2/4 symbols came back empty" ve hemen
+    ardından "rate limited".
+
+    Toleransın kendi gerekçesi büyük bir evren için yazılmış ("a third of the
+    universe"); dörtlük bir kümede o cümlenin karşılığı yok.
+    """
+
+    def setup_method(self):
+        run._backoff_steps.clear()
+
+    def teardown_method(self):
+        run._backoff_steps.clear()
+
+    def _cycle(self, monkeypatch, total, returned, tier="band"):
+        products = [
+            {"symbol": f"S{i}", "data_symbol": f"S{i}", "market": "FX"}
+            for i in range(total)
+        ]
+        monkeypatch.setattr(run, "open_markets", lambda: {"FX"})
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: products)
+        monkeypatch.setattr(run.config, "is_band_product", lambda p: tier == "band")
+        monkeypatch.setattr(
+            run.yfinance_source, "fetch_quotes",
+            lambda p: [{"symbol": f"S{i}"} for i in range(returned)],
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_market_data", lambda c, q, k: {"quotes_written": len(q)}
+        )
+        run.run_quotes(None, tier=tier)
+
+    def test_one_missing_of_four_is_not_a_provider_problem(self, monkeypatch):
+        self._cycle(monkeypatch, total=4, returned=3)
+        assert run.current_interval_seconds("band") == run.config.band_interval_seconds()
+
+    def test_two_missing_of_four_is_not_either(self, monkeypatch):
+        """Ölçülen tam durum: 2/4 boş döndü ve tur geri çekilmeye girdi."""
+        self._cycle(monkeypatch, total=4, returned=2)
+        assert run.current_interval_seconds("band") == run.config.band_interval_seconds()
+
+    def test_three_missing_of_four_still_counts(self, monkeypatch):
+        """Dördün üçü gerçekten bir sağlayıcı sorunudur."""
+        self._cycle(monkeypatch, total=4, returned=1)
+        assert run.current_interval_seconds("band") > run.config.band_interval_seconds()
+
+    def test_a_large_tier_is_unaffected_by_the_floor(self, monkeypatch):
+        """487'lik katmanda oran zaten çok daha önce devreye giriyor; taban
+        oradaki davranışı değiştirmemeli."""
+        self._cycle(monkeypatch, total=400, returned=200, tier="bulk")
+        assert run.current_interval_seconds("bulk") > run.config.quote_interval_seconds()
+
+    def test_a_handful_missing_from_a_large_tier_is_still_tolerated(self, monkeypatch):
+        self._cycle(monkeypatch, total=400, returned=395, tier="bulk")
+        assert run.current_interval_seconds("bulk") == run.config.quote_interval_seconds()
+
+
+class TestSessionState:
+    """Saatler burada kalıyor, backend'e OLGU gidiyor.
+
+    Backend eski bir fiyatın "piyasa kapalı" mı yoksa "veri akışı durdu" mu
+    olduğunu tek başına ayırt edemiyordu ve kullanıcıya sebebi söylemeyen bir
+    cümle kurmak zorundaydı.
+    """
+
+    def test_the_open_set_is_pushed(self):
+        handler = recorder(body={"markets": 5})
+        got = sinks.push_sessions(client_for(handler), {"BIST", "FX"})
+        assert got == {"markets": 5}
+        assert handler.calls[0].url.path.endswith("/market/sessions")
+        assert json.loads(handler.calls[0].content) == {"open": ["BIST", "FX"]}
+
+    def test_an_empty_set_is_still_reported(self):
+        """"Hepsi kapalı" da bir olgu. Bildirilmezse backend eski bir kaydı
+        okumaya devam ederdi."""
+        handler = recorder(body={"markets": 5})
+        sinks.push_sessions(client_for(handler), set())
+        assert json.loads(handler.calls[0].content) == {"open": []}
+
+    def test_a_failure_does_not_raise(self):
+        """Seans bilgisi fiyatın üstüne konan bir açıklama, fiyatın kendisi
+        değil: yazamamak turu düşürmemeli."""
+        def handler(request):
+            return httpx.Response(500, json={})
+
+        assert sinks.push_sessions(client_for(handler), {"BIST"}) is None
+
+    def test_the_cycle_reports_before_deciding_to_skip(self, monkeypatch):
+        """Kapalıyken tur atlanıyor ama bildirim ondan ÖNCE gidiyor."""
+        pushed = []
+        monkeypatch.setattr(run, "open_markets", lambda: set())
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.sinks, "push_sessions",
+                            lambda c, m: pushed.append(set(m)))
+        run.run_quotes(None)
+        assert pushed == [set()]

@@ -17,11 +17,13 @@ fundamental attached to them is real.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
+    Boolean,
     BigInteger,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -166,6 +168,61 @@ class TransactionProposal(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     audit_id: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class InstrumentQuarterly(Base):
+    """Çeyreklik gelir tablosu. Enstrüman başına DÖNEM DÖNEM bir satır.
+
+    `InstrumentFundamentals` bir anlık görüntü: alan başına tek güncel değer,
+    geçmiş yok. Bu yüzden "son çeyrek kârı önceki çeyreğe göre şu kadar arttı"
+    kurulamıyordu -- kıyaslanacak ikinci dönem hiç saklanmıyordu. Bu tablo o
+    boşluğu kapatıyor ve iki tablo AYRI duruyor, çünkü biri her gün üstüne
+    yazılıyor, diğeri birikiyor.
+
+    DOĞAL ANAHTAR (product_id, period_end). Sıra numarası değil: sağlayıcının
+    dönemleri ardışık gelmiyor -- ölçüldü, AKBNK/GARAN/EREGL'de 2025Q3 gelir
+    tablosunda hiç yok. "Son iki satırı al" diyen bir karşılaştırma o üç
+    hissede 2025Q2 ile 2025Q4'ü kıyaslar ve bunu söylemez; bitişiklik dönem
+    sonundan hesaplanmak zorunda.
+
+    Dört kalem saklanıyor. Sağlayıcının gelir tablosu şirkete göre 33-52 satır
+    ve derin örneklenen on iki sembolün hepsinde bulunan yirmi kalemden
+    yalnızca bunlar bu kartın sorusunu cevaplıyor. `Basic EPS` bilerek yok:
+    34 hissede son çeyrekte 32 kez dolu, bir önceki çeyrekte YALNIZCA 3 kez --
+    seri olarak saklamak neredeyse hep yarısı boş bir kolon açmak olurdu ve
+    hisse başına kâr zaten anlık tabloda duruyor.
+
+    Her sayısal kolon nullable. Ölçüldü: 34 hissenin 16'sında serinin bir
+    yerinde eksik değer var, ve sıfıra çevirmek "o çeyrek raporlandı, kâr
+    sıfır çıktı" demek olurdu.
+    """
+
+    __tablename__ = "instrument_quarterly"
+    __table_args__ = (
+        UniqueConstraint(
+            "product_id", "period_end", name="uq_instrument_quarterly_period"
+        ),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    product_id: Mapped[str] = mapped_column(
+        String, ForeignKey(f"{SCHEMA}.investment_products.id"), nullable=False, index=True
+    )
+    #: Çeyreğin BİTİŞ tarihi, sağlayıcının verdiği hâliyle. Etiket
+    #: ("2026Q2") saklanmıyor: tamamen bundan türetilebiliyor ve hiçbir zaman
+    #: değişmeyecek bir değer için ikinci bir sütun, ikisinin ayrışabileceği
+    #: bir yer açardı.
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+
+    total_revenue: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    net_income: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    pretax_income: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    operating_expense: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class InstrumentFundamentals(Base):
@@ -385,4 +442,70 @@ class WatchlistItem(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class AllocationTarget(Base):
+    """Kullanıcının KENDİ belirlediği hedef ağırlık, kova başına bir satır.
+
+    Sistemin önerdiği bir model portföy DEĞİL ve bilerek öyle değil.
+    `compliance/rules.py:SUI-001`'in gerekçesi şunu söylüyor: "sistem ölçüm
+    ile kullanıcının kendi beyanını karşılaştırır, bir ürünün kişiye
+    uygunluğuna karar vermez." Hedefi sistemin koyması, tam olarak o kararı
+    vermek olurdu -- üstelik dört SPK ürün grubundan yalnızca birinin
+    (hisse) bu sistemde enstrümanı var, dolayısıyla önerilen hedefin çoğu
+    uygulanamaz bir talimat olurdu.
+
+    Kova ANAHTARLA saklanıyor, etiketle değil (`allocation.BUCKETS`): bir
+    etiketi düzeltmek kimsenin kayıtlı hedefini geçersizleştirmemeli.
+
+    `user_id` düz bir kolon, foreign key değil -- modüller birbirinin ORM
+    sınıfını import etmiyor (bkz. CLAUDE.md shared/ kuralı).
+    """
+
+    __tablename__ = "allocation_targets"
+    __table_args__ = (
+        # Kova başına tek hedef. İkinci bir satır, hangisinin geçerli olduğunu
+        # söyleyemeyen bir hedef bırakırdı.
+        UniqueConstraint("user_id", "bucket", name="uq_allocation_target_bucket"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    bucket: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: 0..100. Toplamın 100 olması router'da doğrulanıyor: burada saklamak
+    #: satır başına bir kısıt, toplam ise satırlar ARASI bir kural.
+    target_percent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+
+class MarketSession(Base):
+    """Bir piyasanın ŞU AN işlem görüp görmediği.
+
+    Saatler burada DEĞİL, `ingestor`'da (`config.MARKET_HOURS`) -- ve orada
+    kalmalı: ikinci bir liste tutmak, bu depoda defalarca ayrışan türden bir
+    şey. Backend'e KURAL değil OLGU geliyor: ingestor her turda hangi
+    piyasaların açık olduğunu bildiriyor, backend onu okuyor.
+
+    Neden gerekli: fiyatın eski olması iki şey demek olabilir -- piyasa
+    kapalı (normal, son kapanış) ya da veri akışı durmuş (arıza). İkisi
+    kullanıcıya farklı şekilde söylenmeli ve backend tek başına ayırt
+    edemiyordu, o yüzden "son işlem verisi" gibi sebebi söylemeyen bir cümle
+    kurmak zorundaydı.
+
+    `updated_at` da saklanıyor: ingestor'ın kendisi durursa bu tablo da
+    eskiyor ve o zaman "kapalı" demek yine bilinmeyeni tespite çevirmek
+    olurdu.
+    """
+
+    __tablename__ = "market_sessions"
+    __table_args__ = ({"schema": SCHEMA},)
+
+    market: Mapped[str] = mapped_column(String(32), primary_key=True)
+    is_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
     )

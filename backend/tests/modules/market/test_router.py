@@ -204,7 +204,7 @@ class TestIngestWrites:
     def test_news_ingest_reports_only_new_rows(self, client, mocker, monkeypatch):
         """Re-running a feed must be a no-op. The count is what proves it."""
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
-        mocker.patch.object(market_module_service, "upsert_news", return_value=0)
+        mocker.patch.object(market_module_service, "upsert_news", return_value=(0, {}, []))
         response = client.post(
             "/api/market/news/ingest",
             headers={"Authorization": "Bearer secret"},
@@ -221,19 +221,32 @@ class TestIngestWrites:
         )
         assert response.json()["news_written"] == 0
 
-    def test_known_hashes_answers_which_are_already_held(self, client, mocker, monkeypatch):
-        """Asked by the ingestor BEFORE it downloads a disclosure body. The
-        KAP key is derived from the disclosure number, so it is computable
-        from a listing alone — which is what makes a backfill resumable."""
+    def test_notifications_are_committed_when_any_were_written(
+        self, client, mocker, monkeypatch
+    ):
+        """`upsert_news` kendi commit'ini atıyor, dolayısıyla bildirimler
+        AYRI bir transaction: bunlar commit edilmezse oturumla birlikte
+        kayboluyorlardı -- ölçüldü, satırlar hiç veritabanına ulaşmadı."""
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
-        mocker.patch.object(market_module_service, "known_hashes", return_value=["a" * 64])
-        response = client.post(
-            "/api/market/news/known-hashes",
-            headers={"Authorization": "Bearer secret"},
-            json={"hashes": ["a" * 64, "b" * 64]},
+        mocker.patch.object(
+            market_module_service, "upsert_news",
+            return_value=(1, {}, [{"id": "n1", "title": "t", "symbols": ["ASELS"]}]),
         )
-        assert response.status_code == 200
-        assert response.json() == {"known": ["a" * 64]}
+        mocker.patch.object(market_router, "_notify_holders", return_value=3)
+        db = MagicMock(spec=Session)
+        app.dependency_overrides[get_db] = lambda: db
+        try:
+            client.post(
+                "/api/market/news/ingest",
+                headers={"Authorization": "Bearer secret"},
+                json={"items": [{
+                    "content_hash": "c" * 64, "title": "Haber", "source": "Dünya",
+                    "published_at": NOW.isoformat(),
+                }]},
+            )
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+        db.commit.assert_called_once()
 
     def test_news_coverage_answers_where_to_resume(self, client, mocker, monkeypatch):
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
@@ -283,22 +296,6 @@ class TestIngestWrites:
         assert client.get(
             "/api/market/news/archive?limit=5000", headers={"Authorization": "Bearer secret"}
         ).status_code == 422
-
-    def test_known_hashes_is_guarded(self, client, monkeypatch):
-        monkeypatch.setenv("BACKEND_API_KEY", "secret")
-        assert client.post(
-            "/api/market/news/known-hashes", json={"hashes": []}
-        ).status_code == 401
-
-    def test_an_unbounded_hash_list_is_refused(self, client, monkeypatch):
-        """Without a cap this indexed lookup becomes a table scan on demand."""
-        monkeypatch.setenv("BACKEND_API_KEY", "secret")
-        response = client.post(
-            "/api/market/news/known-hashes",
-            headers={"Authorization": "Bearer secret"},
-            json={"hashes": ["a" * 64] * 5001},
-        )
-        assert response.status_code == 422
 
     def test_short_content_hash_is_rejected(self, client, monkeypatch):
         """The hash is the deduplication key shared with the rag service; a
@@ -604,3 +601,32 @@ class TestCalendarEndpoint:
         )
         market_client.get(self.URL, params={"limit": 5})
         assert rows.call_args.kwargs["limit"] == 5
+
+
+class TestSessionStateEndpoint:
+    """Saatler ingestor'da kalıyor; backend'e kural değil OLGU geliyor."""
+
+    URL = "/api/market/sessions"
+
+    def test_the_open_set_is_recorded(self, client, mocker, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        spy = mocker.patch.object(market_service, "record_sessions", return_value=5)
+        response = client.post(
+            self.URL, headers={"Authorization": "Bearer secret"},
+            json={"open": ["BIST", "FX"]},
+        )
+        assert response.json() == {"markets": 5}
+        assert spy.call_args.args[1] == ["BIST", "FX"]
+
+    def test_an_empty_set_is_a_valid_report(self, client, mocker, monkeypatch):
+        """"Hepsi kapalı" da bir olgu; bildirilmezse backend eski bir kaydı
+        okumaya devam ederdi."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        spy = mocker.patch.object(market_service, "record_sessions", return_value=5)
+        client.post(self.URL, headers={"Authorization": "Bearer secret"},
+                    json={"open": []})
+        assert spy.call_args.args[1] == []
+
+    def test_it_is_guarded_like_the_other_service_endpoints(self, client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.post(self.URL, json={"open": []}).status_code == 401

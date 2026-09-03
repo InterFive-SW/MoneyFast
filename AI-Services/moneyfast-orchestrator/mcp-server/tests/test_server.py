@@ -36,6 +36,31 @@ EXPECTED_TOOLS = {
     # because it needs price HISTORY, and the history can be too short to
     # answer -- a failure mode a current quote does not have.
     "get_technical_signals",
+    # v2.11: haberin kullanıcının SAHİP OLDUĞU hisselerle kesişimi. Belge
+    # aramasından ayrı, çünkü bu bir sorgu değil bir kesişim: eşleşme sembol
+    # eşitliğiyle kesin, semantik yakınlıkla değil.
+    "get_portfolio_news",
+    # v2.12: aynı okuma, her POZİSYON için, artı tek bir toplam cümlesi.
+    # Tek-sembol aracının n kez çağrılmasıyla aynı şey değil: sayı ile değer
+    # ayrışıyor ve toplamı modele hesaplatmak her turda başka bir sayı
+    # üretirdi.
+    "get_portfolio_technicals",
+    # v2.13: "ne olurdu" ailesi. Üçü de ölçüm; ikisi geçmiş getirilerin
+    # aritmetiği, biri gerçekten olan günler.
+    "run_portfolio_scenario",
+    "get_portfolio_stress_test",
+    "simulate_position_change",
+    # v2.14: şirketin işi nasıl gidiyor. Yeni veri değil -- zaten toplanan
+    # otuz beş alan, ajana ilk kez ulaşıyor.
+    "get_company_fundamentals",
+    # v2.15: tek SERİ taşıyan araç. Anlık görüntünün cevaplayamadığı soru.
+    "get_quarterly_financials",
+    # v2.16: neye SAHİP olduğu değil, ne kazanıp ne harcadığı. Portföyle
+    # bütçe arasındaki köprü; hesaplama zaten vardı, ajan göremiyordu.
+    "get_cash_flow_summary",
+    # v2.18: hepsi birden. Diğerleri birer soruyu cevaplıyor; bu, hiçbirinin
+    # tek başına cevaplayamadığı "genel durum" sorusunu.
+    "get_portfolio_report",
 }
 
 #: Every tool that reaches the backend. classify_and_route_intent is
@@ -52,7 +77,7 @@ class TestWiring:
         # v2.10: `get_technical_signals` eklendi. Bilerek yapılan bir
         # sözleşme değişikliği, dolayısıyla iddia gevşetilmiyor, onunla
         # birlikte taşınıyor.
-        assert server.CONTRACT_VERSION == "v2.10"
+        assert server.CONTRACT_VERSION == "v2.18"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -68,7 +93,8 @@ class TestWiring:
         assert domains == {
             "orchestrator", "portfolio", "market_data", "market_research",
             "risk_strategy", "compliance", "transaction", "banking",
-            "technical",
+            "technical", "news", "scenario", "fundamentals", "cash_flow",
+            "report",
         }
 
     def test_every_domain_module_exposes_register(self):

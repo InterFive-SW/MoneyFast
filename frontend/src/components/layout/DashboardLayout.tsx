@@ -13,6 +13,7 @@ import { Outlet, useLocation } from 'react-router-dom'
 import ErrorBoundary from '../ErrorBoundary'
 import Sidebar from './Sidebar'
 import Header  from './Header'
+import SuitabilityBanner from '../risk/SuitabilityBanner'
 import { ChatProvider } from '../../context/ChatContext'
 import ChatPopup from '../chat/ChatPopup'
 
@@ -129,6 +130,10 @@ export default function DashboardLayout() {
         {/* ── İçerik Sütunu ────────────────────────────────────────────── */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <Header pageTitle={pageTitle} />
+
+          {/* Uygunluk testi daveti. Header'ın ALTINDA ve içeriğin üstünde:
+              her sayfada görünmesi gerekiyor ama hiçbirini engellememeli. */}
+          <SuitabilityBanner />
 
           {/* Alt boşluk YALNIZCA balon görünürken.
 

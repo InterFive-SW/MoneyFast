@@ -247,3 +247,21 @@ async def health_check():
     Sistemin ayakta olup olmadığını ve doğru modüle ulaşıldığını doğrulamak için kullanılır.
     """
     return {"status": "ok", "module": "auth"}
+
+from fastapi import UploadFile, File
+
+@router.post(
+    "/profile-picture",
+    status_code=status.HTTP_200_OK,
+    summary="Kullanıcı profil fotoğrafını güncelle"
+)
+def upload_profile_picture(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(deps.get_current_user)
+):
+    """
+    Kullanıcının profil fotoğrafını yükler ve kaydeder.
+    GÜVENLİK: Sadece yetkili kullanıcılar erişebilir ve dosya türü servis katmanında kontrol edilir.
+    """
+    return service.upload_profile_picture(user.tc_no, file, db)

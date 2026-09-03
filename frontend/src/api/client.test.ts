@@ -105,10 +105,21 @@ describe('endpoint paths', () => {
     ['getWatchlist', '/api/investment/watchlist'],
     ['getTopMovers', '/api/investment/top-movers'],
     ['getAssetAllocation', '/api/investment/asset-allocation'],
+    ['getAllocationTarget', '/api/investment/allocation-target'],
+    // "Detaylı Rapor Oluştur": tek çağrı, altı bölüm.
+    ['getPortfolioReport', '/api/analytics/report'],
+    ['getAllocationDrift', '/api/investment/allocation-drift'],
     ['getSectorAllocation', '/api/investment/sector-allocation'],
     ['getHeatmap', '/api/investment/heatmap'],
     ['getMarketTickers', '/api/market/tickers'],
     ['getMarketNews', '/api/market/news'],
+    // Oturuma bağlı ve demo portföyüne düşmüyor; kullanıcı yoldan değil
+    // token'dan çözülüyor, o yüzden çağrı argümansız.
+    ['getPortfolioNews', '/api/market/news/portfolio'],
+    ['getPortfolioTechnical', '/api/market/portfolio/technical'],
+    // Stres testi dönemsiz çağrılabiliyor: hiçbir girdi istemiyor ve zaten
+    // olanı gösteriyor.
+    ['getStressTest', '/api/risk/stress'],
     ['getPortfolioAnalysis', '/api/analytics/portfolio'],
     ['getCurrentUser', '/api/auth/me'],
       ['getConversations', '/api/ai_orchestrator/conversations'],
@@ -116,6 +127,29 @@ describe('endpoint paths', () => {
     const fetchMock = mockFetch({})
     ;(apiClient as never as Record<string, () => void>)[method]()
     expect(calledUrl(fetchMock)).toBe(path)
+  })
+
+  it('senaryo faktörü ve şoku gövdede gider', () => {
+    const fetchMock = mockFetch({})
+    apiClient.runScenario('USDTRY', -10)
+    expect(calledUrl(fetchMock)).toBe('/api/risk/scenario')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      factor: 'USDTRY', shock_pct: -10,
+    })
+  })
+
+  it('dönem yalnızca verildiğinde gönderilir', () => {
+    // Verilmediğinde backend'in penceresi kullanılıyor; buraya bir sayı
+    // gömmek, ekranın ve sohbetin farklı pencerelerden konuşması demekti.
+    const fetchMock = mockFetch({})
+    apiClient.runScenario('XU100', 10, '3M')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).lookback).toBe('3M')
+  })
+
+  it('stres testinde dönem sorgu dizesine kodlanır', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getStressTest('6M')
+    expect(calledUrl(fetchMock)).toBe('/api/risk/stress?lookback=6M')
   })
 
   it('encodes a symbol into the candles path', () => {
@@ -1289,5 +1323,88 @@ describe('settings actions', () => {
     await apiClient.deleteAccount({ reason: 'test' })
     expect(calledUrl(fetchMock)).toContain('/api/auth/me')
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+  })
+})
+
+describe('hedef dağılım', () => {
+  it('sends the whole target list, not a patch', async () => {
+    // Kısmi güncelleme yok: birleştirme, toplamı 100 olan bir hedefi
+    // sessizce 140'a çıkarabilirdi.
+    const fetchMock = mockFetch({ hasTarget: true, targets: [] })
+    await apiClient.setAllocationTarget([
+      { bucket: 'bist_equity', targetPercent: 60 },
+      { bucket: 'cash', targetPercent: 40 },
+    ])
+    expect(calledUrl(fetchMock)).toBe('/api/investment/allocation-target')
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body as string)).toEqual({
+      targets: [
+        { bucket: 'bist_equity', targetPercent: 60 },
+        { bucket: 'cash', targetPercent: 40 },
+      ],
+    })
+  })
+
+  it('clears the target with an empty list', async () => {
+    const fetchMock = mockFetch({ hasTarget: false, targets: [] })
+    await apiClient.setAllocationTarget([])
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(JSON.parse(init.body as string)).toEqual({ targets: [] })
+  })
+})
+
+describe('detaylı rapor PDF', () => {
+  it('asks the server for the document rather than printing the page', async () => {
+    // Belge SUNUCUDA üretiliyor: ekranın DOM'unu yazdırmak, raporun metnini
+    // ikinci bir yerde kurmak olurdu ve iki yüzey ayrışırdı.
+    const blob = new Blob(['%PDF-1.4'], { type: 'application/pdf' })
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200, blob: async () => blob,
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const got = await apiClient.downloadPortfolioReportPdf()
+    expect(calledUrl(fetchMock)).toBe('/api/analytics/report.pdf')
+    expect(got).toBe(blob)
+  })
+
+  it('raises when the server cannot produce it', async () => {
+    // 503: yazı tipi kurulu değil. Sessizce boş bir dosya indirmek, bozuk
+    // bir belgeyi belge diye vermek olurdu.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false, status: 503, statusText: 'Service Unavailable',
+    }))
+    await expect(apiClient.downloadPortfolioReportPdf()).rejects.toThrow('503')
+  })
+})
+
+describe('bildirimler', () => {
+  it('asks for the list with the badge count', async () => {
+    const fetchMock = mockFetch({ unread_count: 3, items: [] })
+    const got = await apiClient.getNotifications(50)
+    expect(calledUrl(fetchMock)).toBe('/api/notification/me/notifications?limit=50')
+    expect(got.unread_count).toBe(3)
+  })
+
+  it('marks one as read by its id', async () => {
+    const fetchMock = mockFetch({ id: 'n-1', is_read: true })
+    await apiClient.markNotificationAsRead('n-1')
+    expect(calledUrl(fetchMock)).toBe('/api/notification/me/notifications/n-1/read')
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PUT')
+  })
+
+  it('escapes an id rather than pasting it into the path', async () => {
+    // Kimlik yoldan geçiyor; kaçırılmadığında bir eğik çizgi başka bir uca
+    // gider.
+    const fetchMock = mockFetch({ id: 'x', is_read: true })
+    await apiClient.markNotificationAsRead('a/b')
+    expect(calledUrl(fetchMock)).toContain('a/b')
+  })
+
+  it('marks all of them read in one call', async () => {
+    const fetchMock = mockFetch({ message: 'ok' })
+    await apiClient.markAllNotificationsAsRead()
+    expect(calledUrl(fetchMock)).toBe('/api/notification/me/notifications/mark-all-read')
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST')
   })
 })

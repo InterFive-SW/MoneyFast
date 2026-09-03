@@ -6,11 +6,13 @@ import QuestionnaireModal from '../../components/risk/QuestionnaireModal'
 import RiskConcentrationPanel from '../../components/risk/RiskConcentrationPanel'
 import RiskContributionPanel from '../../components/risk/RiskContributionPanel'
 import RiskFactorsWidget from '../../components/risk/RiskFactorsWidget'
+import TeknikGorunumPaneli from '../../components/analiz/TeknikGorunumPaneli'
 import RiskMetricsPanel from '../../components/risk/RiskMetricsPanel'
 import RiskNarrativeCard from '../../components/risk/RiskNarrativeCard'
 import RiskRecommendationsWidget from '../../components/risk/RiskRecommendationsWidget'
 import RiskScoreWidget from '../../components/risk/RiskScoreWidget'
 import ScoreBreakdown from '../../components/risk/ScoreBreakdown'
+import HedefDagilimPaneli from '../../components/risk/HedefDagilimPaneli'
 import SuitabilityCard from '../../components/risk/SuitabilityCard'
 import { useAnalysis } from '../Analiz'
 
@@ -77,6 +79,13 @@ export default function RiskSekmesi() {
                 />
             </div>
 
+            {/* Uygunluk kartının yanı: o, ölçülen risk seviyesini beyan edilen
+                toleransla karşılaştırıyor; bu, ölçülen ağırlıkları kullanıcının
+                kendi koyduğu hedefle. İkisi de iki OLGUNUN karşılaştırması. */}
+            <div className="mb-6">
+                <HedefDagilimPaneli />
+            </div>
+
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
                 <div className="flex flex-col gap-6 lg:col-span-1">
                     <RiskScoreWidget score={risk.score ?? null} level={risk.level ?? null} />
@@ -106,6 +115,10 @@ export default function RiskSekmesi() {
                             {/* Yoğunlaşmanın hemen ardından: ağırlıkları
                                 gördükten sonraki soru "peki risk hangisinden". */}
                             <RiskContributionPanel raw={metrics.risk_contributions} />
+                            {/* Risk ölçümleri portföyün ne kadar OYNADIĞINI
+                                söylüyor; teknik görünüm şu an NEREDE durduğunu.
+                                İkisi ayrı soru ve yan yana okunuyor. */}
+                            <TeknikGorunumPaneli />
                             <RiskFactorsWidget factors={risk.findings ?? []} />
                             <RiskRecommendationsWidget
                                 recommendations={risk.suggestions ?? []}

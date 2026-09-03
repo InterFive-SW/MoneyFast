@@ -21,6 +21,7 @@ import sanitize
 import sources
 import widgets
 from mcp_client import get_mcp_client
+import orchestrator
 from orchestrator import run_turn, run_turn_streaming
 
 log = logging.getLogger("moneyfast.api")
@@ -83,7 +84,19 @@ async def readyz() -> dict[str, Any]:
         tools = await get_mcp_client().list_tools()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"mcp unreachable: {exc}") from exc
-    return {"status": "ready", "mcp_tools": tools}
+    # Sağlayıcı ve model yankılanıyor: "bu container aslında hangi
+    # sağlayıcıyla konuşuyor" sorusu, container'a girmeden cevaplanabilmeli.
+    # `rag`'in `/readyz`'i model ve boyutu aynı sebeple döndürüyor.
+    #
+    # `model_name()` istemci KURMUYOR: kursaydı hazırlık yoklaması anahtarın
+    # varlığına bağlanır ve eksik bir anahtar, MCP erişilebilirliğini
+    # raporlamak için yazılmış bir ucu 503'e çevirirdi. Anahtar yankılanmıyor.
+    return {
+        "status": "ready",
+        "mcp_tools": tools,
+        "llm_provider": orchestrator.provider_name(),
+        "llm_model": orchestrator.model_name(fast=False),
+    }
 
 
 @app.post("/chat", response_model=ChatResponse)

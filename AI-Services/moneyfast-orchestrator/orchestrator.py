@@ -31,7 +31,7 @@ import os
 import re
 import sys
 from functools import lru_cache
-from typing import Any, Literal, Optional, TypedDict
+from typing import Any, Literal, NamedTuple, Optional, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
@@ -117,6 +117,30 @@ _TOO_LARGE_MARKERS = (
     "context length", "maximum context",
 )
 
+#: Yapılandırma hatası: model adı artık geçerli değil. Kotadan da boyuttan
+#: da farklı, çünkü BEKLEMEK düzeltmiyor ve isteği daraltmak da düzeltmiyor
+#: -- düzeltecek olan tek şey `LLM_PROVIDER`/`*_MODEL` ayarını değiştirmek.
+#:
+#: ÖLÇÜLDÜ, ve tam da bu yüzden var: NVIDIA NIM'e geçerken belgelerin
+#: önerdiği iki model adı da bir hafta önce emekliye ayrılmıştı ve uç nokta
+#: `410 Gone` döndü: "The model 'meta/llama-3.3-70b-instruct' has reached its
+#: end of life on 2026-08-26". Kullanıcı "kısa bir süre sonra tekrar
+#: deneyin" cevabı aldı; bekleyerek geçmeyecek bir şey için.
+#:
+#: Adlar dar tutuldu. Çıplak "404" YOK: bir jeton sayısında ya da bir istek
+#: kimliğinde geçebilir ve kalıcı olmayan bir hatayı kalıcı diye anlatmak,
+#: bu dosyanın zaten bir kez düzelttiği hatanın aynadaki hâli olurdu.
+_CONFIG_ERROR_MARKERS = (
+    "end of life", "no longer available", "model_not_found",
+    "does not exist", "410",
+)
+
+MISCONFIGURED_TR = (
+    "Yapılandırılmış dil modeli şu anda kullanılamıyor, bu yüzden yanıt "
+    "üretemedim. Bu geçici bir yoğunluk değil: beklemek düzeltmez, ayarın "
+    "güncellenmesi gerekiyor."
+)
+
 #: Substrings that mark a provider quota/rate-limit refusal. Matched on the
 #: exception text because the LLM client wraps the provider's 429 rather than
 #: raising a typed error.
@@ -148,6 +172,8 @@ def _failure_message(exc: Exception) -> str:
     text = str(exc).casefold()
     if any(m in text for m in _TOO_LARGE_MARKERS):
         return TOO_LARGE_TR
+    if any(m in text for m in _CONFIG_ERROR_MARKERS):
+        return MISCONFIGURED_TR
     return RATE_LIMITED_TR if any(m in text for m in _RATE_LIMIT_MARKERS) else GENERIC_FAILURE_TR
 
 
@@ -221,27 +247,134 @@ class MoneyFastState(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 # LLM
 # ---------------------------------------------------------------------------
+class Provider(NamedTuple):
+    """Bir sağlayıcının uç noktası, anahtar adı ve model adları."""
+
+    base_url: str
+    api_key_env: str
+    model_env: str
+    default_model: str
+    fast_env: str
+    default_fast: str
+    #: Sağlayıcıya özel gövde alanları. Boş bırakılabilir.
+    extra_body: dict = {}
+
+
+#: Desteklenen sağlayıcılar. Üçü de OpenAI-uyumlu `/chat/completions`
+#: konuşuyor, dolayısıyla tek istemci hepsini kapsıyor.
+#:
+#: **Model adları sağlayıcıya ÖZEL, ortak bir `LLM_MODEL` yok.**
+#: `llama-3.3-70b-versatile` ile `meta/llama-3.3-70b-instruct` birbirinin
+#: yerine geçen dizgeler değil; tek bir ortak değişken, sağlayıcı
+#: değiştirildiğinde yanlış id göndermek ve anlaşılmaz bir 404 almak demekti.
+PROVIDERS = {
+    "groq": Provider(
+        base_url="https://api.groq.com/openai/v1",
+        api_key_env="GROQ_API_KEY",
+        model_env="GROQ_MODEL", default_model="llama-3.3-70b-versatile",
+        fast_env="GROQ_FAST_MODEL", default_fast="llama-3.1-8b-instant",
+    ),
+    "nvidia": Provider(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key_env="NVIDIA_API_KEY",
+        # ADLAR ÖLÇÜLEREK SEÇİLDİ, belgeden kopyalanmadı. Belgelerin ve
+        # üçüncü taraf rehberlerin önerdiği `meta/llama-3.3-70b-instruct` ve
+        # `meta/llama-3.1-8b-instruct` 2026-08-26'da emekliye ayrılmış ve uç
+        # nokta `410 Gone` dönüyor. Katalogda görünen adların çoğu da bu
+        # hesapta 404: listelenmek, sunulmak demek değil.
+        model_env="NVIDIA_MODEL", default_model="nvidia/nemotron-3-super-120b-a12b",
+        fast_env="NVIDIA_FAST_MODEL", default_fast="nvidia/nemotron-3.5-lightning-30b-a3b",
+        # NIM'in nemotron-3 ailesi AKIL YÜRÜTEN modeller: varsayılan olarak
+        # düşünme adımlarını `content` alanına yazıyorlar ("Okay, the user is
+        # asking..."). O hâliyle yönlendirme JSON'u ayrıştırılamaz ve sentez
+        # çıktısı kullanıcıya modelin düşüncesini gösterirdi. Kapatınca
+        # temiz JSON dönüyor -- ölçüldü.
+        extra_body={"chat_template_kwargs": {"thinking": False}},
+    ),
+    "openai": Provider(
+        base_url="https://api.openai.com/v1",
+        api_key_env="OPENAI_API_KEY",
+        model_env="OPENAI_MODEL", default_model="gpt-4o",
+        fast_env="OPENAI_FAST_MODEL", default_fast="gpt-4o-mini",
+    ),
+}
+
+DEFAULT_PROVIDER = "groq"
+
+
+def provider_name() -> str:
+    return os.getenv("LLM_PROVIDER", DEFAULT_PROVIDER).strip().lower()
+
+
+def provider() -> Provider:
+    """Yapılandırılmış sağlayıcı.
+
+    Tanınmayan bir ad HATA veriyor, ve bu `embeddings.prefixes()`'ten
+    BİLEREK farklı. Orada bilinmeyen bir model güvenli varsayılana düşüyor,
+    çünkü yanlış bir önek recall'a mal olur ve eksik önek hiçbir şeye. Burada
+    güvenli bir varsayılan YOK: operatör `nvida` yazdığında Groq'a düşmek,
+    NVIDIA model adlarını Groq'a göndermek demek.
+    """
+    name = provider_name()
+    found = PROVIDERS.get(name)
+    if found is None:
+        raise RuntimeError(
+            f"LLM_PROVIDER={name!r} is not a known provider; "
+            f"choose one of {', '.join(sorted(PROVIDERS))}"
+        )
+    return found
+
+
+def model_name(fast: bool = False) -> str:
+    """Bu turda kullanılacak model adı. İSTEMCİ KURMUYOR.
+
+    `/readyz` bunu okuyor: istemci kurmak, hazırlık yoklamasını anahtarın
+    varlığına bağlar ve eksik bir anahtar MCP erişilebilirliğini raporlamak
+    için yazılmış bir ucu 503'e çevirirdi.
+    """
+    entry = provider()
+    return (
+        os.getenv(entry.fast_env, entry.default_fast) if fast
+        else os.getenv(entry.model_env, entry.default_model)
+    )
+
+
 @lru_cache(maxsize=2)
 def get_llm(fast: bool = False):
-    """Lazy so importing this module never requires a key."""
-    from langchain_groq import ChatGroq
+    """Lazy so importing this module never requires a key.
 
-    api_key = os.getenv("GROQ_API_KEY")
+    `lru_cache` TAŞIYICI: `tests/conftest.py`'deki autouse fixture
+    `get_llm.cache_clear()` çağırıyor. Dekoratör kalkarsa süitteki her test
+    kurulum aşamasında hata verir.
+    """
+    from langchain_openai import ChatOpenAI
+
+    entry = provider()
+    # Ortak ad önce: compose'da tek bir korumalı değişken var ve sağlayıcıya
+    # özel ad, geliştiricinin kendi `.env`'i için geriye dönük kapı.
+    api_key = os.getenv("LLM_API_KEY") or os.getenv(entry.api_key_env)
     if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not set")
-    model = (
-        os.getenv("GROQ_FAST_MODEL", "llama-3.1-8b-instant")
-        if fast
-        else os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        raise RuntimeError(
+            f"{entry.api_key_env} is not set (LLM_PROVIDER={provider_name()})"
+        )
+    return ChatOpenAI(
+        model=model_name(fast),
+        temperature=0,
+        api_key=api_key,
+        base_url=entry.base_url,
+        extra_body=dict(entry.extra_body) or None,
     )
-    return ChatGroq(model=model, temperature=0, api_key=api_key)
 
 
-#: Kota hatasında kaç kez yeniden denenir. Groq dakikalık pencere
-#: uyguluyor, yani birkaç saniyelik bir bekleme çoğu turu kurtarıyor.
+#: Kota hatasında kaç kez yeniden denenir. Dakikalık pencere uygulayan bir
+#: sağlayıcıda birkaç saniyelik bekleme çoğu turu kurtarıyor.
 LLM_MAX_ATTEMPTS = int(os.getenv("LLM_MAX_ATTEMPTS", "3"))
 
 #: İlk bekleme, saniye. Sonrakiler ikiye katlanıyor.
+#:
+#: 1,5 saniye GROQ'un penceresine karşı ölçüldü; NVIDIA NIM için yeniden
+#: ölçülmedi. Sağlayıcı `Retry-After` döndürüyorsa onu okumak tahmin
+#: etmekten iyidir -- yapılmadı, ve yapılana kadar bu bir varsayım.
 LLM_BACKOFF_SECONDS = float(os.getenv("LLM_BACKOFF_SECONDS", "1.5"))
 
 
@@ -280,8 +413,21 @@ def _is_retryable(exc: Exception) -> bool:
 
     `_failure_message` ile aynı metin eşlemesi, aynı sebeple: istemci
     sağlayıcının 429'unu sarmalıyor ve tipli bir hata fırlatmıyor.
+
+    **Boyut kontrolü ÖNCE, ve `_failure_message` ile aynı sırada.**
+    Sağlayıcının 413'ü `rate_limit_exceeded` kodunu taşıyor ve gövdesinde
+    "Requested 8429, Limit 8000" gibi bir sayı geçiyor -- `_RATE_LIMIT_MARKERS`
+    içindeki çıplak "429" ona takılıyor. O koruma olmadan kalıcı bir hata üç
+    kez deneniyor: 4,5 saniye bekleme ve sağlayıcıya bedava üç istek, hepsi
+    aynı sonuçla.
+
+    Sınır: yalnızca "Requested 8429" yazan, hiçbir boyut işareti taşımayan
+    bir gövde hâlâ yeniden denenir. Koruma `413` / `request too large` /
+    `context length` gibi bir işaretin bulunmasına dayanıyor.
     """
     text = str(exc).casefold()
+    if any(marker in text for marker in _TOO_LARGE_MARKERS + _CONFIG_ERROR_MARKERS):
+        return False
     return any(marker in text for marker in _RATE_LIMIT_MARKERS + _TRANSPORT_MARKERS)
 
 
@@ -870,10 +1016,15 @@ async def _narrow_then_widen(
     ile aynı yön.
     """
     if not ticker:
-        return await _run_tool(
+        single = await _run_tool(
             state, "rag_semantic_market_search", args,
             assumptions=assumptions, empty_when=lambda p: not p.get("results"),
         )
+        # Bu dal da loglanıyor. Loglanmadığı sürece "hiç arama yapılmadı" ile
+        # "arama yapıldı ve boş döndü" ayırt edilemiyordu ve boş dönen bir
+        # tur, iz dosyası okunmadan teşhis edilemedi.
+        _log_search(args, single, "single")
+        return single
 
     base_filters = {k: v for k, v in (args.get("filters") or {}).items() if k != "tickers"}
     narrow_args = {**args, "filters": {**base_filters, "tickers": [ticker]}}
@@ -976,6 +1127,15 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     # Overridden here rather than in the tool, because the caller owns this
     # choice and the contract's default has to stay what it says.
     args["min_similarity"] = float(os.getenv("RAG_MIN_SIMILARITY", "0.45"))
+    # Dilin ne olduğu KORPUSUN özelliği, sorunun değil -- planlayıcının
+    # kararı olamaz. Süzgeç bırakılmıyor: kaldırmak "her dil" demek ve
+    # derlem tek dilli olduğu sürece bir dil süzgeci yalnızca ELEYEBİLİR.
+    #
+    # ÖLÇÜLDÜ: planlayıcı Türkçe bir soruya `{"languages": ["en"]}` koydu ve
+    # sekiz eşleşmenin tamamını sildi; kullanıcı "MIATK hakkında güncel bir
+    # gelişme kaynağı bulamadım" cevabı aldı, derlemde 23 MIATK belgesi
+    # dururken. `min_similarity` ile aynı gerekçe: bu seçim çağıranın.
+    (args.get("filters") or {}).pop("languages", None)
     # The retriever scans this reversed and folds in the newest user turn it
     # finds, so the count only affects payload size, not what gets resolved.
     args["conversation_context"] = (state.get("conversation_history") or [])[

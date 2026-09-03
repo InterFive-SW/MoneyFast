@@ -221,6 +221,17 @@ services:
     env_file:
       - ../AI-Services/moneyfast-orchestrator/.env
     environment:
+      # LLM sağlayıcısı ve anahtarı. Anahtar TEK ve korumalı:
+      # `:?` compose AYRIŞTIRMA anında çalışıyor, `LLM_PROVIDER` okunmadan
+      # önce -- yani `GROQ_API_KEY` ve `NVIDIA_API_KEY`'in ikisine birden
+      # koruma koymak, ikisini de zorunlu yapardı. Ortak bir ad, dosyadaki
+      # diğer her sırrın sahip olduğu "compose up'ta yüksek sesle çök"
+      # özelliğini geri getiriyor; bugün LLM anahtarı onu taşımayan tek sır.
+      #
+      # `env_file` duruyor: geliştiricinin kendi `.env`'indeki sağlayıcıya
+      # özel ad hâlâ çalışsın diye. Buradaki değer önceliklidir.
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      LLM_API_KEY: ${LLM_API_KEY:?Set LLM_API_KEY in infra/.env}
       MCP_SERVER_URL: http://mcp:8000/sse
       JURISDICTION: ${JURISDICTION:-TR}
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-tr-TR}

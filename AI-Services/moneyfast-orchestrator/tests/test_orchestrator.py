@@ -200,6 +200,45 @@ class TestResearchQuery:
         assert out == "ASELS son durum ne"
 
 
+class TestPlannerFilters:
+    """Dilin ne olduğu KORPUSUN özelliği, sorunun değil.
+
+    ÖLÇÜLDÜ: planlayıcı Türkçe bir soruya `{"languages": ["en"]}` koydu ve
+    sekiz eşleşmenin tamamını sildi -- derlemde 23 MIATK belgesi dururken
+    kullanıcı "gelişme kaynağı bulamadım" cevabı aldı.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_language_filter_is_dropped(self, mocker, patched_llm):
+        import json as _json
+        patched_llm.set_response(_json.dumps({
+            "arguments": {"filters": {"languages": ["en"], "published_after": "2023-01-01"}}
+        }))
+        seen = {}
+
+        async def fake(state, args, ticker, assumptions):
+            seen["filters"] = args.get("filters")
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT",
+                                          "status": "EMPTY", "data": {}}}
+
+        mocker.patch.object(orchestrator, "_narrow_then_widen", side_effect=fake)
+        mocker.patch.object(orchestrator, "_fold_in_own_documents",
+                            side_effect=lambda s, a, r: r)
+        await orchestrator.market_research_node({"user_message": "MIATK son gelişmeler"})
+        assert "languages" not in seen["filters"]
+        # Planlayıcının diğer süzgeçlerine dokunulmuyor.
+        assert seen["filters"]["published_after"] == "2023-01-01"
+
+    @pytest.mark.asyncio
+    async def test_a_plan_without_filters_is_fine(self, mocker, patched_llm):
+        patched_llm.set_response('{"arguments": {}}')
+        mocker.patch.object(orchestrator, "_narrow_then_widen",
+                            side_effect=lambda s, a, t, x: {"specialist_output": {}})
+        mocker.patch.object(orchestrator, "_fold_in_own_documents",
+                            side_effect=lambda s, a, r: r)
+        assert await orchestrator.market_research_node({"user_message": "haberler"}) is not None
+
+
 class TestNarrowThenWiden:
     """Hisse süzgeci bir DARALTMA denemesi, sert bir kural değil.
 
@@ -487,6 +526,158 @@ class TestResilientSpecialists:
         source = inspect.getsource(orchestrator.build_graph)
         assert '_resilient("compliance"' not in source
         assert '_resilient("synthesis"' not in source
+
+
+class TestProviderRegistry:
+    """Sağlayıcı bir ortam değişkeniyle değişiyor.
+
+    Groq, NVIDIA NIM ve OpenAI aynı `/chat/completions` biçimini konuşuyor,
+    dolayısıyla tek istemci hepsini kapsıyor. Değişen şey uç nokta, anahtar
+    adı ve MODEL ADLARI -- sonuncusu ortak bir değişkende tutulamaz:
+    `llama-3.3-70b-versatile` ile `meta/llama-3.3-70b-instruct` birbirinin
+    yerine geçmez.
+    """
+
+    def test_the_default_is_groq(self):
+        assert orchestrator.provider_name() == "groq"
+        assert orchestrator.provider().base_url == "https://api.groq.com/openai/v1"
+
+    def test_nvidia_brings_its_own_endpoint_and_model_ids(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+        monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+        orchestrator.get_llm.cache_clear()
+        llm = orchestrator.get_llm()
+        assert str(llm.openai_api_base) == "https://integrate.api.nvidia.com/v1"
+        assert llm.model_name == "nvidia/nemotron-3-super-120b-a12b"
+        assert orchestrator.get_llm(fast=True).model_name == (
+            "nvidia/nemotron-3.5-lightning-30b-a3b"
+        )
+
+    def test_nvidia_turns_the_reasoning_preamble_off(self, monkeypatch):
+        """NIM'in nemotron-3 ailesi akıl yürüten modeller: varsayılan olarak
+        düşünme adımlarını `content`'e yazıyorlar ("Okay, the user is
+        asking..."). O hâliyle yönlendirme JSON'u ayrıştırılamaz ve sentez
+        çıktısı kullanıcıya modelin düşüncesini gösterirdi."""
+        monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+        monkeypatch.setenv("LLM_API_KEY", "nvapi-test")
+        orchestrator.get_llm.cache_clear()
+        assert orchestrator.get_llm().extra_body == {
+            "chat_template_kwargs": {"thinking": False}
+        }
+
+    def test_groq_sends_no_extra_body(self):
+        """Sağlayıcıya özel gövde alanı yalnızca gerekende var: Groq'a
+        tanımadığı bir alan göndermek 400 demek."""
+        assert orchestrator.PROVIDERS["groq"].extra_body == {}
+
+    def test_the_provider_name_is_case_and_space_insensitive(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "  NVIDIA ")
+        assert orchestrator.provider().api_key_env == "NVIDIA_API_KEY"
+
+    def test_an_unknown_provider_raises_naming_the_valid_set(self, monkeypatch):
+        """`embeddings.prefixes()`'ten BİLEREK farklı: orada bilinmeyen bir
+        model güvenli varsayılana düşer. Burada güvenli varsayılan yok --
+        `nvida` yazıldığında Groq'a düşmek, NVIDIA model adlarını Groq'a
+        göndermek demek."""
+        monkeypatch.setenv("LLM_PROVIDER", "nvida")
+        with pytest.raises(RuntimeError, match="nvida.*groq.*nvidia.*openai"):
+            orchestrator.provider()
+
+    def test_a_missing_key_names_both_the_variable_and_the_provider(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
+        orchestrator.get_llm.cache_clear()
+        with pytest.raises(RuntimeError, match="NVIDIA_API_KEY.*nvidia"):
+            orchestrator.get_llm()
+
+    def test_the_shared_key_variable_is_read_first(self, monkeypatch):
+        """Compose'da tek bir korumalı değişken var: `:?` ayrıştırma anında
+        çalışıyor, `LLM_PROVIDER` okunmadan önce, yani sağlayıcıya özel iki
+        adı birden zorunlu yapamazdık."""
+        monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+        monkeypatch.setenv("LLM_API_KEY", "shared")
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+        orchestrator.get_llm.cache_clear()
+        assert orchestrator.get_llm() is not None
+
+    def test_the_per_provider_key_still_works(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "openai")
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        orchestrator.get_llm.cache_clear()
+        assert orchestrator.get_llm().model_name == "gpt-4o"
+
+    def test_model_names_are_overridable_per_provider(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+        monkeypatch.setenv("NVIDIA_MODEL", "nvidia/nemotron-4-340b-instruct")
+        assert orchestrator.model_name() == "nvidia/nemotron-4-340b-instruct"
+
+    def test_model_name_builds_no_client(self, monkeypatch):
+        """`/readyz` bunu okuyor. İstemci kursaydı, eksik bir anahtar MCP
+        erişilebilirliğini raporlayan bir ucu 503'e çevirirdi."""
+        monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
+        assert orchestrator.model_name() == "nvidia/nemotron-3-super-120b-a12b"
+
+
+class TestRetiredModel:
+    """Emekliye ayrılmış bir model, kotadan da boyuttan da farklı.
+
+    ÖLÇÜLDÜ: NVIDIA NIM'e geçerken üçüncü taraf rehberin önerdiği iki model
+    adı da bir hafta önce emekliye ayrılmıştı ve uç nokta `410 Gone` döndü.
+    Kullanıcı "kısa bir süre sonra tekrar deneyin" cevabı aldı -- beklemekle
+    geçmeyecek bir şey için. Ayarı değiştirmekten başka çaresi yok.
+    """
+
+    RETIRED = Exception(
+        "Error code: 410 - {'status': 410, 'detail': \"The model "
+        "'meta/llama-3.3-70b-instruct' has reached its end of life on "
+        "2026-08-26T09:00:00Z and is no longer available.\"}"
+    )
+
+    def test_it_does_not_tell_the_user_to_wait(self):
+        message = orchestrator._failure_message(self.RETIRED)
+        assert message == orchestrator.MISCONFIGURED_TR
+        assert "beklemek düzeltmez" in message.casefold()
+
+    def test_it_is_not_retried(self):
+        """Üç deneme, gelmesi imkânsız bir cevap için 4,5 saniye bekleme."""
+        assert orchestrator._is_retryable(self.RETIRED) is False
+
+    def test_a_quota_refusal_is_still_told_to_wait(self):
+        assert orchestrator._failure_message(
+            Exception("429 rate limit exceeded")
+        ) == orchestrator.RATE_LIMITED_TR
+
+
+class TestRetryableClassification:
+    def test_an_oversized_request_is_not_retried(self):
+        """Sağlayıcının 413'ü `rate_limit_exceeded` taşıyor ve gövdesinde
+        "Requested 8429" geçiyor -- `_RATE_LIMIT_MARKERS`'taki çıplak "429"
+        ona takılıyor. Koruma olmadan kalıcı bir hata üç kez deneniyordu:
+        4,5 saniye bekleme ve sağlayıcıya bedava üç istek."""
+        exc = Exception(
+            "Error code: 413 - Request too large. Requested 8429, Limit 8000"
+        )
+        assert orchestrator._is_retryable(exc) is False
+
+    @pytest.mark.asyncio
+    async def test_an_oversized_request_calls_the_model_once(self, patched_llm, mocker):
+        sleep = mocker.patch.object(
+            orchestrator.asyncio, "sleep", new_callable=mocker.AsyncMock
+        )
+        patched_llm.set_responses([
+            Exception("413 request too large: Requested 8429, Limit 8000")
+        ])
+        with pytest.raises(Exception):
+            await orchestrator._llm_text("s", "u")
+        assert len(patched_llm.calls) == 1
+        assert sleep.call_args_list == []
+
+    def test_a_plain_quota_refusal_is_still_retried(self):
+        assert orchestrator._is_retryable(Exception("429 rate limit exceeded")) is True
 
 
 class TestRoutingOverrides:

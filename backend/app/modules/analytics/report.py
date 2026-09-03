@@ -91,7 +91,17 @@ def build_report(db: Session, user_id: Optional[str]) -> dict[str, Any]:
     # içindeki fiyatların ait olduğu an farklı şeyler ve rapor, sistemin
     # gecikmeyi söylemeyen tek yüzeyi olmamalı: sohbet, portföy ucu ve
     # gösterge paneli hepsi söylüyor.
-    as_of, delay_minutes, is_delayed = market_service.freshness(quotes)
+    #
+    # YALNIZCA RAPORDAKİ enstrümanların kotaları. Evrenin tamamı gönderiliyordu
+    # ve `freshness` en ESKİ gözlemi alıyor (haklı olarak: bir gövde en az
+    # güncel rakamı kadar günceldir). Sonuç, kullanıcının hiç sahip olmadığı
+    # ve o saatte KAPALI olan bir borsanın raporun tamamını bayat
+    # göstermesiydi -- ölçüldü, BIST fiyatları otuz saniyelikken rapor
+    # "462 dakika gecikmeli" diyordu, çünkü ABD borsası on sekiz saattir
+    # kapalıydı.
+    held = {row.get("symbol") for row, _value in valued}
+    own_quotes = {s: q for s, q in quotes.items() if s in held} or quotes
+    as_of, delay_minutes, is_delayed = market_service.freshness(own_quotes)
     return {
         "generated_at": now.isoformat().replace("+00:00", "Z"),
         "currency_code": "TRY",

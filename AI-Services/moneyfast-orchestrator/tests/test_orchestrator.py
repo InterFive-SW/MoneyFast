@@ -1751,7 +1751,11 @@ class TestSynthesisNode:
         # JSON dilimi + şablonun kendi bağlayıcı kuralları. Sınırlanan şey
         # JSON; şablon bir kural eklendiğinde büyüyor ve payı burada açıkça
         # ayrılmış -- testin ölçtüğü, gövdenin kırpıldığı.
-        assert len(embedded) < orchestrator.SYNTHESIS_PAYLOAD_CHARS + 2000
+        #
+        # 2.000'di. Bileşik turlar için iki kural eklendi (4b, 4c) ve
+        # gövdeden sonra gelen metin 2.609 karaktere çıktı; pay ÖLÇÜLEN
+        # değere göre yükseltildi, kırpma iddiası gevşetilmedi.
+        assert len(embedded) < orchestrator.SYNTHESIS_PAYLOAD_CHARS + 2700
 
     @pytest.mark.asyncio
     async def test_the_writer_is_given_the_conversation(self, patched_llm, base_state):
@@ -4169,3 +4173,348 @@ class TestReportBranch:
         }
         out = await orchestrator.portfolio_node(base_state)
         assert out["specialist_output"]["status"] == "EMPTY"
+
+
+class TestCompoundTurns:
+    """Birden çok isteği olan tur, istek başına bir uzmana dağıtılır.
+
+    Ölçülen kusur: "AKBNK kaç lira ve portföyümün riski ne durumda" TEK bir
+    ajana gidiyordu ve cevap "AKBNK fiyatı şu anda alınamıyor. Portföyünüzün
+    riski hakkında da veri bulunamadı." oluyordu -- ikisi de fazlasıyla
+    mevcutken. Yönlendirici bir ajan seçmek zorunda kalınca, seçtiğinin aracı
+    diğer yarıyı cevaplayamıyor ve o yarı "veri yok" diye geçiyor.
+
+    Sözleşme bunu BAŞTAN BERİ tarif ediyordu (`is_compound`, `sub_requests`)
+    ve hiçbir şey okumuyordu.
+    """
+
+    REQUESTS = ["AKBNK kaç lira", "portföyümün riski ne durumda"]
+    AGENTS = ["MARKET_DATA_AGENT", "RISK_STRATEGY_AGENT"]
+
+    def _parts(self, requests, agents):
+        """Alt istekler, her biri kendi ajanıyla -- yönlendiricinin TEK
+        çağrısından geldiği hâliyle."""
+        return [{"request": r, "agent": a} for r, a in zip(requests, agents)]
+
+    def _specialists(self, mocker, outputs):
+        async def make(name):
+            async def node(state):
+                return {"specialist_output": outputs[name],
+                        "tools_used": [f"tool_{name}"]}
+            return node
+
+        nodes = {}
+        for name in outputs:
+            async def node(state, _n=name):
+                return {"specialist_output": outputs[_n],
+                        "tools_used": [f"tool_{_n}"]}
+            nodes[name] = node
+        mocker.patch.dict(orchestrator._SPECIALIST_NODES, nodes, clear=True)
+
+    @pytest.mark.asyncio
+    async def test_each_request_reaches_its_own_specialist(self, mocker, base_state):
+        self._specialists(mocker, {
+            "market_data": {"status": "OK", "data": {"price": 71.15}},
+            "risk": {"status": "OK", "data": {"score": 36.3}},
+        })
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(self.REQUESTS, self.AGENTS)}
+        )
+        parts = out["specialist_output"]["parts"]
+        assert [p["agent"] for p in parts] == [
+            "MARKET_DATA_AGENT", "RISK_STRATEGY_AGENT"
+        ]
+        assert parts[0]["output"]["data"]["price"] == 71.15
+        assert parts[1]["output"]["data"]["score"] == 36.3
+
+    @pytest.mark.asyncio
+    async def test_the_request_text_travels_with_its_answer(self, mocker, base_state):
+        """Sentez parçayı cevaplarken hangi soruya cevap verdiğini bilmeli."""
+        self._specialists(mocker, {
+            "market_data": {"status": "OK", "data": {}},
+            "risk": {"status": "OK", "data": {}},
+        })
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(self.REQUESTS, self.AGENTS)}
+        )
+        assert [p["request"] for p in out["specialist_output"]["parts"]] == self.REQUESTS
+
+    @pytest.mark.asyncio
+    async def test_each_specialist_sees_only_its_own_request(self, mocker, base_state):
+        """Uzmana turun tamamını vermek, tam olarak düzeltilen kusur olurdu."""
+        seen = []
+
+        async def spy(state):
+            seen.append(state["user_message"])
+            return {"specialist_output": {"status": "OK", "data": {}}, "tools_used": []}
+
+        mocker.patch.dict(
+            orchestrator._SPECIALIST_NODES,
+            {"market_data": spy, "risk": spy}, clear=True,
+        )
+        await orchestrator.compound_node({**base_state, "sub_requests": self._parts(self.REQUESTS, self.AGENTS)})
+        assert seen == self.REQUESTS
+
+    @pytest.mark.asyncio
+    async def test_one_failing_part_does_not_take_the_other_down(
+        self, mocker, base_state
+    ):
+        """Tek bir aracın hatasının turun tamamını "veriye ulaşamadım"a
+        çevirmesi, bu kusurun kendisiydi."""
+
+        async def boom(state):
+            raise RuntimeError("araç düştü")
+
+        async def fine(state):
+            return {"specialist_output": {"status": "OK", "data": {"price": 1}},
+                    "tools_used": []}
+
+        mocker.patch.dict(
+            orchestrator._SPECIALIST_NODES,
+            {"market_data": fine, "risk": boom}, clear=True,
+        )
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(self.REQUESTS, self.AGENTS)}
+        )
+        parts = out["specialist_output"]["parts"]
+        assert parts[0]["output"] is not None
+        assert parts[1]["output"] is None
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_an_agent_without_a_tool_carries_no_output(self, mocker, base_state):
+        """EDUCATION ve SMALLTALK'ın aracı yok: parça bir araç turu değil,
+        sentezin doğrudan cevaplayacağı bir soru."""
+        self._specialists(mocker, {"market_data": {"status": "OK", "data": {}}})
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(
+                ["enflasyon nedir", "AKBNK kaç lira"],
+                ["EDUCATION_AGENT", "MARKET_DATA_AGENT"],
+            )}
+        )
+        parts = out["specialist_output"]["parts"]
+        assert parts[0]["output"] is None and parts[0]["agent"] == "EDUCATION_AGENT"
+        assert parts[1]["output"] is not None
+
+    @pytest.mark.asyncio
+    async def test_every_part_reports_its_tools(self, mocker, base_state):
+        self._specialists(mocker, {
+            "market_data": {"status": "OK", "data": {}},
+            "risk": {"status": "OK", "data": {}},
+        })
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(self.REQUESTS, self.AGENTS)}
+        )
+        assert out["tools_used"] == ["tool_market_data", "tool_risk"]
+
+    @pytest.mark.asyncio
+    async def test_requests_beyond_the_cap_are_reported_not_dropped(
+        self, mocker, base_state
+    ):
+        """Sorulmuş ama işlenmemiş bir istek, hiç sorulmamış gibi
+        davranılacak bir şey değil."""
+        self._specialists(mocker, {
+            "market_data": {"status": "OK", "data": {}},
+            "risk": {"status": "OK", "data": {}},
+        })
+        out = await orchestrator.compound_node({
+            **base_state,
+            "sub_requests": self._parts(
+                [*self.REQUESTS, "bir de temettü ne zaman"],
+                [*self.AGENTS, "MARKET_DATA_AGENT"],
+            ),
+        })
+        assert len(out["specialist_output"]["parts"]) == orchestrator.MAX_SUB_REQUESTS
+        assert out["specialist_output"]["unanswered"] == ["bir de temettü ne zaman"]
+
+    @pytest.mark.asyncio
+    async def test_no_answerable_part_is_empty(self, mocker, base_state):
+        self._specialists(mocker, {})
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(
+                ["merhaba", "nasılsın"], ["EDUCATION_AGENT", "SMALLTALK_AGENT"],
+            )}
+        )
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_blank_requests_are_ignored(self, mocker, base_state):
+        self._specialists(mocker, {"market_data": {"status": "OK", "data": {}}})
+        out = await orchestrator.compound_node(
+            {**base_state, "sub_requests": self._parts(
+                ["AKBNK kaç lira"], ["MARKET_DATA_AGENT"],
+            )}
+        )
+        assert len(out["specialist_output"]["parts"]) == 1
+
+
+class TestCompoundPayloadFits:
+    """Bileşik bir gövde ORTASINDAN kesilmiyor.
+
+    Kırpılmış JSON modele bozuk bir gövde vermek demek ve ondan okunan bir
+    sayı yanlış olabilir; eksik bir PARÇA ise söylenebilir bir şey.
+    """
+
+    def _payload(self, filler):
+        return {
+            "agent": "COMPOUND", "status": "OK", "unanswered": [],
+            "parts": [
+                {"request": "AKBNK kaç lira", "agent": "MARKET_DATA_AGENT",
+                 "output": {"data": {"x": "a"}}},
+                {"request": "riskim ne", "agent": "RISK_STRATEGY_AGENT",
+                 "output": {"data": {"x": filler}}},
+            ],
+        }
+
+    def test_a_payload_that_fits_is_untouched(self):
+        out = json.loads(orchestrator._fit_payload(self._payload("kısa")))
+        assert len(out["parts"]) == 2 and out["unanswered"] == []
+
+    def test_an_oversized_payload_drops_a_whole_part(self):
+        big = "x" * (orchestrator.SYNTHESIS_PAYLOAD_CHARS + 500)
+        out = json.loads(orchestrator._fit_payload(self._payload(big)))
+        assert len(out["parts"]) == 1
+        assert out["parts"][0]["request"] == "AKBNK kaç lira"
+
+    def test_the_dropped_request_is_reported_rather_than_lost(self):
+        """Sorulmuş ama işlenmemiş bir istek, hiç sorulmamış gibi
+        davranılacak bir şey değil."""
+        big = "x" * (orchestrator.SYNTHESIS_PAYLOAD_CHARS + 500)
+        out = json.loads(orchestrator._fit_payload(self._payload(big)))
+        assert out["unanswered"] == ["riskim ne"]
+
+    def test_a_first_part_that_alone_overflows_still_truncates(self):
+        """Parçaları düşürmek yetmezse kırpma devreye giriyor: gövdesiz bir
+        istek göndermektense kırpılmış bir gövde, ve uyarı log'da."""
+        payload = {"agent": "COMPOUND", "unanswered": [], "parts": [
+            {"request": "r1", "output": {"x": "y" * 20000}},
+            {"request": "r2", "output": {"x": "z"}},
+        ]}
+        assert len(orchestrator._fit_payload(payload)) == \
+            orchestrator.SYNTHESIS_PAYLOAD_CHARS
+
+    def test_a_single_part_too_large_still_truncates(self):
+        """Son parça da sığmıyorsa kırpma devreye giriyor: parçasız bir
+        gövde bırakmaktansa kırpılmış bir gövde, ve uyarı log'da."""
+        huge = {"agent": "COMPOUND", "parts": [
+            {"request": "r", "output": {"x": "y" * 20000}},
+        ]}
+        assert len(orchestrator._fit_payload(huge)) == \
+            orchestrator.SYNTHESIS_PAYLOAD_CHARS
+
+
+class TestCompoundDetection:
+    """Yönlendiricinin bileşiklik kararı."""
+
+    def _routed(self, patched_llm, response):
+        patched_llm.set_response(response)
+
+    @pytest.mark.asyncio
+    async def test_two_requests_are_carried(self, fake_mcp, patched_llm, base_state):
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": True,
+            "sub_requests": [
+                {"request": "AKBNK kaç lira", "agent": "MARKET_DATA_AGENT"},
+                {"request": "riskim ne", "agent": "RISK_STRATEGY_AGENT"},
+            ],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert [p["request"] for p in out["sub_requests"]] == [
+            "AKBNK kaç lira", "riskim ne"
+        ]
+        assert [p["agent"] for p in out["sub_requests"]] == [
+            "MARKET_DATA_AGENT", "RISK_STRATEGY_AGENT"
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_hallucinated_agent_falls_back(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Uydurulmuş bir ajan adı gerçek bir uzmana ulaşmamalı."""
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": True,
+            "sub_requests": [
+                {"request": "a", "agent": "SUPER_AGENT"},
+                {"request": "b", "agent": "RISK_STRATEGY_AGENT"},
+            ],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert out["sub_requests"][0]["agent"] == "EDUCATION_AGENT"
+
+    @pytest.mark.asyncio
+    async def test_a_plain_string_entry_still_parses(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Model bazen düz metin listesi yazıyor. İsteği kaybetmektense
+        ajansız taşımak doğru: sentez onu yine cevaplıyor."""
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": True, "sub_requests": ["a", "b"],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert [p["request"] for p in out["sub_requests"]] == ["a", "b"]
+        assert all(p["agent"] == "EDUCATION_AGENT" for p in out["sub_requests"])
+
+    @pytest.mark.asyncio
+    async def test_a_single_sub_request_is_not_compound(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """`is_compound` true ama tek alt istek dönen bir sınıflandırma, turu
+        gereksiz yere ikinci bir yönlendirmeden geçirirdi."""
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": True,
+            "sub_requests": [{"request": "AKBNK kaç lira",
+                              "agent": "MARKET_DATA_AGENT"}],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert out["sub_requests"] == []
+
+    @pytest.mark.asyncio
+    async def test_sub_requests_without_the_flag_are_ignored(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": False, "sub_requests": ["a", "b"],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert out["sub_requests"] == []
+
+    @pytest.mark.asyncio
+    async def test_blank_entries_do_not_count_towards_compoundness(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(json.dumps({
+            "target_agent": "MARKET_DATA_AGENT", "confidence": 0.9,
+            "is_compound": True,
+            "sub_requests": [{"request": "AKBNK kaç lira", "agent": "MARKET_DATA_AGENT"},
+                             {"request": "  ", "agent": "RISK_STRATEGY_AGENT"}],
+        }))
+        out = await orchestrator.router_node(base_state)
+        assert out["sub_requests"] == []
+
+
+class TestCompoundRouting:
+    def test_a_compound_turn_goes_to_the_compound_node(self, base_state):
+        assert orchestrator.route_after_router(
+            {**base_state, "sub_requests": [{"request": "a", "agent": "MARKET_DATA_AGENT"},
+             {"request": "b", "agent": "RISK_STRATEGY_AGENT"}],
+             "target_agent": "MARKET_DATA_AGENT"}
+        ) == "compound"
+
+    def test_safety_still_decides_first(self, base_state):
+        """Bileşik bir tur da olsa, sıkıntı sinyali taşıyan mesaj önce
+        insana gider."""
+        assert orchestrator.route_after_router({
+            **base_state,
+            "sub_requests": [{"request": "a", "agent": "MARKET_DATA_AGENT"}],
+            "safety_flags": ["DISTRESS_SIGNAL"],
+        }) == "handoff"
+
+    def test_a_single_request_turn_is_unaffected(self, base_state):
+        assert orchestrator.route_after_router(
+            {**base_state, "sub_requests": [], "target_agent": "MARKET_DATA_AGENT"}
+        ) == "market_data"

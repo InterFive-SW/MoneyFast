@@ -191,6 +191,10 @@ class MoneyFastState(TypedDict, total=False):
     user_id: str
     locale: str
     entities: dict[str, Any]
+    #: Turda birden çok ayrı istek varsa, her birinin kendi başına ayakta
+    #: duran hâli ve o istek için seçilen ajan. Boş liste = tek istek.
+    #: Yönlendirici TEK çağrıda üretiyor, `compound` düğümü tüketiyor.
+    sub_requests: list[dict[str, str]]
     safety_flags: list[str]
     needs_clarification: bool
     clarifying_question: Optional[str]
@@ -385,6 +389,7 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
         return {
             "primary_intent": "OUT_OF_SCOPE",
             "target_agent": "HUMAN_HANDOFF" if "DISTRESS_SIGNAL" in flags else fallback,
+            "sub_requests": [],
             "entities": {},
             "safety_flags": flags,
             "needs_clarification": False,
@@ -424,9 +429,21 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
         "routed intent=%s agent=%s confidence=%s flags=%s",
         result.get("primary_intent"), target, result.get("confidence"), flags,
     )
+    # Bileşiklik yalnızca GERÇEKTEN birden çok istek varsa taşınıyor:
+    # `is_compound` true ama tek alt istek dönen bir sınıflandırma, turu
+    # gereksiz yere ikinci bir yönlendirmeden geçirirdi.
+    sub_requests = (
+        _parse_sub_requests(result.get("sub_requests"))
+        if result.get("is_compound")
+        else []
+    )
+    if len(sub_requests) < 2:
+        sub_requests = []
+
     return {
         "primary_intent": result.get("primary_intent") or "OUT_OF_SCOPE",
         "target_agent": target,
+        "sub_requests": sub_requests,
         "entities": result.get("entities") or {},
         "safety_flags": flags,
         "needs_clarification": needs_clarification,
@@ -1395,7 +1412,13 @@ async def handoff_node(state: MoneyFastState) -> dict[str, Any]:
 
 #: Sentez gövdesinin karakter tavanı, TAHMİN DEĞİL ÖLÇÜM.
 #:
-#: Sağlayıcının istek başına sınırı 8.000 token. Sabit maliyet ölçüldü:
+#: Sağlayıcının sınırı 8.000 token / DAKİKA -- istek başına değil. Bu ayrım
+#: ölçülerek öğrenildi: hata gövdesi "tokens per minute (TPM)" diyor ve tek
+#: bir turda birden çok çağrı yapıldığında (yönlendirme + planlama + sentez)
+#: bütçe çağrılar ARASINDA paylaşılıyor. Aşağıdaki hesap yine de tek çağrının
+#: sığması için gerekli, ama yeterli değil.
+#:
+#: Sabit maliyet ölçüldü:
 #: sistem prompt'u 15.874 + şablon 2.029 = 17.903 karakter (~4.475 token).
 #: Sohbet geçmişi ölçülen turlarda ~1.500 token tutuyor. Geriye kalan
 #: ~2.000 token ≈ 8.000 karakter.
@@ -1426,6 +1449,27 @@ def _fit_payload(payload: dict[str, Any]) -> str:
     text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     if len(text) <= SYNTHESIS_PAYLOAD_CHARS:
         return text
+
+    # Bileşik bir gövde ORTASINDAN kesilmiyor: parça DÜŞÜRÜLÜYOR ve düşen
+    # istek `unanswered`'a geçiyor. Kırpılmış JSON modele bozuk bir gövde
+    # vermek demek ve ondan okunan bir sayı yanlış olabilir; eksik bir parça
+    # ise söylenebilir bir şey.
+    parts = payload.get("parts")
+    if isinstance(parts, list) and len(parts) > 1:
+        trimmed = dict(payload)
+        unanswered = list(payload.get("unanswered") or [])
+        while len(parts) > 1 and len(text) > SYNTHESIS_PAYLOAD_CHARS:
+            dropped = parts[-1]
+            parts = parts[:-1]
+            unanswered.append(dropped.get("request") or "")
+            trimmed["parts"] = parts
+            trimmed["unanswered"] = [r for r in unanswered if r]
+            text = json.dumps(trimmed, ensure_ascii=False, separators=(",", ":"))
+        log.warning(
+            "compound payload trimmed to %d part(s) to fit the budget", len(parts)
+        )
+        if len(text) <= SYNTHESIS_PAYLOAD_CHARS:
+            return text
     log.warning(
         "synthesis payload truncated: %d -> %d chars", len(text), SYNTHESIS_PAYLOAD_CHARS
     )
@@ -1606,9 +1650,129 @@ async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
 # Conditional edges
 # ---------------------------------------------------------------------------
 SpecialistRoute = Literal[
-    "portfolio", "market_data",
-    "market_research", "risk", "transaction", "handoff", "synthesis"
+    "portfolio", "market_data", "market_research", "risk", "transaction",
+    "handoff", "compound", "synthesis"
 ]
+
+
+#: Bir turda kaç ayrı istek işlenir.
+#:
+#: İki, ve sebebi bütçe: sentez gövdesi sağlayıcının 8.000 token'lık istek
+#: sınırına dayanmış durumda ve tek bir risk turu ölçüldüğünde 6.400 karakter
+#: tutuyor. Üçüncü bir parça, cevabı olan iki parçayı da düşürürdü.
+#:
+#: Kırpılan istek SESSİZCE düşmüyor: `_compound_payload` neyin dışarıda
+#: kaldığını taşıyor ve sentez bunu söylüyor. Sorulmuş ama cevaplanmamış bir
+#: soru, hiç sorulmamış gibi davranılacak bir şey değil.
+MAX_SUB_REQUESTS = 2
+
+#: Ajan adından graf düğümüne. `route_after_router` ile aynı tablo, ama orası
+#: bir dal seçiyor; burası bir fonksiyon çağırıyor.
+_NODE_FOR_AGENT = {
+    "PORTFOLIO_AGENT": "portfolio",
+    "MARKET_DATA_AGENT": "market_data",
+    "MARKET_RESEARCH_AGENT": "market_research",
+    "RISK_STRATEGY_AGENT": "risk",
+    "TRANSACTION_AGENT": "transaction",
+}
+
+
+async def compound_node(state: MoneyFastState) -> dict[str, Any]:
+    """Birden çok isteği olan bir turu, istek başına bir uzmana dağıtır.
+
+    Ölçülen kusur: "AKBNK kaç lira ve portföyümün riski ne durumda" TEK bir
+    ajana gidiyordu ve cevap "AKBNK fiyatı şu anda alınamıyor. Portföyünüzün
+    riski hakkında da veri bulunamadı." oluyordu -- ikisi de fazlasıyla
+    mevcutken. Yönlendirici bir ajan seçmek zorunda kalınca, seçtiği ajanın
+    aracı diğer yarıyı cevaplayamıyor ve o yarı "veri yok" diye geçiyor.
+
+    Sözleşme bunu BAŞTAN BERİ tarif ediyordu: `classify_and_route_intent`
+    `is_compound` ve `sub_requests` döndürüyor ve aracın kendi belgesi
+    "is_compound true ise her alt istek için bir kez yeniden çağır" diyor.
+    Hiçbir şey okumuyordu.
+
+    Her parça kendi ajanına gidiyor: uzman seçimi parça başına yapılıyor,
+    çünkü bileşik bir turun iki yarısı tam olarak farklı ajanlara ait olduğu
+    için bileşik.
+
+    Bir parçanın düşmesi diğerini DÜŞÜRMEZ: hatası kendi parçasında
+    taşınıyor ve sentez cevaplanabilenleri cevaplıyor. Tek bir aracın
+    hatasının turun tamamını "veriye ulaşamadım"a çevirmesi, bu kusurun
+    kendisiydi.
+    """
+    requests = list(state.get("sub_requests") or [])
+    dropped = [entry["request"] for entry in requests[MAX_SUB_REQUESTS:]]
+    parts: list[dict[str, Any]] = []
+    tools: list[str] = list(state.get("tools_used") or [])
+
+    for entry in requests[:MAX_SUB_REQUESTS]:
+        request, agent = entry["request"], entry["agent"]
+        node = _NODE_FOR_AGENT.get(agent)
+        if node is None:
+            # Kendi aracı olmayan ajan (EDUCATION, SMALLTALK): parça bir
+            # araç turu değil, sentezin doğrudan cevaplayacağı bir soru.
+            parts.append({"request": request, "agent": agent, "output": None})
+            continue
+        branch = {**state, "user_message": request, "target_agent": agent}
+        try:
+            result = await _SPECIALIST_NODES[node](branch)
+        except Exception as exc:  # pragma: no cover - savunma
+            log.warning("compound part failed (%s): %s", agent, exc)
+            parts.append({"request": request, "agent": agent, "output": None})
+            continue
+        parts.append({
+            "request": request,
+            "agent": agent,
+            "output": result.get("specialist_output"),
+        })
+        tools.extend(result.get("tools_used") or [])
+
+    return {
+        "specialist_output": {
+            "agent": "COMPOUND",
+            "status": "OK" if any(p["output"] for p in parts) else "EMPTY",
+            "parts": parts,
+            # Sorulmuş ama işlenmemiş istekler. Sessizce düşmüyorlar.
+            "unanswered": dropped,
+        },
+        "tools_used": tools,
+    }
+
+
+#: Düğüm adından fonksiyona. Graf `build_graph`'te kuruluyor ama bileşik
+#: düğümü uzmanları DOĞRUDAN çağırıyor: graf içinden graf çalıştırmak, aynı
+#: turu iki kez izlemek ve iki kez uyumluluk kapısından geçirmek olurdu.
+_SPECIALIST_NODES: dict[str, Any] = {}
+
+
+def _parse_sub_requests(raw: Any) -> list[dict[str, str]]:
+    """Alt istekler, her biri kendi ajanıyla.
+
+    Ajan AYNI ÇAĞRIDA geliyor, parça başına ikinci bir yönlendirme çağrısıyla
+    değil. Önce öyle yazıldı ve ölçüldüğünde sağlayıcının dakikalık token
+    sınırına takıldı: bileşik bir tur router + parça başına yönlendirme +
+    parça başına planlama + sentez ile altı LLM çağrısı yapıyordu ve ikinci
+    parçanın yönlendirmesi 429 alıyordu. Yönlendirici turu zaten
+    sınıflandırıyor; ikinci kez sormak, bildiğini yeniden sormaktı.
+
+    Tanınmayan ajan adı EDUCATION'a düşüyor: uydurulmuş bir ad gerçek bir
+    uzmana ulaşmamalı.
+    """
+    parsed: list[dict[str, str]] = []
+    for entry in raw or []:
+        if isinstance(entry, dict):
+            request = str(entry.get("request") or "").strip()
+            agent = str(entry.get("agent") or "")
+        else:
+            # Eski biçim: düz metin listesi. Ajanı yok, sentez cevaplar.
+            request, agent = str(entry).strip(), ""
+        if not request:
+            continue
+        parsed.append({
+            "request": request,
+            "agent": agent if agent in AGENTS else "EDUCATION_AGENT",
+        })
+    return parsed
 
 
 def route_after_router(state: MoneyFastState) -> SpecialistRoute:
@@ -1631,6 +1795,10 @@ def route_after_router(state: MoneyFastState) -> SpecialistRoute:
     intent = state.get("primary_intent")
     if intent == "UNSAFE" or "DISTRESS_SIGNAL" in (state.get("safety_flags") or []):
         return "handoff"
+    # Güvenlikten SONRA: bileşik bir tur da olsa, sıkıntı sinyali taşıyan bir
+    # mesaj önce insana gider.
+    if state.get("sub_requests"):
+        return "compound"
     return {
         "PORTFOLIO_AGENT": "portfolio",
         "MARKET_DATA_AGENT": "market_data",
@@ -1670,7 +1838,23 @@ def _traced(name: str, fn):
     return wrapper
 
 
+def _register_specialists() -> None:
+    """Bileşik düğümünün çağırdığı uzmanlar.
+
+    Modül düzeyinde değil bir fonksiyonda: düğümler bu satırların ALTINDA
+    tanımlı ve modül düzeyinde bir sözlük onları göremezdi.
+    """
+    _SPECIALIST_NODES.update({
+        "portfolio": portfolio_node,
+        "market_data": market_data_node,
+        "market_research": market_research_node,
+        "risk": risk_node,
+        "transaction": transaction_node,
+    })
+
+
 def build_graph():
+    _register_specialists()
     g = StateGraph(MoneyFastState)
     g.add_node("router", _traced("router", router_node))
     g.add_node("portfolio", _traced("portfolio", portfolio_node))
@@ -1679,6 +1863,7 @@ def build_graph():
     g.add_node("risk", _traced("risk", risk_node))
     g.add_node("transaction", _traced("transaction", transaction_node))
     g.add_node("handoff", _traced("handoff", handoff_node))
+    g.add_node("compound", _traced("compound", compound_node))
     g.add_node("synthesis", _traced("synthesis", synthesis_node))
     g.add_node("compliance", _traced("compliance", compliance_gate_node))
 
@@ -1693,10 +1878,12 @@ def build_graph():
             "risk": "risk",
             "transaction": "transaction",
             "handoff": "handoff",
+            "compound": "compound",
             "synthesis": "synthesis",
         },
     )
-    for node in ("portfolio", "market_data", "market_research", "risk", "transaction", "handoff"):
+    for node in ("portfolio", "market_data", "market_research", "risk",
+                 "transaction", "handoff", "compound"):
         g.add_edge(node, "synthesis")
     g.add_edge("synthesis", "compliance")
     g.add_conditional_edges(

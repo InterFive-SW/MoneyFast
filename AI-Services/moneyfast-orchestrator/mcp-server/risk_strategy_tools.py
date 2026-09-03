@@ -54,6 +54,26 @@ ALLOWED_METRICS = (
 #: tekrarlanan ders: prompt tavsiyedir.
 _DELIVERED_ALONGSIDE = frozenset({"ALLOCATION_DRIFT", "GROUP_EXPOSURE"})
 
+#: Aynı ölçümün başka adları. `_SORT_SYNONYMS` ile aynı gerekçe: model yanlış
+#: bir şey İSTEMİYOR, bu sistemin kullanmadığı adı yazıyor.
+#:
+#: Ölçüldü: planlayıcı `ES` gönderdi -- Expected Shortfall, CVaR'ın standart
+#: adı -- ve tur "'ES' bir metrik adı değil" ile düştü. Reddetmek, cevabı
+#: modelin hangi eşanlamlıyı seçtiğine bağlı kılıyor.
+_METRIC_SYNONYMS = {
+    "ES": "CVAR",
+    "EXPECTED_SHORTFALL": "CVAR",
+    "CONDITIONAL_VAR": "CVAR",
+    "VALUE_AT_RISK": "VAR",
+    "VOLATILITY_ANNUALIZED": "VOLATILITY",
+    "STDEV": "VOLATILITY",
+    "DRAWDOWN": "MAX_DRAWDOWN",
+    "MAXIMUM_DRAWDOWN": "MAX_DRAWDOWN",
+    "SHARPE_RATIO": "SHARPE",
+    "HHI": "CONCENTRATION",
+    "CORRELATION": "CORRELATION_MATRIX",
+}
+
 
 def _canonical_metrics(metrics: Optional[list[str]]) -> Optional[list[str]]:
     """Metrik adlarını kanonik hâle getirir, ya da geçerli kümeyi adıyla söyler."""
@@ -66,6 +86,7 @@ def _canonical_metrics(metrics: Optional[list[str]]) -> Optional[list[str]]:
             # Sessizce yok sayma DEĞİL: istenen şey turda gerçekten geliyor,
             # yalnızca bu parametreyle değil.
             continue
+        name = _METRIC_SYNONYMS.get(name, name)
         if name not in ALLOWED_METRICS:
             raise InvalidInputError(
                 f"{TOOL}: '{raw}' bir metrik adı değil. Geçerli değerler: "

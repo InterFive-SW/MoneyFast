@@ -390,6 +390,220 @@ class TestNarrowThenWiden:
         assert orchestrator._result_rows({"specialist_output": {"data": {"results": "nope"}}}) == []
 
 
+class TestNarrowThenWidenSimilarityFloor:
+    """0,45 süzgeçsiz arama için ölçülmüştü; ticker süzgeçli geçişler ayrı
+    bir taban kullanır -- bkz. `TICKER_FILTERED_MIN_SIMILARITY`.
+
+    Ölçüm: aynı beş THYAO haberi 0,135-0,171 arası puan alıyor, süzgeçsiz
+    aramanın kalibre edildiği bandın ("junk" 0,40 altı, en zayıf gerçek isabet
+    0,466) tamamen dışında. 0,45'i dar geçişe uygulamak ASELS ve THYAO'nun
+    etiketli haberlerinin tamamını siliyordu.
+    """
+
+    def _payload(self, rows):
+        return {"as_of": "x", "source": "s", "is_delayed": False,
+                "index_lag_minutes": 0, "results": rows, "query_echo": "q"}
+
+    @pytest.mark.asyncio
+    async def test_the_narrow_pass_uses_the_ticker_floor(self, mocker):
+        seen = []
+
+        async def fake(state, tool, args, **kw):
+            seen.append(args.get("min_similarity"))
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT",
+                                          "status": "OK", "data": self._payload(
+                [{"chunk_id": f"c{i}"} for i in range(3)]
+            )}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        # Çağıranın tabanı 0,45 olsa bile: dar geçiş KENDİ süzgecini kuruyor,
+        # dolayısıyla kendi tabanını da kurmalı.
+        await orchestrator._narrow_then_widen(
+            {}, {"query": "q", "min_similarity": 0.45}, "THYAO", []
+        )
+        assert seen[0] == orchestrator.TICKER_FILTERED_MIN_SIMILARITY
+        assert orchestrator.TICKER_FILTERED_MIN_SIMILARITY < 0.135
+
+    @pytest.mark.asyncio
+    async def test_the_wide_pass_keeps_the_callers_floor(self, mocker):
+        """Geniş geçiş ticker süzgecini KALDIRIYOR (bkz. yukarısı), dolayısıyla
+        ticker tabanının onda kalacak bir gerekçesi yok -- çağıranın kendi
+        tabanı (süzgeçsiz arama için kalibre edilmiş) geçerli olmalı."""
+        seen = []
+        results = [self._payload([{"chunk_id": "n0"}]), self._payload([])]
+
+        async def fake(state, tool, args, **kw):
+            seen.append(args.get("min_similarity"))
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT",
+                                          "status": "OK", "data": results.pop(0)}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        await orchestrator._narrow_then_widen(
+            {}, {"query": "q", "min_similarity": 0.45}, "THYAO", []
+        )
+        assert seen == [orchestrator.TICKER_FILTERED_MIN_SIMILARITY, 0.45]
+
+    @pytest.mark.asyncio
+    async def test_a_planners_ticker_filter_lowers_the_single_pass_floor(self, mocker):
+        """`ticker` (entity/carried_ticker'dan) boş olsa da planlayıcının
+        kendi `filters.tickers`'ı bu çağrıyı ticker süzgeçli yapar."""
+        seen = []
+
+        async def fake(state, tool, args, **kw):
+            seen.append(args.get("min_similarity"))
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT",
+                                          "status": "OK", "data": self._payload([])}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        await orchestrator._narrow_then_widen(
+            {}, {"query": "q", "min_similarity": 0.45,
+                 "filters": {"tickers": ["ASELS"]}},
+            None, [],
+        )
+        assert seen == [orchestrator.TICKER_FILTERED_MIN_SIMILARITY]
+
+    @pytest.mark.asyncio
+    async def test_a_ticker_less_single_pass_keeps_the_callers_floor(self, mocker):
+        seen = []
+
+        async def fake(state, tool, args, **kw):
+            seen.append(args.get("min_similarity"))
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT",
+                                          "status": "OK", "data": self._payload([])}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        await orchestrator._narrow_then_widen(
+            {}, {"query": "q", "min_similarity": 0.45}, None, []
+        )
+        assert seen == [0.45]
+
+    @pytest.mark.asyncio
+    async def test_the_callers_args_object_is_not_mutated(self, mocker):
+        """`market_research_node` aynı `args`'ı bu çağrıdan sonra
+        `_fold_in_own_documents`'a da geçiriyor; dar/tek geçişin kendi tabanı
+        için orada mutasyon YOK, kopya üzerinde çalışılıyor."""
+        caller_args = {"query": "q", "min_similarity": 0.45,
+                        "filters": {"tickers": ["ASELS"]}}
+
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT",
+                                          "status": "OK", "data": self._payload([])}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        await orchestrator._narrow_then_widen({}, caller_args, None, [])
+        assert caller_args["min_similarity"] == 0.45
+
+    def test_the_floor_is_zero_and_tunable_without_a_rebuild(self, monkeypatch):
+        assert orchestrator.TICKER_FILTERED_MIN_SIMILARITY == 0.0
+        monkeypatch.setenv("RAG_TICKER_MIN_SIMILARITY", "0.2")
+        import importlib
+
+        reloaded = importlib.reload(orchestrator)
+        try:
+            assert reloaded.TICKER_FILTERED_MIN_SIMILARITY == 0.2
+        finally:
+            monkeypatch.delenv("RAG_TICKER_MIN_SIMILARITY")
+            importlib.reload(orchestrator)
+
+
+class TestWriterResultSlimming:
+    """What reaches the writer is the readable source, not the retrieval ledger.
+
+    A regression fix with the same shape as `_slim_posture`: the ticker-filtered
+    path returned nothing until the archive was tagged, so nobody had measured
+    what eight full documents do to the synthesis body. Measured once they
+    arrived: 8.316 tokens requested against an 8.000 limit, and the user got
+    "veri tek seferde işleyebileceğimden büyük çıktı" for THYAO in a session
+    where ASELS had just been answered.
+    """
+
+    def test_retrieval_bookkeeping_does_not_reach_the_writer(self):
+        row = {
+            "chunk_id": "29b336b5-f68f-4e92-986c-8757fdd6918e",
+            "doc_id": "6976828b-b959-42de-a62a-0a287459b39c",
+            "title": "ASELSAN 125,1 milyon dolarlık satışı KAP'a bildirdi",
+            "snippet": "…",
+            "publisher": "KAP",
+            "author": None,
+            "published_at": "2026-08-31T23:31:21Z",
+            "url": "https://www.kap.org.tr/tr/Bildirim/1656530",
+            "tickers": ["ASELS"],
+            "doc_type": "FILING",
+            "language": "tr",
+            "score": 0.5236370673226679,
+            "is_opinion": False,
+        }
+        out = orchestrator._slim_results(
+            {"specialist_output": {"data": {"results": [row]}}}
+        )
+        kept = out["specialist_output"]["data"]["results"][0]
+        assert set(kept) == {
+            "title", "snippet", "publisher", "published_at", "url",
+            "tickers", "doc_type", "is_opinion",
+        }
+        # False bir değer, bir yokluk değil: bir yorum yazısı ile bir
+        # bildirim yazara ayırt edilebilir kalmalı.
+        assert kept["is_opinion"] is False
+
+    def test_sources_build_gets_every_field_it_reads(self):
+        """`sources._documents` yalnızca `title`, `publisher`, `published_at`,
+        `url` okuyor -- dördü de burada kalıyor. Bu testin amacı, ileride
+        `_WRITER_RESULT_FIELDS` daraltılırsa atıf özelliğinin sessizce
+        bozulmasını önlemek."""
+        row = {"chunk_id": "c1", "title": "t", "publisher": "p",
+               "published_at": "2026-08-31", "url": "https://x", "score": 0.5}
+        out = orchestrator._slim_results(
+            {"specialist_output": {"data": {"results": [row]}}}
+        )
+        kept = out["specialist_output"]["data"]["results"][0]
+        for field in ("title", "publisher", "published_at", "url"):
+            assert field in kept
+
+    def test_the_returned_body_is_a_copy(self):
+        """Slimming yazara giden bir görünüm, aracın cevabının bir düzenlemesi
+        değil. Aynı sözlükler `agent_trace`'in dosyaya yazdığı şey ve
+        `score`/`doc_id` kaybetmiş bir iz, bir belgenin neden o sırada
+        listelendiğini cevaplayamaz."""
+        row = {"chunk_id": "c1", "title": "t", "score": 0.5}
+        original = {"specialist_output": {"data": {"as_of": "x", "results": [row]}}}
+        out = orchestrator._slim_results(original)
+        assert row == {"chunk_id": "c1", "title": "t", "score": 0.5}
+        assert original["specialist_output"]["data"]["results"] == [row]
+        assert out is not original
+        assert out["specialist_output"]["data"]["as_of"] == "x"
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {},
+            {"specialist_output": {}},
+            {"specialist_output": {"data": None}},
+            {"specialist_output": {"data": {"results": []}}},
+            {"specialist_output": {"data": {"results": "not-a-list"}}},
+        ],
+    )
+    def test_a_body_without_results_passes_through(self, payload):
+        """Bir hata zarfı, başarı biçimindeymiş gibi yeniden yazılmamalı."""
+        assert orchestrator._slim_results(payload) == payload
+
+    @pytest.mark.asyncio
+    async def test_the_node_slims_after_folding_in_own_documents(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Sıra önemli: tekilleştirme `chunk_id` okuyor, dolayısıyla
+        kullanıcının kendi belgeleri birleştirilmeden önce düşürülemez."""
+        fake_mcp.responses["rag_semantic_market_search"] = [
+            {"results": [{"chunk_id": "c1", "title": "haber", "score": 0.6}]},
+            {"results": [{"chunk_id": "c2", "title": "belge", "score": 0.5}]},
+        ]
+        patched_llm.set_response("{}")
+        out = await orchestrator.market_research_node({**base_state, "user_id": "u-1"})
+        rows = out["specialist_output"]["data"]["results"]
+        assert rows, "sonuçlar düşmemeli"
+        assert all("chunk_id" not in row for row in rows)
+        assert [row["title"] for row in rows] == ["belge", "haber"]
+
+
 class TestSourcesRecapNode:
     """Hiç model çağırmıyor, ve bu düğümün var olma sebebi o."""
 
@@ -4479,6 +4693,16 @@ class TestOwnDocumentsGetTheirOwnSlots:
     def _plan(self, patched_llm):
         patched_llm.set_response("{}")
 
+    @staticmethod
+    def _row(chunk_id):
+        """Tekilleştirme `chunk_id`'yi okur, iddialar başlığı: ikisi de gerek.
+
+        Ayırt edici alan olarak başlık kullanılıyor çünkü `chunk_id` düğümün
+        çıktısında yok -- `_slim_results` alma katmanının muhasebesini
+        yazara göndermiyor.
+        """
+        return {"chunk_id": chunk_id, "title": chunk_id}
+
     @pytest.mark.asyncio
     async def test_a_second_search_is_scoped_to_the_users_uploads(
         self, fake_mcp, patched_llm, base_state
@@ -4505,15 +4729,15 @@ class TestOwnDocumentsGetTheirOwnSlots:
         en olası olanı -- ama haberin yerini almıyor, önüne ekleniyor."""
         self._plan(patched_llm)
         fake_mcp.responses["rag_semantic_market_search"] = [
-            {"results": [{"chunk_id": "news-1"}, {"chunk_id": "news-2"}]},
-            {"results": [{"chunk_id": "doc-1"}]},
+            {"results": [self._row("news-1"), self._row("news-2")]},
+            {"results": [self._row("doc-1")]},
         ]
 
         out = await orchestrator.market_research_node(
             {**base_state, "user_id": "u-1"}
         )
 
-        ids = [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]]
+        ids = [r["title"] for r in out["specialist_output"]["data"]["results"]]
         assert ids == ["doc-1", "news-1", "news-2"]
 
     @pytest.mark.asyncio
@@ -4522,15 +4746,15 @@ class TestOwnDocumentsGetTheirOwnSlots:
     ):
         self._plan(patched_llm)
         fake_mcp.responses["rag_semantic_market_search"] = [
-            {"results": [{"chunk_id": "doc-1"}, {"chunk_id": "news-1"}]},
-            {"results": [{"chunk_id": "doc-1"}]},
+            {"results": [self._row("doc-1"), self._row("news-1")]},
+            {"results": [self._row("doc-1")]},
         ]
 
         out = await orchestrator.market_research_node(
             {**base_state, "user_id": "u-1"}
         )
 
-        ids = [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]]
+        ids = [r["title"] for r in out["specialist_output"]["data"]["results"]]
         assert ids == ["doc-1", "news-1"]
 
     @pytest.mark.asyncio
@@ -4568,7 +4792,7 @@ class TestOwnDocumentsGetTheirOwnSlots:
     ):
         self._plan(patched_llm)
         fake_mcp.responses["rag_semantic_market_search"] = [
-            {"results": [{"chunk_id": "news-1"}]},
+            {"results": [self._row("news-1")]},
             {"results": []},
         ]
 
@@ -4576,7 +4800,7 @@ class TestOwnDocumentsGetTheirOwnSlots:
             {**base_state, "user_id": "u-1"}
         )
 
-        ids = [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]]
+        ids = [r["title"] for r in out["specialist_output"]["data"]["results"]]
         assert ids == ["news-1"]
 
     @pytest.mark.asyncio
@@ -4605,7 +4829,7 @@ class TestOwnDocumentsGetTheirOwnSlots:
         self._plan(patched_llm)
         # Kuyruk: birinci çağrı haberi döner, ikincisi patlar.
         fake_mcp.responses["rag_semantic_market_search"] = [
-            {"results": [{"chunk_id": "news-1"}]},
+            {"results": [self._row("news-1")]},
             MCPUnavailable("gone"),
         ]
 
@@ -4613,7 +4837,7 @@ class TestOwnDocumentsGetTheirOwnSlots:
             {**base_state, "user_id": "u-1"}
         )
 
-        ids = [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]]
+        ids = [r["title"] for r in out["specialist_output"]["data"]["results"]]
         assert ids == ["news-1"]
 
     @pytest.mark.asyncio

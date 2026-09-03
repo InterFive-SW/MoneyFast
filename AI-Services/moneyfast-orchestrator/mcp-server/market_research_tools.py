@@ -31,9 +31,13 @@ DEFAULT_TOP_K = 8
 
 #: The contract's documented default, kept as-is so a direct caller gets the
 #: documented behaviour. The running system never relies on it: the
-#: orchestrator always passes RAG_MIN_SIMILARITY (0.35), calibrated for the
-#: multilingual MiniLM embedder actually in use, where relevant Turkish news
-#: hits score 0.43-0.72 and this E5-era floor would discard most of them.
+#: orchestrator picks the floor per call, because one number cannot serve
+#: both cases. This E5-era value is far too high for the multilingual MiniLM
+#: embedder actually in use, whose scores run lower across the board; and a
+#: search carrying a ticker filter needs lower still, since the tag rather
+#: than the score is what makes the document relevant. See
+#: `orchestrator.market_research_node` / `_narrow_then_widen` for the
+#: measurements behind both.
 DEFAULT_MIN_SIMILARITY = 0.62
 
 

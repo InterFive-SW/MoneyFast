@@ -61,6 +61,12 @@ EXPECTED_TOOLS = {
     # v2.18: hepsi birden. Diğerleri birer soruyu cevaplıyor; bu, hiçbirinin
     # tek başına cevaplayamadığı "genel durum" sorusunu.
     "get_portfolio_report",
+    # v2.19: şirket ADINDAN sembole. Belge aramasından ayrı, çünkü bu bir
+    # benzerlik değil bir sözlük araması: "türk hava yolları" ile THYAO
+    # arasındaki bağ kayıtlı bir gerçek. Bu araç olmadan yönlendiricinin
+    # çıkardığı `company_names` hiçbir yerde okunmuyordu ve adla sorulan her
+    # soru süzgeçsiz aramaya düşüyordu.
+    "resolve_instruments",
 }
 
 #: Every tool that reaches the backend. classify_and_route_intent is
@@ -77,7 +83,8 @@ class TestWiring:
         # v2.10: `get_technical_signals` eklendi. Bilerek yapılan bir
         # sözleşme değişikliği, dolayısıyla iddia gevşetilmiyor, onunla
         # birlikte taşınıyor.
-        assert server.CONTRACT_VERSION == "v2.18"
+        # v2.19: `resolve_instruments`.
+        assert server.CONTRACT_VERSION == "v2.19"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -94,7 +101,7 @@ class TestWiring:
             "orchestrator", "portfolio", "market_data", "market_research",
             "risk_strategy", "compliance", "transaction", "banking",
             "technical", "news", "scenario", "fundamentals", "cash_flow",
-            "report",
+            "report", "instrument",
         }
 
     def test_every_domain_module_exposes_register(self):

@@ -103,6 +103,9 @@ ROUTES = {
     "/risk/stress": "stress",
     "/risk/simulate": "simulate",
     "/market/instruments": "instruments",
+    # v2.19. `/market/search` ile `/market/instruments` ayrı yollar; ikisi de
+    # enstrüman döndürüyor ama biri tarama, diğeri ad->sembol sözlüğü.
+    "/market/search": "instrument_search",
     # v2.11. Listed before the bare "/market/" fragments would matter; the
     # paths do not overlap, but naming it keeps the mapping readable.
     "/market/news/portfolio": "portfolio_news",

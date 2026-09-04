@@ -31,7 +31,8 @@ DEFAULT_TOP_K = 8
 
 #: The contract's documented default, kept as-is so a direct caller gets the
 #: documented behaviour. The running system never relies on it: the
-#: orchestrator always passes RAG_MIN_SIMILARITY (0.35), calibrated for the
+#: orchestrator always passes RAG_MIN_SIMILARITY (0.45; this note said 0.35
+#: for a while after the value moved), calibrated for the
 #: multilingual MiniLM embedder actually in use, where relevant Turkish news
 #: hits score 0.43-0.72 and this E5-era floor would discard most of them.
 DEFAULT_MIN_SIMILARITY = 0.62

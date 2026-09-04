@@ -8,6 +8,8 @@ veriyormuş gibi görünür ve fark edilmesi çok daha zordur.
 
 from __future__ import annotations
 
+import pytest
+
 from app.modules.market import symbol_match
 
 #: Gerçek unvanlar, KAP üye listesinden. Sahte veri kullanmıyoruz çünkü
@@ -314,3 +316,150 @@ class TestShortNamesNeverMatchLoosely:
         assert symbol_match.resolve_symbols("MAVI bugün yükseldi", rows) == [
             {"symbol": "MAVI", "basis": "SYMBOL"}
         ]
+
+
+#: Gölgeleme testleri için: aynı kısa adı içeren AYRI bir şirket.
+SHADOW_UNIVERSE = UNIVERSE + [
+    {"symbol": "GRNYO", "name": "GARANTİ BANKASI OPERASYONEL KİRALAMA A.Ş."},
+]
+
+
+class TestAliases:
+    """Elle yazılmış ticari kısa adlar.
+
+    Otomatik türetme DENENDİ VE ÖLÇÜLDÜ: resmî unvanın ilk kelimesini kısa ad
+    saymak korpusta felaket üretiyor -- `turkiye` 551 haberde geçiyor ve sekiz
+    bankaya bağlanırdı, `altin` 112, `izmir` 21, `zorlu` 8. Yüksek frekanslı
+    tokenların neredeyse tamamı sıradan Türkçe kelime.
+
+    Bu yüzden liste elle ve tek kurala göre: bir kısa ad, ancak YALNIZCA o
+    şirketi gösteriyorsa girer.
+    """
+
+    def test_a_trade_name_the_official_title_does_not_carry(self):
+        """"ASELSAN ELEKTRONİK SANAYİ VE TİCARET A.Ş." çekirdeği "aselsan
+        elektronik sanayi ve ticaret"; haber sadece "Aselsan" yazıyor ve NAME
+        yolu bunu bulamıyor."""
+        got = symbol_match.resolve_symbols(
+            "Aselsan'dan yeni sözleşme", UNIVERSE
+        )
+        assert got == [{"symbol": "ASELS", "basis": "ALIAS"}]
+
+    def test_turkish_suffixes_do_not_break_it(self):
+        for text in ("Turkcell'in yeni yatırımı", "Turkcell’den açıklama",
+                     "TURKCELL rekor kırdı"):
+            got = symbol_match.resolve_symbols(text, UNIVERSE)
+            assert {g["symbol"] for g in got} == {"TCELL"}, text
+
+    def test_an_ordinary_word_is_not_an_alias(self):
+        """Listeye giremeyen adlar: "zorlu" (sıfat), "emlak" (sıradan ad),
+        "altin", "izmir". Ölçülen yanlış eşleşmeler bunlardı."""
+        for text in ("Haakon'un zorlu sınavı", "Emlak vergisi düzenlemesi",
+                     "İzmir'de kongre", "Altın fiyatları yükseldi"):
+            assert symbol_match.resolve_symbols(text, UNIVERSE) == [], text
+
+    def test_a_symbol_outside_the_universe_is_not_invented(self):
+        """Liste elle yazılıyor: bir sembol borsadan çıktığında ya da yanlış
+        yazıldığında burada hayalet bir bağ üretilmemeli."""
+        assert symbol_match.resolve_symbols(
+            "Aselsan'dan yeni sözleşme", [{"symbol": "THYAO", "name": "TÜRK HAVA YOLLARI A.O."}]
+        ) == []
+
+    def test_a_longer_official_name_shadows_the_alias(self):
+        """"Garanti Bankası Operasyonel Kiralama" AYRI bir şirket. Metinde
+        kısa adı içeren daha uzun bir resmî ad varsa kısa ad susuyor:
+        kaçırmak, yanlış bağlamaktan iyidir."""
+        got = symbol_match.resolve_symbols(
+            "Garanti Bankası Operasyonel Kiralama'dan yeni filo yatırımı",
+            SHADOW_UNIVERSE,
+        )
+        assert {g["symbol"] for g in got} == {"GRNYO"}
+
+    def test_the_bank_itself_still_matches(self):
+        got = symbol_match.resolve_symbols(
+            "Garanti Bankası'ndan sürdürülebilir tahvil ihracı", SHADOW_UNIVERSE
+        )
+        assert {g["symbol"] for g in got} == {"GARAN"}
+
+    def test_a_symbol_match_outranks_an_alias(self):
+        """Kod eşleşmesi kısa addan güçlü; aynı sembol ikisiyle de
+        bulunduysa kanıtın güçlüsü raporlanır."""
+        got = symbol_match.resolve_symbols(
+            "TCELL kodlu Turkcell hissesi", UNIVERSE, ticker_markets=None
+        )
+        assert got == [{"symbol": "TCELL", "basis": "SYMBOL"}]
+
+    def test_no_alias_is_written_for_two_symbols(self):
+        """Çakışan bir kısa ad sessizce birini ezerdi; kurulumda hata
+        veriyor."""
+        assert symbol_match._build_alias_index()
+
+    def test_every_alias_is_folded_form(self):
+        """Liste katlanmış biçimde yazılmalı: eşleştirme katlanmış metinde
+        arıyor ve "Tüpraş" yazılmış bir kısa ad hiç tutmazdı."""
+        for alias in symbol_match._ALIAS_INDEX:
+            assert alias == symbol_match.fold(alias), alias
+
+
+class TestAliasTableIsChecked:
+    """Kısa ad tablosu elle yazılıyor; çakışma sessiz kalmamalı.
+
+    İki şirkete aynı kısa adı yazmak, tabloyu büyüten birinin yapabileceği
+    en kolay hata. Sözlük onu sessizce ezerdi: sonradan yazılan kazanır ve
+    önceki şirketin haberleri, hiç uyarı vermeden başka bir sembole
+    etiketlenirdi. Yanlış etiket, eksik etiketten kötü -- kullanıcı ASELS
+    sorup THYAO haberi okur ve bunun yanlış olduğunu anlamasının bir yolu
+    yoktur.
+    """
+
+    def test_the_same_name_written_to_two_symbols_is_an_error(self, monkeypatch):
+        monkeypatch.setattr(
+            symbol_match,
+            "ALIASES",
+            {"AAAA": ("ortak ad",), "BBBB": ("ortak ad",)},
+        )
+        with pytest.raises(ValueError, match="iki sembole birden"):
+            symbol_match._build_alias_index()
+
+    def test_the_same_name_repeated_for_one_symbol_is_fine(self, monkeypatch):
+        """Aynı sembole iki kez yazmak gereksiz ama zararsız: çakışma değil."""
+        monkeypatch.setattr(
+            symbol_match, "ALIASES", {"AAAA": ("ortak ad", "ortak  ad")}
+        )
+        assert symbol_match._build_alias_index() == {"ortak ad": "AAAA"}
+
+    def test_the_real_table_has_no_collisions(self):
+        """Tablonun kendisi: bu test, koruma çalışsın diye değil, tablo
+        bozulduğunda kırılsın diye var."""
+        index = symbol_match._build_alias_index()
+        assert len(index) == sum(len(v) for v in symbol_match.ALIASES.values())
+
+
+class TestSpelledOutLegalSuffix:
+    """Unvan eki açık yazıldığında da atılır.
+
+    Ürün kayıtlarındaki resmî ad ile bildirim başlığındaki ad aynı eki farklı
+    biçimde yazıyor: "Türkiye Vakiflar Bankasi Türk Anonim Ortakligi" ile
+    "TÜRKİYE VAKIFLAR BANKASI T.A.O.". Yalnızca kısaltma atıldığı sürece bu
+    ikisinin çekirdek adı farklı çıkıyor ve şirket kendi bildiriminde
+    eşleşmiyordu.
+    """
+
+    @pytest.mark.parametrize(
+        "written, core",
+        [
+            ("Türkiye Vakiflar Bankasi Türk Anonim Ortakligi", "turkiye vakiflar bankasi"),
+            ("TÜRKİYE VAKIFLAR BANKASI T.A.O.", "turkiye vakiflar bankasi"),
+            ("Teknosa Iç ve Dis Ticaret Anonim Sirketi", "teknosa ic ve dis ticaret"),
+            ("TEKNOSA İÇ VE DIŞ TİCARET A.Ş.", "teknosa ic ve dis ticaret"),
+        ],
+    )
+    def test_both_spellings_fold_to_the_same_core(self, written, core):
+        assert symbol_match.core_name(written) == core
+
+    def test_a_name_that_merely_contains_the_words_is_not_cut(self):
+        """Ek yalnızca SONDA atılır: ortasında geçen bir kelime unvan eki
+        değildir."""
+        assert symbol_match.core_name("Anonim Sirketi Yatirim Holding") == (
+            "anonim sirketi yatirim holding"
+        )

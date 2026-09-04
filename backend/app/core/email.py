@@ -416,3 +416,214 @@ async def send_transaction_email(
             logger.warning("SMTP yapılandırması eksik, işlem e-postası gönderilemedi.")
     except Exception as e:
         logger.error(f"E-posta gönderilirken (Transaction) beklenmeyen bir hata oluştu: {str(e)}")
+
+
+async def send_daily_news_email(
+    email_to: str,
+    first_name: str,
+    news_items: list,
+    holdings_data: list,
+    watchlist_symbols: list,
+    quotes: dict
+) -> None:
+    """
+    Kullanıcının portföyündeki ve favori listesindeki (watchlist) varlıkların
+    fiyat özetlerini ve ilgili son 24 saatin haberlerini içeren günlük piyasa bültenini asenkron olarak gönderir.
+    """
+    
+    # 1. Portföy (Holdings) HTML Tablosu Oluşturma
+    holdings_html = ""
+    if holdings_data:
+        holdings_rows = ""
+        for item in holdings_data:
+            symbol = item.get("symbol", "Bilinmiyor")
+            quote = quotes.get(symbol, {})
+            price = quote.get("price") if quote.get("price") is not None else item.get("price")
+            change_percent = quote.get("change_percent") if quote.get("change_percent") is not None else item.get("change_percent")
+            
+            price_str = f"{price:,.2f}" if price is not None else "N/A"
+            
+            if change_percent is not None:
+                if change_percent > 0:
+                    color = "#10B981" # Yeşil
+                    arrow = "▲"
+                    bg_badge = "rgba(16, 185, 129, 0.1)"
+                elif change_percent < 0:
+                    color = "#EF4444" # Kırmızı
+                    arrow = "▼"
+                    bg_badge = "rgba(239, 68, 68, 0.1)"
+                else:
+                    color = "#94a3b8"
+                    arrow = "▬"
+                    bg_badge = "rgba(148, 163, 184, 0.1)"
+                change_str = f"""<span style="background: {bg_badge}; padding: 4px 8px; border-radius: 6px; color: {color}; display: inline-block;">{arrow} {abs(change_percent):.2f}%</span>"""
+            else:
+                change_str = "N/A"
+
+            holdings_rows += f"""
+            <tr>
+                <td style="color: #60a5fa; border-bottom: 1px solid #1e293b; font-size: 15px; font-weight: 600; padding: 14px 0;">{symbol}</td>
+                <td align="right" style="color: #f1f5f9; border-bottom: 1px solid #1e293b; font-weight: 600; font-size: 15px; padding: 14px 0;">{price_str}</td>
+                <td align="right" style="border-bottom: 1px solid #1e293b; font-weight: 600; font-size: 14px; padding: 14px 0;">{change_str}</td>
+            </tr>
+            """
+        
+        holdings_html = f"""
+        <h3 style="color: #e2e8f0; font-size: 18px; margin-bottom: 15px; margin-top: 30px; border-left: 3px solid #60a5fa; padding-left: 10px;">Portföy Özeti</h3>
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0f172a; border-radius: 10px; border: 1px solid #1e293b; padding: 10px 20px; margin-bottom: 30px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+            {holdings_rows}
+        </table>
+        """
+
+    # 2. İzleme Listesi (Watchlist) HTML Tablosu Oluşturma
+    watchlist_html = ""
+    if watchlist_symbols:
+        watchlist_rows = ""
+        for symbol in watchlist_symbols:
+            quote = quotes.get(symbol, {})
+            price = quote.get("price")
+            change_percent = quote.get("change_percent")
+            
+            price_str = f"{price:,.2f}" if price is not None else "N/A"
+            
+            if change_percent is not None:
+                if change_percent > 0:
+                    color = "#10B981"
+                    arrow = "▲"
+                    bg_badge = "rgba(16, 185, 129, 0.1)"
+                elif change_percent < 0:
+                    color = "#EF4444"
+                    arrow = "▼"
+                    bg_badge = "rgba(239, 68, 68, 0.1)"
+                else:
+                    color = "#94a3b8"
+                    arrow = "▬"
+                    bg_badge = "rgba(148, 163, 184, 0.1)"
+                change_str = f"""<span style="background: {bg_badge}; padding: 4px 8px; border-radius: 6px; color: {color}; display: inline-block;">{arrow} {abs(change_percent):.2f}%</span>"""
+            else:
+                change_str = "N/A"
+
+            watchlist_rows += f"""
+            <tr>
+                <td style="color: #60a5fa; border-bottom: 1px solid #1e293b; font-size: 15px; font-weight: 600; padding: 14px 0;">{symbol}</td>
+                <td align="right" style="color: #f1f5f9; border-bottom: 1px solid #1e293b; font-weight: 600; font-size: 15px; padding: 14px 0;">{price_str}</td>
+                <td align="right" style="border-bottom: 1px solid #1e293b; font-weight: 600; font-size: 14px; padding: 14px 0;">{change_str}</td>
+            </tr>
+            """
+            
+        watchlist_html = f"""
+        <h3 style="color: #e2e8f0; font-size: 18px; margin-bottom: 15px; margin-top: 30px; border-left: 3px solid #8b5cf6; padding-left: 10px;">İzleme Listesi</h3>
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0f172a; border-radius: 10px; border: 1px solid #1e293b; padding: 10px 20px; margin-bottom: 30px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+            {watchlist_rows}
+        </table>
+        """
+
+    # 3. Son Haberler (News) HTML Oluşturma
+    news_html_cards = ""
+    if news_items:
+        news_html_cards = f'<h3 style="color: #e2e8f0; font-size: 18px; margin-bottom: 15px; margin-top: 30px; border-left: 3px solid #f59e0b; padding-left: 10px;">Portföyünüzden Öne Çıkanlar</h3>'
+        for item in news_items:
+            related = ", ".join(item.related_symbols) if hasattr(item, "related_symbols") and item.related_symbols else "Genel Piyasa"
+            related_label = f"Sektör Haberi (Sembol: {related})" if related != "Genel Piyasa" else related
+            title = item.title if hasattr(item, "title") and item.title else "Haber Başlığı"
+            
+            import re
+            summary = item.summary if hasattr(item, "summary") and item.summary else ""
+            summary = re.sub(r'<[^>]+>', '', summary)
+            if len(summary) > 160:
+                summary = summary[:160] + "..."
+                
+            url = item.url if hasattr(item, "url") and item.url else "#"
+            
+            time_str = ""
+            if hasattr(item, "published_at") and item.published_at:
+                try:
+                    time_str = item.published_at.strftime("%d %b %H:%M")
+                except:
+                    pass
+
+            news_html_cards += f"""
+            <div style="background-color: #0f172a; border-radius: 10px; border: 1px solid #1e293b; padding: 20px; margin-bottom: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="background: rgba(96, 165, 250, 0.1); color: #60a5fa; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; letter-spacing: 0.5px;">{related_label}</span>
+                    <span style="color: #64748b; font-size: 12px;">{time_str}</span>
+                </div>
+                <h4 style="margin: 0 0 10px 0; color: #f8fafc; font-size: 17px; line-height: 1.5; font-weight: 600;">
+                    <a href="{url}" style="color: #f8fafc; text-decoration: none;">{title}</a>
+                </h4>
+                <p style="margin: 0; color: #94a3b8; font-size: 14px; line-height: 1.6;">{summary}</p>
+            </div>
+            """
+    else:
+        news_html_cards = """
+        <h3 style="color: #e2e8f0; font-size: 18px; margin-bottom: 15px; margin-top: 30px; border-left: 3px solid #f59e0b; padding-left: 10px;">Piyasa Haberleri</h3>
+        <div style="background-color: #0f172a; border-radius: 10px; border: 1px dashed #334155; padding: 30px; text-align: center;">
+            <p style="margin: 0; color: #94a3b8; font-size: 15px; line-height: 1.6;">Son 24 saatte takip ettiğiniz varlıklarla ilgili yeni bir gelişme bulunmamaktadır.</p>
+        </div>
+        """
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #020617; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f8fafc;">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #020617; padding: 40px 0;">
+            <tr>
+                <td align="center">
+                    <table width="600" border="0" cellspacing="0" cellpadding="0" style="background-color: #0f172a; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border: 1px solid #1e293b;">
+                        <tr>
+                            <td align="center" style="padding: 40px 40px 30px 40px; border-bottom: 1px solid #1e293b; background: linear-gradient(135deg, #0f172a 0%, #020617 100%);">
+                                <h2 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 700; letter-spacing: -0.5px;">MoneyFast</h2>
+                                <p style="margin: 8px 0 0 0; color: #94a3b8; font-size: 15px; font-weight: 500;">Günlük Piyasa ve Portföy Özeti</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 40px;">
+                                <h3 style="margin-top: 0; color: #f8fafc; font-size: 20px; font-weight: 600;">Merhaba {first_name},</h3>
+                                <p style="color: #cbd5e1; font-size: 16px; line-height: 1.6; margin-bottom: 10px;">
+                                    İşte takip ettiğiniz ve sahip olduğunuz varlıkların son 24 saatteki durumu:
+                                </p>
+                                
+                                {holdings_html}
+                                {watchlist_html}
+                                {news_html_cards}
+                                
+                                <div style="margin-top: 40px; text-align: center;">
+                                    <a href="https://moneyfast.app" style="display: inline-block; background-color: #3b82f6; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 15px;">Platforma Git</a>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td align="center" style="padding: 24px; background-color: #020617; border-top: 1px solid #1e293b;">
+                                <p style="margin: 0; color: #64748b; font-size: 13px; line-height: 1.5;">
+                                    Bu e-postayı bildirim ayarlarınız açık olduğu için alıyorsunuz.<br>
+                                    Tercihlerinizi <a href="#" style="color: #60a5fa; text-decoration: none;">Güvenlik Merkezi</a> üzerinden değiştirebilirsiniz.
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+    message = MessageSchema(
+        subject="MoneyFast Portföy ve Piyasa Bülteni",
+        recipients=[email_to],
+        body=html_content,
+        subtype=MessageType.html
+    )
+
+    try:
+        if 'fm' in globals():
+            await fm.send_message(message)
+            logger.info(f"Daily market briefing email sent to {email_to}")
+        else:
+            logger.warning("SMTP yapılandırması eksik, günlük bülten e-postası gönderilemedi.")
+    except Exception as e:
+        logger.error(f"E-posta gönderilirken (Daily Briefing) beklenmeyen bir hata oluştu: {str(e)}")

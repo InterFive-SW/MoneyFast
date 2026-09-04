@@ -141,8 +141,51 @@ def _symbols_for(item: dict[str, Any], universe: list[InvestmentProduct]) -> lis
         # olurdu.
         return sorted(set(declared))
 
-    text = " ".join(filter(None, (item.get("title"), item.get("summary"))))
-    return [row["symbol"] for row in resolve_news_symbols(text, universe)]
+    found = resolve_item_symbols(
+        item.get("source"), item.get("title"), item.get("summary"), universe
+    )
+    return [row["symbol"] for row in found]
+
+
+#: Bildirim kaynakları: gövdesinde ilgili tarafları -- yönetim kurulu
+#: üyesinin başka şirketteki görevini, ana ortaklığı, likidite sağlayıcıyı --
+#: sayan kaynaklar.
+FILING_SOURCES = frozenset({"KAP"})
+
+
+def resolve_item_symbols(
+    source: str | None, title: str | None, summary: str | None, universe: list[Any]
+) -> list[dict[str, str]]:
+    """Bir haber satırının bağlandığı semboller. Bildirimlerde kısa ad dar.
+
+    Kısa ad ("thy", "opet") bir bildirimin GÖVDESİNDE, o bildirimin konusu
+    olmayan bir şirketi işaret ediyor: KAP formları ilgili tarafları tek tek
+    sayıyor. Ölçüldü, kural arşivde 16 farklı (sembol, konu) çiftini
+    düşürüyor ve elle bakıldığında on altısı da yanlış:
+
+      "TÜRKİYE GARANTİ BANKASI A.Ş. — Şirket Genel Bilgi Formu"  -> TKFEN
+      "OTOKAR OTOMOTİV VE SAVUNMA SANAYİ A.Ş. — ..."             -> YKBNK
+      "EMLAK KATILIM VARLIK KİRALAMA A.Ş. — ..."                 -> THYAO
+
+    Kısıt YALNIZCA kısa ada. Açık kod ve resmî ad gövdede de okunmaya devam
+    ediyor, çünkü orada güvenilirler: BISTECH devre kesici bildirimlerinin
+    başlığı jenerik ("BORSA İSTANBUL BISTECH DEVRE KESİCİ UYGULAMASI") ve
+    konu şirket yalnızca gövdede, açık koduyla yazılı. Metnin tamamını
+    başlığa indirgemek bu bildirimlerin 550'sini birden koparıyordu.
+
+    Haber kaynaklarına hiç dokunulmuyor: "Borsada bugün" başlıklı bir yazı
+    gerçekten gövdesinde saydığı hisseler hakkındadır.
+    """
+    text = " ".join(filter(None, (title, summary)))
+    found = resolve_news_symbols(text, universe)
+    if (source or "").strip().upper() not in FILING_SOURCES:
+        return found
+    in_title = {row["symbol"] for row in resolve_news_symbols(title or "", universe)}
+    return [
+        row
+        for row in found
+        if row["basis"] != "ALIAS" or row["symbol"] in in_title
+    ]
 
 
 def resolve_news_symbols(text: str, universe: list[Any]) -> list[dict[str, str]]:

@@ -63,6 +63,8 @@ class UserResponse(BaseModel):
     email: str
     phone_number: str
     is_active: bool
+    # JSONB formatında bildirim tercihleri matrisi
+    notification_preferences: Dict[str, Dict[str, bool]] = Field(..., description="Bildirim tercihleri matrisi")
     # birimi, varsayılan dashboard şablonu). JSONB olarak saklandığı için
     # şema genişletmeye gerek kalmadan yeni tercih anahtarları eklenebilir.
     user_preferences: Dict[str, str] = Field(..., description="Kullanıcıya özgü görünüm ve bölgesel tercihler")

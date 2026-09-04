@@ -91,6 +91,9 @@ services:
       # Committed, reviewable per-user seed data. Mounted so `export_seeds`
       # writes to the repo rather than into the container filesystem.
       - ../seeds:/app/seeds
+      # Persistent storage for user uploads (like avatars) so they survive
+      # container rebuilds.
+      - backend_uploads:/app/uploads
     networks:
       # web-ingress is what makes the `ports:` mapping above actually work.
       # Docker cannot DNAT host traffic into a container attached only to
@@ -255,6 +258,7 @@ services:
 volumes:
   postgres_data:
   vector_db_data:
+  backend_uploads:
 
 networks:
   # The only network reachable from the host. Deliberately holds one service:

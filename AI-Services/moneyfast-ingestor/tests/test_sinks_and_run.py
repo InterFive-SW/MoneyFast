@@ -615,6 +615,41 @@ class TestCycles:
         assert result == {"fetched": 1, "kap": 0, "embedded": 1, "tagged": 0,
                           "news_written": 1}
 
+    def test_global_news_uses_the_same_sink(self, monkeypatch):
+        """İkinci bir yazma yolu, iki farklı tekilleştirme davranışı demek
+        olurdu. Öğeler `rss_source`in ürettiği sözlük biçiminde çıkıyor."""
+        pushed = {}
+        monkeypatch.setattr(
+            run.gdelt_source, "fetch_all", lambda: [{"title": "oil up"}]
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: pushed.update(backend=list(i))
+            or {"news_written": 1, "news_symbols": {"h": ["THYAO"]}},
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i, s=None: pushed.update(rag=list(i), symbols=s) or 1,
+        )
+        result = run.run_global_news(None)
+        assert result == {"fetched": 1, "embedded": 1, "tagged": 1, "news_written": 1}
+        # Sembol haritası backend'den korpusa taşınıyor: ters sırada korpus
+        # etiketsiz kalırdı.
+        assert pushed["symbols"] == {"h": ["THYAO"]}
+        assert pushed["rag"] == pushed["backend"]
+
+    def test_global_news_with_nothing_fetched_writes_nothing(self, monkeypatch):
+        """GDELT ulaşılamazsa ya da hiçbir sorgu eşleşmezse backend'e boş bir
+        yazma isteği gitmiyor -- yazacak bir şey yokken yazmak, her saat
+        başı anlamsız bir tur demekti."""
+        wrote = []
+        monkeypatch.setattr(run.gdelt_source, "fetch_all", lambda: [])
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend", lambda c, i: wrote.append(i) or {}
+        )
+        assert run.run_global_news(None) == {"fetched": 0, "embedded": 0, "tagged": 0}
+        assert wrote == []
+
     def test_disclosures_ride_the_same_pipeline_as_news(self, monkeypatch):
         """KAP için ikinci bir yol açılmadı: bildirimler de haber öğesi
         biçiminde çıkıyor ve aynı lavaboya akıyor. Ayrı bir yol, backend'in
@@ -978,6 +1013,11 @@ class TestScheduler:
             # `quotes` işi vardı ve bütün evreni 30 saniyede bir çekiyordu.
             "quotes_band": "interval", "quotes_bulk": "interval",
             "news": "interval",
+            # Küresel haber AYRI bir iş: sekiz sorgu var ve GDELT istek
+            # başına beş saniye istiyor, yani tur ~40 saniye. Bunu on beş
+            # dakikalık RSS döngüsüne katmak, Türkçe haberi bir dış servisin
+            # temposuna bağlamak olurdu.
+            "global-news": "interval",
             # Gün içi barlar, toplu turla aynı ritimde.
             "candles_intraday": "interval",
             "candles": "cron", "fundamentals": "cron",

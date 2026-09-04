@@ -1190,7 +1190,9 @@ async def _narrow_then_widen(
     # Amaç "konuyla ilgisiz haberle doldurmak" değil. Hisseyi hiç anmayan bir
     # satır bu soruya cevap değil, ve derlemede o şirkete dair bir şey yoksa
     # doğru cevap "yok" -- `results == []` zaten TAM bir cevap sayılıyor.
-    wide_rows = [row for row in _result_rows(wide) if _mentions(row, ticker, aliases)]
+    wide_rows = [
+        row for row in _result_rows(wide) if _is_context(row, ticker, aliases)
+    ]
     if not wide_rows:
         # Dar geçiş bir şey bulduysa o. Bulmadıysa BOŞ -- `wide` DEĞİL.
         #
@@ -1223,6 +1225,47 @@ def _emptied(result: dict[str, Any]) -> dict[str, Any]:
     data["results"] = []
     output["data"] = data
     return {**result, "specialist_output": output}
+
+
+#: Şirketi ANMAYAN bir satırın yine de bağlam sayılması için gereken puan.
+#:
+#: Ölçüldü, aynı derlem ve aynı gömme modeli:
+#:
+#:   "petrol fiyatlari jeopolitik havayolu maliyeti"
+#:     0,633  Petroldeki yükseliş ucuz uçuşları vurdu          <- makro bağlam
+#:     0,623  Petrol gemileri Hürmüz Boğazı'nı geçemedi        <- makro bağlam
+#:     0,622  96 dolarlık petrole THY ve Pegasus'tan hedge     <- makro bağlam
+#:   "THYAO ..." (eski tur)
+#:     0,463  Asya'nın en zengin ülkesinde nüfus alarmı        <- DOLGU
+#:
+#: Bant geniş ama iki nokta arasında; 0,55 ikisini de rahat ayırıyor.
+#: Alma eşiğinden (0,45) yüksek olması kasıtlı: şirketi anmayan bir satırı
+#: KAYNAK olarak listelemek, onu getirmekten daha güçlü bir iddia.
+CONTEXT_MIN_SCORE = 0.55
+
+
+def _is_context(row: dict[str, Any], ticker: str, aliases: tuple[str, ...]) -> bool:
+    """Bu satır bu soruya bağlam sayılır mı?
+
+    İki ayrı soru, tek bir kapıya sıkıştırılmıştı. Bir belge ya bu şirketi
+    ANIYOR, ya BAŞKA bir şirketin belgesi, ya da hiçbir şirkete bağlı değil --
+    ve üçüncüsü ilk ikisinden farklı davranmalı.
+
+    * Şirketi anıyorsa: geçer (`_mentions`).
+    * BAŞKA bir şirketin etiketini taşıyorsa: geçmez, puanı ne olursa olsun.
+      Ölçülen hata tam buydu: THYAO sorusuna 0,669 puanlı bir EKGYO bildirimi
+      kaynak gösterildi. Başka bir şirketin bildirimi bu şirket hakkında
+      kanıt değildir.
+    * Hiçbir etiketi yoksa: MAKRO olabilir -- petrol, faiz, jeopolitik. Bunlar
+      havayolu maliyetini gerçekten açıklıyor ve hepsini elemek, kullanıcının
+      istediği zinciri ("ABD saldırısı -> petrol -> THYAO") kurulamaz
+      yapardı. Yalnızca daha yüksek bir puan istiyor.
+    """
+    if _mentions(row, ticker, aliases):
+        return True
+    if row.get("tickers"):
+        return False
+    return float(row.get("score") or 0.0) >= CONTEXT_MIN_SCORE
 
 
 def _mentions(
@@ -1268,11 +1311,86 @@ def _log_search(args: dict[str, Any], result: dict[str, Any], pass_name: str) ->
     )
 
 
+#: Korpusun belge türleri. Araç sözleşmesinde yazılı ve depoda BÜYÜK HARFLE
+#: saklanıyor.
+DOC_TYPES = frozenset({
+    "NEWS", "ANALYST_REPORT", "FILING", "TRANSCRIPT", "MACRO_NOTE", "REGULATORY",
+})
+
+
+def _normalise_doc_types(filters: dict[str, Any]) -> None:
+    """Planlayıcının belge türü süzgecini kullanılabilir hâle getirir.
+
+    `languages` ile aynı arıza sınıfı, aynı sessizlik: ÖLÇÜLDÜ, planlayıcı
+    `doc_types: ["news", "analysis"]` gönderdi. Depoda tür `NEWS` diye
+    yazılı, dolayısıyla küçük harfli değer hiçbir satırla eşleşmiyor ve
+    `analysis` zaten şemada yok. İki geçiş de sıfır döndü ve kullanıcı
+    "verilere ulaşamadım" cevabı aldı -- derlemde 0,63 puanla eşleşen üç
+    haber dururken.
+
+    Büyük harfe çevriliyor (biçim hatası), tanınmayan değer DÜŞÜRÜLÜYOR ve
+    loglanıyor. Hepsi düşerse süzgecin kendisi kalkıyor: geriye boş bir liste
+    bırakmak "hiçbir türü kabul etme" demek olurdu, yani sessizliğin daha da
+    kesini.
+    """
+    raw = filters.get("doc_types")
+    if not raw:
+        return
+    wanted = [str(value).strip().upper() for value in raw]
+    kept = [value for value in wanted if value in DOC_TYPES]
+    dropped = [value for value in wanted if value not in DOC_TYPES]
+    if dropped:
+        log.info("dropping unknown doc_types %s", dropped)
+    if kept:
+        filters["doc_types"] = kept
+    else:
+        filters.pop("doc_types", None)
+
+
+#: Planlayıcı sorgusunun ikinci bir deneme sayılması için gereken en az
+#: uzunluk. Bir iki karakterlik "sorgu" damıtma değil, kayıp.
+MIN_RETRY_QUERY_LENGTH = 8
+
+
+def _is_distinct_query(planner_query: str, used_query: str) -> bool:
+    """İkinci deneme yapmaya değer mi.
+
+    Aynı metni ikinci kez aramak, aynı sıfır sonucu ikinci kez almak demek --
+    ve planlayıcıya "kullanıcının cümlesini olduğu gibi geçir" dendiği için
+    çoğu turda iki metin AYNI.
+    """
+    return (
+        len(planner_query) >= MIN_RETRY_QUERY_LENGTH
+        and _fold(planner_query) != _fold(used_query)
+    )
+
+
 async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     plan = await _llm_json(
         SPECIALIST_PROMPTS["MARKET_RESEARCH_AGENT"], _specialist_task(state), fast=True
     )
     args = plan.get("arguments") or {}
+    # Planlayıcının DAMITILMIŞ sorgusu. Normal
+    # yolda kullanıcının cümlesi kazanıyor (bkz. `_research_query`), ama
+    # cümle uzadıkça gömme vektörü SEYRELİYOR ve hiçbir belge eşiği
+    # geçemiyor.
+    #
+    # `arguments.query` DEĞİL, ayrı bir `fallback_query`: uzman istemi
+    # planlayıcıya "kullanıcının cümlesini olduğu gibi geçir" diyor ve
+    # ölçüldüğünde gerçekten öyle yapıyordu -- yani iki alan aynıydı ve
+    # ikinci deneme aynı sıfır sonucu ikinci kez alıyordu. Ölçüldü:
+    #
+    #   "petrol fiyatları ve jeopolitik gelişmeler hakkında ne var? bu
+    #    THYAO gibi havayollarını nasıl etkiler?"   -> 0 sonuç
+    #   "petrol fiyatları ve jeopolitik gelişmeler" -> 0,749 / 0,719 / 0,692
+    #   "petrol fiyatları havayolu maliyeti"        -> 0,640 / 0,628 / 0,602
+    #
+    # O 0,602'lik satır "96 dolarlık petrole THY ve Pegasus'tan hedge
+    # kalkanı" -- sorunun tam cevabı derlemde duruyordu ve uzun cümle onu
+    # bulunamaz kılıyordu.
+    # Zarfın KÖKÜNDEN, `arguments`ın içinden değil: araç sözleşmesi donuk ve
+    # oraya bilinmeyen bir alan koymak `ContractViolationError` olurdu.
+    planner_query = str(plan.get("fallback_query") or "").strip()
     args.setdefault("top_k", 8)
     # Cosine thresholds are a property of the embedding model, not a product
     # constant. The tool contract documents 0.62, which is calibrated for E5;
@@ -1304,6 +1422,7 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     # gelişme kaynağı bulamadım" cevabı aldı, derlemde 23 MIATK belgesi
     # dururken. `min_similarity` ile aynı gerekçe: bu seçim çağıranın.
     (args.get("filters") or {}).pop("languages", None)
+    _normalise_doc_types(args.get("filters") or {})
     # The retriever scans this reversed and folds in the newest user turn it
     # finds, so the count only affects payload size, not what gets resolved.
     #
@@ -1354,9 +1473,20 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     # yazmadığı bir kod, sorduğu şirketin adının önüne eklenmiş hâlde.
     args["query"] = _research_query(state, ticker)
 
-    result = await _narrow_then_widen(
-        state, args, ticker, plan.get("assumptions") or [], aliases
-    )
+    assumptions = plan.get("assumptions") or []
+    result = await _narrow_then_widen(state, args, ticker, assumptions, aliases)
+
+    # Hiçbir şey bulunamadıysa planlayıcının damıtılmış sorgusuyla BİR kez
+    # daha. Sadece bir kez ve sadece boşken: her turda iki arama yapmak, işe
+    # yarayan yolu da iki katına çıkarırdı.
+    if not _result_rows(result) and _is_distinct_query(planner_query, args["query"]):
+        log.info("empty research; retrying with the planner query %r", planner_query)
+        retry = await _narrow_then_widen(
+            state, {**args, "query": planner_query}, ticker, assumptions, aliases
+        )
+        if _result_rows(retry):
+            result = retry
+
     return _slim_results(await _fold_in_own_documents(state, args, result))
 
 

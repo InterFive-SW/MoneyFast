@@ -752,11 +752,24 @@ analyst, and you have NO numeric authority.
 TASK: pass the user's phrasing through as query. Do NOT resolve pronouns; the
 retriever resolves coreference server-side. Set filters.published_after
 whenever the request is time-sensitive.
+
+ALSO emit `fallback_query`: the SAME request reduced to 3-6 content words, no
+question words, no pronouns, no filler. It is used ONLY when the full sentence
+retrieves nothing, and it exists because a long sentence dilutes the embedding.
+Measured against the same corpus and the same threshold:
+
+  "petrol fiyatlari ve jeopolitik gelismeler hakkinda ne var? bu THYAO gibi
+   havayollarini nasil etkiler?"            -> 0 results
+  "petrol fiyatlari havayolu maliyeti"      -> 0.640, 0.628, 0.602
+
+The 0.602 row was the article that answered the question. Keep the user's
+LANGUAGE and their own words; this is a trim, not a translation and not a
+rewrite. If the request is already short, repeat it verbatim.
 """ + _ENVELOPE_RULE + """
 {"tool": "rag_semantic_market_search", "arguments": {"query": str,
  "top_k": int, "filters": {"tickers": [str], "doc_types": [str],
  "published_after": str|null, "languages": [str]}|null,
- "min_similarity": float}, "assumptions": [str]}
+ "min_similarity": float}, "fallback_query": str, "assumptions": [str]}
 
 DO NOT set min_similarity. The caller supplies a value calibrated for the
 corpus's embedding model; any number you invent will be calibrated for a

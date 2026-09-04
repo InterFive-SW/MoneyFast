@@ -24,7 +24,13 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from . import config, refresh_server, sinks
-from .sources import kap_archive, kap_source, rss_source, yfinance_source
+from .sources import (
+    gdelt_source,
+    kap_archive,
+    kap_source,
+    rss_source,
+    yfinance_source,
+)
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -548,6 +554,43 @@ def run_news(client: httpx.Client) -> dict:
     }
 
 
+def run_global_news(client: httpx.Client) -> dict:
+    """Küresel haber turu. `run_news`ten AYRI, üç sebeple.
+
+    Tempo: sekiz sorgu var ve GDELT istek başına beş saniye istiyor, yani tur
+    ~40 saniye sürüyor. Bunu on beş dakikalık RSS döngüsüne katmak, Türkçe
+    haberi bir dış servisin temposuna bağlamak olurdu.
+
+    Yalıtım: GDELT ulaşılamazsa Türkçe haber akışı etkilenmemeli. Ayrı iş,
+    ayrı hata.
+
+    Aynılık: lavabo AYNI. Öğeler `rss_source`in ürettiği sözlük biçiminde
+    çıkıyor, dolayısıyla backend'e ve korpusa giden yol tek -- ikinci bir
+    yazma yolu, iki farklı tekilleştirme davranışı demek olurdu.
+
+    Sembol çözümü yine backend'de: `symbol_match` küresel bir haberde de
+    BIST adı arıyor ("Turkish Airlines" gibi), ve enstrüman evreni orada.
+    """
+    items = gdelt_source.fetch_all()
+    if not items:
+        log.info("global news cycle: nothing fetched")
+        return {"fetched": 0, "embedded": 0, "tagged": 0}
+
+    backend_result = sinks.push_news_to_backend(client, items) or {}
+    symbols = backend_result.pop("news_symbols", None) or {}
+    embedded = sinks.push_news_to_rag(client, items, symbols)
+    log.info(
+        "global news cycle: %d fetched, %s stored, %d embedded, %d symbol-tagged",
+        len(items), backend_result.get("news_written", 0), embedded, len(symbols),
+    )
+    return {
+        "fetched": len(items),
+        "embedded": embedded,
+        "tagged": len(symbols),
+        **backend_result,
+    }
+
+
 def _disclosure_index(url: Optional[str]) -> Optional[int]:
     """Kalıcı bağlantının sonundaki bildirim numarası.
 
@@ -871,6 +914,14 @@ def start_scheduler() -> None:
         "interval",
         minutes=config.news_interval_minutes(),
         id="news",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        _job("global-news", run_global_news),
+        "interval",
+        minutes=config.gdelt_interval_minutes(),
+        id="global-news",
         max_instances=1,
         coalesce=True,
     )

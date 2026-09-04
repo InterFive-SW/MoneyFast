@@ -77,9 +77,17 @@ def may_fetch(url: str, client: httpx.Client) -> bool:
     return allowed
 
 
-def wait_for_host(url: str) -> None:
+def wait_for_host(url: str, minimum: float = 0.0) -> None:
+    """Space requests to one host.
+
+    `minimum` raises the floor for a host that has ASKED for more room. GDELT
+    says so in its own 429 body -- "Please limit requests to one every 5
+    seconds" -- and the project-wide default is 2. Taking the larger of the
+    two means a stated request always wins, and lowering the global default
+    can never quietly start violating it.
+    """
     host = urlparse(url).netloc
-    delay = config.per_host_delay()
+    delay = max(config.per_host_delay(), minimum)
     previous = _last_request.get(host)
     if previous is not None:
         elapsed = time.monotonic() - previous

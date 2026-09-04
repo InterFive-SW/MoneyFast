@@ -8,30 +8,37 @@ import MarketComparisonChart from '../../components/markets/MarketComparisonChar
 import ColumnSetSwitcher from '../../components/markets/ColumnSetSwitcher'
 import StockFilterPanel, { EMPTY_STOCK_FILTERS, applyStockFilters, type StockFilters } from '../../components/markets/StockFilterPanel'
 
-/** Hangi piyasanın gösterileceği. Evren artık iki borsayı kapsıyor. */
-type MarketChoice = 'Tümü' | 'BIST' | 'ABD'
-const MARKET_CHOICES: MarketChoice[] = ['Tümü', 'BIST', 'ABD']
+/**
+ * Hangi piyasa gösterilecek.
+ *
+ * `value` sunucuya gider ve bir BORSA (BIST, NASDAQ) ya da bir ENDEKS
+ * (SP500) olabilir. İkisi aynı alanda taşınıyor çünkü ayrım gerçek: AAPL
+ * Nasdaq'ta işlem görür VE S&P 500 üyesidir, dolayısıyla her iki sekmede de
+ * görünmesi doğru. `market` sütunu tek başına bunu ifade edemezdi.
+ */
+type MarketChoice = { label: string; value?: string }
+const MARKET_CHOICES: MarketChoice[] = [
+  { label: 'Tümü' },
+  { label: 'BIST', value: 'BIST' },
+  { label: 'Nasdaq', value: 'NASDAQ' },
+  { label: 'S&P 500', value: 'SP500' },
+]
 
 export default function StocksScreen() {
   const [columnSet, setColumnSet] = useState<ColumnSetKey>('getiri')
   const [filters, setFilters] = useState<StockFilters>(EMPTY_STOCK_FILTERS)
-  const [market, setMarket] = useState<MarketChoice>('Tümü')
+  const [market, setMarket] = useState<MarketChoice>(MARKET_CHOICES[0])
 
   // Canlı evren: açılışta bir kez çekilir, fiyatlar SSE ile güncellenir.
   // Sektör listesi de buradan gelir — sabit bir listeyle canlı veride
   // karşılığı olmayan sektörler süzgeçte görünürdü.
-  const { instruments, loading, sectors } = useInstruments()
-
-  // Piyasa süzgeci diğer süzgeçlerden ÖNCE uygulanır: sektör listesi ve
-  // karşılaştırmalar da seçilen piyasaya göre daralsın.
-  const inMarket = useMemo(
-    () => (market === 'Tümü' ? instruments : instruments.filter((i) => i.market === market)),
-    [instruments, market]
-  )
+  // Süzgeç sunucuda: evren binin üzerinde enstrüman, istemcide ilk sayfayı
+  // süzmek seçilen piyasanın yalnızca bir kısmını göstermek olurdu.
+  const { instruments, loading, sectors } = useInstruments(1200, market.value)
 
   const filteredInstruments = useMemo(
-    () => applyStockFilters(inMarket, filters),
-    [inMarket, filters]
+    () => applyStockFilters(instruments, filters),
+    [instruments, filters]
   )
 
   if (loading) {
@@ -48,20 +55,15 @@ export default function StocksScreen() {
         <div className="flex rounded-lg border border-white/10 bg-slate-900/50 p-1">
           {MARKET_CHOICES.map((choice) => (
             <button
-              key={choice}
+              key={choice.label}
               onClick={() => setMarket(choice)}
               className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
-                market === choice
+                market.label === choice.label
                   ? 'bg-white/10 text-white'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {choice}
-              {choice !== 'Tümü' && (
-                <span className="ml-1.5 tabular-nums text-[10px] text-slate-500">
-                  {instruments.filter((i) => i.market === choice).length}
-                </span>
-              )}
+              {choice.label}
             </button>
           ))}
         </div>
@@ -72,7 +74,7 @@ export default function StocksScreen() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <div className="lg:col-span-2">
-          <MarketInstrumentsTable instruments={filteredInstruments} columnSet={columnSet} />
+          <MarketInstrumentsTable instruments={filteredInstruments} columnSet={columnSet} showMarketTabs={false} />
         </div>
 
         <div className="flex flex-col gap-6">

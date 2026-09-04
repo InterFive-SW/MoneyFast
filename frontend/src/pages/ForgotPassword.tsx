@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import logo from '../assets/logo.png'
+import logo from '../assets/logo-icon.png'
 import { api } from '../api/client'
 
 export default function ForgotPassword() {
@@ -21,59 +21,51 @@ export default function ForgotPassword() {
     setSuccess('')
 
     if (!tcNo || !email.trim()) {
-      setError('Lütfen tüm alanları doldurun.')
+      setError('Lütfen tüm alanları doldurun')
       return
     }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError('Lütfen geçerli bir e-posta adresi girin.')
+      setError('Lütfen geçerli bir e-posta adresi girin')
       return
     }
 
     if (tcNo.length !== 11) {
-      setError('T.C. Kimlik No 11 haneli olmalıdır.')
+      setError('T.C. Kimlik No 11 haneli olmalıdır')
       return
     }
 
     setLoading(true)
     try {
       await api.post('/api/auth/forgot-password', {
-        email
+        tc_no: tcNo,
+        email: email
       })
       
-      setSuccess('Şifre yenileme bağlantısı e-posta adresinize gönderildi.')
+      setSuccess('Şifre yenileme bağlantısı e-posta adresinize gönderildi')
     } catch (err: any) {
-      setError(err.message || 'Bir hata oluştu. Lütfen bilgilerinizi kontrol edin.')
+      setError(err.message || 'Bir hata oluştu. Lütfen bilgilerinizi kontrol edin')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-slate-950">
-      {/* Animated background blobs */}
-      <div className="pointer-events-none absolute -left-40 top-20 h-96 w-96 rounded-full bg-brandBlue/20 blur-[100px]" />
-      <div className="pointer-events-none absolute -bottom-40 -right-40 h-96 w-96 rounded-full bg-purple-500/10 blur-[100px]" />
-
+    <div className="relative min-h-screen antialiased bg-hologram-global text-slate-300 overflow-hidden">
       {/* Logo */}
       <header className="absolute left-6 top-6 z-10 sm:left-10 sm:top-8">
         <Link to="/" className="flex items-center gap-3">
-          <img src={logo} alt="MoneyFast Logo" className="h-20 sm:h-28 w-auto object-contain transition-transform duration-300 hover:scale-105" />
+          <img src={logo} alt="MoneyFast Logo" className="h-10 sm:h-12 w-auto object-contain transition-transform duration-300 hover:scale-105" />
         </Link>
       </header>
 
       {/* İçerik */}
       <main className="flex min-h-screen items-center justify-center px-5 pb-10 pt-28 sm:px-8">
-        <section className="w-full max-w-xl rounded-[2.5rem] border border-white/10 bg-slate-900/50 px-7 py-10 shadow-[0_24px_70px_-30px_rgba(0,0,0,0.5)] backdrop-blur-xl sm:px-12 sm:py-12">
+        <section className="relative z-10 w-full max-w-xl rounded-[2.5rem] bg-slate-900/50 backdrop-blur-xl border border-white/10 px-7 py-10 shadow-2xl sm:px-12 sm:py-12">
           <div className="mx-auto max-w-md">
-            <div className="mb-9 text-center">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-300">
-                <span className="h-2 w-2 rounded-full bg-brandBlue shadow-[0_0_8px_rgba(75,123,229,0.8)]" />
-                Şifre Yenileme
-              </div>
-
-              <h1 className="text-3xl font-bold tracking-tight text-white">
-                Şifreni mi unuttun?
+            <div className="mb-9 text-center flex flex-col items-center">
+              <h1 className="text-3xl font-bold tracking-tight text-gradient-hero inline-block">
+                Şifrenizi Sıfırlayın
               </h1>
             </div>
             {success && (
@@ -104,7 +96,7 @@ export default function ForgotPassword() {
                   value={tcNo}
                   onChange={(e) => handleTcChange(e.target.value)}
                   className="block w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white transition-colors placeholder:text-slate-500 focus:border-brandBlue focus:outline-none focus:ring-4 focus:ring-brandBlue/20"
-                  placeholder="11 haneli T.C. kimlik numaranız"
+                  placeholder="11 haneli T.C. Kimlik No"
                 />
               </div>
 
@@ -122,7 +114,7 @@ export default function ForgotPassword() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="block w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white transition-colors placeholder:text-slate-500 focus:border-brandBlue focus:outline-none focus:ring-4 focus:ring-brandBlue/20"
-                  placeholder="ornek@email.com"
+                  placeholder="ornek@eposta.com"
                 />
               </div>
 

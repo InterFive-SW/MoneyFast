@@ -8,11 +8,40 @@ type MarketTab = 'BIST' | 'ABD' | 'Kripto'
 type SortKey = 'symbol' | 'price' | 'changePercent' | 'volume'
 type SortDir = 'asc' | 'desc'
 
+/** Açılışta gösterilen satır sayısı; gerisi "Tümünü Gör" ile gelir. */
+/** Sayfa başına satır. */
+const PAGE_SIZE = 15
+
+/** Sayfalama düğmesi. Devre dışıyken tıklanamaz VE öyle görünür -- gri ama
+ *  basılabilen bir düğme, listenin bittiğini söylemez. */
+function PageButton({
+  label, disabled, onClick,
+}: { label: string; disabled: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded-lg border border-white/10 bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-emerald-400/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:text-slate-200"
+    >
+      {label}
+    </button>
+  )
+}
+
 interface Props {
   instruments: MarketInstrument[]
   columnSet?: ColumnSetKey
   activeTab?: MarketTab
   onTabChange?: (tab: MarketTab) => void
+  /**
+   * Piyasa seçimini üst ekran yapıyorsa false verilir.
+   *
+   * StocksScreen'in kendi Tümü/BIST/ABD süzgeci varken tablo bir de kendi
+   * sekmesine göre süzüyordu: üstte ABD seçilince tablo hâlâ 'BIST'te
+   * olduğu için tüm satırlar eleniyor, ekran boş kalıyordu.
+   */
+  showMarketTabs?: boolean
 }
 
 function formatCompact(value: number): string {
@@ -49,7 +78,7 @@ function Week52RangeBar({ low, high, price }: { low: number; high: number; price
  * Pazar sekmesi + arama + sütun sıralama + favoriye ekleme + kolon seti — tamamen mock veri üzerinde, client-side.
  * `columnSet` verilmezse 'Getiri' seti (Hacim/Piyasa Değeri/52 Hafta) gösterilir.
  */
-export default function MarketInstrumentsTable({ instruments, columnSet = 'getiri', activeTab: controlledTab, onTabChange }: Props) {
+export default function MarketInstrumentsTable({ instruments, columnSet = 'getiri', activeTab: controlledTab, onTabChange, showMarketTabs = true }: Props) {
   const navigate = useNavigate()
   const [internalTab, setInternalTab] = useState<MarketTab>('BIST')
   const activeTab = controlledTab ?? internalTab
@@ -88,7 +117,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
 
   const rows = useMemo(() => {
     const filtered = instruments.filter((item) => {
-      if (item.market !== activeTab) return false
+      if (showMarketTabs && item.market !== activeTab) return false
       if (!query.trim()) return true
       const q = query.trim().toLowerCase()
       return item.symbol.toLowerCase().includes(q) || item.name.toLowerCase().includes(q)
@@ -101,7 +130,29 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
     })
 
     return sorted
-  }, [instruments, activeTab, query, sortKey, sortDir])
+  }, [instruments, activeTab, query, sortKey, sortDir, showMarketTabs])
+
+  /**
+   * Sayfa sayfa, 15'erlik.
+   *
+   * "Tümünü Gör" tek bir düğmeydi ve basıldığında bin satırı birden basıyordu
+   * -- dibi görünmeyen, kaydırıldıkça devam eden bir liste. Sayfalar hem
+   * listeyi sonlu gösteriyor hem de nerede olunduğunu söylüyor.
+   */
+  const [page, setPage] = useState(0)
+
+  // Süzgeç ya da sekme değişince ilk sayfaya dönülür: yeni bir aramanın
+  // dördüncü sayfasında açılmak, sonucu bulunamadı sanmaktır.
+  useEffect(() => {
+    setPage(0)
+  }, [activeTab, query, showMarketTabs])
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  // Süzgeç ya da arama listeyi kısaltınca beşinci sayfada kalınmaz: var
+  // olmayan bir sayfa boş bir tablo gösterir ve kullanıcı bunu "sonuç yok"
+  // diye okur.
+  const current = Math.min(page, pageCount - 1)
+  const visibleRows = rows.slice(current * PAGE_SIZE, current * PAGE_SIZE + PAGE_SIZE)
 
   const columns: { key: SortKey; label: string; align: 'left' | 'right' }[] = [
     { key: 'symbol', label: 'Enstrüman', align: 'left' },
@@ -114,6 +165,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
         <div className="flex items-center gap-3">
           <h3 className="text-[11px] uppercase tracking-wider font-semibold text-slate-400">Enstrümanlar</h3>
+          {showMarketTabs && (
           <div className="flex bg-slate-800/5 p-1 rounded-lg backdrop-blur-sm">
             {(['BIST', 'ABD', 'Kripto'] as MarketTab[]).map((tab) => (
               <button
@@ -127,6 +179,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
               </button>
             ))}
           </div>
+          )}
         </div>
 
         <div className="relative">
@@ -190,7 +243,7 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100/50">
-            {rows.map((item) => (
+            {visibleRows.map((item) => (
               <tr
                 key={item.symbol}
                 onClick={() => navigate(`/investment/hisseler/${item.symbol}`)}
@@ -212,7 +265,28 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
                   <div className="font-semibold text-white text-sm hover:text-emerald-500 transition-colors">{item.symbol}</div>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className="text-xs text-slate-400">{item.name}</span>
-                    <span className="text-[10px] font-medium text-slate-400 bg-slate-800/5 px-1.5 py-0.5 rounded">{item.sector}</span>
+                    {/* Sektörü olmayan enstrümanda rozet HİÇ çizilmiyor.
+                        Döviz ve altının sektörü eksik değil, yok. */}
+                    {item.sector && (
+                      <span className="text-[10px] font-medium text-slate-400 bg-slate-800/5 px-1.5 py-0.5 rounded">{item.sector}</span>
+                    )}
+                  </div>
+                  {/* Fiyat ve değişim, DAR EKRANDA adın altında.
+                      Tablo altı-yedi sütun ve telefonda fiyat sütunu sağa
+                      taşıyor: veri kayıp değil, yatay kaydırmanın arkasında --
+                      ama bir piyasa tablosunun asıl sayısı kaydırılmadan
+                      görünmeli. `sm`'den itibaren gizleniyor, çünkü orada
+                      kendi sütunlarında zaten var ve iki kez göstermek
+                      satırı bölerdi. */}
+                  <div className="mt-1 flex items-center gap-2 tabular-nums sm:hidden">
+                    <span className="text-sm font-medium text-slate-200">
+                      {formatPrice(item.price)} {item.unit}
+                    </span>
+                    <span
+                      className={`text-xs font-semibold ${item.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}
+                    >
+                      {item.changePercent > 0 ? '+' : ''}{item.changePercent.toFixed(2)}%
+                    </span>
                   </div>
                 </td>
                 <td className="py-3 pl-4 text-right tabular-nums text-sm font-medium text-slate-200">
@@ -248,6 +322,30 @@ export default function MarketInstrumentsTable({ instruments, columnSet = 'getir
           </tbody>
         </table>
       </div>
+
+      {rows.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-3">
+          <span className="text-[11px] tabular-nums text-slate-400">
+            {rows.length} sonuçtan {current * PAGE_SIZE + 1}–
+            {current * PAGE_SIZE + visibleRows.length} arası
+          </span>
+          <div className="flex items-center gap-1.5">
+            <PageButton
+              label="‹ Önceki"
+              disabled={current === 0}
+              onClick={() => setPage(current - 1)}
+            />
+            <span className="px-2 text-[11px] tabular-nums text-slate-400">
+              {current + 1} / {pageCount}
+            </span>
+            <PageButton
+              label="Sonraki ›"
+              disabled={current >= pageCount - 1}
+              onClick={() => setPage(current + 1)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -69,10 +69,11 @@ const PROPS: Record<string, Record<string, unknown>> = {
 }
 
 const WIDGETS = [
-  'AssetAllocationWidget', 'DividendCalendarWidget', 'InvestmentBalanceWidget',
+  'AssetAllocationWidget', 'InvestmentBalanceWidget',
   'MarketTickerWidget', 'MiniTickerWidget', 'NewsWidget', 'OrderHistoryWidget',
   'PortfolioChartWidget', 'PositionsWidget', 'ProfitLossHeatmapWidget',
-  'QuickActionsWidget', 'RecentTransactionsWidget', 'SavingsGoalWidget',
+  'QuickActionsWidget', 'RecentTransactionsWidget', 'RiskSummaryWidget',
+  'SavingsGoalWidget',
   'SectorAllocationWidget', 'SpendingOverviewWidget', 'TopMoversWidget',
   'TotalBalanceWidget', 'WatchlistWidget',
 ]

@@ -8,10 +8,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
-import { useWatchlist } from './useWatchlist'
+import { useWatchlist, __resetWatchlistStore } from './useWatchlist'
 import { apiClient } from '../api/client'
 
 beforeEach(() => {
+  // Liste artık modül seviyesinde tek bir depoda (ticker bandının
+  // Piyasalar'daki yıldızı duyabilmesi için). Paylaşılan durum, testler
+  // arasında sızmaması için her testten önce sıfırlanır.
+  __resetWatchlistStore()
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(apiClient, 'getWatchlist').mockResolvedValue({
     all: [{ symbol: 'THYAO' }, { symbol: 'AAPL' }],
@@ -82,5 +86,42 @@ describe('useWatchlist', () => {
     const { result } = await mounted()
     await act(async () => { await result.current.refresh() })
     expect(apiClient.getWatchlist).toHaveBeenCalledTimes(2)
+  })
+
+  it('shares one list across every component that asks for it', async () => {
+    /**
+     * Ticker bandı, Piyasalar tablosu ve İzleme Listesi widget'ı aynı listeyi
+     * gösteriyor. Her biri kendi kopyasını tutarken Piyasalar'da yıldızlanan
+     * bir sembol, bandda ancak sayfa yenilenince görünüyordu -- tek bir
+     * listenin iki ayrı hâli.
+     */
+    const first = await mounted()
+    const second = await mounted()
+
+    await act(async () => { await first.result.current.toggle('SISE') })
+
+    expect(first.result.current.symbols.has('SISE')).toBe(true)
+    expect(second.result.current.symbols.has('SISE')).toBe(true)
+  })
+
+  it('reads the list once even when several components mount together', async () => {
+    /* Bir sayfada birkaç bileşen aynı anda bağlanıyor; her biri aynı isteği
+       ayrı ayrı açmamalı. */
+    vi.mocked(apiClient.getWatchlist).mockClear()
+    renderHook(() => useWatchlist())
+    renderHook(() => useWatchlist())
+    await waitFor(() => expect(apiClient.getWatchlist).toHaveBeenCalled())
+    expect(apiClient.getWatchlist).toHaveBeenCalledTimes(1)
+  })
+
+  it('un-starring the last symbol leaves the list genuinely empty', async () => {
+    /* Boş liste boş görünür. Kullanıcının seçmediği hisseleri onun listesiymiş
+       gibi göstermek, listenin ne olduğunu anlamsızlaştırır. */
+    vi.mocked(apiClient.getWatchlist).mockResolvedValue({
+      all: [{ symbol: 'THYAO' }], bist: [{ symbol: 'THYAO' }], global: [],
+    } as never)
+    const view = await mounted()
+    await act(async () => { await view.result.current.toggle('THYAO') })
+    expect(view.result.current.symbols.size).toBe(0)
   })
 })

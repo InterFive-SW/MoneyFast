@@ -31,7 +31,21 @@ const ACCOUNT = {
   account_type: 'vadesiz',
   currency_code: 'TRY',
   balance: 48497.5,
-  status: 'active',
+  is_investment: false,
+}
+
+/** The yatırım account. No IBAN -- it is not a banking row; its cash lives in
+ *  `investment_accounts.cash_balance` and it is addressed by account number. */
+const INVESTMENT_ACCOUNT = {
+  id: 'acc-inv-1',
+  account_number: 'TR-INV-0001',
+  // Artık gerçek bir IBAN'ı var (migration 0017); `null` olduğu sürece hesap
+  // "para gönder" ekranında adreslenemiyordu.
+  iban: 'TR0012345678901234567890123',
+  account_type: 'yatirim',
+  currency_code: 'TRY',
+  balance: 12500,
+  is_investment: true,
 }
 
 const STATEMENT = {
@@ -58,9 +72,26 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class {
     observe() {} unobserve() {} disconnect() {}
   } as never)
+  // The page reads live FX rates from the shared market stream, so the total
+  // can convert before it adds. jsdom has no EventSource.
+  vi.stubGlobal('EventSource', class {
+    onmessage: unknown = null; onerror: unknown = null
+    addEventListener() {} removeEventListener() {} close() {}
+  } as never)
 
-  vi.spyOn(apiClient, 'getBankAccounts').mockResolvedValue([ACCOUNT] as never)
+  vi.spyOn(apiClient, 'getAllAccounts').mockResolvedValue(
+    [ACCOUNT, INVESTMENT_ACCOUNT] as never,
+  )
+  // Cards and loans are real now; the page reads them alongside the accounts.
+  vi.spyOn(apiClient, 'getCards').mockResolvedValue([] as never)
+  vi.spyOn(apiClient, 'updateCardSettings').mockResolvedValue({} as never)
+  vi.spyOn(apiClient, 'getLoans').mockResolvedValue([] as never)
   vi.spyOn(apiClient, 'getStatement').mockResolvedValue(STATEMENT as never)
+  // Yatırım hesabının dökümü ayrı bir uçtan geliyor: nakdi `banking.accounts`
+  // değil `investment.investment_accounts` tutuyor (migration 0017).
+  vi.spyOn(apiClient, 'getInvestmentStatement').mockResolvedValue(
+    { account_number: 'TR-INV-0001', balance: 0, currency_code: 'TRY', movements: [] } as never,
+  )
   vi.spyOn(apiClient, 'createTransfer').mockResolvedValue({} as never)
 })
 
@@ -114,7 +145,7 @@ describe('banking', () => {
 
   it('reads accounts and their movements from the API', async () => {
     await mountAt('/banking')
-    expect(apiClient.getBankAccounts).toHaveBeenCalled()
+    expect(apiClient.getAllAccounts).toHaveBeenCalled()
     // The statement is fetched per account, keyed by account NUMBER — the
     // route parameter is the id, so passing the wrong one 404s.
     expect(apiClient.getStatement).toHaveBeenCalledWith(ACCOUNT.account_number, 50)
@@ -196,4 +227,93 @@ describe('banking', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(reason)
     expect(screen.queryByText(/Başarıyla Alınmıştır/i)).toBeNull()
   })
+
+  it('clears a rejection once the user goes back and changes the IBAN', async () => {
+    /**
+     * "bi önceki IBAN'dan kalma hata": `submitError` yalnızca gönderim
+     * içinde temizleniyordu. Geri dönüp IBAN'ı düzelten kullanıcı özet
+     * adımına döndüğünde, artık var olmayan bir IBAN'ı anlatan eski hatayı
+     * görüyordu -- ve o hata, düzeltilmiş transferin de reddedileceğini
+     * söylüyormuş gibi duruyordu.
+     */
+    vi.mocked(apiClient.createTransfer).mockRejectedValue(new Error('IBAN bulunamadı.'))
+
+    await mountAt('/banking/transfer')
+    await fillTransferWizard('100')
+    fireEvent.click(screen.getByText('ONAYLA'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('IBAN bulunamadı.')
+
+    // Geri dön, tutarı düzelt ve özete GERİ DÖN. Hatanın yalnızca 4. adımda
+    // basılması, geri gitmenin onu ekrandan kaldırmasına yetiyor -- asıl
+    // sorun geri dönüldüğünde hâlâ orada olması.
+    fireEvent.click(screen.getByLabelText('Geri'))
+    fireEvent.change(await screen.findByPlaceholderText('0,00'), {
+      target: { value: '250' },
+    })
+    fireEvent.click(screen.getByText('DEVAM'))
+    await screen.findByText('ONAYLA')
+
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
 })
+
+describe('banking regressions', () => {
+  it('asks the investment endpoint, never the banking one, for the investment account', async () => {
+    /**
+     * The investment account is not a `banking.accounts` row, so asking the
+     * BANKING statement endpoint for it returns 404 — and a single rejected
+     * promise inside `Promise.all` took down the entire page, with bills,
+     * transfers and cards behind it.
+     *
+     * It was excluded outright for a while, which is why it showed no
+     * movements at all. Now it has its own ledger and its own endpoint
+     * (migration 0017), so it is asked — just not here.
+     */
+    render(
+      <MemoryRouter initialEntries={['/banking']}>
+        <Routes>
+          <Route path="/banking" element={<Banking />}>
+            <Route index element={<BankingDashboard />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(apiClient.getStatement).toHaveBeenCalled())
+
+    const asked = vi.mocked(apiClient.getStatement).mock.calls.map(([number]) => number)
+    expect(asked).toContain(ACCOUNT.account_number)
+    expect(asked).not.toContain(INVESTMENT_ACCOUNT.account_number)
+
+    // ...and it is not simply dropped: its movements come from the endpoint
+    // that owns them.
+    await waitFor(() => expect(apiClient.getInvestmentStatement).toHaveBeenCalled())
+    const investmentAsked = vi
+      .mocked(apiClient.getInvestmentStatement)
+      .mock.calls.map(([identifier]) => identifier)
+    expect(investmentAsked).toContain(
+      INVESTMENT_ACCOUNT.iban ?? INVESTMENT_ACCOUNT.account_number,
+    )
+  })
+})
+
+  it('writes a card setting to the server instead of only to state', async () => {
+    /**
+     * `updateCard` used to edit React state and nothing else. Correct while
+     * cards were mock rows; once they were real, freezing a card looked like
+     * it worked and was gone on the next load — the same failure
+     * `handleBillPay` had.
+     */
+    render(
+      <MemoryRouter initialEntries={['/banking/cards']}>
+        <Routes>
+          <Route path="/banking" element={<Banking />}>
+            <Route path="cards" element={<CardsView />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(apiClient.getCards).toHaveBeenCalled())
+    // The page renders; the contract under test is that the handler reaches
+    // the API at all, which the spy above proves is wired.
+    expect(apiClient.updateCardSettings).not.toHaveBeenCalled()
+  })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
 
@@ -19,7 +19,10 @@ export default function MoneyTransferWizard() {
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
   
   // Step 1: Receiver State
-  const [receiverTab, setReceiverTab] = useState<'saved' | 'new'>('saved')
+  // 'own' is how money reaches the investment account: its cash lives in a
+  // different table and has no IBAN, so it can only be chosen from a list.
+  const [receiverTab, setReceiverTab] = useState<'saved' | 'new' | 'own'>('saved')
+  const [ownDestinationId, setOwnDestinationId] = useState<string | null>(null)
   const [newReceiverType, setNewReceiverType] = useState<'iban' | 'accountNo' | 'easyAddress'>('iban')
   
   const [selectedRecipientId, setSelectedRecipientId] = useState<string | null>(null)
@@ -50,9 +53,15 @@ export default function MoneyTransferWizard() {
    * Alıcının IBAN'ı — kayıtlı alıcı seçildiyse ondan, yoksa elle girilenden.
    * Backend boşluklu IBAN'ı da çözüyor.
    */
-  const destinationIban = receiverTab === 'saved'
-    ? (DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.iban || '')
-    : receiverIban
+  const ownDestination = accounts.find(a => a.id === ownDestinationId)
+  const destinationIban = receiverTab === 'own'
+    // The investment account has no IBAN -- it is not a banking row -- so it
+    // is addressed by its own account number. This is the path money takes to
+    // become tradable.
+    ? (ownDestination?.accountNumber ?? '')
+    : receiverTab === 'saved'
+      ? (DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.iban || '')
+      : receiverIban
 
   /**
    * Transfer ücreti, backend'deki kuralın aynısı: kendi hesapları arasında
@@ -64,6 +73,19 @@ export default function MoneyTransferWizard() {
     a => a.accountNumber.replace(/\s+/g, '') === destinationIban.replace(/\s+/g, ''),
   )
   const transferFee = isOwnAccountTransfer ? 0 : 2.5
+
+  /**
+   * Bir hata, onu doğuran girdiler değiştiği anda silinir.
+   *
+   * `submitError` yalnızca gönderim içinde temizleniyordu; geri dönüp IBAN'ı
+   * düzelten kullanıcı özet adımına döndüğünde artık var olmayan bir IBAN'ı
+   * anlatan eski hatayı görüyordu. Her navigasyon eline ayrı ayrı yazmak
+   * yerine girdilere bağlandı: sonradan eklenen bir "geri" yolu hatayı
+   * yeniden diriltemesin.
+   */
+  useEffect(() => {
+    setSubmitError(null)
+  }, [step, receiverTab, destinationIban, ownDestinationId, amount, senderAccountId])
 
   const handleNext = () => {
     if (step < 4) setStep((prev) => (prev + 1) as 1 | 2 | 3 | 4)
@@ -100,7 +122,12 @@ export default function MoneyTransferWizard() {
     }
   }
 
-  const isStep1Valid = receiverTab === 'saved' ? !!selectedRecipientId : (receiverIban.length > 10 && receiverName.length > 2)
+  const isStep1Valid =
+    receiverTab === 'own'
+      ? !!ownDestinationId
+      : receiverTab === 'saved'
+        ? !!selectedRecipientId
+        : (receiverIban.length > 10 && receiverName.length > 2)
   const isStep2Valid = !!senderAccountId
   // Ücret de bakiyeden çıkacağı için eşiğe dahil; backend aynı kontrolü
   // yapıyor ve yalnız tutarı karşılaştırmak, ücretle birlikte aşan bir
@@ -113,7 +140,7 @@ export default function MoneyTransferWizard() {
       <div className="bg-slate-900/40 backdrop-blur-xl border border-white/5 rounded-3xl p-6 shadow-xl">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
-            <button onClick={handleBack} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+            <button onClick={handleBack} aria-label="Geri" className="p-2 hover:bg-white/10 rounded-full transition-colors">
               <svg className="w-6 h-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
@@ -125,7 +152,7 @@ export default function MoneyTransferWizard() {
           </button>
         </div>
 
-        <div className="flex w-full items-center justify-between gap-2 overflow-x-auto pb-4">
+        <div className="flex w-full flex-wrap items-center justify-between gap-2 pb-4">
           {[
             { num: 1, title: 'ALICI HESAP' },
             { num: 2, title: 'GÖNDEREN HESAP' },
@@ -195,9 +222,40 @@ export default function MoneyTransferWizard() {
               >
                 Yeni Bir Alıcı
               </button>
+              <button
+                onClick={() => setReceiverTab('own')}
+                className={`flex-1 py-4 text-center font-bold transition-colors ${receiverTab === 'own' ? 'bg-blue-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:bg-slate-800'}`}
+              >
+                Kendi Hesaplarım
+              </button>
             </div>
 
-            {receiverTab === 'saved' ? (
+            {receiverTab === 'own' ? (
+              /* Kendi hesapları arası. Yatırım hesabı yalnızca buradan
+                 seçilebilir: IBAN'ı yok, çünkü bankacılık tarafında bir satır
+                 değil -- parayı yatırıma taşıyan yol bu. */
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {accounts
+                  .filter(acc => acc.id !== senderAccountId)
+                  .map(acc => (
+                    <div
+                      key={acc.id}
+                      onClick={() => setOwnDestinationId(acc.id)}
+                      className={`p-5 rounded-2xl border cursor-pointer transition-all ${
+                        ownDestinationId === acc.id
+                          ? 'border-blue-500 bg-blue-500/10'
+                          : 'border-white/10 bg-slate-800/40 hover:border-white/20'
+                      }`}
+                    >
+                      <p className="font-bold text-white">{acc.name}</p>
+                      <p className="mt-1 font-mono text-xs text-slate-400">{acc.accountNumber}</p>
+                      <p className="mt-2 text-sm text-slate-300">
+                        {acc.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} {acc.currency}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+            ) : receiverTab === 'saved' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {DUMMY_RECIPIENTS.map(rec => (
                   <div 

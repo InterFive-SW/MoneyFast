@@ -31,7 +31,7 @@ export default function BankingMenu({
     { id: 'loans', title: 'Krediler', isNew: false, action: () => onFeatureNotReady('Krediler') },
     { id: 'payments', title: 'Ödemeler', isNew: false, action: onOpenBillPayment },
     { id: 'investments', title: 'Yatırım ve Borsa', isNew: false, action: () => navigate('/investment') },
-    { id: 'saved_tx', title: 'Kayıtlı İşlemlerim', isNew: false, action: () => onFeatureNotReady('Kayıtlı İşlemlerim') }
+    { id: 'saved_tx', title: 'Kayıtlı İşlemlerim', isNew: false, action: () => navigate('/banking/saved') }
   ]
 
   return (

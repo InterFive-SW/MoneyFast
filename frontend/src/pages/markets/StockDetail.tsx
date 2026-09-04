@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import { MOCK_EARNINGS_REPORTS, MOCK_DIVIDEND_ANNOUNCEMENTS, MOCK_FUNDS } from '../../data/mockData'
 import { useInstrument } from '../../hooks/useInstrument'
 import SampleDataBadge from '../../components/markets/SampleDataBadge'
+import TeknikGorunum from '../../components/markets/TeknikGorunum'
+import { compact, pct, ratio, useFundamentals } from '../../hooks/useFundamentals'
 
 type DetailTab = 'ozet' | 'finansallar' | 'oran-analizi' | 'temettu' | 'fon-pozisyonlari'
 
@@ -23,6 +25,21 @@ function fmtCompact(value: number): string {
   return new Intl.NumberFormat('tr-TR', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 }
 
+/** Bir oran satırı. `tone` verilirse negatif değer kırmızı yazılır: bir
+ *  faaliyet ZARARI, dönemin en bilgilendirici olgusudur ve diğerleriyle aynı
+ *  renkte geçiştirilmemeli. */
+function Row({ label, value, tone }: { label: string; value: string; tone?: number | null }) {
+  const negative = typeof tone === 'number' && tone < 0
+  return (
+    <tr>
+      <td className="py-2.5 text-sm text-slate-400">{label}</td>
+      <td className={`py-2.5 text-right text-sm font-semibold tabular-nums ${negative ? 'text-rose-400' : 'text-white'}`}>
+        {value}
+      </td>
+    </tr>
+  )
+}
+
 /** Hisse detay sayfası — /investment/hisseler/:symbol, 5 sekme (Fintables'ın "onlarca sekme"sinin V1'de daraltılmış hali) */
 export default function StockDetail() {
   const { symbol = '' } = useParams()
@@ -31,6 +48,9 @@ export default function StockDetail() {
   // Live, from /api/market/instruments. Resolving against MOCK_MARKET_INSTRUMENTS
   // meant this page showed a frozen price for the row the user just clicked.
   const { instrument, loading } = useInstrument(symbol.toUpperCase())
+  // Sohbetin okuduğu uç noktanın AYNISI: ikisi ayrı kaynaktan besleniyor
+  // olsaydı aynı şirket için farklı bir marj söyleyebilirlerdi.
+  const { fundamentals } = useFundamentals(symbol.toUpperCase())
 
   const earningsReport = useMemo(
     () => MOCK_EARNINGS_REPORTS.find((r) => r.symbol === symbol.toUpperCase()),
@@ -67,8 +87,9 @@ export default function StockDetail() {
     )
   }
 
-  const derivedNetIncome = instrument.pe ? instrument.marketCap / instrument.pe : undefined
-  const derivedRevenue = derivedNetIncome && instrument.netMargin ? derivedNetIncome / (instrument.netMargin / 100) : undefined
+  // Türetilen gelir/net kâr hesapları KALKTI: piyasa değerini F/K'ya bölüp
+  // "tahmini yıllık gelir" demek, sağlayıcının gerçek hasılatı verdiği
+  // yerde bir tahmini olgu diye sunmaktı. Artık `total_revenue` geliyor.
 
   return (
     <div>
@@ -112,6 +133,7 @@ export default function StockDetail() {
 
       <div className="bg-slate-800/70 backdrop-blur-md rounded-[2rem] p-6 border border-white/50 shadow-sm">
         {activeTab === 'ozet' && (
+          <div className="flex flex-col gap-5">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
               { label: 'Piyasa Değeri', value: `${fmtCompact(instrument.marketCap)} ${instrument.unit}` },
@@ -129,27 +151,44 @@ export default function StockDetail() {
               </div>
             ))}
           </div>
+
+          {/* Hesaplanmış eğilim. Sohbetin okuduğu uç noktanın AYNISI: ikisi
+              ayrı hesaplasaydı aynı hisse için farklı bir eğilim
+              söyleyebilirlerdi. */}
+          <TeknikGorunum symbol={symbol.toUpperCase()} />
+          </div>
         )}
 
         {activeTab === 'finansallar' && (
-          derivedRevenue && derivedNetIncome ? (
+          fundamentals && fundamentals.total_revenue !== null ? (
             <div className="space-y-4">
-            <SampleDataBadge reason="Bilanço ve gelir tablosu verisi için bir kaynak yok; fiyat ve temel oranlar canlıdır." />
-              {earningsReport && (
-                <div className="rounded-xl bg-emerald-500/100/10 border border-emerald-500/20 p-4 text-sm text-slate-200">
-                  <span className="font-semibold text-emerald-400">{earningsReport.period} bilançosu</span> — beklenti EPS {fmt(earningsReport.epsExpected, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}, gerçekleşen {fmt(earningsReport.epsActual, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ({earningsReport.surprise > 0 ? '+' : ''}{earningsReport.surprise}%)
-                </div>
-              )}
               <table className="w-full text-left border-collapse">
-                <tbody className="divide-y divide-slate-100">
-                  <tr><td className="py-2.5 text-sm text-slate-400">Tahmini Yıllık Gelir</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{fmtCompact(derivedRevenue)} {instrument.unit}</td></tr>
-                  <tr><td className="py-2.5 text-sm text-slate-400">Tahmini Yıllık Net Kâr</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{fmtCompact(derivedNetIncome)} {instrument.unit}</td></tr>
-                  <tr><td className="py-2.5 text-sm text-slate-400">Toplam Varlıklar</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{instrument.totalAssets ? `${fmtCompact(instrument.totalAssets)} ${instrument.unit}` : '—'}</td></tr>
-                  <tr><td className="py-2.5 text-sm text-slate-400">Faaliyet Nakit Akışı</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{instrument.operatingCashFlow ? `${fmtCompact(instrument.operatingCashFlow)} ${instrument.unit}` : '—'}</td></tr>
-                  <tr><td className="py-2.5 text-sm text-slate-400">Yıllık Gelir Büyümesi</td><td className={`py-2.5 text-right text-sm font-semibold tabular-nums ${(instrument.revenueGrowth ?? 0) < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>{instrument.revenueGrowth !== undefined ? `${instrument.revenueGrowth > 0 ? '+' : ''}${instrument.revenueGrowth}%` : '—'}</td></tr>
+                <tbody className="divide-y divide-white/5">
+                  <Row label="Hasılat (yıllık)" value={compact(fundamentals.total_revenue, instrument.unit)} />
+                  <Row
+                    label="Hasılat büyümesi"
+                    value={pct(fundamentals.revenue_growth)}
+                    tone={fundamentals.revenue_growth}
+                  />
+                  <Row label="FAVÖK marjı" value={pct(fundamentals.ebitda_margin)} />
+                  <Row label="Serbest nakit akışı" value={compact(fundamentals.free_cash_flow, instrument.unit)} />
+                  <Row label="Faaliyet nakit akışı" value={compact(fundamentals.operating_cash_flow, instrument.unit)} />
+                  <Row label="Toplam borç" value={compact(fundamentals.total_debt, instrument.unit)} />
+                  <Row label="Toplam nakit" value={compact(fundamentals.total_cash, instrument.unit)} />
+                  <Row label="Firma değeri" value={compact(fundamentals.enterprise_value, instrument.unit)} />
+                  <Row
+                    label="Kâr büyümesi"
+                    value={pct(fundamentals.earnings_growth)}
+                    tone={fundamentals.earnings_growth}
+                  />
                 </tbody>
               </table>
-              <p className="text-[11px] text-slate-400">Gelir/net kâr rakamları F/K ve net kâr marjından türetilmiş tahmini değerlerdir (mock veri).</p>
+              <p className="text-[11px] text-slate-500">
+                {/* "—" burada "sağlayıcı bunu yayımlamıyor" demek, sıfır değil.
+                    Bankaların brüt marjı yoktur ve onu %0,0 diye çizmek,
+                    şirketin hiç sahip olmadığı bir olguyu bildirmek olurdu. */}
+                Boş bırakılan alanlar için sağlayıcıda veri yok; sıfır anlamına gelmez.
+              </p>
             </div>
           ) : (
             <p className="text-sm text-slate-400">Bu enstrüman için finansal tablo verisi bulunmuyor.</p>
@@ -157,17 +196,32 @@ export default function StockDetail() {
         )}
 
         {activeTab === 'oran-analizi' && (
-          instrument.pe !== undefined ? (
-            <table className="w-full text-left border-collapse">
-              <tbody className="divide-y divide-slate-100">
-                <tr><td className="py-2.5 text-sm text-slate-400">F/K</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{fmt(instrument.pe)}x</td></tr>
-                <tr><td className="py-2.5 text-sm text-slate-400">PD/DD</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{fmt(instrument.pb)}x</td></tr>
-                <tr><td className="py-2.5 text-sm text-slate-400">FD/FAVÖK</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{fmt(instrument.evEbitda)}x</td></tr>
-                <tr><td className="py-2.5 text-sm text-slate-400">Net Kâr Marjı</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">%{fmt(instrument.netMargin)}</td></tr>
-                <tr><td className="py-2.5 text-sm text-slate-400">Özkaynak Kârlılığı (ROE)</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">%{fmt(instrument.roe)}</td></tr>
-                <tr><td className="py-2.5 text-sm text-slate-400">Borç/Özkaynak</td><td className="py-2.5 text-right text-sm font-semibold tabular-nums text-white">{fmt(instrument.debtToEquity)}x</td></tr>
-              </tbody>
-            </table>
+          fundamentals ? (
+            <div className="space-y-4">
+              <table className="w-full text-left border-collapse">
+                <tbody className="divide-y divide-white/5">
+                  <Row label="F/K" value={ratio(fundamentals.pe_ratio)} />
+                  <Row label="İleri F/K" value={ratio(fundamentals.forward_pe)} />
+                  <Row label="PD/DD" value={ratio(fundamentals.pb_ratio)} />
+                  <Row label="Brüt marj" value={pct(fundamentals.gross_margin)} />
+                  <Row
+                    label="Faaliyet marjı"
+                    value={pct(fundamentals.operating_margin)}
+                    tone={fundamentals.operating_margin}
+                  />
+                  <Row label="Net kâr marjı" value={pct(fundamentals.profit_margin)} tone={fundamentals.profit_margin} />
+                  <Row label="Özkaynak kârlılığı" value={pct(fundamentals.return_on_equity)} />
+                  <Row label="Aktif kârlılığı" value={pct(fundamentals.return_on_assets)} />
+                  <Row label="Borç/Özkaynak" value={ratio(fundamentals.debt_to_equity)} />
+                  <Row label="Cari oran" value={ratio(fundamentals.current_ratio)} />
+                  <Row label="Hisse başı kâr" value={fundamentals.trailing_eps === null ? '—' : `${fmt(fundamentals.trailing_eps, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${instrument.unit}`} tone={fundamentals.trailing_eps} />
+                  <Row label="Beta" value={fundamentals.beta === null ? '—' : fmt(fundamentals.beta, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} />
+                </tbody>
+              </table>
+              <p className="text-[11px] text-slate-500">
+                Boş bırakılan alanlar için sağlayıcıda veri yok; sıfır anlamına gelmez.
+              </p>
+            </div>
           ) : (
             <p className="text-sm text-slate-400">Bu enstrüman için oran analizi verisi bulunmuyor.</p>
           )

@@ -1,7 +1,17 @@
+import { Link } from 'react-router-dom'
 import type { RiskSuggestion } from '../../api/client'
 
 interface RiskRecommendationsWidgetProps {
   recommendations: RiskSuggestion[]
+  /**
+   * Önerinin gideceği rota, ya da hedefi yoksa `null`.
+   *
+   * Düğmenin `onClick`'i yoktu: tıklanıyor ve hiçbir şey olmuyordu, ki bu
+   * kullanıcıya özelliğin bozuk olduğunu söyler. Her önerinin bir hedefi de
+   * yok — "geçmişi eksik enstrümanlar" gidilecek bir ekran değil, bir
+   * bilgilendirmedir; o durumda düğme hiç çizilmez.
+   */
+  resolveTarget?: (suggestion: RiskSuggestion) => string | null
 }
 
 const IconArrowRight = () => (
@@ -10,7 +20,10 @@ const IconArrowRight = () => (
   </svg>
 )
 
-export default function RiskRecommendationsWidget({ recommendations }: RiskRecommendationsWidgetProps) {
+export default function RiskRecommendationsWidget({
+  recommendations,
+  resolveTarget,
+}: RiskRecommendationsWidgetProps) {
   return (
     <div className="flex flex-col rounded-2xl border border-white/10 bg-slate-900/50 backdrop-blur-xl border-white/10 shadow-2xl p-6 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
@@ -26,6 +39,7 @@ export default function RiskRecommendationsWidget({ recommendations }: RiskRecom
           const priorityColor = 
             rec.priority === 'high' ? 'bg-rose-500' :
             rec.priority === 'medium' ? 'bg-amber-500' : 'bg-emerald-500'
+          const target = resolveTarget?.(rec) ?? null
 
           return (
             <div key={rec.id} className="relative flex flex-col rounded-xl border border-white/10 p-4 pl-5 shadow-sm transition-shadow hover:shadow-md">
@@ -39,14 +53,19 @@ export default function RiskRecommendationsWidget({ recommendations }: RiskRecom
                 </div>
               </div>
               
-              <div className="mt-4 flex">
-                <button className="group flex items-center gap-1.5 text-sm font-medium text-brandBlue transition-colors hover:text-blue-500">
-                  {rec.actionLabel}
-                  <span className="transition-transform group-hover:translate-x-0.5">
-                    <IconArrowRight />
-                  </span>
-                </button>
-              </div>
+              {target && (
+                <div className="mt-4 flex">
+                  <Link
+                    to={target}
+                    className="group flex items-center gap-1.5 text-sm font-medium text-brandBlue transition-colors hover:text-blue-500"
+                  >
+                    {rec.actionLabel}
+                    <span className="transition-transform group-hover:translate-x-0.5">
+                      <IconArrowRight />
+                    </span>
+                  </Link>
+                </div>
+              )}
             </div>
           )
         })}

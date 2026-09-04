@@ -1,3 +1,7 @@
+import type { MessageSource } from '../api/client';
+
+export type { MessageSource };
+
 // src/types/chat.ts
 export type SenderType = 'user' | 'ai';
 
@@ -74,6 +78,18 @@ export interface ChatMessage {
    * gerçekten gerektiği yerde de atlatıyordu.
    */
   disclosures?: string[];
+  /**
+   * Cevabın dayandığı kaynaklar.
+   *
+   * Bildirimler gibi ayrı taşınıyor ve aynı sebeple: metnin içine
+   * karıştırılan bir kaynakça okunmuyor. Ama bildirimlerden farklı olarak
+   * bunlar TIKLANABİLİR olmalı, o yüzden düz metin değil bağlantı olarak
+   * gösteriliyorlar.
+   *
+   * Widget'ların aksine geri yükleniyorlar: bir kaynak tarihsel bir olgu --
+   * o belge vardı ve bu cevap ona dayanıyordu -- ve yarın da doğru kalıyor.
+   */
+  sources?: MessageSource[];
 }
 
 /**
@@ -84,4 +100,23 @@ export interface ChatSession {
   title: string;
   messages: ChatMessage[];
   updatedAt: Date;
+  /**
+   * Sunucudan gelen bir oturum önce yalnızca başlığıyla listelenir;
+   * mesajları ilk açılışında yüklenir. Bu bayrak olmasaydı "mesajı olmayan
+   * sohbet" ile "mesajları henüz getirilmemiş sohbet" ayırt edilemezdi.
+   */
+  messagesLoaded?: boolean;
+  /**
+   * `server` ise silme/yeniden adlandırma isteklerinin gideceği bir satır
+   * var. Henüz hiç mesaj gönderilmemiş yerel bir oturumun karşılığı yoktur
+   * ve onu silmeye çalışmak 404 üretir.
+   */
+  origin?: 'server' | 'local';
 }
+
+/**
+ * Bir turun geçmişe yazılıp yazılmadığı ve yazılmadıysa sebebi.
+ * `anonymous` ile `session_expired` bilerek ayrı: ilki hiç kaybı olmayan
+ * bir ziyaretçi, ikincisi kaybı olan biri.
+ */
+export type PersistenceStatus = 'saved' | 'anonymous' | 'session_expired' | 'failed';

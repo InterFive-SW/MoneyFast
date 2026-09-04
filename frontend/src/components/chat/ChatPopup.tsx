@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useChat } from '../../context/ChatContext';
 import MessageBubble from './MessageBubble';
 import ChatInput from './ChatInput';
+import PersistenceNotice from './PersistenceNotice';
 import TypingIndicator from './TypingIndicator';
 
 interface ChatPopupProps {
@@ -19,7 +20,7 @@ interface ChatPopupProps {
  * Global `useChat` context'ini kullanarak sohbet geçmişini ana sayfayla senkron tutar.
  */
 export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
-  const { messages, isTyping, currentThought, handleSendMessage } = useChat();
+  const { messages, isTyping, currentThought, notice, dismissNotice, handleSendMessage, createNewSession } = useChat();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -55,6 +56,22 @@ export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
         </div>
         
         <div className="flex items-center gap-1">
+          {/* Sohbeti Sıfırlama Butonu
+
+              Pencerenin baştan başlamanın bir yolu yoktu: yarım kalmış bir
+              konuşmadan çıkmak için sohbet sayfasına gitmek gerekiyordu. */}
+          <button
+            onClick={createNewSession}
+            disabled={messages.length === 0}
+            className="p-1.5 text-slate-400 hover:text-brandBlue hover:bg-brandBlue/10 rounded-lg transition-colors focus:outline-none disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+            title="Yeni Sohbet"
+            aria-label="Yeni Sohbet"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+
           {/* Tam Ekrana (Sohbet Sayfasına) Geçiş Butonu */}
           <button 
             onClick={() => {
@@ -103,6 +120,7 @@ export default function ChatPopup({ isOpen, onClose }: ChatPopupProps) {
 
       {/* Girdi Alanı */}
       <div className="p-3 bg-slate-900 border-t border-white/10">
+        <PersistenceNotice message={notice} onDismiss={dismissNotice} />
         <ChatInput onSendMessage={handleSendMessage} disabled={isTyping} />
       </div>
 

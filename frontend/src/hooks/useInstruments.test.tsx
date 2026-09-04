@@ -69,11 +69,36 @@ describe('useInstruments', () => {
     expect(result.current.instruments[0].pe).toBeUndefined()
   })
 
-  it('labels a missing sector rather than leaving it blank', async () => {
-    mockApi([apiRow({ sector: null })])
+  it('labels a stock with no sector rather than leaving it blank', async () => {
+    // Gerçek bir boşluk: sağlayıcı bir gün doldurabilir. Ölçüldü, 94
+    // enstrümanın dördünde sektör yok.
+    mockApi([apiRow({ sector: null, market: 'BIST' })])
     const { result } = renderHook(() => useInstruments())
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.instruments[0].sector).toBe('Bilinmiyor')
+  })
+
+  it.each(['FX', 'COMEX'])(
+    'leaves the sector blank for %s, where there is no such attribute',
+    async (market) => {
+      // Döviz paritesinin ve ons altının sektörü EKSİK DEĞİL, yok. Onlara
+      // "bilinmiyor" demek, bir gün öğrenilebilecek bir boşluk varmış gibi
+      // göstermek olurdu.
+      mockApi([apiRow({ sector: null, market })])
+      const { result } = renderHook(() => useInstruments())
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(result.current.instruments[0].sector).toBe('')
+    },
+  )
+
+  it('keeps a blank sector out of the filter options', async () => {
+    // Adı olmayan bir seçenek tıklanamaz ve listenin sonunda boş bir satır
+    // bırakırdı.
+    mockApi([apiRow({ sector: null, market: 'FX' }),
+             apiRow({ symbol: 'THYAO', sector: 'Ulaştırma', market: 'BIST' })])
+    const { result } = renderHook(() => useInstruments())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.sectors).toEqual(['Ulaştırma'])
   })
 
   it('treats a missing change as flat so sorting does not produce NaN', async () => {
@@ -94,6 +119,22 @@ describe('useInstruments', () => {
     mockApi([])
     renderHook(() => useInstruments(50))
     await waitFor(() => expect(apiClient.getInstruments).toHaveBeenCalledWith({ limit: 50 }))
+  })
+
+  it('sends the market filter to the server, not the client', async () => {
+    /**
+     * Evren binin üzerinde enstrüman. `limit` kadarını çekip istemcide
+     * süzmek, seçilen piyasanın yalnızca ilk sayfaya düşen kısmını
+     * göstermek olurdu.
+     *
+     * `market` bir borsa (NASDAQ) ya da bir endeks (SP500) olabilir: AAPL
+     * Nasdaq'ta işlem görür VE S&P 500 üyesidir.
+     */
+    mockApi([])
+    renderHook(() => useInstruments(50, 'SP500'))
+    await waitFor(() =>
+      expect(apiClient.getInstruments).toHaveBeenCalledWith({ limit: 50, market: 'SP500' }),
+    )
   })
 
   it('stops loading and shows nothing when the request fails', async () => {
@@ -118,19 +159,30 @@ describe('useInstruments', () => {
 describe('adapter fallbacks', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('falls back to BIST for an exchange nobody mapped', async () => {
+  it('labels an unmapped venue "Diğer" rather than claiming BIST', async () => {
     // Better than dropping the row: an unmapped venue still has a price.
+    // 'BIST' idi ve bu, satırı yanlış bir borsaya yazıyordu.
     mockApi([apiRow({ market: 'XETRA' })])
     const { result } = renderHook(() => useInstruments())
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.instruments[0].market).toBe('BIST')
+    expect(result.current.instruments[0].market).toBe('Diğer')
   })
 
-  it('falls back to BIST when the exchange is null', async () => {
+  it('labels a null venue "Diğer" too', async () => {
     mockApi([apiRow({ market: null })])
     const { result } = renderHook(() => useInstruments())
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.instruments[0].market).toBe('BIST')
+    expect(result.current.instruments[0].market).toBe('Diğer')
+  })
+
+  it.each([
+    ['FX', 'Döviz'],
+    ['COMEX', 'Altın'],
+  ])('maps %s to %s — the document names both', async (upstream, label) => {
+    mockApi([apiRow({ market: upstream })])
+    const { result } = renderHook(() => useInstruments())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.instruments[0].market).toBe(label)
   })
 
   it('shows an unmapped currency code rather than an empty unit', async () => {

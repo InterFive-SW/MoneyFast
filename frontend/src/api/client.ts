@@ -1,8 +1,25 @@
 import type { paths, components } from './generated/schema';
+import { clearChatStorage } from '../lib/chatStorage';
+import { isTokenExpiringSoon } from '../lib/jwt';
 
 // Helper type to extract response types
 type GetResponseType<T> = T extends {
     get: {
+        responses: {
+            200: {
+                content: {
+                    'application/json': infer U;
+                };
+            };
+        };
+    };
+} ? U : never;
+
+/** Aynısı, POST ile cevap veren uçlar için. `GetResponseType` yalnızca `get`
+ *  taşıyan yolları çözüyor ve POST-only bir uçta sessizce `never` veriyor --
+ *  o da alan erişiminde anlaşılmaz bir tip hatasına dönüşüyor. */
+type PostResponseType<T> = T extends {
+    post: {
         responses: {
             200: {
                 content: {
@@ -19,15 +36,176 @@ export type PortfolioChartData = GetResponseType<paths['/api/investment/portfoli
 export type Position = GetResponseType<paths['/api/investment/positions']>[0];
 export type Order = GetResponseType<paths['/api/investment/orders']>[0];
 export type AssetAllocationItem = GetResponseType<paths['/api/investment/asset-allocation']>[0];
+export type AllocationTarget = GetResponseType<paths['/api/investment/allocation-target']>;
+export type AllocationDrift = GetResponseType<paths['/api/investment/allocation-drift']>;
+export type PortfolioReport = GetResponseType<paths['/api/analytics/report']>;
 export type StageTransactionRequest = components['schemas']['StageTransactionRequest'];
 export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
 export type MarketTicker = GetResponseType<paths['/api/market/tickers']>[0];
+
+// --- Banking: bills, staged payments, saved payees -------------------------
+
+/** Vadesiz, vadeli veya yatırım — tek biçimde. */
+export interface HeatmapTile {
+    symbol: string
+    name?: string | null
+    /** Kutunun ALANI bundan geliyor. */
+    marketCap: number
+    changePercent: number
+    sector: string
+    price: number
+    currency: string
+}
+
+export interface MarketHeatmap {
+    items: HeatmapTile[]
+    /** Piyasa değeri bilinmediği için çizilemeyen enstrüman sayısı. */
+    missing: number
+}
+
+export interface InstrumentSuggestion {
+    symbol: string
+    name?: string | null
+    market?: string | null
+    currency?: string | null
+}
+
+export interface PortfolioAccount {
+    id: string
+    account_number: string
+    iban?: string | null
+    account_type: string
+    currency_code: string
+    balance: number
+    /** Vadeli hesabın saklanan yıllık oranı ve vadesi; vadesizde null. */
+    interest_rate?: number | null
+    term_days?: number | null
+    is_investment: boolean
+}
+
+export interface ApiCard {
+    id: string
+    name: string
+    brand: string
+    card_number: string
+    limit: number
+    current_debt: number
+    available_limit: number
+    due_day: number
+    color?: string | null
+    is_digital: boolean
+    settings: Record<string, unknown>
+    linked_account_id?: string | null
+}
+
+export interface ApiLoan {
+    id: string
+    title: string
+    total_amount: number
+    remaining_amount: number
+    installment_amount: number
+    installment_count: number
+    paid_installments: number
+    remaining_months: number
+    next_due?: string | null
+    progress_percentage: number
+}
+
+export interface BillLookup {
+    found: boolean
+    id?: string | null
+    institution?: string | null
+    customer_no?: string | null
+    name?: string | null
+    amount?: number | null
+    due_date?: string | null
+    subscriber_no?: string | null
+    due_day?: string | null
+}
+
+// --- Notifications -----------------------------------------------------------
+
+/**
+ * REST polling tabanlı bildirim mimarisi için temel bildirim arayüzü.
+ * Backend'deki NotificationResponse şemasını temsil eder.
+ */
+export interface Notification {
+    id: string;
+    title: string;
+    description: string;
+    type: string;
+    link_url?: string | null;
+    is_read: boolean;
+    created_at: string;
+}
+
+/**
+ * Sayfalandırılmış veya sınırlanmış bildirim listesini ve okunmamış bildirim sayısını tutar.
+ */
+export interface NotificationListResponse {
+    unread_count: number;
+    items: Notification[];
+}
+
+export interface StagePaymentRequest {
+    payment_type: 'TRANSFER' | 'BILL_PAYMENT' | 'CARD_PAYMENT'
+    amount?: number | null
+    destination?: string | null
+    institution?: string | null
+    subscriber_no?: string | null
+    description?: string | null
+    idempotency_key?: string | null
+}
+
+/** Hazırlanmış ama uygulanmamış bir ödeme. Onaylanana kadar para durur. */
+export interface PaymentProposal {
+    proposal_id: string
+    status: string
+    payment_type: string
+    amount: number
+    currency: string
+    destination?: string | null
+    description?: string | null
+    expires_at: string
+    balance_before?: number | null
+}
+
+export interface PaymentConfirmation {
+    proposal_id: string
+    status: string
+    reference_number: string
+    amount: number
+    currency: string
+    balance_after?: number | null
+}
+
+export interface SavedPayee {
+    id: string
+    label: string
+    institution: string
+    subscriber_no: string
+}
 // `instruments` şemada opsiyonel görünür (varsayılanı olan bir alan); satır
 // tipini almak için önce boş olmayan hâline daraltılır.
 export type CandleSeries = GetResponseType<paths['/api/market/candles']>;
 export type Candle = NonNullable<CandleSeries['candles']>[0];
-export type PortfolioAnalysis = GetResponseType<paths['/api/analytics/portfolio']>;
+/**
+ * `benchmark` burada elle yazılı: `generated/schema.d.ts` bu alan eklenmeden
+ * önce üretilmişti. Yeniden üretimi ayrı ve opsiyonel bir adım
+ * (CONTRACT_WORKFLOW.md).
+ */
+export interface BenchmarkSeries {
+    symbol: string;
+    points: { date: string; value: number }[];
+}
+
+export type PortfolioAnalysis = GetResponseType<paths['/api/analytics/portfolio']> & {
+    /** Endeksin, portföyün kendi günlerindeki ham kapanışları. Örtüşen geçmiş
+     *  yoksa `null` — kısmi örtüşmeden çizilen bir karşılaştırma çizgisi,
+     *  birinin barı olmayan günlerde ayrışma gösterir. */
+    benchmark?: BenchmarkSeries | null;
+};
 export type BankAccount = GetResponseType<paths['/api/banking/accounts']>[0];
 export type Statement = GetResponseType<paths['/api/banking/accounts/{account_number}/statement']>;
 export type Movement = NonNullable<Statement['movements']>[0];
@@ -40,15 +218,361 @@ export type MarketInstrument = NonNullable<
     GetResponseType<paths['/api/market/instruments']>['instruments']
 >[0];
 export type NewsItem = GetResponseType<paths['/api/market/news']>[0];
-export type RiskProfile = GetResponseType<paths['/api/risk/profile']>;
+/** Portföye dokunan haberler paneli. Sayı ve başlıklar aynı pencereden. */
+export type PortfolioNews = GetResponseType<paths['/api/market/news/portfolio']>;
+export type PortfolioNewsItem = PortfolioNews['items'][0];
+export type PortfolioNewsSymbol = PortfolioNews['symbols'][0];
+/** Portföy geneli teknik görünüm: pozisyon başına okuma + toplulaştırma. */
+export type PortfolioTechnical = GetResponseType<paths['/api/market/portfolio/technical']>;
+export type PortfolioTechnicalRow = PortfolioTechnical['positions'][0];
+/** Koşullu makro senaryo: ölçülen duyarlılık ve şokun yansıması. */
+export type ScenarioResult = PostResponseType<paths['/api/risk/scenario']>;
+/** Stres testi: gerçekten olan günler ve faktörlerin en sert pencereleri. */
+export type StressResult = GetResponseType<paths['/api/risk/stress']>;
+export type ScenarioFactor = 'USDTRY' | 'EURTRY' | 'XU100' | 'XAUUSD';
+/** Kullanıcının ankette beyan ettiği tolerans. Anket doldurulmadan `null`. */
+export interface DeclaredRiskProfile {
+    tolerance_level: string;
+    investment_horizon: string;
+    assessed_at: string;
+    questionnaire_version: string;
+}
+
+/**
+ * Ölçüm ile beyanın karşılaştırması.
+ *
+ * İki taraf da AYNI üç etiketi taşır (Düşük/Orta/Yüksek), iki sayı değil:
+ * ölçülen puan ters (100 = sakin), anketin ham puanı değil.
+ */
+export interface RiskSuitability {
+    measured_level: string | null;
+    declared_tolerance: string | null;
+    alignment: 'ALIGNED' | 'PORTFOLIO_RISKIER' | 'PORTFOLIO_CALMER' | 'UNKNOWN';
+    statement: string;
+}
+
+/**
+ * `declared` ve `suitability` burada elle yazılı: `generated/schema.d.ts` bu
+ * alanlar eklenmeden önce üretilmişti. Yeniden üretimi ayrı ve opsiyonel bir
+ * adım (CONTRACT_WORKFLOW.md).
+ */
+export type RiskProfile = GetResponseType<paths['/api/risk/profile']> & {
+    declared?: DeclaredRiskProfile | null;
+    suitability?: RiskSuitability | null;
+    /** Ölçümün kapsadığı aralık: başlangıç/bitiş tarihi ve gözlem sayısı. */
+    window?: Record<string, unknown> | null;
+    /** Neye göre ölçüldüğü: karşılaştırma ölçütü, Sharpe'ın netleştirildiği
+     *  faiz, yeniden dengeleme varsayımı. */
+    assumptions?: Record<string, unknown> | null;
+};
+/** Uç noktanın kabul ettiği kapalı küme; sunucu bunun dışını 422 ile reddeder. */
+/**
+ * Teknik göstergeler.
+ *
+ * Her alan null olabilir ve null "geçmiş bu göstergeyi hesaplayacak kadar
+ * uzun değil" demek — sıfır DEĞİL. 30 barlık bir enstrümanda 200 günlük
+ * ortalama yoktur ve arayüz onu çizmez.
+ */
+export interface TechnicalSignals {
+    observations: number;
+    last_close: number | null;
+    sma_20: number | null;
+    sma_50: number | null;
+    sma_200: number | null;
+    pct_from_sma_20: number | null;
+    pct_from_sma_50: number | null;
+    pct_from_sma_200: number | null;
+    rsi_14: number | null;
+    week52_high: number | null;
+    week52_low: number | null;
+    week52_position_pct: number | null;
+    up_days_recent: number | null;
+    recent_window: number | null;
+    volume_vs_average: number | null;
+    annualised_volatility: number | null;
+    max_drawdown_pct: number | null;
+    trend: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS' | 'UNKNOWN';
+}
+
+export interface TechnicalSignalsOut {
+    symbol: string;
+    currency: string;
+    signals: TechnicalSignals;
+    /** Gösterilecek Türkçe cümle, tam hâliyle. Yeterli geçmiş yoksa null. */
+    narrative: string | null;
+}
+
+/**
+ * Bir enstrümanın saklanan temel verisi.
+ *
+ * Her alan null olabilir ve null "sağlayıcı bunu yayımlamıyor" demek,
+ * SIFIR değil. Bankanın brüt marjı yoktur.
+ */
+export interface FundamentalsOut {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    updated_at: string | null;
+
+    pe_ratio: number | null;
+    pb_ratio: number | null;
+    market_cap: number | null;
+    dividend_yield: number | null;
+    sector: string | null;
+    industry: string | null;
+    week52_high: number | null;
+    week52_low: number | null;
+
+    total_revenue: number | null;
+    revenue_growth: number | null;
+    gross_margin: number | null;
+    operating_margin: number | null;
+    ebitda_margin: number | null;
+    profit_margin: number | null;
+    return_on_equity: number | null;
+    return_on_assets: number | null;
+    debt_to_equity: number | null;
+    current_ratio: number | null;
+    total_debt: number | null;
+    total_cash: number | null;
+    free_cash_flow: number | null;
+    operating_cash_flow: number | null;
+    enterprise_value: number | null;
+    beta: number | null;
+    trailing_eps: number | null;
+    forward_eps: number | null;
+    forward_pe: number | null;
+    earnings_growth: number | null;
+    payout_ratio: number | null;
+    dividend_rate: number | null;
+
+    /** Analist konsensüsü: BAŞKASININ değerlendirmesi. */
+    recommendation_key: string | null;
+    analyst_count: number | null;
+    target_mean_price: number | null;
+
+    ex_dividend_date: string | null;
+    earnings_date: string | null;
+}
+
+/** Analist konsensüsü: BAŞKASININ değerlendirmesi, ürünün kendi görüşü değil. */
+export interface AnalystRow {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    recommendation: string;
+    analyst_count: number;
+    target_mean_price: number | null;
+}
+
+export interface DividendRow {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    dividend_yield: number | null;
+    dividend_rate: number | null;
+    payout_ratio: number | null;
+    ex_dividend_date: string | null;
+}
+
+export interface EarningsRow {
+    symbol: string;
+    name: string | null;
+    currency: string;
+    earnings_date: string;
+}
+
+export interface MarketCalendar {
+    analysts: AnalystRow[];
+    dividends: DividendRow[];
+    earnings: EarningsRow[];
+}
+
+/** Kullanıcının sohbete yüklediği bir belge, listede göründüğü hâliyle. */
+export interface ChatDocument {
+    id: string;
+    filename: string;
+    /** PDF / Excel / CSV / PowerPoint / Metin. */
+    kind: string;
+    size_bytes: number;
+    /** PDF'te sayfa, tabloda satır, sunumda slayt. */
+    units: number | null;
+    char_count: number | null;
+    /** Metin tavana takıldıysa doğru. */
+    truncated: boolean;
+    created_at: string;
+}
+
+export interface ChatDocumentList {
+    documents: ChatDocument[];
+    /** Kabul edilen uzantılar. Dosya seçici bunu okuyor: iki listenin
+     *  ayrışması, seçilebilen ama reddedilen bir dosya demek. */
+    accepted: string[];
+    max_bytes: number;
+}
+
+export type RiskLookback = '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX';
+
+/** Anket soruları. Puanlar istemciye HİÇ gelmez: seçeneğin ağırlığını
+ *  görmek anketi bir teste çevirir ve insanlar teste cevap verir. */
+export interface RiskQuestion {
+    key: string;
+    prompt: string;
+    helper: string | null;
+    options: { value: string; label: string }[];
+}
+
+/** Bir ürün grubu ve ona sorulan üç soru. Yapı yalnızca SUNUM meselesi:
+ *  puanlama düz soru listesi üzerinden çalışıyor ve bu gruplamadan habersiz. */
+export interface RiskQuestionGroup {
+    key: string;
+    label: string;
+    /** Grubun risk seviyesi, testin kendi yazdığı hâliyle. */
+    risk: string;
+    questions: RiskQuestion[];
+}
+
+export interface RiskQuestionSection {
+    key: string;
+    title: string;
+    helper: string | null;
+    questions: RiskQuestion[];
+    groups: RiskQuestionGroup[];
+}
+
+export interface RiskQuestionnaire {
+    version: string;
+    sections: RiskQuestionSection[];
+}
+
+/** Bir ürün grubunun yeterliliği ve GEREKÇESİ.
+ *
+ *  Gerekçe zorunlu: "uygun değil" tek başına kişi hakkında bir yargı gibi
+ *  okunuyor. Hangi beyandan çıktığı yazılı olunca hem öyle olmadığı hem de
+ *  kullanıcının cevabını değiştirerek sonucu değiştirebileceği görünüyor. */
+export interface RiskProductGroup {
+    key: string;
+    label: string;
+    risk: string;
+    knowledge: string;
+    frequency: string;
+    volume: string;
+    has_experience: boolean;
+    eligible: boolean;
+    reason: string;
+}
+
+/** Simülasyonun bir tarafı. Metriklerin tamamı değil, kıyaslanabilir olanlar. */
+export interface RiskSimulationSide {
+    score: number | null;
+    level: string | null;
+    volatility: number | null;
+    hhi: number | null;
+    effective_n: number | null;
+    max_drawdown: number | null;
+    position_count: number;
+}
+
+export interface RiskSimulationChange {
+    symbol: string;
+    quantity_delta: number;
+    applied: boolean;
+    note: string | null;
+}
+
+export interface RiskSimulation {
+    as_of: string;
+    current: RiskSimulationSide;
+    hypothetical: RiskSimulationSide;
+    /** sonra - önce. Ölçülemeyen tarafta `null` — sıfır "değişmedi" demek. */
+    deltas: Record<string, number | null>;
+    changes: RiskSimulationChange[];
+    warnings: string[];
+}
+
+/** Bir günün ölçümü. Her metrik opsiyonel: ölçülemeyen bir gün sıfır
+ *  değil, boşluk olarak çizilir. */
+export interface RiskSnapshot {
+    captured_on: string;
+    score: number | null;
+    level: string | null;
+    volatility: number | null;
+    hhi: number | null;
+    max_drawdown: number | null;
+    position_count: number;
+}
+
+export interface RiskHistory {
+    /** Her noktanın ölçüldüğü pencere. Noktalar farklı pencerelerden gelseydi
+     *  seri anlamsız olurdu. */
+    lookback: string;
+    days: number;
+    points: RiskSnapshot[];
+}
+
+export interface RiskAssessmentResult {
+    tolerance_level: string;
+    investment_horizon: string;
+    assessed_at: string;
+    questionnaire_version: string;
+    raw_score: number;
+    /** v1 ile doldurulmuş bir profilde BOŞ. Boş liste "hiçbiri uygun değil"
+     *  demek değil, "sorulmadı" demek. */
+    product_groups: RiskProductGroup[];
+}
 export type RiskFinding = NonNullable<RiskProfile['findings']>[0];
 export type RiskSuggestion = NonNullable<RiskProfile['suggestions']>[0];
 
 export type WatchlistItem = GetResponseType<paths['/api/investment/watchlist']>['bist'][0];
 export type TopMoverItem = GetResponseType<paths['/api/investment/top-movers']>['gainers'][0];
-export type DividendItem = GetResponseType<paths['/api/investment/dividends']>[0];
 export type SectorAllocationItem = GetResponseType<paths['/api/investment/sector-allocation']>[0];
 export type HeatmapItem = GetResponseType<paths['/api/investment/heatmap']>[0];
+
+/** Sohbet listesi satırı. Kaynak anahtarı `thread_id`, `id` değil. */
+export interface ConversationSummary {
+    id: string;
+    thread_id: string;
+    title: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ConversationList {
+    items: ConversationSummary[];
+    total: number;
+    limit: number;
+    offset: number;
+}
+
+/**
+ * Cevabın dayandığı tek bir kaynak.
+ *
+ * `kind` bir ayırıcı: arayüz bir belgeyi bağlantı, bir ölçüm serisini düz
+ * metin olarak gösteriyor, ve kapalı bir ayırıcı ileride yeni bir kaynak
+ * türünün şema değiştirmeden eklenmesini sağlıyor.
+ */
+export interface MessageSource {
+    kind: 'DOCUMENT' | 'QUOTE' | 'SERIES' | 'HOLDINGS' | 'PROFILE';
+    label: string;
+    detail?: string;
+    url?: string | null;
+    as_of?: string | null;
+}
+
+export interface ConversationMessage {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    created_at: string;
+    disclosures: string[];
+    sources?: MessageSource[];
+}
+
+export interface ConversationDetail extends ConversationSummary {
+    messages: ConversationMessage[];
+    has_more: boolean;
+    context_topic: string | null;
+}
 
 // Native fetch API client for backend
 class ApiClient {
@@ -66,11 +590,18 @@ class ApiClient {
      */
     private refreshInFlight: Promise<boolean> | null = null;
 
-    private authHeaders(): Record<string, string> {
+    /**
+     * @param body Gönderilecek gövde. `FormData` ise Content-Type
+     *   KURULMAZ: multipart sınırını (`boundary=...`) tarayıcı üretiyor ve
+     *   elle yazılan bir başlık onu ezerek gövdeyi sunucu tarafında
+     *   ayrıştırılamaz hâle getirir.
+     */
+    private authHeaders(body?: BodyInit | null): Record<string, string> {
         const token = localStorage.getItem('access_token');
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-        };
+        const headers: Record<string, string> = {};
+        if (!(body instanceof FormData)) {
+            headers['Content-Type'] = 'application/json';
+        }
         if (token) {
             headers['Authorization'] = `Bearer ${token}`;
         }
@@ -108,7 +639,8 @@ class ApiClient {
      * önerileri hazırlamaya devam ediyordu.
      */
     private async authedFetch(fullUrl: string, init: RequestInit): Promise<Response> {
-        const send = () => fetch(fullUrl, { ...init, headers: this.authHeaders() });
+        const send = () =>
+            fetch(fullUrl, { ...init, headers: this.authHeaders(init.body) });
         let response = await send();
         // Giriş ve yenileme uçlarının 401'i normaldir: yanlış şifre ya da
         // ölmüş bir yenileme token'ı. Onları tazelemeye çalışmak döngü olur.
@@ -126,9 +658,79 @@ class ApiClient {
     static onSessionExpired(): void {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
+        // Sohbet deposu da gider. Token'ları silip sohbetleri bırakmak, ortak
+        // bir tarayıcıda sıradaki kullanıcıya öncekinin konuşmalarını
+        // devretmek demekti.
+        clearChatStorage();
         if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
             window.location.assign('/login');
         }
+    }
+
+    /**
+     * Bir tur göndermeden önce oturumu tazele ve sonucu bildir.
+     *
+     * Sohbet uçları anonim çağrıyı kabul ediyor, dolayısıyla süresi dolmuş
+     * bir token 401 DEĞİL, 200-anonim üretiyor — ve `authedFetch`'in yenileme
+     * makinesi 401 görmediği için sohbet yolunda hiç çalışmıyordu. Oturumun
+     * sessizce düşmesinin sebebi buydu.
+     *
+     * Başarısızlıkta `/login`'e YÖNLENDİRMEZ: birini cümlenin ortasında
+     * oradan almak, yazdığı mesajı kaybettirir. Çağıran anonim olarak devam
+     * eder ve kullanıcıya kaydedilmediği söylenir.
+     */
+    async ensureFreshSession(): Promise<'authenticated' | 'anonymous'> {
+        const token = localStorage.getItem('access_token');
+        if (!token) return 'anonymous';
+        if (!isTokenExpiringSoon(token)) return 'authenticated';
+        return (await this.tryRefresh()) ? 'authenticated' : 'anonymous';
+    }
+
+    // ----------------------------------------------------------------------
+    // Conversations
+    //
+    // Şemalar burada elle yazılı: `src/api/generated/schema.d.ts` bu uçlar
+    // eklenmeden önce üretilmişti. Yeniden üretimi ayrı bir adım
+    // (CONTRACT_WORKFLOW.md) ve bu dosyanın çalışmasının önkoşulu değil.
+    // ----------------------------------------------------------------------
+    getConversations(params: { limit?: number; offset?: number } = {}) {
+        const query = new URLSearchParams();
+        if (params.limit !== undefined) query.set('limit', String(params.limit));
+        if (params.offset !== undefined) query.set('offset', String(params.offset));
+        const suffix = query.toString() ? `?${query}` : '';
+        return this.request<ConversationList>(`/ai_orchestrator/conversations${suffix}`);
+    }
+
+    getConversation(threadId: string, limit?: number) {
+        const suffix = limit === undefined ? '' : `?limit=${limit}`;
+        return this.request<ConversationDetail>(
+            `/ai_orchestrator/conversations/${encodeURIComponent(threadId)}${suffix}`,
+        );
+    }
+
+    renameConversation(threadId: string, title: string) {
+        return this.patch<ConversationSummary>(
+            `/ai_orchestrator/conversations/${encodeURIComponent(threadId)}`,
+            { title },
+        );
+    }
+
+    deleteConversation(threadId: string) {
+        return this.request<{ thread_id: string; status: string }>(
+            `/ai_orchestrator/conversations/${encodeURIComponent(threadId)}`,
+            'DELETE',
+        );
+    }
+
+    private async patch<T>(endpoint: string, data: unknown): Promise<T> {
+        const response = await this.authedFetch(`${this.baseUrl}${endpoint}`, {
+            method: 'PATCH',
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+            throw new Error(`API Hatası: ${response.status} ${response.statusText}`);
+        }
+        return await response.json();
     }
 
     private async request<T>(endpoint: string, method: 'GET' | 'DELETE' = 'GET'): Promise<T> {
@@ -151,8 +753,16 @@ class ApiClient {
         return this.request<InvestmentBalance>('/investment/portfolio/summary');
     }
 
-    getPortfolioChart() {
-        return this.request<PortfolioChartData>('/investment/portfolio/chart');
+    /**
+     * Portföyün mum serisi, TEK aralık.
+     *
+     * Beş aralığın hepsi tek istekte üretiliyordu: çağrı başına ~130 sorgu ve
+     * ölçülen 5,9 saniye. Ekran aynı anda bir aralık gösteriyor.
+     */
+    getPortfolioChart(range = 'yil') {
+        return this.request<PortfolioChartData>(
+            `/investment/portfolio/chart?range=${encodeURIComponent(range)}`,
+        );
     }
 
     getPositions() {
@@ -165,6 +775,53 @@ class ApiClient {
 
     getAssetAllocation() {
         return this.request<AssetAllocationItem[]>('/investment/asset-allocation');
+    }
+
+    /**
+     * "Detaylı Rapor Oluştur": sistemin ölçtüğü her şey tek belgede.
+     *
+     * Bölüm cümleleri BACKEND'de kuruluyor ve olduğu gibi gösteriliyor;
+     * ekran, PDF ve sohbet aynı metni okumalı.
+     */
+    getPortfolioReport() {
+        return this.request<PortfolioReport>('/analytics/report');
+    }
+
+    /**
+     * Aynı raporun indirilebilir hâli.
+     *
+     * Belge SUNUCUDA üretiliyor: ekranın DOM'unu yazdırmak, raporun metnini
+     * ikinci bir yerde kurmak olurdu ve iki yüzey er ya da geç ayrışırdı.
+     * `request` JSON çözdüğü için ayrı bir yol.
+     */
+    async downloadPortfolioReportPdf(): Promise<Blob> {
+        const response = await this.authedFetch(
+            `${this.baseUrl}/analytics/report.pdf`, { method: 'GET' },
+        );
+        if (!response.ok) {
+            throw new Error(`API Hatası: ${response.status} ${response.statusText}`);
+        }
+        return await response.blob();
+    }
+
+    /** Kullanıcının kendi belirlediği hedef ağırlıklar. */
+    getAllocationTarget() {
+        return this.request<AllocationTarget>('/investment/allocation-target');
+    }
+
+    /**
+     * Hedefi tamamen değiştirir; boş liste hedefi kaldırır.
+     *
+     * Kısmi güncelleme yok: birleştirme, toplamı 100 olan bir hedefi sessizce
+     * 140'a çıkarabilirdi.
+     */
+    setAllocationTarget(targets: { bucket: string; targetPercent: number }[]) {
+        return this.put<AllocationTarget>('/investment/allocation-target', { targets });
+    }
+
+    /** Ölçülen ağırlık ile kullanıcının kendi hedefi arasındaki fark. */
+    getAllocationDrift() {
+        return this.request<AllocationDrift>('/investment/allocation-drift');
     }
 
     /** Follow an instrument. Idempotent — starring twice is not an error. */
@@ -191,13 +848,94 @@ class ApiClient {
      * Risk sayfasının profili: puan, puanı üreten bileşenler, bulgular ve
      * nakit akışı. Sayfa daha önce sabit bir fixture okuyordu.
      */
-    getRiskProfile() {
-        return this.request<RiskProfile>('/risk/profile');
+    getRiskQuestionnaire() {
+        return this.request<RiskQuestionnaire>('/risk/questionnaire');
     }
 
-    getDividends() {
-        return this.request<DividendItem[]>('/investment/dividends');
+    submitRiskAssessment(answers: Record<string, string>) {
+        return this.post<RiskAssessmentResult>('/api/risk/assessment', { answers });
     }
+
+    simulateRisk(
+        changes: { symbol: string; quantity_delta: number }[],
+        lookback?: RiskLookback,
+    ) {
+        return this.post<RiskSimulation>('/api/risk/simulate', {
+            changes,
+            ...(lookback ? { lookback } : {}),
+        });
+    }
+
+    /** Bir enstrümanın teknik görünümü. Sohbet ile hisse detay sayfası AYNI
+     *  uç noktayı okuyor; ayrı hesaplasalardı aynı hisse için farklı bir
+     *  eğilim söyleyebilirlerdi. */
+    /** Bir enstrümanın gelir tablosu, marjları ve analist konsensüsü.
+     *  `/market/instruments`'ten ayrı: o dondurulmuş v2.2 sözleşmesi ve bir
+     *  LİSTE için "bu ne ediyor" sorusunu yanıtlıyor. */
+    getFundamentals(symbol: string) {
+        return this.request<FundamentalsOut>(
+            `/market/fundamentals?symbol=${encodeURIComponent(symbol)}`,
+        );
+    }
+
+    /** "Analizler" ekranının üç listesi, tek çağrıda. */
+    getMarketCalendar(limit?: number) {
+        const suffix = limit === undefined ? '' : `?limit=${limit}`;
+        return this.request<MarketCalendar>(`/market/calendar${suffix}`);
+    }
+
+    getTechnicalSignals(symbol: string) {
+        return this.request<TechnicalSignalsOut>(
+            `/market/technicals?symbol=${encodeURIComponent(symbol)}`,
+        );
+    }
+
+    // ---- Sohbete yüklenen belgeler --------------------------------------
+
+    /** Bir dosyayı yükler. Metni çıkarılır ve KULLANICIYA AİT olarak gömülür;
+     *  yalnızca yükleyenin aramalarında çıkar. */
+    async uploadChatDocument(file: File, threadId?: string): Promise<ChatDocument> {
+        const form = new FormData();
+        form.append('file', file);
+        if (threadId) form.append('thread_id', threadId);
+
+        // `authedFetch` gövdeyi olduğu gibi geçiriyor; Content-Type ELLE
+        // KURULMUYOR. multipart sınırını tarayıcı üretir ve elle yazılan bir
+        // başlık onu ezip gövdeyi ayrıştırılamaz hâle getirir.
+        const response = await this.authedFetch(
+            `${this.baseUrl}/ai_orchestrator/documents`,
+            { method: 'POST', body: form },
+        );
+        if (!response.ok) throw new Error(await describeError(response));
+        return response.json();
+    }
+
+    getChatDocuments() {
+        return this.request<ChatDocumentList>('/ai_orchestrator/documents');
+    }
+
+    /** Belgeyi hem listeden hem aramadan kaldırır. */
+    async deleteChatDocument(id: string): Promise<void> {
+        const response = await this.authedFetch(
+            `${this.baseUrl}/ai_orchestrator/documents/${encodeURIComponent(id)}`,
+            { method: 'DELETE' },
+        );
+        if (!response.ok) throw new Error(await describeError(response));
+    }
+
+    getRiskHistory(days?: number) {
+        const suffix = days === undefined ? '' : `?days=${days}`;
+        return this.request<RiskHistory>(`/risk/history${suffix}`);
+    }
+
+    getRiskProfile(lookback?: RiskLookback) {
+        // Uç nokta bu parametreyi baştan beri kabul ediyordu; istemci hiç
+        // geçmiyordu, dolayısıyla sayfa her zaman bir yıllık pencereyi
+        // gösteriyor ve kullanıcı onu değiştiremiyordu.
+        const suffix = lookback ? `?lookback=${lookback}` : '';
+        return this.request<RiskProfile>(`/risk/profile${suffix}`);
+    }
+
 
     getSectorAllocation() {
         return this.request<SectorAllocationItem[]>('/investment/sector-allocation');
@@ -228,11 +966,16 @@ class ApiClient {
      * Onay yalnızca burada, kullanıcının kendi eylemiyle verilir. Ajan bu uç
      * noktaya erişemez ve sohbette "evet" demek onay sayılmaz.
      */
-    confirmProposal(proposalId: string) {
-        return this.post<Record<string, string>>(
+    async confirmProposal(proposalId: string) {
+        const response = await this.post<Record<string, string>>(
             `/investment/transactions/${encodeURIComponent(proposalId)}/confirm`,
-            {},
+            {}
         );
+        // Trigger a notification refresh immediately so the user sees the PENDING transaction notification
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event("refreshNotifications"));
+        }
+        return response;
     }
 
     // Market endpoints
@@ -287,6 +1030,45 @@ class ApiClient {
         );
     }
 
+    /**
+     * Yatırım hesabının nakit hareketleri.
+     *
+     * Ayrı bir uç, çünkü nakit `banking.accounts` değil
+     * `investment.investment_accounts` üzerinde duruyor. Yanıt bankacılık
+     * dökümüyle aynı biçimde, böylece arayüz iki listeyi de aynı satır
+     * bileşeniyle basabiliyor.
+     */
+    getInvestmentStatement(identifier: string, limit = 20) {
+        return this.request<Statement>(
+            `/investment/accounts/${encodeURIComponent(identifier)}/statement?limit=${limit}`,
+        );
+    }
+
+    /**
+     * Sembol ya da şirket adına göre enstrüman önerisi.
+     *
+     * Evren binin üzerinde enstrüman: bir açılır liste bunu taşıyamaz.
+     * Türkçe katlama sunucu tarafında (`market_service._fold`), dolayısıyla
+     * `sise` yazan `ŞİŞE`yi buluyor.
+     */
+    searchInstruments(query: string, limit = 10) {
+        return this.request<InstrumentSuggestion[]>(
+            `/market/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+        );
+    }
+
+    /**
+     * Piyasa ısı haritası: piyasa değeri ve günlük değişim.
+     *
+     * `getHeatmap` ile karıştırılmamalı -- o, kullanıcının portföyünü pozisyon
+     * ağırlığına göre gösteriyor. Bu, piyasanın kendisini gösteriyor.
+     */
+    getMarketHeatmap(market?: string, limit = 300) {
+        const query = new URLSearchParams({ limit: String(limit) })
+        if (market) query.set('market', market)
+        return this.request<MarketHeatmap>(`/market/heatmap?${query}`)
+    }
+
     /** Kategorilere göre harcama özeti. */
     getSpending(days = 30) {
         return this.request<SpendingSummary>(`/banking/spending?days=${days}`);
@@ -318,13 +1100,102 @@ class ApiClient {
     }
 
     /** Portföy analizi — dağılım, trend, performans ve işlem geçmişi tek çağrıda. */
-    getPortfolioAnalysis() {
-        return this.request<PortfolioAnalysis>('/analytics/portfolio');
+    /**
+     * Portföy analizi.
+     *
+     * İki ayrı boyut, iki ayrı soydan geldi ve ikisi de gerçek:
+     *
+     * - `lookback` ÖLÇÜM PENCERESİ (1A, 1Y…). Aynı pencere risk uç noktasına
+     *   da gidiyor; Analiz ekranındaki tek dönem seçici ikisini birden
+     *   sürüyor. Geçilmezse sunucu 1Y kullanır.
+     * - `range='day'` ÇÖZÜNÜRLÜK: gün içi seriyi (5 dakikalık gerçek barlar)
+     *   döndürür, varsayılan günlük barlardır.
+     *
+     * İkisini tek bir parametreye sıkıştırmak, "son bir yıl" ile "bugünü
+     * dakika dakika" arasındaki farkı kaybetmek olurdu.
+     */
+    getPortfolioAnalysis(lookback?: RiskLookback, range?: 'all' | 'day') {
+        const query = new URLSearchParams();
+        if (lookback) query.set('lookback', lookback);
+        if (range) query.set('range', range);
+        const suffix = query.toString() ? `?${query}` : '';
+        return this.request<PortfolioAnalysis>(`/analytics/portfolio${suffix}`);
     }
 
     /** Oturumdaki kullanıcının profili; token yoksa istek 401 ile döner. */
+    /**
+     * Para gönderilebilecek TÜM hesaplar: vadesiz, vadeli ve yatırım.
+     *
+     * Yatırım hesabının nakiti başka bir tabloda durur; bu uç onu da aynı
+     * şekle getirir, `is_investment` ile işaretleyerek. Ekranın nerede
+     * durduğunu bilmesi gerekmiyor.
+     */
+    getAllAccounts() {
+        return this.request<PortfolioAccount[]>('/banking/accounts/all')
+    }
+
+    /** Kullanıcının kartları. `available_limit` türetilir, saklanmaz. */
+    getCards() {
+        return this.request<ApiCard[]>('/banking/cards')
+    }
+
+    /** Kart ayarları saklananın üzerine yazılır; tek anahtar gönderen bir
+     *  ekran diğerlerini sıfırlamaz. */
+    updateCardSettings(cardId: string, settings: Record<string, unknown>) {
+        return this.patch<ApiCard>(
+            `/banking/cards/${encodeURIComponent(cardId)}/settings`, { settings },
+        )
+    }
+
+    getLoans() {
+        return this.request<ApiLoan[]>('/banking/loans')
+    }
+
+    /** Abone numarasıyla açık fatura sorgular. Bulunamaması hata değildir. */
+    lookupBill(institution: string, subscriberNo: string) {
+        const q = new URLSearchParams({ institution, subscriber_no: subscriberNo })
+        return this.request<BillLookup>(`/banking/bills/lookup?${q}`)
+    }
+
+    /**
+     * Ödeme önerisi hazırlar. **Para hareket etmez.**
+     *
+     * Hisse alım-satımıyla aynı sözleşme: hazırlama ile onay ayrı iki adım.
+     * Sohbetin kendi başına para göndermesini engelleyen şey bu ayrım.
+     */
+    stagePayment(request: StagePaymentRequest) {
+        return this.post<PaymentProposal>('/api/banking/payments/stage', request)
+    }
+
+    /** Öneriyi uygular. Para yalnızca burada hareket eder. */
+    confirmPayment(proposalId: string) {
+        return this.post<PaymentConfirmation>(
+            `/api/banking/payments/${encodeURIComponent(proposalId)}/confirm`, {},
+        )
+    }
+
+    getSavedPayees() {
+        return this.request<{ payees: SavedPayee[] }>('/banking/saved-payees')
+    }
+
+    addSavedPayee(request: { label: string; institution: string; subscriber_no: string }) {
+        return this.post<SavedPayee>('/api/banking/saved-payees', request)
+    }
+
+    deleteSavedPayee(payeeId: string) {
+        return this.request<void>(
+            `/banking/saved-payees/${encodeURIComponent(payeeId)}`, 'DELETE',
+        )
+    }
+
     getCurrentUser() {
-        return this.request<{ id: string; first_name: string; last_name: string }>('/auth/me');
+        return this.request<{
+            id: string
+            first_name: string
+            last_name: string
+            /** Kimlikten türetilen, kullanıcıya özel müşteri numarası. */
+            customer_no?: string | null
+        }>('/auth/me');
     }
 
     getMarketTickers() {
@@ -333,6 +1204,46 @@ class ApiClient {
 
     getMarketNews() {
         return this.request<NewsItem[]>('/market/news');
+    }
+
+    /**
+     * Kullanıcının tuttuğu hisselere bağlı haberler.
+     *
+     * Oturum zorunlu ve demo portföyüne düşmüyor: "portföyünüze dokunan
+     * haberler" başlığı altında başkasının hisselerinin haberlerini
+     * göstermek, izleme listesinin eskiden yaptığı hatanın aynısı olurdu.
+     */
+    getPortfolioNews() {
+        return this.request<PortfolioNews>('/market/news/portfolio');
+    }
+
+    /**
+     * Portföy geneli teknik görünüm.
+     *
+     * Hisse detay sayfasıyla AYNI motoru okuyor: iki yüzeyin aynı hisse için
+     * farklı bir eğilim göstermesi mümkün değil.
+     */
+    getPortfolioTechnical() {
+        return this.request<PortfolioTechnical>('/market/portfolio/technical');
+    }
+
+    /**
+     * Koşullu senaryo. Bir TAHMİN değil: geçmiş birlikte hareketin
+     * aritmetiği, koşula bağlanmış hâli.
+     */
+    runScenario(factor: ScenarioFactor, shockPct: number, lookback?: string) {
+        return this.post<ScenarioResult>('/api/risk/scenario', {
+            factor,
+            shock_pct: shockPct,
+            ...(lookback ? { lookback } : {}),
+        });
+    }
+
+    /** Stres testi: uydurulmuş bir kayıp senaryosu değil, olan günler. */
+    getStressTest(lookback?: string) {
+        return this.request<StressResult>(
+            `/risk/stress${lookback ? `?lookback=${encodeURIComponent(lookback)}` : ''}`,
+        );
     }
 
     // Generic get method for backwards compatibility with UserContext
@@ -367,6 +1278,13 @@ class ApiClient {
         handlers: {
             onStage?: (label: string) => void
             onDone?: (payload: any) => void
+            /**
+             * Backend'in `done`'dan sonra eklediği `saved` olayı. Ayrı bir
+             * dal gerekiyor çünkü dispatch olay ADINA değil gövdenin ŞEKLİNE
+             * bakıyor ve bu gövde ne `stage` ne de `final_output` içeriyor —
+             * eklenmeden önce sessizce yere düşüyordu.
+             */
+            onSaved?: (payload: { conversation_id: string | null; persistence: string }) => void
         },
     ): Promise<boolean> {
         let response: Response
@@ -411,6 +1329,8 @@ class ApiClient {
                 } else if (payload && 'final_output' in payload) {
                     sawDone = true
                     handlers.onDone?.(payload)
+                } else if (payload && 'persistence' in payload) {
+                    handlers.onSaved?.(payload)
                 }
             }
         }
@@ -435,6 +1355,132 @@ class ApiClient {
             console.error(`[API Ağ Hatası] POST ${fullUrl} isteği başarısız oldu:`, error);
             throw error;
         }
+    }
+
+    async postForm<T>(url: string, data: FormData): Promise<T> {
+        const normalizedUrl = url.startsWith('/api') ? url.substring(4) : url;
+        const fullUrl = url.startsWith('http') ? url : `${this.baseUrl}${normalizedUrl}`;
+        try {
+            const response = await this.authedFetch(fullUrl, {
+                method: 'POST',
+                body: data, // no JSON.stringify, and no Content-Type header (browser sets it automatically with boundary)
+            });
+            if (!response.ok) {
+                throw new Error(await describeError(response));
+            }
+            return await response.json();
+        } catch (error) {
+            console.error(`[API Ağ Hatası] POST ${fullUrl} isteği başarısız oldu:`, error);
+            throw error;
+        }
+    }
+
+    // Generic put method
+    async put<T>(url: string, data?: any): Promise<T> {
+        const normalizedUrl = url.startsWith('/api') ? url.substring(4) : url;
+        const fullUrl = url.startsWith('http') ? url : `${this.baseUrl}${normalizedUrl}`;
+        try {
+            const response = await this.authedFetch(fullUrl, {
+                method: 'PUT',
+                body: data ? JSON.stringify(data) : undefined,
+            });
+            if (!response.ok) {
+                throw new Error(await describeError(response));
+            }
+            return await response.json();
+        } catch (error) {
+            console.error(`[API Ağ Hatası] PUT ${fullUrl} isteği başarısız oldu:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Oturum açmış kullanıcının profil bilgilerini günceller.
+     * 
+     * @param data - Güncellenecek profil bilgileri
+     * @param data.email - Opsiyonel yeni e-posta adresi
+     * @param data.phone_number - Opsiyonel yeni telefon numarası
+     * @param data.notification_preferences - Backend'de PostgreSQL JSONB kolonunda saklanan, esnek bildirim tercihleri matrisi (Kategori -> Kanal -> Durum).
+     * @param data.transaction_limit - Güvenlik Merkezi → İşlem Onay Limiti slider'ından ayarlanan eşik değeri (₺).
+     * @param data.user_preferences - Görünüm & Format sekmesinden ayarlanan kullanıcı tercihleri (dil, para birimi, dashboard şablonu).
+     */
+    async updateProfile(data: {
+        email?: string;
+        phone_number?: string;
+        notification_preferences?: Record<string, Record<string, boolean>>;
+        transaction_limit?: number;
+        user_preferences?: Record<string, string>;
+    }) {
+        return this.put<{ id: string; first_name: string; last_name: string }>('/auth/me', data);
+    }
+
+    /**
+     * Oturum açmış kullanıcının şifresini güvenli bir şekilde değiştirir.
+     * Mevcut şifrenin doğrulanmasını gerektirir.
+     */
+    async changePassword(data: { current_password: string; new_password: string }) {
+        return this.post<void>('/auth/change-password', data);
+    }
+
+    /**
+     * KVKK/GDPR kapsamında kullanıcının tüm kişisel verilerinin dışa
+     * aktarılması talebini backend'e iletir. İstek başarılı olduğunda
+     * backend bir arka plan görevi başlatır ve dosya hazırlandığında
+     * kullanıcının kayıtlı e-posta adresine gönderir.
+     */
+    async requestDataExport() {
+        return this.post<{ message: string }>('/auth/export-data', {});
+    }
+
+    /**
+     * Kullanıcı hesabını kalıcı olarak kapatır (soft delete).
+     *
+     * GÜVENLİK & YASAL UYUM:
+     * Bu metod backend'de `is_active=False` yaparak hesabı devre dışı bırakır;
+     * MASAK ve finansal düzenleme gereklilikleri gereği kullanıcı kaydı
+     * veritabanından fiziksel olarak silinmez. Frontend'deki çok adımlı onay
+     * modalı (kullanıcının bilinçli olarak "KAPAT" yazması) bu çağrıyı korur.
+     *
+     * Başarılı dönüşte çağıran taraf localStorage'ı temizleyerek
+     * kullanıcıyı /login sayfasına yönlendirmelidir.
+     */
+    async deleteAccount(data: { reason?: string }) {
+        const normalizedUrl = `${this.baseUrl}/auth/me`;
+        const response = await this.authedFetch(normalizedUrl, {
+            method: 'DELETE',
+            body: JSON.stringify(data),
+        });
+        if (!response.ok) {
+            throw new Error(await describeError(response));
+        }
+        return await response.json();
+    }
+
+    // ============================================================================
+    // Notifications
+    // ============================================================================
+    
+    /**
+     * Kullanıcının okunmamış veya tüm bildirimlerini sayfalandırılmış şekilde getirir.
+     * Bu fonksiyon, Header.tsx içerisinde tanımlanan setInterval ile periyodik (polling)
+     * olarak çağrılacak şekilde tasarlanmıştır.
+     */
+    async getNotifications(limit: number = 50): Promise<NotificationListResponse> {
+        return this.request<NotificationListResponse>(`/notification/me/notifications?limit=${limit}`);
+    }
+
+    /**
+     * Kullanıcının tıkladığı belirli bir bildirimi okundu olarak işaretler.
+     */
+    async markNotificationAsRead(id: string): Promise<Notification> {
+        return this.put<Notification>(`/notification/me/notifications/${id}/read`);
+    }
+
+    /**
+     * Okunmamış tüm bildirimleri tek seferde (batch) okundu olarak işaretler.
+     */
+    async markAllNotificationsAsRead(): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/notification/me/notifications/mark-all-read');
     }
 }
 

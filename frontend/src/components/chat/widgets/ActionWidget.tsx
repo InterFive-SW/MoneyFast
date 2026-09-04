@@ -1,7 +1,8 @@
 // src/components/chat/widgets/ActionWidget.tsx
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ActionWidgetPayload } from '../../../types/chat';
 import { api } from '../../../api/client';
+import { useTradeFlow } from '../../../hooks/useTradeFlow';
 
 interface ActionWidgetProps {
   payload: ActionWidgetPayload;
@@ -15,106 +16,98 @@ interface ActionWidgetProps {
  * API entegrasyonu sayesinde onaylanan işlemler backend'e iletilir.
  */
 export default function ActionWidget({ payload }: ActionWidgetProps) {
-  const [status, setStatus] = useState<'pending' | 'loading' | 'confirmed' | 'cancelled'>('pending');
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
   /**
-   * İşlemi onaylar ve backend servisine iletir.
-   * Yükleme durumu esnasında butonlarda animasyon gösterir.
+   * Önceden hazırlanmış öneriyi onaylar.
+   *
+   * Sistemde bir işlemin yetkilendirildiği TEK yer burası ve yapısı gereği
+   * bir kullanıcı eylemi: ajan bu uç noktaya ulaşamıyor ve sohbette "evet"
+   * demek onu tetiklemiyor.
    */
-  const handleConfirm = async () => {
-    setStatus('loading');
+  const submit = useCallback(async () => {
     setToastMessage(null);
-
     try {
-      // Confirms the REAL staged proposal by its id. This is the only place
-      // in the system where a transaction is authorised, and it is a user
-      // action by construction: the agent cannot reach this endpoint, and
-      // saying "evet" in the chat does not trigger it.
       const result = await api.confirmProposal(payload.proposalId ?? payload.actionId);
-
-      setStatus('confirmed');
       setToastMessage({ type: 'success', message: result?.message ?? 'İşlem onaylandı.' });
     } catch (error) {
       console.error("İşlem onayı sırasında hata oluştu:", error);
-      setStatus('pending'); // Tekrar denemesi için pending'e çekiyoruz
-
-      // An expired proposal is not a transient error, so retrying will not
-      // help; the user needs to ask for it to be prepared again.
+      // Süresi dolmuş bir öneri geçici bir hata değil; tekrar denemek işe
+      // yaramaz, kullanıcının yeniden hazırlatması gerekiyor.
       const expired = error instanceof Error && error.message.includes('410');
-      setToastMessage({
-        type: 'error',
-        message: expired
+      throw new Error(
+        expired
           ? 'Bu önerinin süresi doldu. Lütfen işlemi yeniden hazırlatın.'
           : 'İşlem onaylanırken bir hata oluştu. Lütfen tekrar deneyiniz.',
-      });
-
-      // Hata mesajını 5 saniye sonra gizle
-      setTimeout(() => setToastMessage(null), 5000);
+      );
     }
-  };
+  }, [payload.proposalId, payload.actionId]);
 
-  /**
-   * Kullanıcı işlemi reddettiğinde durumu günceller.
-   */
-  const handleCancel = () => {
-    setStatus('cancelled');
-    setToastMessage({ type: 'error', message: 'İşlem iptal edildi.' });
-  };
+  // `review`'dan başlıyor: öneriyi ajan zaten hazırladı, kullanıcının
+  // girecek bir şeyi yok. Panel akışıyla AYNI durum makinesi -- ikisi onayın
+  // ne demek olduğu konusunda ayrışmamalı.
+  const flow = useTradeFlow({ onSubmit: submit, initialStage: 'review' });
 
   return (
     <div className="mt-3 w-full relative">
       <div className="bg-slate-900/50 backdrop-blur-xl rounded-xl p-4 border border-white/10 shadow-2xl flex flex-col gap-3 shadow-sm transition-all">
-        <p className="text-sm font-medium text-slate-700 leading-relaxed">{payload.message}</p>
-        
-        {status === 'pending' || status === 'loading' ? (
-          <div className="flex flex-col gap-2 w-full mt-1">
-            <div className="flex gap-2 w-full">
-              <button 
-                onClick={handleConfirm}
-                disabled={status === 'loading'}
-                className="flex-1 flex justify-center items-center gap-2 px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        <p className="text-sm font-medium leading-relaxed text-slate-200">{payload.message}</p>
+
+        {flow.stage === 'review' || flow.stage === 'error' ? (
+          <>
+            {flow.stage === 'error' && (
+              <p className="text-sm text-rose-400">{flow.error}</p>
+            )}
+            <div className="flex w-full gap-2">
+              <button
+                onClick={flow.accept}
+                className="flex-1 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-600"
               >
-                {status === 'loading' ? (
-                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                ) : null}
                 {payload.confirmLabel}
               </button>
-              <button 
-                onClick={handleCancel}
-                disabled={status === 'loading'}
-                className="flex-1 px-3 py-2 bg-white hover:bg-slate-50 text-slate-300 text-sm font-medium border border-slate-200 rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              <button
+                onClick={flow.reject}
+                className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-white/10"
               >
                 {payload.cancelLabel}
               </button>
             </div>
+          </>
+        ) : flow.stage === 'countdown' ? (
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={flow.submitNow}
+              className="w-full rounded-lg bg-emerald-500 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-600"
+            >
+              Onayla ({flow.remaining} sn)
+            </button>
+            <button
+              onClick={flow.cancel}
+              className="w-full rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/20"
+            >
+              İptal
+            </button>
+            <p className="text-center text-[11px] text-slate-500">
+              {flow.remaining} saniye sonra iletilecek.
+            </p>
           </div>
+        ) : flow.stage === 'submitting' ? (
+          <p className="text-center text-sm text-slate-400">İletiliyor…</p>
         ) : (
-          <div className={`text-sm font-medium px-3 py-2 rounded-lg text-center mt-1 border transition-all duration-300 ease-in-out ${
-            status === 'confirmed' 
-              ? 'bg-emerald-50 border-white/10 text-emerald-700 shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
-              : 'bg-rose-50 border-rose-100 text-rose-700'
-          }`}>
-            {status === 'confirmed' ? 'İşlem yetkilendirildi.' : 'İşlem sonlandırıldı.'}
+          <div className="mt-1 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-center text-sm font-medium text-emerald-300">
+            İşlem yetkilendirildi.
           </div>
         )}
       </div>
 
-      {/* Bildirim akışın içinde durur.
-          `absolute -bottom-14` ile kartın 56px altına konumlandırılıyordu ve
-          orası tam olarak MessageBubble'ın yasal dipnotunun bulunduğu yer:
-          bildirim göründüğünde zorunlu bildirimin üstünü örtüyordu. */}
       {toastMessage && (
-        <div className={`mt-2 w-full text-center px-4 py-2 rounded-lg text-xs font-medium shadow-md transition-all animate-fade-in-up border ${
-          toastMessage.type === 'success'
-            ? 'bg-emerald-500 border-emerald-600 text-white shadow-emerald-500/20'
-            : 'bg-rose-500 border-rose-600 text-white shadow-rose-500/20'
-        }`}>
+        <p
+          className={`mt-2 text-xs ${
+            toastMessage.type === 'success' ? 'text-emerald-400' : 'text-rose-400'
+          }`}
+        >
           {toastMessage.message}
-        </div>
+        </p>
       )}
     </div>
   );

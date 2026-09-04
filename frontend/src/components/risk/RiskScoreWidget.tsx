@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import Term from '../common/Term'
 
 interface RiskScoreWidgetProps {
   /** null when nothing could be measured. Refusing to score beats defaulting
@@ -22,7 +23,10 @@ export default function RiskScoreWidget({ score, level }: RiskScoreWidgetProps) 
 
   return (
     <div className="flex flex-col items-center justify-center rounded-2xl border border-white/10 bg-slate-900/50 backdrop-blur-xl border-white/10 shadow-2xl p-6 shadow-sm">
-      <h3 className="mb-6 text-base font-semibold text-white self-start">Genel Risk Skoru</h3>
+      <h3 className="mb-6 flex items-center gap-2 self-start text-base font-semibold text-white">
+        Genel Risk Skoru
+        <Term termKey="risk_score" />
+      </h3>
       
       <div className="relative flex items-center justify-center">
         {/* Arka plan dairesi */}
@@ -61,11 +65,28 @@ export default function RiskScoreWidget({ score, level }: RiskScoreWidgetProps) 
       <div className={`mt-6 rounded-full px-4 py-1.5 text-sm font-semibold ${bgColor} ${color}`}>
         {label}
       </div>
-      
+
+      {/* Ölçek TERS: yüksek puan daha sakin portföy demek, ama sayfanın adı
+          "Risk Analizi". "83 puan" gören biri doğal olarak yüksek risk sanar,
+          o yüzden yön küçük bir dipnotta değil, halkanın hemen altında. */}
+      <div className="mt-4 w-full">
+        <div className="h-1.5 w-full overflow-hidden rounded-full">
+          <div className="flex h-full">
+            <div className="h-full flex-[45] bg-rose-500/70" />
+            <div className="h-full flex-[25] bg-amber-500/70" />
+            <div className="h-full flex-[30] bg-emerald-500/70" />
+          </div>
+        </div>
+        <div className="mt-1 flex justify-between text-[10px] text-slate-500">
+          <span>0 · daha oynak</span>
+          <span>100 · daha sakin</span>
+        </div>
+      </div>
+
       <p className="mt-4 text-center text-sm text-slate-400">
         {score === null
           ? 'Ölçülebilir veri olmadığı için skor hesaplanamadı.'
-          : `Risk skoru ${score}/100. Yüksek puan daha sakin bir portföy demektir; oynaklık, yoğunlaşma ve geçmiş düşüşten türetilir.`}
+          : 'Oynaklık, yoğunlaşma ve geçmiş düşüşten türetilir. Ölçülemeyen bir bileşen sıfır sayılmaz, hesaptan çıkarılır.'}
       </p>
     </div>
   )

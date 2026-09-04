@@ -96,12 +96,39 @@ RULES: List[Rule] = [
         replacement="[kesinlik iddiası kaldırıldı]",
     ),
     Rule(
+        "GUA-003",
+        "Unhedged directional claim",
+        "HIGH",
+        # A forward-looking verb NOT reached by a conditional or a hedge.
+        # `beklenebilir`, `olabilir`, `görünüyor` are excluded because they
+        # ARE the hedge; a bare "yükselecek" is not.
+        r"\b(yüksele|düşe|arta|kazandıra|katlana|getire)(cak|cek)\b"
+        r"(?!\s*(mı|mi|diye|de[mğ]il))"
+        r"(?!.{0,60}(belirlemez|garanti etmez|kesin de[gğ]il|diyemem|diyemez|söyleyemem))",
+        "Çekinceye bağlanmamış yön iddiası, dayanaksız bir performans "
+        "beklentisi yaratır.",
+        "Yön okumasını koşula bağlayın ve geçmiş fiyat hareketinin geleceği "
+        "belirlemediğini aynı cümlede belirtin.",
+        replacement="[çekincesiz yön iddiası kaldırıldı]",
+    ),
+    # The pattern is unchanged; the REASON is. The system now stores a
+    # declared tolerance (`risk.risk_profiles`), so "we hold no profile" is no
+    # longer why this is blocked. The ban survives its original justification
+    # because the two claims were never the same thing: saying a holding is
+    # "size uygun" is a judgement ABOUT the user, while reporting that a
+    # measured level sits above a tolerance they themselves declared is a
+    # comparison of two stated facts. `profile.suitability` produces the
+    # second and deliberately avoids this wording -- a test pins that it does
+    # not trip this rule.
+    Rule(
         "SUI-001",
         "Suitability claim on personal holdings",
         "HIGH",
         r"(size uygun|sizin için (doğru|ideal|uygun)|risk profilinize uygun)",
-        "Sistem kullanıcının risk profilini tutmuyor; uygunluk iddiası dayanaksızdır.",
-        "Uygunluk iddiasını kaldırın; yalnızca ölçülen metrikleri aktarın.",
+        "Uygunluk bir yargıdır; sistem ölçüm ile kullanıcının kendi beyanını "
+        "karşılaştırır, bir ürünün kişiye uygunluğuna karar vermez.",
+        "Uygunluk iddiasını kaldırın; ölçülen seviye ile beyan edilen toleransı "
+        "olgu olarak aktarın.",
         replacement="[uygunluk değerlendirmesi kaldırıldı]",
         requires_personal_data=True,
     ),

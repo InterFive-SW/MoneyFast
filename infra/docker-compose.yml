@@ -45,6 +45,7 @@ services:
       - ./vector-migrations/base/0001_create_vector_extension_and_rag_schema.sql:/docker-entrypoint-initdb.d/10-extension-and-schema.sql:ro
       - ./vector-migrations/base/0002_create_documents_and_chunks.sql:/docker-entrypoint-initdb.d/20-documents-and-chunks.sql:ro
       - ./vector-migrations/base/0003_create_exact_retrieval.sql:/docker-entrypoint-initdb.d/30-exact-retrieval.sql:ro
+      - ./vector-migrations/base/0004_document_ownership.sql:/docker-entrypoint-initdb.d/35-document-ownership.sql:ro
       - ./vector-db-init-grants.sh:/docker-entrypoint-initdb.d/40-grants.sh:ro
       - ./vector-db-grants.sql:/bootstrap/vector-db-grants.sql:ro
     healthcheck:
@@ -73,6 +74,10 @@ services:
       SEEDS_DIR: /app/seeds
       DATABASE_URL: ${BASE_DATABASE_URL:?Set a URL-encoded BASE_DATABASE_URL in infra/.env}
       AI_ORCHESTRATOR_URL: http://agents:8080
+      # Sohbette adı geçen bir enstrümanın fiyatını anında tazelemek için.
+      # Fiyatı backend çekmiyor: yfinance'a çıkan tek bileşen ingestor ve
+      # veritabanı kredensiyeli olmayan da o.
+      INGESTOR_REFRESH_URL: http://ingestor:8200
       # Shared secret guarding the service-to-service ingest endpoints. When
       # unset the guard REFUSES rather than opening them, so a missing value
       # fails loudly instead of silently publishing a write endpoint.
@@ -86,6 +91,9 @@ services:
       # Committed, reviewable per-user seed data. Mounted so `export_seeds`
       # writes to the repo rather than into the container filesystem.
       - ../seeds:/app/seeds
+      # Persistent storage for user uploads (like avatars) so they survive
+      # container rebuilds.
+      - backend_uploads:/app/uploads
     networks:
       # web-ingress is what makes the `ports:` mapping above actually work.
       # Docker cannot DNAT host traffic into a container attached only to
@@ -108,6 +116,12 @@ services:
       EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:-384}
       RAG_CORPUS_VERSION: ${RAG_CORPUS_VERSION:-market_corpus_v1}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MARKET_SEED_DIR: /seeds/market
+    volumes:
+      # Commit'lenmiş haber derleminin tabanı. Salt okunur: bu servis derlemi
+      # okuyup yükler, dosyayı üretmez -- dışa aktarma `export_corpus.py` ile
+      # elle yapılıyor.
+      - ../seeds/market:/seeds/market:ro
     expose:
       - "8100"
     healthcheck:
@@ -139,6 +153,11 @@ services:
       # Container-internal port, not the host mapping. See docs/DOCKER_NETWORKING.md.
       BACKEND_API_BASE_URL: http://backend:8000/api
       RAG_API_BASE_URL: http://rag:8100
+      # get_risk_profile_summary names its user in the path rather than
+      # resolving one from a session, so the backend guards it with this key.
+      # backend_client sends it as a bearer header on every call; the
+      # session-scoped endpoints ignore it.
+      BACKEND_API_KEY: ${BACKEND_API_KEY:?Set BACKEND_API_KEY in infra/.env}
     expose:
       - "8000"
     healthcheck:
@@ -166,9 +185,23 @@ services:
       RAG_API_BASE_URL: http://rag:8100
       BACKEND_API_KEY: ${BACKEND_API_KEY:?Set BACKEND_API_KEY in infra/.env}
       NEWS_FEEDS: ${NEWS_FEEDS:-}
-      INGESTOR_QUOTE_INTERVAL_MINUTES: ${INGESTOR_QUOTE_INTERVAL_MINUTES:-15}
+      # Hisseler beş dakikada bir: gün içi grafiğin bir seansta 78 noktası
+      # olsun diye. Bu değer uzun süre HİÇBİR ŞEY yapmadı:
+      # config.py `INGESTOR_QUOTE_INTERVAL_SECONDS` adına bakıyordu, buradaki
+      # ada değil, dolayısıyla ingestor 30 saniyede bir bütün evreni çekiyordu.
+      INGESTOR_QUOTE_INTERVAL_MINUTES: ${INGESTOR_QUOTE_INTERVAL_MINUTES:-5}
+      # Kur/altın/endeks şeridi ayrı ve hızlı: birkaç sembol, 30 saniye.
+      INGESTOR_BAND_INTERVAL_SECONDS: ${INGESTOR_BAND_INTERVAL_SECONDS:-30}
       INGESTOR_NEWS_INTERVAL_MINUTES: ${INGESTOR_NEWS_INTERVAL_MINUTES:-15}
-      INGESTOR_HISTORY_DAYS: ${INGESTOR_HISTORY_DAYS:-400}
+      # İki yıllık günlük geçmiş; performans grafiği o kadar geriye gidiyor.
+      INGESTOR_HISTORY_DAYS: ${INGESTOR_HISTORY_DAYS:-730}
+      INGESTOR_REFRESH_PORT: ${INGESTOR_REFRESH_PORT:-8200}
+      # KAP bildirimleri. Piyasa saatlerine bağlı DEĞİL: fiyata en çok etki
+      # eden açıklamalar 18:00 kapanışından sonra ve açılıştan önce geliyor.
+      INGESTOR_KAP_INTERVAL_MINUTES: ${INGESTOR_KAP_INTERVAL_MINUTES:-20}
+      # Tek sorgunun kapsadığı gün. Ölçüldü: bir hafta 1101 satır, altmış gün
+      # tam 2000 -- yani tavan. Üç gün tavanın çok altında kalıyor.
+      INGESTOR_KAP_WINDOW_DAYS: ${INGESTOR_KAP_WINDOW_DAYS:-3}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       backend:
@@ -191,6 +224,17 @@ services:
     env_file:
       - ../AI-Services/moneyfast-orchestrator/.env
     environment:
+      # LLM sağlayıcısı ve anahtarı. Anahtar TEK ve korumalı:
+      # `:?` compose AYRIŞTIRMA anında çalışıyor, `LLM_PROVIDER` okunmadan
+      # önce -- yani `GROQ_API_KEY` ve `NVIDIA_API_KEY`'in ikisine birden
+      # koruma koymak, ikisini de zorunlu yapardı. Ortak bir ad, dosyadaki
+      # diğer her sırrın sahip olduğu "compose up'ta yüksek sesle çök"
+      # özelliğini geri getiriyor; bugün LLM anahtarı onu taşımayan tek sır.
+      #
+      # `env_file` duruyor: geliştiricinin kendi `.env`'indeki sağlayıcıya
+      # özel ad hâlâ çalışsın diye. Buradaki değer önceliklidir.
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      LLM_API_KEY: ${LLM_API_KEY:?Set LLM_API_KEY in infra/.env}
       MCP_SERVER_URL: http://mcp:8000/sse
       JURISDICTION: ${JURISDICTION:-TR}
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-tr-TR}
@@ -214,6 +258,7 @@ services:
 volumes:
   postgres_data:
   vector_db_data:
+  backend_uploads:
 
 networks:
   # The only network reachable from the host. Deliberately holds one service:

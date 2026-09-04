@@ -1,14 +1,28 @@
+import { useState } from 'react'
 import type { BankAccount } from '../../data/mockBankingData'
 
 interface Props {
   isOpen: boolean
   onClose: () => void
   account: BankAccount | null
-  onConfirm: (accountId: string) => void
+  /** Backend'e gider ve reddedilirse Türkçe gerekçesiyle fırlatır. */
+  onConfirm: (accountId: string) => Promise<void>
 }
 
+/**
+ * Hesap kapatma onayı.
+ *
+ * Bir dönem burada "bakiyeniz toplam varlıklarınızdan düşülecektir (Mock
+ * gereği)" yazıyordu: kapatma yalnızca ekranda oluyordu ve para görünüşte yok
+ * oluyordu. Kapatmak parayı yok etmek değil -- backend bakiyesi olan hesabı
+ * reddediyor, düğme de bunu ÖNCEDEN söylüyor.
+ */
 export default function CloseAccountModal({ isOpen, onClose, account, onConfirm }: Props) {
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   if (!isOpen || !account) return null
+
+  const funded = account.balance > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
@@ -37,17 +51,21 @@ export default function CloseAccountModal({ isOpen, onClose, account, onConfirm 
           
           <div className="bg-rose-500/10 rounded-xl p-4 border border-rose-500/20 mb-6">
             <div className="flex justify-between items-center">
-              <span className="text-sm text-rose-200">Kapatılacak Bakiye</span>
+              <span className="text-sm text-rose-200">Hesap Bakiyesi</span>
               <span className="text-lg font-bold text-white">
                 {account.balance.toLocaleString('tr-TR', { style: 'currency', currency: account.currency })}
               </span>
             </div>
-            {account.balance > 0 && (
+            {funded && (
               <p className="text-xs text-rose-300 mt-2">
-                * Kapatılan hesaptaki bakiyeniz toplam varlıklarınızdan düşülecektir (Mock gereği).
+                Bakiyesi olan hesap kapatılamaz. Önce bakiyeyi başka bir hesabınıza aktarın.
               </p>
             )}
           </div>
+
+          {error && (
+            <p className="mb-4 text-sm text-rose-300">{error}</p>
+          )}
 
           <div className="flex gap-3">
             <button 
@@ -56,14 +74,26 @@ export default function CloseAccountModal({ isOpen, onClose, account, onConfirm 
             >
               İptal Et
             </button>
-            <button 
-              onClick={() => {
-                onConfirm(account.id)
-                onClose()
+            <button
+              disabled={funded || busy}
+              onClick={async () => {
+                setError(null)
+                setBusy(true)
+                try {
+                  await onConfirm(account.id)
+                  onClose()
+                } catch (caught) {
+                  // Backend'in gerekçesi Türkçe ve burada gösteriliyor:
+                  // sessizce kapanan bir kip, kullanıcıya hesabın kapandığını
+                  // söylerdi.
+                  setError(caught instanceof Error ? caught.message : 'Hesap kapatılamadı.')
+                } finally {
+                  setBusy(false)
+                }
               }}
-              className="flex-1 bg-rose-500 hover:bg-rose-600 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-rose-500/20"
+              className="flex-1 bg-rose-500 hover:bg-rose-600 disabled:cursor-not-allowed disabled:bg-rose-500/30 disabled:text-white/50 text-white font-medium py-3 rounded-xl transition-colors shadow-lg shadow-rose-500/20"
             >
-              Hesabı Kapat
+              {busy ? 'Kapatılıyor…' : 'Hesabı Kapat'}
             </button>
           </div>
         </div>

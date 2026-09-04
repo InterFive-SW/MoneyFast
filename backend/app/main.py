@@ -7,10 +7,40 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.scheduler import start_scheduler, scheduler
+from app.modules.market import stream
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """
+    FastAPI uygulamasının yaşam döngüsü yöneticisi (Lifespan).
+    
+    MİMARİ KARAR:
+    Eskiden kullanılan @app.on_event("startup") yerine modern FastAPI uygulamalarında 
+    'lifespan' context manager'ı önerilmektedir. Bu yapı, uygulama başlarken ve kapanırken 
+    gerekli olan kaynakların (veritabanı bağlantıları, background scheduler vb.) 
+    güvenli bir şekilde ayağa kaldırılmasını ve sonlandırılmasını (Graceful Shutdown) sağlar.
+    Uygulama çöktüğünde veya kapatıldığında 'yield' sonrasındaki kısım çalışır ve hafıza 
+    sızıntılarını önler.
+    """
+    # 1. Market veri akışını yapılandır (Canlı fiyatlar için)
+    configure_market_stream()
+    
+    # 2. APScheduler'ı başlat. Arka planda Daily News dahil tüm periyodik görevleri yönetir.
+    start_scheduler()
+    
+    yield
+    
+    # Graceful Shutdown: Uygulama kapanırken arkadaki scheduler işlemleri durdurulur.
+    import app.core.scheduler as scheduler_module
+    if scheduler_module.scheduler:
+        scheduler_module.scheduler.shutdown()
+
 app = FastAPI(
     title="MoneyFast API",
     description="Modüler monolit kişisel finans danışmanı backend'i",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 """
@@ -58,7 +88,7 @@ def configure_market_stream() -> None:
         db = SessionLocal()
         try:
             quotes = market_service.latest_quotes(db)
-            as_of, delay, is_delayed = market_service.freshness(quotes)
+            as_of, delay, is_delayed, is_stale = market_service.freshness(quotes)
             return {
                 "as_of": as_of.isoformat() if as_of else None,
                 "delay_minutes": delay,
@@ -80,17 +110,20 @@ def configure_market_stream() -> None:
 
     stream.configure(read_frame)
 
+# Yüklenen statik dosyaları (özellikle kullanıcı avatar'larını) dışa açmak için mount işlemi.
+# Bu klasör projenin kök dizinindeki 'uploads' dizinine işaret eder.
+# Güvenlik Notu: Yalnızca resim dosyalarına erişim sağlanacağından, 
+# executable (örn: .py, .sh) barındırılmaması önemlidir.
+import os
+from fastapi.staticfiles import StaticFiles
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    # A lifespan handler rather than the deprecated @app.on_event("startup").
-    configure_market_stream()
-    yield
-
-
-app.router.lifespan_context = lifespan
+uploads_dir = Path(__file__).parent.parent / "uploads"
+os.makedirs(uploads_dir / "avatars", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 _static_dir = Path(__file__).parent.parent / "frontend" / "dist"
+if not _static_dir.exists():
+    _static_dir = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 if _static_dir.exists():
     @app.get("/{full_path:path}", include_in_schema=False)

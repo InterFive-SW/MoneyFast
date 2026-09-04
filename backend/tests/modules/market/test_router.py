@@ -126,6 +126,20 @@ class TestNews:
         assert market_client.get("/api/market/news?limit=0").status_code == 422
         assert market_client.get("/api/market/news?limit=500").status_code == 422
 
+    @pytest.mark.parametrize("news", [[article()]])
+    def test_symbols_reach_the_service(self, market_client):
+        """Tekrarlanan anahtar, virgüllü liste değil: FastAPI `List[str]`i
+        böyle okuyor ve virgüllü hâli tek bir sembol adı sanılırdı."""
+        market_client.get("/api/market/news?symbols=THYAO&symbols=AAPL")
+        _, kwargs = market_module_service.latest_news.call_args
+        assert kwargs["symbols"] == ["THYAO", "AAPL"]
+
+    @pytest.mark.parametrize("news", [[article()]])
+    def test_no_symbols_passes_none_not_an_empty_list(self, market_client):
+        market_client.get("/api/market/news")
+        _, kwargs = market_module_service.latest_news.call_args
+        assert kwargs["symbols"] is None
+
 
 class TestRelativeTime:
     @pytest.mark.parametrize(
@@ -204,7 +218,7 @@ class TestIngestWrites:
     def test_news_ingest_reports_only_new_rows(self, client, mocker, monkeypatch):
         """Re-running a feed must be a no-op. The count is what proves it."""
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
-        mocker.patch.object(market_module_service, "upsert_news", return_value=0)
+        mocker.patch.object(market_module_service, "upsert_news", return_value=(0, {}, []))
         response = client.post(
             "/api/market/news/ingest",
             headers={"Authorization": "Bearer secret"},
@@ -220,6 +234,82 @@ class TestIngestWrites:
             },
         )
         assert response.json()["news_written"] == 0
+
+    def test_notifications_are_committed_when_any_were_written(
+        self, client, mocker, monkeypatch
+    ):
+        """`upsert_news` kendi commit'ini atıyor, dolayısıyla bildirimler
+        AYRI bir transaction: bunlar commit edilmezse oturumla birlikte
+        kayboluyorlardı -- ölçüldü, satırlar hiç veritabanına ulaşmadı."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        mocker.patch.object(
+            market_module_service, "upsert_news",
+            return_value=(1, {}, [{"id": "n1", "title": "t", "symbols": ["ASELS"]}]),
+        )
+        mocker.patch.object(market_router, "_notify_holders", return_value=3)
+        db = MagicMock(spec=Session)
+        app.dependency_overrides[get_db] = lambda: db
+        try:
+            client.post(
+                "/api/market/news/ingest",
+                headers={"Authorization": "Bearer secret"},
+                json={"items": [{
+                    "content_hash": "c" * 64, "title": "Haber", "source": "Dünya",
+                    "published_at": NOW.isoformat(),
+                }]},
+            )
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+        db.commit.assert_called_once()
+
+    def test_news_coverage_answers_where_to_resume(self, client, mocker, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        mocker.patch.object(
+            market_module_service, "news_coverage",
+            return_value={"KAP": {"items": 390, "last": "2026-08-28", "last_index": 1655982}},
+        )
+        response = client.get(
+            "/api/market/news/coverage", headers={"Authorization": "Bearer secret"}
+        )
+        assert response.status_code == 200
+        assert response.json()["KAP"]["last_index"] == 1655982
+
+    def test_news_coverage_is_guarded(self, client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.get("/api/market/news/coverage").status_code == 401
+
+    def test_the_archive_is_paged_for_the_corpus_backfill(
+        self, client, mocker, monkeypatch
+    ):
+        """Panoya düşmek, sohbetin bulabilmesi demek değil: ölçüldü, panoda
+        28.984 bildirim varken derlemde 147 gövde vardı. Bu uç, aradaki
+        açığı kapatan işin girdisi."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        mocker.patch.object(market_module_service, "news_archive", return_value=[
+            SimpleNamespace(
+                content_hash="a" * 64, title="THYAO — bildirim",
+                url="https://www.kap.org.tr/tr/Bildirim/1", related_symbols=["THYAO"],
+                published_at=NOW,
+            )
+        ])
+        response = client.get(
+            "/api/market/news/archive?source=KAP&limit=200&offset=0",
+            headers={"Authorization": "Bearer secret"},
+        )
+        assert response.status_code == 200
+        item = response.json()["items"][0]
+        assert item["url"].endswith("/Bildirim/1")
+        assert item["related_symbols"] == ["THYAO"]
+
+    def test_the_archive_is_guarded(self, client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.get("/api/market/news/archive").status_code == 401
+
+    def test_an_unbounded_archive_page_is_refused(self, client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.get(
+            "/api/market/news/archive?limit=5000", headers={"Authorization": "Bearer secret"}
+        ).status_code == 422
 
     def test_short_content_hash_is_rejected(self, client, monkeypatch):
         """The hash is the deduplication key shared with the rag service; a
@@ -240,3 +330,317 @@ class TestIngestWrites:
 
 def test_market_health_reports_module_name(client):
     assert client.get("/api/market/health").json() == {"status": "ok", "module": "market"}
+
+
+class TestInstrumentSearch:
+    """Yazdıkça öneri: evren binin üzerinde enstrüman, açılır liste taşımaz."""
+
+    URL = "/api/market/search"
+
+    def test_it_returns_the_service_rows(self, market_client, mocker):
+        mocker.patch.object(
+            market_service, "search_instruments",
+            return_value=[{"symbol": "THYAO", "name": "Türk Hava Yolları",
+                           "market": "BIST", "currency": "TRY"}],
+        )
+        body = market_client.get(f"{self.URL}?q=thy").json()
+        assert body[0]["symbol"] == "THYAO"
+
+    def test_an_empty_query_is_rejected(self, market_client):
+        """Boş arama bütün evreni dökmemeli."""
+        assert market_client.get(f"{self.URL}?q=").status_code == 422
+
+    def test_the_limit_is_capped(self, market_client):
+        assert market_client.get(f"{self.URL}?q=a&limit=999").status_code == 422
+
+
+class TestIntradaySymbols:
+    """Gün içi bar gereken küme; evrenin tamamı değil."""
+
+    URL = "/api/market/candles/intraday-symbols"
+
+    def test_it_needs_the_service_key(self, market_client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        assert market_client.get(self.URL).status_code == 401
+
+    def test_it_reports_the_symbols(self, market_client, mocker, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        mocker.patch.object(
+            market_service, "intraday_symbols", return_value=["THYAO", "USDTRY"],
+        )
+        body = market_client.get(
+            self.URL, headers={"Authorization": "Bearer s3cret"},
+        ).json()
+        assert body == {"symbols": ["THYAO", "USDTRY"]}
+
+
+class TestNamedLookupRefreshesFirst:
+    """Adı verilen bir enstrüman sorulduğunda fiyat önce tazelenir.
+
+    Toplu tur on beş dakikada bir dönüyor; "THYAO kaç TL" sorusuna on beş
+    dakika önceki fiyatla cevap vermek, kullanıcının karar verdiği anda yanlış
+    sayı göstermek olurdu.
+    """
+
+    def test_a_named_symbol_triggers_a_refresh(self, market_client, mocker):
+        refresh = mocker.patch.object(market_module_service, "refresh_quotes")
+        mocker.patch.object(market_service, "list_instruments", return_value=[])
+        market_client.get("/api/market/instruments?symbols=THYAO")
+        refresh.assert_called_once()
+
+    def test_a_screen_does_not(self, market_client, mocker):
+        """Tarama yüzlerce satır okur ve hiçbiri tek bir anlık fiyata bağlı
+        karar değildir."""
+        refresh = mocker.patch.object(market_module_service, "refresh_quotes")
+        mocker.patch.object(market_service, "list_instruments", return_value=[])
+        market_client.get("/api/market/instruments?market=BIST")
+        refresh.assert_not_called()
+
+
+class TestMarketHeatmapEndpoint:
+    """Piyasanın ısı haritası; portföyünkiyle karıştırılmamalı."""
+
+    URL = "/api/market/heatmap"
+
+    def test_it_returns_tiles_and_the_missing_count(self, market_client, mocker):
+        mocker.patch.object(
+            market_service, "market_heatmap",
+            return_value={
+                "items": [{
+                    "symbol": "THYAO", "name": "Türk Hava Yolları",
+                    "marketCap": 1_000_000.0, "changePercent": 1.5,
+                    "sector": "Taşımacılık", "price": 300.0, "currency": "TRY",
+                }],
+                "missing": 4,
+            },
+        )
+        body = market_client.get(f"{self.URL}?market=BIST").json()
+        assert body["items"][0]["symbol"] == "THYAO"
+        # Kaç enstrümanın çizilemediği söylenir: sessizce düşen kutular,
+        # haritayı olduğundan küçük gösterir.
+        assert body["missing"] == 4
+
+    def test_the_limit_is_capped(self, market_client):
+        assert market_client.get(f"{self.URL}?limit=5000").status_code == 422
+
+    def test_no_market_means_every_market(self, market_client, mocker):
+        heatmap = mocker.patch.object(
+            market_service, "market_heatmap", return_value={"items": [], "missing": 0},
+        )
+        market_client.get(self.URL)
+        assert heatmap.call_args.kwargs["market"] is None
+
+
+class TestMissingFundamentalsEndpoint:
+    URL = "/api/market/fundamentals/missing"
+
+    def test_it_needs_the_service_key(self, market_client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        assert market_client.get(self.URL).status_code == 401
+
+    def test_it_reports_what_is_missing(self, market_client, mocker, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        mocker.patch.object(
+            market_service, "symbols_without_fundamentals", return_value=["AAPL"],
+        )
+        body = market_client.get(
+            self.URL, headers={"Authorization": "Bearer s3cret"},
+        ).json()
+        assert body == {"symbols": ["AAPL"]}
+
+
+class TestTechnicalsEndpoint:
+    """`GET /api/market/technicals` — sohbet ile hisse detay sayfasının
+    okuduğu TEK yer. Ayrı hesaplasalardı aynı hisse için farklı bir eğilim
+    söyleyebilirlerdi."""
+
+    URL = "/api/market/technicals"
+
+    def test_an_unknown_symbol_is_an_empty_measurement_not_an_error(
+        self, market_client, mocker
+    ):
+        """"Bu enstrümanın geçmişi yok" bir cevaptır."""
+        mocker.patch.object(market_service, "resolve_symbol", return_value=None)
+
+        body = market_client.get(self.URL, params={"symbol": "YOKBOYLE"}).json()
+
+        assert body["symbol"] == "YOKBOYLE"
+        assert body["narrative"] is None
+        assert body["signals"]["trend"] == "UNKNOWN"
+        assert body["signals"]["observations"] == 0
+
+    def test_it_returns_the_signals_and_the_sentence_together(
+        self, market_client, mocker
+    ):
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            return_value=SimpleNamespace(symbol="AKBNK", currency_code="TRY"),
+        )
+        mocker.patch.object(
+            market_service, "candle_series",
+            return_value=[
+                {"timestamp": f"2026-01-{(i % 28) + 1:02d}", "open": 100.0 + i,
+                 "high": 100.0 + i, "low": 100.0 + i, "close": 100.0 + i,
+                 "volume": 1000}
+                for i in range(260)
+            ],
+        )
+
+        body = market_client.get(self.URL, params={"symbol": "akbnk"}).json()
+
+        assert body["symbol"] == "AKBNK"
+        assert body["currency"] == "TRY"
+        assert body["signals"]["trend"] == "UPTREND"
+        assert body["signals"]["sma_200"] is not None
+        assert "AKBNK" in body["narrative"]
+        assert "yükseliş eğiliminde" in body["narrative"]
+
+    def test_a_short_history_reports_the_gap_rather_than_filling_it(
+        self, market_client, mocker
+    ):
+        """30 barlık bir enstrümanda 200 günlük ortalama YOKTUR."""
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            return_value=SimpleNamespace(symbol="YENI", currency_code="TRY"),
+        )
+        mocker.patch.object(
+            market_service, "candle_series",
+            return_value=[
+                {"timestamp": f"2026-01-{(i % 28) + 1:02d}", "open": 10.0,
+                 "high": 10.0, "low": 10.0, "close": 10.0, "volume": None}
+                for i in range(30)
+            ],
+        )
+
+        body = market_client.get(self.URL, params={"symbol": "YENI"}).json()
+
+        assert body["signals"]["sma_20"] is not None
+        assert body["signals"]["sma_200"] is None
+        assert body["signals"]["volume_vs_average"] is None
+
+
+class TestFundamentalsEndpoint:
+    """`GET /api/market/fundamentals` — gelir tablosu ve kârlılık.
+
+    `/instruments`'ten ayrı tutuluyor: o payload dondurulmuş v2.2 sözleşmesi
+    ve bir LİSTE için "bu ne ediyor" sorusunu yanıtlıyor.
+    """
+
+    URL = "/api/market/fundamentals"
+
+    def test_an_unknown_symbol_is_an_empty_record_not_an_error(
+        self, market_client, mocker
+    ):
+        mocker.patch.object(market_service, "resolve_symbol", return_value=None)
+
+        body = market_client.get(self.URL, params={"symbol": "YOKBOYLE"}).json()
+
+        assert body["symbol"] == "YOKBOYLE"
+        assert body["total_revenue"] is None
+
+    def test_an_instrument_with_no_fundamentals_row_still_answers(
+        self, market_client, mocker
+    ):
+        """Enstrüman var ama temel verisi henüz çekilmemiş. "Bu enstrümanın
+        temel verisi yok" bir cevaptır."""
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            return_value=SimpleNamespace(
+                symbol="YENI", name="Yeni A.Ş.", currency_code="TRY"
+            ),
+        )
+        mocker.patch.object(market_service, "fundamentals_for", return_value=None)
+
+        body = market_client.get(self.URL, params={"symbol": "YENI"}).json()
+
+        assert body["symbol"] == "YENI"
+        assert body["name"] == "Yeni A.Ş."
+        assert body["gross_margin"] is None
+
+    def test_it_returns_the_stored_record(self, market_client, mocker):
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            return_value=SimpleNamespace(
+                symbol="THYAO", name="Türk Hava Yolları", currency_code="TRY"
+            ),
+        )
+        mocker.patch.object(
+            market_service, "fundamentals_for",
+            return_value={
+                "symbol": "THYAO", "name": "Türk Hava Yolları", "currency": "TRY",
+                "total_revenue": 26_350_999_552,
+                "revenue_growth": 0.205,
+                "operating_margin": -0.026,
+                "gross_margin": None,
+            },
+        )
+
+        body = market_client.get(self.URL, params={"symbol": "thyao"}).json()
+
+        assert body["total_revenue"] == 26_350_999_552
+        assert body["revenue_growth"] == pytest.approx(0.205)
+        # Zarar korunuyor: negatif bir marj eksik veri değil, olgu.
+        assert body["operating_margin"] == pytest.approx(-0.026)
+        assert body["gross_margin"] is None
+
+
+class TestCalendarEndpoint:
+    """`GET /api/market/calendar` — "Analizler" ekranının üç listesi."""
+
+    URL = "/api/market/calendar"
+
+    def test_it_returns_the_three_lists(self, market_client, mocker):
+        mocker.patch.object(
+            market_service, "calendar_rows",
+            return_value={
+                "analysts": [{
+                    "symbol": "AAPL", "name": "Apple Inc.", "currency": "USD",
+                    "recommendation": "buy", "analyst_count": 39,
+                    "target_mean_price": 324.45,
+                }],
+                "dividends": [],
+                "earnings": [],
+            },
+        )
+
+        body = market_client.get(self.URL).json()
+
+        assert body["analysts"][0]["analyst_count"] == 39
+        assert body["dividends"] == []
+
+    def test_the_limit_reaches_the_service(self, market_client, mocker):
+        rows = mocker.patch.object(
+            market_service, "calendar_rows",
+            return_value={"analysts": [], "dividends": [], "earnings": []},
+        )
+        market_client.get(self.URL, params={"limit": 5})
+        assert rows.call_args.kwargs["limit"] == 5
+
+
+class TestSessionStateEndpoint:
+    """Saatler ingestor'da kalıyor; backend'e kural değil OLGU geliyor."""
+
+    URL = "/api/market/sessions"
+
+    def test_the_open_set_is_recorded(self, client, mocker, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        spy = mocker.patch.object(market_service, "record_sessions", return_value=5)
+        response = client.post(
+            self.URL, headers={"Authorization": "Bearer secret"},
+            json={"open": ["BIST", "FX"]},
+        )
+        assert response.json() == {"markets": 5}
+        assert spy.call_args.args[1] == ["BIST", "FX"]
+
+    def test_an_empty_set_is_a_valid_report(self, client, mocker, monkeypatch):
+        """"Hepsi kapalı" da bir olgu; bildirilmezse backend eski bir kaydı
+        okumaya devam ederdi."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        spy = mocker.patch.object(market_service, "record_sessions", return_value=5)
+        client.post(self.URL, headers={"Authorization": "Bearer secret"},
+                    json={"open": []})
+        assert spy.call_args.args[1] == []
+
+    def test_it_is_guarded_like_the_other_service_endpoints(self, client, monkeypatch):
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.post(self.URL, json={"open": []}).status_code == 401

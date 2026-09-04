@@ -31,7 +31,8 @@ DEFAULT_TOP_K = 8
 
 #: The contract's documented default, kept as-is so a direct caller gets the
 #: documented behaviour. The running system never relies on it: the
-#: orchestrator always passes RAG_MIN_SIMILARITY (0.35), calibrated for the
+#: orchestrator always passes RAG_MIN_SIMILARITY (0.45; this note said 0.35
+#: for a while after the value moved), calibrated for the
 #: multilingual MiniLM embedder actually in use, where relevant Turkish news
 #: hits score 0.43-0.72 and this E5-era floor would discard most of them.
 DEFAULT_MIN_SIMILARITY = 0.62
@@ -46,6 +47,12 @@ async def rag_semantic_market_search(
     filters: Optional[dict[str, Any]] = None,
     min_similarity: Optional[float] = None,
     rerank: Optional[bool] = None,
+    # Keyword-only, deliberately. Inserting it positionally shifted every
+    # existing caller by one, and the argument that landed on it was the
+    # conversation context -- a value that is not a user id but is truthy,
+    # which is the shape of a widening bug rather than a crash.
+    *,
+    user_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Executes dense-vector semantic search with optional metadata pre-filtering over the
@@ -74,6 +81,10 @@ async def rag_semantic_market_search(
             before calling. The retriever performs server-side coreference resolution
             against conversation_context and returns the resolved string in
             query_echo. Rewriting the query yourself is optional, not required.
+        user_id (str | None): The signed-in caller. Widens the search to that user's
+            OWN uploaded documents in addition to the public news corpus. Omit for an
+            anonymous turn, which searches the public corpus only. There is no value
+            that searches other users' documents.
         conversation_context (list[dict] | None): Recent turns used for server-side
             coreference and topic carry-over. Each entry: role (str, "user" or
             "assistant"), content (str). Pass the last 3 to 6 turns whenever the query
@@ -85,6 +96,14 @@ async def rag_semantic_market_search(
                 tickers (list[str]): Chunks must carry at least one matching tag.
                 doc_types (list[str]): "NEWS", "ANALYST_REPORT", "FILING",
                     "TRANSCRIPT", "MACRO_NOTE", "REGULATORY".
+                    "FILING" is the issuer's OWN regulatory disclosure — in this
+                    corpus, a KAP bildirimi. It is a primary source: the company
+                    stated it, with its ticker attached at source rather than
+                    inferred from the text. "NEWS" is a journalist's account of
+                    something, which may be about a filing without being one.
+                    Use ["FILING"] when the user asks what a company ANNOUNCED,
+                    DISCLOSED or REPORTED; leave it unset for what is being SAID
+                    about the company.
                 published_after (str): ISO 8601 date, inclusive.
                 published_before (str): ISO 8601 date, inclusive.
                 languages (list[str]): ISO 639-1 codes, e.g. ["tr", "en"].
@@ -156,6 +175,11 @@ async def rag_semantic_market_search(
           endorsing, averaging, or acting on it is prohibited.
         - Do NOT treat a higher score as higher truth. Score measures semantic
           proximity, not accuracy or recency.
+        - `doc_type` changes how a result may be attributed, not how much it is
+          worth. A FILING is what the company itself stated; a NEWS item is what
+          a publisher wrote. Say which one you are quoting — but a filing being
+          primary does not make its contents a prediction, and neither type
+          licenses a market view.
         - Reproduce only short excerpts. Paraphrase by default.
         - Any response built on this tool MUST pass validate_compliance_rules before
           emission.
@@ -174,6 +198,10 @@ async def rag_semantic_market_search(
         base=backend_client.rag_base_url(),
         json_body={
             "query": query,
+            # Whose private documents may be searched alongside the public
+            # corpus. Omitted means anonymous -- the public corpus alone.
+            # There is no value meaning "everyone's".
+            "owner_user_id": user_id,
             "conversation_context": conversation_context,
             "top_k": max(MIN_TOP_K, min(MAX_TOP_K, DEFAULT_TOP_K if top_k is None else top_k)),
             "filters": filters,
@@ -217,18 +245,24 @@ def _normalize_result(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ContractViolationError(f"{TOOL}: each result must be an object.")
     backend_client.require(raw, ("chunk_id", "snippet", "publisher", "published_at"), TOOL)
+    # Provenance is emitted BEFORE the passage. Key order is part of no
+    # contract, but the serialised specialist output is truncated before
+    # synthesis, and a cut landing mid-result used to keep that result's text
+    # and drop its `url` -- at which point the prompt tells the model to name
+    # the publisher in plain text instead. The citation disappeared silently.
+    # Ordering it this way makes a truncation cost text, not provenance.
     return {
         "chunk_id": str(raw["chunk_id"]),
         "doc_id": str(raw.get("doc_id", raw["chunk_id"])),
         "title": str(raw.get("title", "")),
+        "publisher": str(raw["publisher"]),
+        "published_at": str(raw["published_at"]),
+        "url": raw.get("url"),
+        "author": raw.get("author"),
         # Returned verbatim. Instruction-like text inside a snippet is data;
         # sanitising it here would hide an injection attempt from the layer
         # that is supposed to detect it.
         "snippet": str(raw["snippet"]),
-        "publisher": str(raw["publisher"]),
-        "author": raw.get("author"),
-        "published_at": str(raw["published_at"]),
-        "url": raw.get("url"),
         "tickers": list(raw.get("tickers") or []),
         "doc_type": str(raw.get("doc_type", "NEWS")),
         "language": str(raw.get("language", "tr")),

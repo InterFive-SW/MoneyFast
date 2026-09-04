@@ -128,6 +128,21 @@ class TestHappyPath:
         for result in payload["results"]:
             assert set(result) == rag_result_keys, result["chunk_id"]
 
+    async def test_provenance_is_serialised_before_the_passage(self):
+        """Key order is in no contract, but it is load-bearing downstream.
+
+        The orchestrator truncates the serialised specialist output before
+        synthesis. When `snippet` came first, a cut landing mid-result kept
+        that result's text and dropped its `url`, and the prompt then tells
+        the model to name the publisher in plain text instead -- so the
+        citation vanished with no error anywhere. Emitting provenance first
+        makes a truncation cost text rather than attribution.
+        """
+        payload = await market_research_tools.rag_semantic_market_search("THY")
+        keys = list(payload["results"][0])
+        for field in ("publisher", "published_at", "url"):
+            assert keys.index(field) < keys.index("snippet"), field
+
     async def test_freshness_is_propagated(self):
         payload = await market_research_tools.rag_semantic_market_search("THY")
         assert_iso8601_utc(payload["as_of"])
@@ -357,3 +372,47 @@ class TestExplicitNulls:
         them and silently rerank when asked not to."""
         await market_research_tools.rag_semantic_market_search(query="THY", rerank=False)
         assert fake_backend.body()["rerank"] is False
+
+
+class TestOwnership:
+    """Whose documents this search may reach.
+
+    The corpus used to be one shared body of news, so there was nothing to
+    scope. Users can now upload their own files, and a search that returns
+    another user's document is a disclosure rather than a relevance problem.
+    """
+
+    async def test_the_caller_is_forwarded_as_the_document_owner(self, fake_backend):
+        await market_research_tools.rag_semantic_market_search(
+            "bilançomda ne yazıyor", user_id="11111111-1111-1111-1111-111111111111"
+        )
+        assert fake_backend.body()["owner_user_id"] == (
+            "11111111-1111-1111-1111-111111111111"
+        )
+
+    async def test_an_anonymous_turn_carries_no_owner_at_all(self, fake_backend):
+        """`backend_client.clean` drops None, so the key is simply absent --
+        and the rag service defaults an absent owner to anonymous, which is
+        the public corpus alone. What matters is that no value is sent that
+        could widen the search."""
+        await market_research_tools.rag_semantic_market_search("banka haberleri")
+        assert fake_backend.body().get("owner_user_id") is None
+
+    async def test_the_owner_cannot_be_passed_positionally(self, fake_backend):
+        """Guards the shape of the mistake, not just its absence: inserting
+        the argument positionally shifted every existing caller by one, and
+        what landed on it was the conversation context -- truthy, not a user
+        id, and therefore a widening bug rather than a crash."""
+        context = [{"role": "user", "content": "THYAO nasıl gidiyor?"}]
+
+        await market_research_tools.rag_semantic_market_search("peki ya o?", context)
+
+        body = fake_backend.body()
+        assert body["conversation_context"] == context
+        assert body.get("owner_user_id") is None
+
+    def test_the_docstring_says_there_is_no_search_everyone_option(self):
+        doc = " ".join(
+            market_research_tools.rag_semantic_market_search.__doc__.split()
+        )
+        assert "There is no value that searches other users' documents." in doc

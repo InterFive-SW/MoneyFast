@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.investment import market_service
 from app.modules.market import service as news_service
+from app.modules.market import service as market_module_service
 
 NOW = datetime.now(timezone.utc)
 
@@ -99,9 +100,12 @@ class TestFreshness:
 
         midnight = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
         quotes = {"A": {"market_timestamp": midnight, "received_at": NOW - timedelta(minutes=1)}}
-        _, delay, _ = market_service.freshness(quotes)
-        # One minute stale plus the declared provider floor — not eleven hours.
-        assert delay < 60
+        as_of, delay, _, is_stale = market_service.freshness(quotes)
+        # Gözlemden ölçülüyor, barın tarihinden değil: bir dakika önce
+        # görülmüş bir fiyat eski DEĞİL.
+        assert delay == market_service.PROVIDER_DELAY_FLOOR_MINUTES
+        assert is_stale is False
+        assert as_of > midnight
 
     def test_uses_the_oldest_observation_in_the_set(self):
         """A payload is only as current as its least current figure."""
@@ -111,17 +115,47 @@ class TestFreshness:
             "A": {"received_at": NOW - timedelta(minutes=5)},
             "B": {"received_at": NOW - timedelta(minutes=45)},
         }
-        as_of, delay, is_delayed = market_service.freshness(quotes)
-        assert delay >= 45 + market_service.PROVIDER_DELAY_FLOOR_MINUTES - 1
+        as_of, delay, is_delayed, is_stale = market_service.freshness(quotes)
+        assert as_of == NOW - timedelta(minutes=45)
+        # Gecikme BESLEMENİN, gözlemin yaşı değil. İkisi bir dönem
+        # toplanıyordu ve kapalı bir borsanın son kapanışı "1095 dakika
+        # gecikmeli" diye raporlanıyordu.
+        assert delay == market_service.PROVIDER_DELAY_FLOOR_MINUTES
+        assert is_delayed is True
+        # Kırk beş dakika henüz eski değil (eşik 60).
+        assert is_stale is False
+
+    def test_the_provider_floor_is_what_is_reported(self):
+        """We cannot observe the exchange's true tick time, so the feed's own
+        delay is declared rather than pretended away -- ve TEK BAŞINA
+        bildiriliyor, gözlemin yaşı eklenmeden."""
+        quotes = {"A": {"received_at": NOW}}
+        _, delay, is_delayed, _ = market_service.freshness(quotes)
+        assert delay == market_service.PROVIDER_DELAY_FLOOR_MINUTES
         assert is_delayed is True
 
-    def test_the_provider_floor_is_always_added(self):
-        """We cannot observe the exchange's true tick time, so the feed's own
-        delay is declared rather than pretended away."""
-        quotes = {"A": {"received_at": NOW}}
-        _, delay, is_delayed = market_service.freshness(quotes)
-        assert delay >= market_service.PROVIDER_DELAY_FLOOR_MINUTES
-        assert is_delayed is True
+    def test_an_old_observation_is_stale_rather_than_delayed(self):
+        """`STALE_AFTER_MINUTES` bu ayrımı baştan beri adlandırıyordu
+        ("beyond this, a quote is not delayed, it is stale") ve hiçbir yerde
+        kullanılmıyordu.
+
+        Ölçülen sonuç: kapalı bir borsanın son kapanışı on sekiz saat
+        yaşlanınca kullanıcıya "1095 dakika gecikmeli" deniyordu."""
+        from datetime import timedelta
+
+        quotes = {"A": {"received_at": NOW - timedelta(hours=18)}}
+        _, delay, _, is_stale = market_service.freshness(quotes)
+        assert is_stale is True
+        # Besleme on sekiz saat gecikmiyor; piyasa kapalı.
+        assert delay == market_service.PROVIDER_DELAY_FLOOR_MINUTES
+
+    @pytest.mark.parametrize("minutes,stale", [(59, False), (61, True)])
+    def test_the_threshold_is_the_named_constant(self, minutes, stale):
+        from datetime import timedelta
+
+        quotes = {"A": {"received_at": NOW - timedelta(minutes=minutes)}}
+        assert market_service.freshness(quotes)[3] is stale
+        assert market_service.STALE_AFTER_MINUTES == 60
 
     def test_a_fresh_quote_is_still_reported_as_delayed(self):
         """Free-tier BIST data is delayed by design. Claiming otherwise would
@@ -130,32 +164,37 @@ class TestFreshness:
 
     def test_falls_back_to_the_bar_timestamp_when_unobserved(self):
         quotes = {"A": {"market_timestamp": NOW}}
-        as_of, _, _ = market_service.freshness(quotes)
+        as_of, _, _, _ = market_service.freshness(quotes)
         assert as_of is not None
 
     def test_no_quotes_reports_delayed_rather_than_current(self):
-        as_of, delay, is_delayed = market_service.freshness({})
+        as_of, delay, is_delayed, is_stale = market_service.freshness({})
         assert as_of is None
         assert is_delayed is True
+        # Hiç kotasyon yoksa gözlem de yok: bunu "taze" saymak, olmayan bir
+        # fiyatı güncel ilan etmek olurdu.
+        assert is_stale is True
 
     def test_naive_timestamp_is_treated_as_utc(self):
         quotes = {"A": {"received_at": NOW.replace(tzinfo=None)}}
-        _, delay, _ = market_service.freshness(quotes)
+        _, delay, _, _ = market_service.freshness(quotes)
         assert delay >= 0
 
 
 class TestNewsStore:
     def test_empty_batch_makes_no_query(self):
         db = MagicMock(spec=Session)
-        assert news_service.upsert_news(db, []) == 0
+        assert news_service.upsert_news(db, []) == (0, {}, [])
         assert db.execute.called is False
 
     def test_articles_are_deduplicated_on_content_hash(self):
         """Not on URL: the same wire story is republished under different
         links, and a feed that renumbers would re-import its whole history."""
         db = MagicMock(spec=Session)
-        db.execute.return_value = SimpleNamespace(rowcount=1)
-        written = news_service.upsert_news(
+        # `RETURNING` ile eklenen satırlar dönüyor: kaç tane olduğu değil,
+        # HANGİLERİ. Bildirim yalnızca gerçekten eklenen haber için üretilmeli.
+        db.execute.return_value.all.return_value = [("id-1", "a" * 64)]
+        written, _, _fresh = news_service.upsert_news(
             db,
             [
                 {
@@ -169,13 +208,216 @@ class TestNewsStore:
         assert "ON CONFLICT" in statement.upper()
         assert "content_hash" in statement
 
-    def test_rowcount_none_reports_zero_rather_than_raising(self):
+    def test_a_batch_that_inserted_nothing_reports_zero(self):
+        """Hepsi zaten duruyorsa `RETURNING` boş döner -- ve bildirim de
+        üretilmez, ki tekrar eden bir gürültü çıkmasın."""
         db = MagicMock(spec=Session)
-        db.execute.return_value = SimpleNamespace(rowcount=None)
-        written = news_service.upsert_news(
+        db.execute.return_value.all.return_value = []
+        written, _, fresh = news_service.upsert_news(
             db, [{"content_hash": "b" * 64, "title": "t", "source": "s", "published_at": NOW}]
         )
-        assert written == 0
+        assert written == 0 and fresh == []
+
+    def test_only_symbol_tagged_new_articles_reach_the_notifier(self, mocker):
+        """Hiçbir hisseye bağlanmayan haber bildirilecek kimseyi
+        göstermiyor; listeye hiç girmiyor."""
+        db = MagicMock(spec=Session)
+        mocker.patch.object(news_service, "_tradable_universe", return_value=[])
+        db.execute.return_value.all.return_value = [("id-1", "c" * 64)]
+        _written, _symbols, fresh = news_service.upsert_news(
+            db, [{"content_hash": "c" * 64, "title": "Genel piyasa yorumu",
+                  "source": "s", "published_at": NOW}]
+        )
+        assert fresh == []
+
+
+class TestNewsSymbolResolution:
+    """Haberi portföydeki hisseye bağlayan yer.
+
+    Bu bağ olmadan "portföyünüzdeki hisseye dair haber" diye bir şey yok:
+    `related_symbols` 1.540 haberin 1.540'ında boştu.
+    """
+
+    # `market`: KOD ile eşleşme yalnızca yerel piyasada geçerli
+    # (`LOCAL_TICKER_MARKETS`) -- alansız bir evren, kod dayanağını hiç
+    # kuramıyordu.
+    UNIVERSE = [
+        SimpleNamespace(
+            symbol="THYAO", name="Türk Hava Yolları A.O.",
+            product_type="stock", market="BIST",
+        ),
+        SimpleNamespace(
+            symbol="ASELS", name="Aselsan Elektronik",
+            product_type="stock", market="BIST",
+        ),
+    ]
+
+    def _db(self):
+        db = MagicMock(spec=Session)
+        # `RETURNING` eklenen satırları döndürüyor; bu sınıfın konusu
+        # sembol çözümlemesi, dolayısıyla tek bir satır yeter.
+        db.execute.return_value.all.return_value = [("id-1", "d" * 64)]
+        db.query.return_value.filter.return_value.all.return_value = self.UNIVERSE
+        return db
+
+    def _stored(self, db):
+        return db.execute.call_args.args[0].compile().params
+
+    def test_a_company_named_in_the_headline_is_linked(self, mocker):
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "c" * 64, "title": "Türk Hava Yolları'ndan rekor",
+            "source": "Dünya", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_a_story_naming_no_company_is_linked_to_nothing(self):
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "d" * 64, "title": "Merkez Bankası faiz kararını açıkladı",
+            "source": "AA", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == []
+
+    def test_a_feed_supplied_ticker_is_kept_without_reading_the_text(self):
+        """KAP bildirimleri ihraççısıyla birlikte gelir. Kesin bilgiyi
+        metinden çıkarımla değiştirmek geriye gidiş olurdu."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "e" * 64, "title": "Türk Hava Yolları'ndan rekor",
+            "source": "KAP", "published_at": NOW, "related_symbols": ["ASELS"],
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["ASELS"]
+
+    def test_a_short_name_in_a_filings_body_is_not_its_subject(self):
+        """Bildirimin konusu başlıkta; gövdedeki adlar ilgili taraflardır.
+
+        Ölçülen vaka: "EMLAK KATILIM VARLIK KİRALAMA A.Ş. — Şirket Genel
+        Bilgi Formu" THYAO'ya bağlanmıştı, çünkü gövdedeki yönetim kurulu
+        listesinde bir üyenin başka görevi "THY Yönetim Kurulu Üyesi" olarak
+        yazılıydı. Kural arşivde 16 farklı (sembol, konu) çiftini düşürüyor
+        ve elle bakıldığında on altısı da yanlış.
+        """
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "1" * 64,
+            "title": "EMLAK KATILIM VARLIK KİRALAMA A.Ş. — Şirket Genel Bilgi Formu",
+            "summary": "Yönetim Kurulu Üyesi THY Yönetim Kurulu Üyesi Erkek",
+            "source": "KAP", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == []
+
+    def test_an_explicit_code_in_a_filings_body_still_counts(self):
+        """Kısıt YALNIZCA kısa ada; açık kod gövdede de güvenilir.
+
+        BISTECH devre kesici bildirimlerinin başlığı jeneriktir ve konu şirket
+        yalnızca gövdede, kendi koduyla yazılıdır. Metnin tamamını başlığa
+        indirgemek bu bildirimlerin 550'sini birden koparıyordu.
+        """
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "2" * 64,
+            "title": "BORSA İSTANBUL BISTECH DEVRE KESİCİ UYGULAMASI — Pay Bazında",
+            "summary": "Devre kesici uygulanan pay: THYAO",
+            "source": "KAP", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_a_news_story_still_reads_its_body(self):
+        """Kısıt bildirimlere ait. "Borsada bugün" başlıklı bir yazı gerçekten
+        gövdesinde saydığı hisseler hakkındadır ve başlığa indirgemek haber
+        tarafında etiketlemeyi geri götürürdü."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "3" * 64, "title": "Borsada bugün öne çıkanlar",
+            "summary": "THY günü yükselişle kapattı.",
+            "source": "Dünya", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_a_filing_that_declares_its_issuer_is_untouched(self):
+        """Kaynağın kendi verdiği etiket çıkarımdan önce gelir; kural yalnızca
+        çıkarım yolunda."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "4" * 64,
+            "title": "OTOKAR OTOMOTİV VE SAVUNMA SANAYİ A.Ş. — Genel Bilgi Formu",
+            "summary": "Yapı Kredi ile kredi sözleşmesi",
+            "source": "KAP", "published_at": NOW, "related_symbols": ["ASELS"],
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["ASELS"]
+
+    def test_a_section_name_offered_as_a_ticker_is_dropped(self):
+        """Türkçe finans beslemeleri yazıları `BORSA` ve `FINANS` bölümlerine
+        koyuyor; ikisi de "3-6 harf" testini geçer ama enstrüman değildir.
+        Evrende karşılığı olmayan etiket düşer ve metinden çözümleme devreye
+        girer."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "f" * 64, "title": "Türk Hava Yolları'ndan rekor",
+            "source": "Dünya", "published_at": NOW,
+            "related_symbols": ["BORSA", "FINANS"],
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_only_stocks_are_offered_to_the_matcher(self):
+        """Bir haberin "USDTRY" ya da "XU100" ile ilişkilendirilmesi,
+        kullanıcıya şirket haberi vaat edip endeks haberi göstermek olurdu."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "0" * 64, "title": "x", "source": "s", "published_at": NOW,
+        }])
+        filter_arg = str(db.query.return_value.filter.call_args.args[0])
+        assert "product_type" in filter_arg
+
+
+class TestNewsArchive:
+    def test_it_reads_one_source_newest_first(self):
+        """Yeniden eskiye, `topup`/`backfill` ile aynı gerekçeyle: yarıda
+        kesilen bir tur bitişik ve GÜNCEL bir derlem bırakır."""
+        db = MagicMock(spec=Session)
+        chain = db.query.return_value.filter.return_value.order_by.return_value
+        chain.limit.return_value.offset.return_value.all.return_value = ["row"]
+        assert news_service.news_archive(db, "KAP", 200, 0) == ["row"]
+        chain.limit.assert_called_once_with(200)
+        chain.limit.return_value.offset.assert_called_once_with(0)
+
+
+class TestNewsCoverage:
+    def _db(self, rows):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = rows
+        return db
+
+    def test_the_disclosure_number_is_read_out_of_the_permalink(self):
+        """No column for it, and none needed: the link we store for citation
+        already carries the number."""
+        db = self._db([
+            SimpleNamespace(source="KAP", items=390, last=NOW, last_index=1655982),
+        ])
+        assert news_service.news_coverage(db)["KAP"]["last_index"] == 1655982
+
+    def test_a_source_without_numbered_links_has_no_watermark(self):
+        """RSS URLs must not be cast to bigint; that is what the regex guard
+        in the query prevents."""
+        db = self._db([SimpleNamespace(source="Dünya", items=12, last=NOW, last_index=None)])
+        assert news_service.news_coverage(db)["Dünya"]["last_index"] is None
+
+    def test_a_source_with_no_dated_rows_reports_no_date(self):
+        db = self._db([SimpleNamespace(source="KAP", items=0, last=None, last_index=None)])
+        assert news_service.news_coverage(db)["KAP"]["last"] is None
+
+    def test_an_empty_table_covers_nothing(self):
+        assert news_service.news_coverage(self._db([])) == {}
+
+    def test_the_query_guards_the_cast_with_a_pattern_match(self):
+        """Without it the ::bigint cast meets an RSS link and the endpoint
+        500s for every caller."""
+        db = self._db([])
+        news_service.news_coverage(db)
+        statement = str(db.execute.call_args.args[0])
+        assert "/Bildirim/[0-9]+$" in statement
+        assert "::bigint" in statement
 
 
 class TestProductLookups:
@@ -245,11 +487,12 @@ class TestCandleCloses:
 
         db = MagicMock(spec=Session)
         db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id="p-1")
-        rows = [
-            SimpleNamespace(timestamp=NOW, close_price=300.0),
-            SimpleNamespace(timestamp=NOW - timedelta(days=1), close_price=295.0),
+        # Core select ile okunuyor: sadece iki sütun için ORM nesnesi kurmak,
+        # sorgunun kendisinden yüz kat pahalıydı.
+        db.execute.return_value.all.return_value = [
+            (NOW, 300.0),
+            (NOW - timedelta(days=1), 295.0),
         ]
-        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = rows
         series = market_service.candle_closes(db, "TEST-THYAO")
         assert [price for _, price in series] == [295.0, 300.0]
 
@@ -264,6 +507,38 @@ class TestLatestNews:
         db.query.return_value.order_by.return_value.limit.return_value.all.return_value = rows
         assert news_service.latest_news(db, limit=5) == rows
         db.query.return_value.order_by.return_value.limit.assert_called_once_with(5)
+
+    def test_no_symbols_means_no_filter(self):
+        """Boş bir sembol listesi "hiçbir haber" değil "süzgeç yok" demek."""
+        db = MagicMock(spec=Session)
+        news_service.latest_news(db, limit=5, symbols=[])
+        db.query.return_value.filter.assert_not_called()
+        news_service.latest_news(db, limit=5, symbols=None)
+        db.query.return_value.filter.assert_not_called()
+
+    def test_symbols_filter_on_array_overlap(self):
+        """Süzgeç SORGUDA: dönen sayfayı süzmek, "en yeni 20"de o hisse yoksa
+        "haber yok" cevabı üretiyordu -- oysa soru hiç sorulmamış oluyordu."""
+        db = MagicMock(spec=Session)
+        rows = [SimpleNamespace(id="n-1")]
+        filtered = db.query.return_value.filter.return_value
+        filtered.order_by.return_value.limit.return_value.all.return_value = rows
+        assert news_service.latest_news(db, limit=5, symbols=["AAPL"]) == rows
+        db.query.return_value.filter.assert_called_once()
+
+    def test_symbols_are_deduplicated_and_blanks_dropped(self):
+        """Aynı deseni `portfolio_news` de kullanıyor; boş bir dize hiçbir
+        satırla çakışmaz ama sorguyu gereksiz yere büyütür."""
+        db = MagicMock(spec=Session)
+        captured = {}
+
+        def remember(clause):
+            captured["clause"] = clause
+            return db.query.return_value.filter.return_value
+
+        db.query.return_value.filter.side_effect = remember
+        news_service.latest_news(db, symbols=["AAPL", "AAPL", "", "MSFT"])
+        assert captured["clause"].right.value == ["AAPL", "MSFT"]
 
 
 class TestNewsIdHelper:
@@ -317,3 +592,67 @@ class TestFundamentalsNameField:
         from app.modules.market.schemas import FundamentalsIn
 
         assert FundamentalsIn(symbol="ASELS").name is None
+
+
+class TestRefreshQuotes:
+    """Sohbet için anlık fiyat tazeleme.
+
+    Fiyatı backend çekmiyor: yfinance'a çıkan tek bileşen ingestor ve
+    veritabanı kredensiyeli olmayan da o.
+    """
+
+    def test_nothing_to_do_without_symbols(self):
+        assert market_module_service.refresh_quotes([]) is False
+        assert market_module_service.refresh_quotes(["  "]) is False
+
+    def test_an_unconfigured_install_simply_does_not_refresh(self, monkeypatch):
+        """Tazeleme yoksa bu bir hata değil: fiyatlar toplu turdan gelir."""
+        monkeypatch.delenv("INGESTOR_REFRESH_URL", raising=False)
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        assert market_module_service.refresh_quotes(["THYAO"]) is False
+
+        monkeypatch.setenv("INGESTOR_REFRESH_URL", "http://ingestor:8200")
+        monkeypatch.delenv("BACKEND_API_KEY", raising=False)
+        assert market_module_service.refresh_quotes(["THYAO"]) is False
+
+    def test_it_posts_the_symbols_and_reports_success(self, monkeypatch, mocker):
+        monkeypatch.setenv("INGESTOR_REFRESH_URL", "http://ingestor:8200/")
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        post = mocker.patch.object(
+            market_module_service.httpx, "post",
+            return_value=SimpleNamespace(
+                raise_for_status=lambda: None, json=lambda: {"refreshed": 1},
+            ),
+        )
+        assert market_module_service.refresh_quotes(["thyao"]) is True
+        assert post.call_args.kwargs["json"] == {"symbols": ["THYAO"]}
+        assert post.call_args.args[0] == "http://ingestor:8200/refresh"
+
+    def test_too_many_symbols_are_trimmed(self, monkeypatch, mocker):
+        """Bu yolu toplu çekim için kullanmak, on beş dakikalık turun var olma
+        sebebini ortadan kaldırırdı."""
+        monkeypatch.setenv("INGESTOR_REFRESH_URL", "http://ingestor:8200")
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        post = mocker.patch.object(
+            market_module_service.httpx, "post",
+            return_value=SimpleNamespace(
+                raise_for_status=lambda: None, json=lambda: {"refreshed": 0},
+            ),
+        )
+        many = [f"S{i}" for i in range(market_module_service.REFRESH_MAX_SYMBOLS + 10)]
+        market_module_service.refresh_quotes(many)
+        sent = post.call_args.kwargs["json"]["symbols"]
+        assert len(sent) == market_module_service.REFRESH_MAX_SYMBOLS
+
+    def test_a_failure_is_swallowed_so_the_turn_still_answers(
+        self, monkeypatch, mocker
+    ):
+        """Tazeleme denemesi başarısız diye sohbetin cevapsız kalması, eski
+        fiyattan kötüdür."""
+        monkeypatch.setenv("INGESTOR_REFRESH_URL", "http://ingestor:8200")
+        monkeypatch.setenv("BACKEND_API_KEY", "s3cret")
+        mocker.patch.object(
+            market_module_service.httpx, "post",
+            side_effect=RuntimeError("ingestor down"),
+        )
+        assert market_module_service.refresh_quotes(["THYAO"]) is False

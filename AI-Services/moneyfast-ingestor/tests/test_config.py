@@ -51,15 +51,16 @@ class TestNumericSettings:
     def test_defaults(self):
         assert config.request_timeout() == 20.0
         assert config.per_host_delay() == 2.0
-        assert config.quote_interval_seconds() == 30
-        assert config.history_days() == 400
+        assert config.quote_interval_seconds() == 300
+        assert config.band_interval_seconds() == 30
+        assert config.history_days() == 730
 
     def test_garbage_falls_back_instead_of_crashing_the_service(self, monkeypatch):
         """A typo in an env var should not stop data collection entirely."""
         monkeypatch.setenv("INGESTOR_TIMEOUT_SECONDS", "soon")
         monkeypatch.setenv("INGESTOR_QUOTE_INTERVAL_SECONDS", "often")
         assert config.request_timeout() == 20.0
-        assert config.quote_interval_seconds() == 30
+        assert config.quote_interval_seconds() == 300
 
     def test_valid_overrides_are_honoured(self, monkeypatch):
         monkeypatch.setenv("INGESTOR_HOST_DELAY_SECONDS", "5.5")
@@ -94,19 +95,93 @@ class TestEmptyEnvironmentOverrides:
 
 
 class TestQuoteInterval:
-    def test_thirty_seconds_by_default(self):
-        """Raised from 10s when the universe doubled to ~190 symbols across
-        two markets. A clean cycle is a few seconds, but one chunk that has to
-        time out pushes it past ten, and every overrun was logged as a skipped
-        run. A budget the cycle can meet beats a number that looks live."""
-        assert config.quote_interval_seconds() == 30
+    def test_five_minutes_by_default(self):
+        """Beş dakika: bir işlem gününe tam 78 tane 5 dakikalık bar sığıyor ve
+        gün içi grafik o kadar noktaya ihtiyaç duyuyor.
 
-    def test_is_overridable(self, monkeypatch):
+        Was 30 SECONDS, over the whole universe.
+
+        `docker-compose.yml` set `INGESTOR_QUOTE_INTERVAL_MINUTES: 15`, but no
+        code ever read that name -- the setting had never taken effect. At a
+        universe of ~1000 instruments a per-30s sweep is two thousand provider
+        requests a minute.
+
+        The band (FX, gold, index) stays fast on its own job, and a symbol the
+        chat asks about is refreshed on demand, so the bulk interval never
+        means a stale answer where staleness would matter.
+        """
+        assert config.quote_interval_seconds() == 300
+
+    def test_the_minutes_name_is_the_one_compose_sets(self, monkeypatch):
+        """The name that had no effect for the whole life of the setting.
+
+        10 dakika, çünkü bütçe aşılırsa gidilecek yer orası."""
+        monkeypatch.setenv("INGESTOR_QUOTE_INTERVAL_MINUTES", "10")
+        assert config.quote_interval_seconds() == 600
+
+    def test_seconds_still_wins_when_given(self, monkeypatch):
         monkeypatch.setenv("INGESTOR_QUOTE_INTERVAL_SECONDS", "30")
         assert config.quote_interval_seconds() == 30
+
+
+class TestBandInterval:
+    """Kur/altın/endeks şeridi: küçük küme, sık tur."""
+
+    def test_thirty_seconds_by_default(self):
+        assert config.band_interval_seconds() == 30
+
+    def test_is_overridable(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_BAND_INTERVAL_SECONDS", "10")
+        assert config.band_interval_seconds() == 10
+
+    def test_has_the_same_floor(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_BAND_INTERVAL_SECONDS", "0")
+        assert config.band_interval_seconds() == 5
+
+
+class TestBandMembership:
+    """Hangi enstrüman hızlı katmanda."""
+
+    def test_fx_and_gold_are_band(self):
+        assert config.is_band_product({"market": "FX"})
+        assert config.is_band_product({"market": "COMEX"})
+
+    def test_an_index_is_band_whatever_its_venue(self):
+        """Endeks bir borsada işlem görüyor ama şeridin parçası."""
+        assert config.is_band_product({"market": "BIST", "product_type": "index"})
+
+    def test_a_stock_is_not(self):
+        assert not config.is_band_product({"market": "BIST", "product_type": "stock"})
+        assert not config.is_band_product({"market": "NASDAQ", "product_type": "stock"})
 
     def test_has_a_floor_against_a_config_typo(self, monkeypatch):
         """A stray 0 or 1 would turn this into a request flood aimed at a
         provider that will rate limit and then block us."""
         monkeypatch.setenv("INGESTOR_QUOTE_INTERVAL_SECONDS", "0")
         assert config.quote_interval_seconds() == 5
+
+
+class TestKap:
+    def test_defaults(self):
+        assert config.kap_base_url() == "https://www.kap.org.tr"
+        assert config.kap_interval_minutes() == 20
+        # Ölçüldü: bir hafta 1101 satır, altmış gün tam 2000 (tavan). Üç gün
+        # ~470 satır demek, yani olağan durumda pencere hiç bölünmüyor.
+        assert config.kap_window_days() == 3
+        assert config.kap_backfill_days() == 183
+
+    def test_overrides_are_honoured_and_a_trailing_slash_is_dropped(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_BASE_URL", "https://example.test/")
+        monkeypatch.setenv("INGESTOR_KAP_INTERVAL_MINUTES", "5")
+        monkeypatch.setenv("INGESTOR_KAP_WINDOW_DAYS", "7")
+        monkeypatch.setenv("INGESTOR_KAP_BACKFILL_DAYS", "30")
+        assert config.kap_base_url() == "https://example.test"
+        assert config.kap_interval_minutes() == 5
+        assert config.kap_window_days() == 7
+        assert config.kap_backfill_days() == 30
+
+    def test_nonsense_values_fall_back_rather_than_crashing_the_service(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_KAP_INTERVAL_MINUTES", "soon")
+        monkeypatch.setenv("INGESTOR_KAP_WINDOW_DAYS", "0")
+        assert config.kap_interval_minutes() == 20
+        assert config.kap_window_days() == 1

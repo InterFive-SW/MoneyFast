@@ -107,7 +107,15 @@ def load_all(session, seeds: Path = SEEDS) -> int:
             outcome = load_file(session, path)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop boot
             session.rollback()
-            log.error("seed %s failed, skipped: %s", path.name, exc)
+            # Name the loss, not just the error. A file applies whole or not
+            # at all, so a skip means that person has NO account, portfolio or
+            # history -- and the only symptom is an empty app. This was one
+            # quiet line while a user silently lost 46 conversations and 13
+            # positions.
+            log.error(
+                "seed %s FAILED and was rolled back -- that user has no data "
+                "loaded at all: %s", path.name, exc,
+            )
             continue
         applied += 1
         log.info("seed %s: %s", path.name, outcome)

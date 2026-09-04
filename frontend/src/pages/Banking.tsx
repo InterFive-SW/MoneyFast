@@ -77,7 +77,9 @@ function formatIban(iban: string): string {
 function toUiAccount(account: PortfolioAccount): BankAccount {
   return {
     id: account.id,
-    name: ACCOUNT_TYPE_LABELS[account.account_type] ?? 'Hesap',
+    // Kullanıcının verdiği ad varsa o; yoksa türden türetilen etiket.
+    // Adı olmayan hesaba ad UYDURULMUYOR -- listede türü yazıyor.
+    name: account.nickname || ACCOUNT_TYPE_LABELS[account.account_type] || 'Hesap',
     type: toUiAccountType(account.account_type, account.currency_code),
     interestRate: account.interest_rate,
     termDays: account.term_days,
@@ -142,8 +144,10 @@ export interface BankingContextType {
   data: BankingData;
   /** Hesap kimliğine göre o hesabın hareketleri. */
   transactionsByAccountId: Record<string, BankTransaction[]>;
-  handleAccountCreate: (currency: string, type: 'checking' | 'savings' | 'foreign_currency', accountName: string, iban: string) => void;
-  handleAccountClose: (accountId: string) => void;
+  /** Hesabı backend'de açar ve defteri yeniden okur. Reddedilirse fırlatır. */
+  handleAccountCreate: (currency: string, type: 'checking' | 'savings' | 'foreign_currency', accountName?: string) => Promise<void>;
+  /** Hesabı kapatır. Bakiyesi olan hesabı backend reddeder. */
+  handleAccountClose: (accountId: string) => Promise<void>;
   handleCardCreate: (type: 'credit' | 'debit', brand: 'mastercard' | 'visa', limit: number, isDigital: boolean, customName: string, linkedAccountId?: string) => void;
   updateCard: (cardId: string, updates: CreditCardUpdate) => void;
   /**
@@ -304,38 +308,35 @@ export default function Banking() {
   // Action Handlers
 
   /**
-   * Hesap açma — henüz yalnızca ekranda.
+   * Hesap açar ve defteri yeniden okur.
    *
-   * Backend'de hesap açma ucu yok; bu yüzden yaratılan hesap sadece bu
-   * bileşenin state'inde yaşıyor ve bir sonraki veri tazelemesinde (örneğin
-   * transfer sonrası) kaybolur. Uç eklenene kadar bilinen bir eksik.
+   * Eskiden bu fonksiyon backend'e hiç gitmiyordu: rastgele bir IBAN
+   * üretilip hesap yalnızca bu bileşenin state'ine yazılıyordu ve bir
+   * sonraki tazelemede kayboluyordu. Hesap numarasını ve IBAN'ı artık
+   * backend üretiyor -- ikisi de `unique` ve istemcinin uydurduğu bir
+   * numaranın çakışmayacağının garantisi yok.
    */
-  const handleAccountCreate = (currency: string, type: 'checking' | 'savings' | 'foreign_currency', accountName: string, iban: string) => {
-    if (!data) return
-    const newAccount: BankAccount = {
-      id: `acc-new-${Date.now()}`,
-      name: accountName || `Yeni ${currency} Hesabı`,
-      type,
-      balance: 0,
-      currency,
-      accountNumber: iban
-    }
-    setData({ ...data, accounts: [...data.accounts, newAccount] })
+  const handleAccountCreate = async (
+    currency: string,
+    type: 'checking' | 'savings' | 'foreign_currency',
+    accountName?: string,
+  ) => {
+    await apiClient.openBankAccount({
+      // Arayüzün sözcükleri burada çözülüyor; uç nokta veritabanının
+      // kullandığı adları alıyor ve çeviri tek yerde duruyor.
+      account_type: type === 'savings' ? 'vadeli' : 'vadesiz',
+      currency_code: currency,
+      nickname: accountName?.trim() || null,
+    })
+    await loadBanking()
   }
 
-  /** Hesap kapatma — `handleAccountCreate` ile aynı sebeple kalıcı değil. */
-  const handleAccountClose = (accountId: string) => {
-    if (!data) return
-    const accountToClose = data.accounts.find(a => a.id === accountId)
-    if (!accountToClose) return
-
-    const updatedAccounts = data.accounts.filter(a => a.id !== accountId)
-
-    setData({
-      ...data,
-      accounts: updatedAccounts,
-      totalAssets: data.totalAssets - accountToClose.balance
-    })
+  /** Hesabı kapatır. Bakiyesi varsa backend reddeder ve gerekçesi Türkçe. */
+  const handleAccountClose = async (accountId: string) => {
+    const account = data?.accounts.find(a => a.id === accountId)
+    if (!account) return
+    await apiClient.closeBankAccount(account.accountNumber.replace(/\s+/g, ''))
+    await loadBanking()
   }
 
   const handleCardCreate = (type: 'credit' | 'debit', brand: 'mastercard' | 'visa', limit: number, isDigital: boolean, customName: string, linkedAccountId?: string) => {

@@ -1,0 +1,198 @@
+"""Ölçüm ile beyanın karşılaştırılması.
+
+Ürünün bu iki şeyi aynı cümlede kullanmasına izin verilen tek yer burası ve
+danışmanlık çizgisinin doğru tarafında kalmasının sebebi şu: iki yarı da
+olgu. Biri fiyat geçmişinden hesaplanıyor, diğeri kullanıcının kendi cevabı.
+Hiçbiri kişi hakkında bir yargı değil ve hiçbiri ne yapılması gerektiğini
+söylemiyor.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from app.modules.risk import profile
+
+
+class TestAlignment:
+    def test_same_band_is_aligned(self):
+        result = profile.suitability("Orta", "Orta")
+        assert result["alignment"] == profile.ALIGNMENT_ALIGNED
+        assert "aynı bandda" in result["statement"]
+
+    def test_portfolio_above_the_declared_band(self):
+        result = profile.suitability("Yüksek", "Düşük")
+        assert result["alignment"] == profile.ALIGNMENT_RISKIER
+        assert "üzerinde" in result["statement"]
+
+    def test_portfolio_below_the_declared_band(self):
+        result = profile.suitability("Düşük", "Yüksek")
+        assert result["alignment"] == profile.ALIGNMENT_CALMER
+        assert "altında" in result["statement"]
+
+    @pytest.mark.parametrize(
+        "measured,declared",
+        [(None, "Orta"), ("Orta", None), (None, None), ("Belirsiz", "Orta"), ("Orta", "Agresif")],
+    )
+    def test_anything_unmeasurable_or_undeclared_is_unknown(self, measured, declared):
+        """Yalnızca yarısı bilinen bir karşılaştırma, karşılaştırma değildir."""
+        result = profile.suitability(measured, declared)
+        assert result["alignment"] == profile.ALIGNMENT_UNKNOWN
+        assert "gerekiyor" in result["statement"]
+
+    def test_both_sides_are_echoed_back(self):
+        """Kullanıcı cümlenin hangi iki değerden kurulduğunu görebilmeli."""
+        result = profile.suitability("Yüksek", "Orta")
+        assert result["measured_level"] == "Yüksek"
+        assert result["declared_tolerance"] == "Orta"
+
+
+class TestWording:
+    """Cümlenin kendisi bir uyumluluk kuralına takılmamalı ve bir direktif
+    içermemeli."""
+
+    ALL = [
+        profile.suitability(measured, declared)["statement"]
+        for measured in ("Düşük", "Orta", "Yüksek")
+        for declared in ("Düşük", "Orta", "Yüksek")
+    ] + [profile.suitability(None, None)["statement"]]
+
+    def test_no_statement_trips_the_suitability_rule(self):
+        """SUI-001 "size uygun" / "risk profilinize uygun" kalıplarını
+        engelliyor. Ürettiğimiz cümle bir karşılaştırma, bir uygunluk iddiası
+        değil — ve bunun tesadüf olmadığını burası sabitliyor."""
+        from app.modules.compliance import rules
+
+        rule = next(r for r in rules.RULES if r.rule_id == "SUI-001")
+        for statement in self.ALL:
+            assert not rule.regex.search(statement), statement
+
+    def test_no_statement_contains_a_directive(self):
+        for statement in self.ALL:
+            lowered = statement.lower()
+            for banned in ("azalt", "artır", "satın al", "öneririz", "meli", "malı"):
+                assert banned not in lowered, f"{banned}: {statement}"
+
+    def test_every_statement_names_both_numbers_it_compares(self):
+        """Gerekçesiz bir karşılaştırma, kullanıcının doğrulayamayacağı bir
+        iddiadır."""
+        for measured in ("Düşük", "Orta", "Yüksek"):
+            for declared in ("Düşük", "Orta", "Yüksek"):
+                statement = profile.suitability(measured, declared)["statement"]
+                assert measured in statement
+                assert declared in statement
+
+
+def _pos(symbol, value, asset_class="stock"):
+    return {"symbol": symbol, "market_value": value, "asset_class": asset_class}
+
+
+def _group(key, eligible, label="Grup", reason="gerekçe"):
+    return {"key": key, "label": label, "eligible": eligible, "reason": reason}
+
+
+class TestGroupExposure:
+    """`suitability`'nin ikinci yarısı: o, ölçülen risk seviyesini beyan
+    edilen toleransla karşılaştırıyor; bu, ürün grubu başına TUTULAN ağırlığı
+    o grup için verilen bilgi ve tecrübe beyanıyla.
+
+    Aynı çizgi, aynı sebeple: iki yarı da olgu. Biri portföyden ölçülüyor,
+    diğeri kullanıcının kendi cevabı.
+    """
+
+    EQUITY = [_group("equity", True, "Ortaklık Payı")]
+
+    def test_holdings_are_grouped_and_weighted(self):
+        out = profile.group_exposure(
+            [_pos("THYAO", 7500.0), _pos("AKBNK", 2500.0)], self.EQUITY
+        )
+        row = out["groups"][0]
+        assert row["group"] == "equity"
+        assert row["value"] == 10000.0
+        assert row["share_percent"] == 100.0
+
+    def test_a_declared_group_reports_the_declaration(self):
+        out = profile.group_exposure([_pos("THYAO", 100.0)], self.EQUITY)
+        assert out["groups"][0]["status"] == profile.EXPOSURE_COVERED
+        assert out["groups"][0]["eligible"] is True
+
+    def test_an_undeclared_group_reports_the_users_own_answer(self):
+        """"Beyan etmemiştiniz" kullanıcının KENDİ cevabını aktarır; "size
+        uygun değil" onun hakkında karar verirdi."""
+        out = profile.group_exposure(
+            [_pos("THYAO", 100.0)], [_group("equity", False)]
+        )
+        row = out["groups"][0]
+        assert row["status"] == profile.EXPOSURE_NOT_ASSESSED
+        assert row["eligible"] is False
+        assert "beyan etmemiştiniz" in row["statement"]
+
+    def test_a_group_never_asked_about_is_distinct_from_one_declined(self):
+        """Biri "soruldu, yeterli çıkmadı", diğeri "hiç sorulmadı"."""
+        out = profile.group_exposure([_pos("THYAO", 100.0)], [])
+        row = out["groups"][0]
+        assert row["eligible"] is None
+        assert "bir kaydınız yok" in row["statement"]
+
+    def test_gold_and_currency_are_reported_as_outside_the_test(self):
+        """Spot altın ve döviz dört grubun HİÇBİRİNDE yok. Bir enstrümanı ona
+        ait olmayan bir gruba sokmak, o grup için verilmiş bir beyanı hakkında
+        hiç soru sorulmamış bir ürüne uygulamak olurdu."""
+        out = profile.group_exposure(
+            [_pos("THYAO", 900.0), _pos("XAUUSD", 100.0, "commodity")], self.EQUITY
+        )
+        outside = out["groups"][-1]
+        assert outside["group"] is None
+        assert outside["status"] == profile.EXPOSURE_OUTSIDE_TEST
+        assert outside["share_percent"] == 10.0
+        assert "commodity" in outside["statement"]
+
+    def test_uncovered_holdings_are_never_silently_dropped(self):
+        """Düşürmek, portföyün bir kısmını değerlendirilmiş gibi
+        göstermek olurdu."""
+        out = profile.group_exposure(
+            [_pos("USDTRY", 400.0, "fx"), _pos("XAUUSD", 600.0, "commodity")],
+            self.EQUITY,
+        )
+        assert out["total_value"] == 1000.0
+        assert sum(row["value"] for row in out["groups"]) == 1000.0
+
+    def test_an_empty_portfolio_reports_no_groups(self):
+        out = profile.group_exposure([], self.EQUITY)
+        assert out["groups"] == []
+        assert out["total_value"] == 0.0
+
+    def test_a_never_taken_test_is_distinct_from_an_empty_result(self):
+        assert profile.group_exposure([_pos("THYAO", 1.0)], None)["assessed"] is False
+        assert profile.group_exposure([_pos("THYAO", 1.0)], self.EQUITY)["assessed"] is True
+
+    def test_groups_are_ordered_by_weight(self):
+        out = profile.group_exposure(
+            [_pos("THYAO", 100.0), _pos("XAUUSD", 900.0, "commodity")], self.EQUITY
+        )
+        assert [row["value"] for row in out["groups"]] == [100.0, 900.0]
+
+    ALL = [
+        row["statement"]
+        for groups in ([_group("equity", True)], [_group("equity", False)], [], None)
+        for row in profile.group_exposure(
+            [_pos("THYAO", 900.0), _pos("XAUUSD", 100.0, "commodity")], groups
+        )["groups"]
+    ]
+
+    def test_no_statement_trips_the_suitability_rule(self):
+        """SUI-001 tam olarak "size uygun" / "risk profilinize uygun"
+        kalıplarını engelliyor. Bu cümleler ondan bilerek kaçınıyor ve bunun
+        tesadüf olmadığını burası sabitliyor -- canlı uyumluluk motoruna karşı
+        da doğrulandı."""
+        from app.modules.compliance import rules
+
+        rule = next(r for r in rules.RULES if r.rule_id == "SUI-001")
+        for statement in self.ALL:
+            assert not rule.regex.search(statement), statement
+
+    def test_no_statement_tells_the_user_what_to_do_with_a_position(self):
+        for statement in self.ALL:
+            lowered = statement.lower()
+            for banned in ("azalt", "artır", "satın al", "satmalı", "öneririz"):
+                assert banned not in lowered, f"{banned}: {statement}"

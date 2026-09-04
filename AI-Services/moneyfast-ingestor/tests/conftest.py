@@ -17,7 +17,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ingestor import config  # noqa: E402
-from ingestor.sources import rss_source  # noqa: E402
+from ingestor.sources import courtesy, rss_source  # noqa: E402
 
 
 class NetworkAccessAttempted(RuntimeError):
@@ -51,7 +51,7 @@ def fresh_rss_state(monkeypatch):
     """Per-test isolation for the robots/ETag/rate-limit caches, and no real
     sleeping for the courtesy delay."""
     rss_source.reset_state()
-    monkeypatch.setattr(rss_source.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(courtesy.time, "sleep", lambda _seconds: None)
     yield
     rss_source.reset_state()
 

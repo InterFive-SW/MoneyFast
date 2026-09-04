@@ -4,91 +4,61 @@ RSS is published so that machines can read it. That is the whole reason this
 project uses it instead of scraping rendered pages: there is no bot check to
 get past, because there was never a wall.
 
-Three courtesies are observed anyway, because being technically allowed to
-fetch something is not the same as being a good citizen of someone else's
-server:
-
-* `robots.txt` is checked before the first fetch of a host and honoured.
-* Requests to one host are spaced by a minimum delay.
-* Conditional requests (`If-None-Match` / `If-Modified-Since`) mean an
-  unchanged feed costs the publisher a 304 rather than a full response.
-
-The `User-Agent` names the project and links to it. If an operator wants us
-gone, they can see who we are and say so.
+Courtesies (robots.txt, per-host delay, conditional requests) live in
+`courtesy`, shared with the KAP source: the delay is per HOST, so two modules
+keeping their own timers could each decide they had waited long enough.
 """
 
 from __future__ import annotations
 
 import hashlib
+import html
 import logging
-import time
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
-from urllib.robotparser import RobotFileParser
 
 import httpx
 
 from .. import config
+from . import courtesy
 
 log = logging.getLogger("moneyfast.ingestor.rss")
 
-#: Last fetch time per host, for the courtesy delay.
-_last_request: dict[str, float] = {}
-
-#: ETag / Last-Modified per feed URL, for conditional requests.
-_validators: dict[str, dict[str, str]] = {}
-
-#: robots.txt verdicts, per host. Cached for the process lifetime: re-fetching
-#: it for every poll would itself be impolite.
-_robots: dict[str, Optional[RobotFileParser]] = {}
+#: Kept as an alias so the shared caches can be cleared through either
+#: module; the suite reaches for this one.
+reset_state = courtesy.reset_state
 
 
-def reset_state() -> None:
-    """Clear the caches. For tests."""
-    _last_request.clear()
-    _validators.clear()
-    _robots.clear()
+#: HTML etiketleri. RSS özetleri işaretlemeyi olduğu gibi taşıyor -- ölçülen
+#: örnek: `<img align="right" src="..." style="border: navy 1px solid;" />`.
+_HTML_TAG = re.compile(r"<[^>]*>")
 
 
-def _may_fetch(url: str, client: httpx.Client) -> bool:
-    if not config.respect_robots():
-        return True
+def clean_summary(raw: str) -> str:
+    """Özetten işaretlemeyi atar, varlıkları çözer.
 
-    parsed = urlparse(url)
-    host = f"{parsed.scheme}://{parsed.netloc}"
-    if host not in _robots:
-        parser = RobotFileParser()
-        try:
-            response = client.get(f"{host}/robots.txt", timeout=config.request_timeout())
-            if response.status_code == 200:
-                parser.parse(response.text.splitlines())
-            else:
-                # No robots.txt is permission by convention, not an error.
-                parser = None
-        except Exception as exc:
-            log.warning("could not read robots.txt for %s: %s", host, exc)
-            parser = None
-        _robots[host] = parser
+    İki yeri birden düzeltiyor. Sembol eşleştirmesi: temizlenmemiş metinde
+    `<img align="right">` özniteliği Align Technology'ye (ALGN) bağlanıyordu.
+    Ve daha önemlisi RAG: ingestor özeti korpusa `content` olarak gönderiyor,
+    yani gömme vektörleri haberin metni yerine HTML gürültüsünü de taşıyordu
+    -- ölçüldü, korpustaki 876 parça işaretleme içeriyor.
 
-    parser = _robots[host]
-    if parser is None:
-        return True
-    allowed = parser.can_fetch(config.user_agent(), url)
-    if not allowed:
-        log.warning("robots.txt disallows %s, skipping", url)
-    return allowed
-
-
-def _wait_for_host(url: str) -> None:
-    host = urlparse(url).netloc
-    delay = config.per_host_delay()
-    previous = _last_request.get(host)
-    if previous is not None:
-        elapsed = time.monotonic() - previous
-        if elapsed < delay:
-            time.sleep(delay - elapsed)
-    _last_request[host] = time.monotonic()
+    Etiketin İÇİ değil KENDİSİ atılıyor: öznitelik adları ve URL'ler haberin
+    metni değil. `&#039;` gibi varlıklar ise SİLİNMİYOR, çözülüyor: "Türkiye
+    &#039;nin" -> "Türkiye'nin", yani metin okunur kalıyor.
+    """
+    text = _HTML_TAG.sub(" ", raw or "")
+    # İki geçiş, çünkü beslemeler ÇİFT kaçışlı gönderiyor: ölçülen veride
+    # `LPG&amp;#039;nin` var, tek geçiş bunu `&#039;`de bırakıyor. Kararlı
+    # hâle gelince duruyor, sonsuz döngü yok.
+    for _ in range(2):
+        unescaped = html.unescape(text)
+        if unescaped == text:
+            break
+        text = unescaped
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def content_hash(title: str, summary: str) -> str:
@@ -97,6 +67,11 @@ def content_hash(title: str, summary: str) -> str:
     Hashing the text rather than the URL because the same wire story is
     republished under different links, and some feeds renumber their URLs on
     every rebuild — which would re-import the whole history each poll.
+
+    Beslemenin verdiği HAM özet üzerinden hesaplanıyor, temizlenmiş hâli
+    üzerinden değil. Temizliğe geçerken hash tanımını da değiştirmek, daha
+    önce alınmış her haberin kimliğini değiştirir ve arşivin tamamı "yeni"
+    sayılıp yeniden yazılırdı.
     """
     return hashlib.sha256(f"{title}\n{summary}".strip().encode("utf-8")).hexdigest()
 
@@ -115,10 +90,17 @@ def _published(entry: Any) -> datetime:
 
 
 def _tickers(entry: Any) -> list[str]:
-    """Symbols the FEED tagged. Never inferred from the headline.
+    """Ticker CANDIDATES the feed tagged. Never inferred from the headline.
 
-    Guessing a ticker from text would put one company's news on another
-    company's page, and the retrieval contract lets the model filter on these.
+    Guessing a ticker from prose would put one company's news on another
+    company's page. These are candidates, not conclusions: the backend checks
+    each one against the instrument universe before storing it, because the
+    universe lives there and this process holds no database credentials.
+
+    That check is what makes the loose shape test below safe. Turkish finance
+    feeds file articles under sections like `BORSA` and `FINANS`, both of
+    which pass "3-6 letters" and would otherwise be recorded as though they
+    were listed companies. Neither is an instrument, so neither survives.
     """
     tags = getattr(entry, "tags", None) or []
     out = []
@@ -209,12 +191,12 @@ def fetch_feed(url: str, client: httpx.Client) -> list[dict[str, Any]]:
     """
     import feedparser
 
-    if not _may_fetch(url, client):
+    if not courtesy.may_fetch(url, client):
         return []
 
-    _wait_for_host(url)
+    courtesy.wait_for_host(url)
     headers = {"User-Agent": config.user_agent()}
-    headers.update(_validators.get(url, {}))
+    headers.update(courtesy.validators.get(url, {}))
 
     try:
         response = client.get(url, headers=headers, timeout=config.request_timeout())
@@ -237,7 +219,7 @@ def fetch_feed(url: str, client: httpx.Client) -> list[dict[str, Any]]:
         validators["If-None-Match"] = response.headers["ETag"]
     if response.headers.get("Last-Modified"):
         validators["If-Modified-Since"] = response.headers["Last-Modified"]
-    _validators[url] = validators
+    courtesy.validators[url] = validators
 
     parsed = feedparser.parse(response.text)
     items = []
@@ -253,9 +235,11 @@ def fetch_feed(url: str, client: httpx.Client) -> list[dict[str, Any]]:
             continue
         items.append(
             {
+                # Hash HAM özetten, saklanan metin TEMİZ. İkisini ayırmak,
+                # temizliğe geçerken arşivin kimliğini korumanın tek yolu.
                 "content_hash": content_hash(title, summary),
                 "title": title,
-                "summary": summary or None,
+                "summary": clean_summary(summary) or None,
                 "source": (getattr(parsed.feed, "title", "") or urlparse(url).netloc).strip(),
                 "url": link,
                 "language": "tr",

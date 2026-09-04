@@ -1,26 +1,36 @@
 from datetime import datetime, timezone
+import asyncio
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 
-from app.core.database import get_db
+from app.core.database import get_db, SessionLocal
 from app.core.deps import get_current_user_id, get_optional_user_id
-from . import ai_service, market_service, service
-from .models import TransactionProposal
+from app.modules.auth.models import User
+from app.core.email import send_transaction_email, send_transaction_request_email
+from app.modules.notification.models import Notification
+from . import ai_service, allocation, market_service, service
+from app.modules.analytics import service as analytics_service
+from app.core.deps import require_service_token
+from .models import AllocationTarget, TransactionProposal
 from .ai_schemas import (
     PortfolioPositionsOut, StageTransactionRequest, StageTransactionOut,
 )
 from .schemas import (
+    AllocationDriftOut,
+    AllocationTargetOut,
+    AllocationTargetRequest,
     InvestmentBalance, Position, Order, CandlestickDataPoint, AssetAllocationItem,
-    WatchlistItem, TopMoverItem, DividendItem, SectorAllocationItem, HeatmapItem,
-    OrderProposeRequest, OrderConfirmRequest
+    WatchlistItem, TopMoverItem, SectorAllocationItem, HeatmapItem,
+    OrderProposeRequest, OrderConfirmRequest, CashStatementOut
 )
 
 router = APIRouter(tags=["investment"])
 
 @router.get("/portfolio/summary", response_model=InvestmentBalance)
-async def get_portfolio_summary(
+def get_portfolio_summary(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -67,42 +77,98 @@ async def get_portfolio_summary(
     }
 
 @router.get("/portfolio/chart", response_model=Dict[str, List[CandlestickDataPoint]])
-async def get_portfolio_chart(
-    symbol: str = Query(default="XU100"),
+def get_portfolio_chart(
+    range: str = Query(default="yil"),
     db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
 ):
-    """
-    Mum (candlestick) grafiği verisi — gerçek `investment.market_candles`
-    satırlarından, farklı zaman dilimleri için.
+    """Portföyün KENDİ değerinin mum serisi.
 
-    Varsayılan sembol XU100: portföyün kendi zaman serisi ancak günlük
-    anlık görüntüler biriktikçe oluşur, endeks ise ilk günden itibaren gerçek.
-    """
-    product = market_service.resolve_symbol(db, symbol)
-    if product is None:
-        raise HTTPException(status_code=404, detail=f"Bilinmeyen sembol: {symbol}")
+    Bu uç nokta uzun süre `XU100` döndürüyordu -- BIST 100 endeksini, "Portföy
+    Performansı" başlığının altında. Gerekçesi de buradaydı: "portföyün kendi
+    zaman serisi ancak günlük anlık görüntüler biriktikçe oluşur". O gerekçe
+    artık geçerli değil: seri, elde olan mumlardan ve pozisyonların zaman
+    içindeki miktarından hesaplanabiliyor.
 
-    series = market_service.candle_series(db, product.symbol, limit=400)
-    # Windows the dashboard offers. Bars, not calendar days: a 5-day window on
-    # a market that was shut for three of them should still draw five bars.
-    windows = {"gun": 1, "hafta": 5, "ay": 22, "yil": 252, "tum": len(series)}
+    **Tek pencere hesaplanır.** Önceden beş pencerenin hepsi her istekte
+    üretiliyordu ve her biri bütün pozisyonların barlarını yeniden okuyordu:
+    çağrı başına ~130 sorgu, ölçülen 5,9 saniye ve 173 KB yanıt. Arayüz aynı
+    anda tek bir aralık gösteriyor, dolayısıyla tek bir aralık dönüyor.
+
+    Bilinmeyen bir aralık adı sessizce varsayılana düşmez: ekranda hangi
+    aralığın çizildiğini bilmemek, yanlış aralığı doğru sanmaktan kötüdür.
+    """
+    if range not in analytics_service.CANDLE_RANGES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Bilinmeyen aralık: {range}. "
+                   f"Geçerli olanlar: {', '.join(analytics_service.CANDLE_RANGES)}.",
+        )
+
+    holdings = market_service.holdings(db, user_id=user_id)
+    priced = [row for row in holdings if row.get("price") is not None]
+    proposals = _confirmed_proposals(db, user_id)
+
+    account = market_service.account(db, user_id=user_id)
+    base_currency = (getattr(account, "currency_code", None) or "TRY")
+    quotes = market_service.latest_quotes(db)
+
+    interval, bucket, window, limit = analytics_service.CANDLE_RANGES[range]
+
+    # Tek pencere hesaplandığı için her sembol tam bir kez okunuyor; ara
+    # bellek gerekmiyor. Beş pencerenin hepsi üretilirken aynı barlar beş kez
+    # çekiliyordu -- çözüm önbellek değil, istenmeyen dört pencereyi hiç
+    # hesaplamamaktı.
+    def bars_for(symbol: str) -> list:
+        return market_service.candle_bars(db, symbol, limit=limit, interval=interval)
+
+    def fx_for(code: str) -> list:
+        return market_service.candle_closes(
+            db, f"{code}{base_currency}", limit=limit, interval=interval
+        )
+
+    # Para birimleri toplanmadan ÖNCE çevrilir, geçmiş kurla.
+    rate_at = analytics_service._rate_lookup(
+        priced, base_currency, fx_for, ai_service.fx_rates(quotes),
+    )
+    candles = analytics_service.portfolio_candles(
+        priced,
+        bars_for=bars_for,
+        proposals=proposals,
+        bucket_seconds=bucket,
+        rate_at=rate_at,
+        window_days=window,
+    )
     return {
-        key: [
+        range: [
             {
-                "time": int(bar["timestamp"].timestamp()),
-                "open": bar["open"], "high": bar["high"],
-                "low": bar["low"], "close": bar["close"],
-                "value": bar.get("volume") or 0,
-                "color": "#22c55e" if bar["close"] >= bar["open"] else "#ef4444",
+                **candle,
+                # Portföyün hacmi yoktur; alan sözleşmede olduğu için sıfır
+                # geçiliyor, arayüz hacim panelini çizmiyor.
+                "value": 0,
+                "color": "#22c55e" if candle["close"] >= candle["open"] else "#ef4444",
             }
-            for bar in series[-count:]
+            for candle in candles
         ]
-        for key, count in windows.items()
-        if count > 0
     }
 
+
+def _confirmed_proposals(db: Session, user_id: Optional[str]) -> list:
+    """Onaylanmış işlemler -- pozisyonun zaman içindeki miktarını veren tek kayıt."""
+    if not user_id:
+        return []
+    return (
+        db.query(TransactionProposal)
+        .filter(
+            TransactionProposal.user_id == user_id,
+            TransactionProposal.status == "CONFIRMED",
+        )
+        .all()
+    )
+
+
 @router.get("/positions", response_model=List[Position])
-async def get_positions(
+def get_positions(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -130,6 +196,14 @@ def _as_frontend_position(row: dict) -> dict:
     daily = (price - previous) * quantity if (previous and price) else 0.0
     return {
         "symbol": row["symbol"],
+        # `holdings()` bunları zaten taşıyordu; burada düşürülüyorlardı.
+        # `currency` ile aynı hikâye: ana sayfadaki "Son Pozisyonlar" tablosu
+        # tür ve giriş tarihi sütunlarını dolduramadığı için o sütunlar boş
+        # kalıyordu -- veri eksik olduğu için değil, sorulmadığı için.
+        "name": row.get("name"),
+        "market": row.get("market"),
+        "productType": row.get("product_type"),
+        "openedAt": row.get("opened_at"),
         # Carried through. `holdings()` had it all along; dropping it here is
         # why the dashboard rendered a dollar price under a "Pozisyon (₺)"
         # heading.
@@ -146,7 +220,7 @@ def _as_frontend_position(row: dict) -> dict:
 
 
 @router.get("/orders", response_model=List[Order])
-async def get_orders(db: Session = Depends(get_db)):
+def get_orders(db: Session = Depends(get_db)):
     """
     Geçmiş ve bekleyen emirler.
 
@@ -158,8 +232,42 @@ async def get_orders(db: Session = Depends(get_db)):
     return market_service.recent_orders(db)
 
 
+
+@router.get(
+    "/accounts/{identifier}/statement",
+    response_model=CashStatementOut,
+    summary="Yatırım hesabı hareketleri",
+)
+def cash_statement(
+    identifier: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Yatırım hesabının nakit hareketleri.
+
+    Hesap IBAN'ıyla ya da hesap numarasıyla çağrılabilir; bankacılık arayüzü
+    elindeki iki alandan hangisi doluysa onu gönderiyor.
+
+    Bankacılık dökümüyle aynı 404 kuralı: başkasının hesabının var olduğunu
+    doğrulamak bile fazla bilgi.
+    """
+    account = market_service.account(db, user_id=user_id, allow_demo_fallback=False)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Hesap bulunamadı.")
+
+    wanted = identifier.replace(" ", "").upper()
+    known = {
+        (account.account_number or "").replace(" ", "").upper(),
+        (account.iban or service.iban_for(account.account_number)).replace(" ", "").upper(),
+    }
+    if wanted not in known:
+        raise HTTPException(status_code=404, detail="Hesap bulunamadı.")
+
+    return service.cash_statement(db, account, limit=limit)
+
 @router.get("/asset-allocation", response_model=List[AssetAllocationItem])
-async def get_asset_allocation(
+def get_asset_allocation(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -169,48 +277,28 @@ async def get_asset_allocation(
     rates = ai_service.fx_rates(quotes)
     account = market_service.account(db, user_id=user_id)
 
-    # Bucketed by the instrument's MARKET, not by its currency. Currency was a
-    # workable proxy while the only foreign instrument was American, but gold
-    # is quoted in dollars and is not a foreign share -- it was being counted
-    # as one. Values are still converted through `holding_value`, which skips
-    # a holding whose rate is unknown rather than assuming 1.0.
-    #: Venue to bucket. Anything unlisted falls to "Diğer" rather than being
-    #: dropped: a holding that disappears from an allocation chart is far
-    #: harder to notice than one in a catch-all slice.
-    by_market = {
-        "BIST": "BIST Hisse",
-        "NASDAQ": "ABD Hisse",
-        "NYSE": "ABD Hisse",
-        "COMEX": "Emtia / Döviz",
-        "FX": "Emtia / Döviz",
-    }
-
-    buckets = {
-        "Nakit (TRY)": float(account.cash_balance) if account else 0.0,
-        "BIST Hisse": 0.0,
-        "ABD Hisse": 0.0,
-        "Emtia / Döviz": 0.0,
-        "Diğer": 0.0,
-    }
+    # Kovalar `allocation.py`'de, tek kaynak. Burada ikinci bir liste tutmak,
+    # hedef karşılaştırmasının farklı adlarla okuması demekti -- bu depoda
+    # aynı hata `sort_by` ve `market` filtresi için iki kez ölçüldü.
+    valued = []
     for row in rows:
         value = ai_service.holding_value(row, rates)
-        if value is None:
-            continue
-        buckets[by_market.get(row.get("market") or "", "Diğer")] += value
-    grand = sum(buckets.values())
-    palette = {
-        "Nakit (TRY)": "#64748b",
-        "BIST Hisse": "#0ea5e9",
-        "ABD Hisse": "#22c55e",
-        "Emtia / Döviz": "#f59e0b",
-        "Diğer": "#a855f7",
-    }
+        if value is not None:
+            valued.append((row, value))
+    amounts = allocation.current_amounts(
+        valued, float(account.cash_balance) if account else 0.0
+    )
+    grand = sum(amounts.values())
     # An empty bucket is noise on a pie chart; cash is kept even at zero
     # because "no cash" is itself worth seeing.
     buckets = {
-        name: amount
-        for name, amount in buckets.items()
-        if amount or name == "Nakit (TRY)"
+        allocation.label_for(key): amount
+        for key, amount in amounts.items()
+        if amount or key == allocation.CASH
+    }
+    palette = {
+        allocation.label_for(key): allocation.colour_for(key)
+        for key in allocation.BUCKETS
     }
     return [
         {
@@ -224,7 +312,7 @@ async def get_asset_allocation(
 
 
 @router.get("/watchlist", response_model=Dict[str, List[WatchlistItem]])
-async def get_watchlist(
+def get_watchlist(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
@@ -270,7 +358,7 @@ async def get_watchlist(
 
 
 @router.post("/watchlist/{symbol}", response_model=Dict[str, str])
-async def add_to_watchlist(
+def add_to_watchlist(
     symbol: str,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -283,7 +371,7 @@ async def add_to_watchlist(
 
 
 @router.delete("/watchlist/{symbol}", response_model=Dict[str, str])
-async def remove_from_watchlist(
+def remove_from_watchlist(
     symbol: str,
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
@@ -295,7 +383,7 @@ async def remove_from_watchlist(
 
 
 @router.get("/top-movers", response_model=Dict[str, List[TopMoverItem]])
-async def get_top_movers(db: Session = Depends(get_db), limit: int = Query(default=5, ge=1, le=20)):
+def get_top_movers(db: Session = Depends(get_db), limit: int = Query(default=5, ge=1, le=20)):
     """
     Günün en çok kazandıran ve kaybettiren hisseleri — "yükselenler/düşenler".
 
@@ -324,20 +412,8 @@ async def get_top_movers(db: Session = Depends(get_db), limit: int = Query(defau
     }
 
 
-@router.get("/dividends", response_model=List[DividendItem])
-async def get_dividends(db: Session = Depends(get_db)):
-    """
-    Temettü verimi — sağlayıcıdan gelen `dividend_yield` üzerinden.
-
-    Ex-date ve ödeme tarihi bu sağlayıcıda yok; uydurulmuş tarih göstermek
-    yerine boş bırakılıyor. Yanlış bir temettü tarihi, kullanıcının o tarihe
-    göre işlem yapmasına sebep olabilir.
-    """
-    return market_service.dividend_rows(db)
-
-
 @router.get("/sector-allocation", response_model=List[SectorAllocationItem])
-async def get_sector_allocation(
+def get_sector_allocation(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -377,7 +453,7 @@ async def get_sector_allocation(
 
 
 @router.get("/heatmap", response_model=List[HeatmapItem])
-async def get_heatmap(
+def get_heatmap(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
@@ -420,8 +496,9 @@ async def get_heatmap(
     "/portfolio/{user_id}/positions",
     response_model=PortfolioPositionsOut,
     summary="Portföy pozisyonları (MCP v2.1 sözleşmesi)",
+    dependencies=[Depends(require_service_token)],
 )
-async def get_portfolio_positions_for_ai(
+def get_portfolio_positions_for_ai(
     user_id: str,
     db: Session = Depends(get_db),
     account_ids: Optional[List[str]] = Query(default=None),
@@ -477,7 +554,7 @@ async def get_portfolio_positions_for_ai(
     response_model=StageTransactionOut,
     summary="İşlem önerisi hazırla (MCP v2.1 sözleşmesi)",
 )
-async def stage_transaction(
+def stage_transaction(
     request: StageTransactionRequest,
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
@@ -519,7 +596,25 @@ async def stage_transaction(
     # what turned an ordinary buy order into REJECTED_VALIDATION.
     body = request.model_dump()
     raw_symbol = (body.get("instrument") or {}).get("symbol")
-    product = market_service.resolve_symbol(db, raw_symbol) if raw_symbol else None
+    # strict: no fuzzy neighbour on the money path. Resolution accepts
+    # abbreviations and unaccented names everywhere ("thy", "turk hava
+    # yollari"), but a typo like "aselsn" must not quietly become an ASELS
+    # order. Reads may guess; a trade may not.
+    product = (
+        market_service.resolve_symbol(db, raw_symbol, strict=True) if raw_symbol else None
+    )
+    # When the name does not resolve, say THAT -- and offer what it might have
+    # been. Without this the raw text flowed on as the symbol, no price was
+    # found for it, and the blocker read "Fiyat bilgisi bulunamayan enstrüman:
+    # aple" -- blaming the price for a name that was never recognised.
+    # Suggestions only: strict mode still refuses to pick one, because a
+    # misread ticker on the money path buys the wrong company.
+    symbol_suggestions: list[str] = []
+    if raw_symbol and product is None:
+        symbol_suggestions = [
+            candidate.symbol
+            for candidate in market_service.resolve_candidates(db, raw_symbol)
+        ]
 
     # Whose portfolio and cash this proposal is measured against. The
     # authenticated identity wins; `mcp` calls with a service identity and
@@ -582,6 +677,7 @@ async def stage_transaction(
         reference_price=reference_price,
         held_quantity=held_quantity,
         resolved_symbol=product.symbol if product else None,
+        symbol_suggestions=symbol_suggestions,
         currency=currency,
         available_cash=float(owner.cash_balance) if owner is not None else None,
         cash_currency=(owner.currency_code if owner is not None else "TRY") or "TRY",
@@ -647,48 +743,107 @@ def _persist_proposal(
     db.commit()
 
 
+async def process_pending_transaction(proposal_id: str, email_to: str):
+    """
+    3 dakika bekleyip, işlemi finalize eden background task.
+    """
+    await asyncio.sleep(15)  # 15 seconds delay
+    
+    with SessionLocal() as db:
+        proposal = db.get(TransactionProposal, proposal_id)
+        if not proposal or proposal.status != "PENDING":
+            return
+            
+        owner = market_service.account(db, user_id=proposal.user_id)
+        if owner is None:
+            return
+            
+        try:
+            service.finalize_settlement(db, proposal, owner)
+            proposal.status = "CONFIRMED"
+            proposal.confirmed_at = datetime.now(timezone.utc)
+            
+            # --- In-App Notification Entegrasyonu ---
+            # Kullanıcıya işlemin başarıyla gerçekleştiğine dair gerçek zamanlı bildirim ekliyoruz.
+            quantity = float(proposal.quantity or 0)
+            db.add(Notification(
+                user_id=proposal.user_id,
+                title="İşlem Gerçekleşti",
+                description=f"{quantity} lot {proposal.symbol} {proposal.transaction_type.lower()} işleminiz başarıyla tamamlandı.",
+                type="SUCCESS",
+                link_url="/portfolio"
+            ))
+            # ----------------------------------------
+            
+            db.commit()
+            
+            if email_to:
+                quantity = float(proposal.quantity or 0)
+                estimate = (proposal.payload or {}).get("estimate") or {}
+                total_amount = abs(float(estimate.get("net_amount", 0)))
+                price = (total_amount / quantity) if quantity > 0 else 0.0
+                await send_transaction_email(
+                    email_to=email_to,
+                    transaction_type=proposal.transaction_type,
+                    asset_symbol=proposal.symbol,
+                    quantity=quantity,
+                    price=price,
+                    total_amount=total_amount,
+                    transaction_date=proposal.confirmed_at
+                )
+        except Exception as e:
+            db.rollback()
+            logging.getLogger(__name__).error("Failed to finalize transaction %s: %s", proposal_id, e)
+            try:
+                service.rollback_funds(db, proposal, owner)
+                proposal.status = "FAILED"
+                
+                # --- In-App Notification Entegrasyonu ---
+                # Hata durumunda (fiyat değişimi vb.) para iadesi sonrası hata bildirimi oluşturuyoruz.
+                db.add(Notification(
+                    user_id=proposal.user_id,
+                    title="İşlem Başarısız",
+                    description=f"{proposal.symbol} {proposal.transaction_type.lower()} işleminiz teknik bir nedenden ötürü gerçekleştirilemedi. Bakiyeniz iade edildi.",
+                    type="ERROR",
+                    link_url="/portfolio"
+                ))
+                # ----------------------------------------
+                
+                db.commit()
+            except Exception as rb_e:
+                db.rollback()
+                logging.getLogger(__name__).error("Failed to rollback transaction %s: %s", proposal_id, rb_e)
+
+
 @router.post(
     "/transactions/{proposal_id}/confirm",
     response_model=Dict[str, str],
     summary="Kullanıcının onayladığı işlem önerisini kesinleştir",
 )
-async def confirm_transaction_proposal(
+def confirm_transaction_proposal(
     proposal_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
     """
     Sohbetteki onay düğmesinin çağırdığı uç nokta.
-
-    Onay **yalnızca burada**, kullanıcının kendi eylemiyle verilir. Ajan
-    hiçbir koşulda onay veremez; sohbet içindeki "evet", "onaylıyorum" gibi
-    ifadeler onay sayılmaz. Bu ayrım MCP sözleşmesinin en sert kuralı ve bu
-    uç nokta onun karşılığı.
-
-    Önerinin gerçekten var olduğu, süresinin dolmadığı ve onu isteyen
-    kullanıcıya ait olduğu doğrulanır; aksi halde reddedilir.
     """
     proposal = db.get(TransactionProposal, proposal_id)
     if proposal is None:
         raise HTTPException(status_code=404, detail="Böyle bir işlem önerisi bulunamadı.")
 
-    # Ownership check before anything else: a 403 that leaked "this exists but
-    # is not yours" would already be more than the caller should learn, so an
-    # unowned proposal is indistinguishable from a missing one.
     if proposal.user_id and proposal.user_id != user_id:
         raise HTTPException(status_code=404, detail="Böyle bir işlem önerisi bulunamadı.")
 
     if proposal.cancelled_at is not None:
         raise HTTPException(status_code=409, detail="Bu öneri iptal edilmiş.")
 
-    if proposal.confirmed_at is not None:
-        # Idempotent: pressing confirm twice reports the same outcome rather
-        # than raising, because the user cannot tell whether the first press
-        # registered.
+    if proposal.confirmed_at is not None or proposal.status == "PENDING":
         return {
             "proposal_id": proposal.id,
-            "status": "confirmed",
-            "message": f"İşlem zaten onaylanmıştı (Öneri No: {proposal.id}).",
+            "status": proposal.status.lower(),
+            "message": f"İşlem zaten işleme alınmıştı (Öneri No: {proposal.id}).",
         }
 
     now = datetime.now(timezone.utc)
@@ -701,16 +856,9 @@ async def confirm_transaction_proposal(
             detail="Bu önerinin süresi doldu. Lütfen işlemi yeniden hazırlatın.",
         )
 
-    # A transfer settles against the BANKING ledger, not the investment
-    # account. Routing it through securities settlement is what produced a
-    # "Satım" with a blank ticker.
     if (proposal.transaction_type or "").upper() in ai_service.TRANSFER_TYPES:
         return _confirm_transfer(db, proposal, user_id, now)
 
-    # Settle before flipping the status, in ONE transaction. Marking a trade
-    # confirmed and then failing to move the money would leave the order list
-    # saying "Gerçekleşti" over an unchanged portfolio — the inconsistency this
-    # whole path exists to remove.
     owner = market_service.account(db, user_id=proposal.user_id or user_id)
     if owner is None:
         raise HTTPException(
@@ -719,22 +867,64 @@ async def confirm_transaction_proposal(
         )
 
     try:
-        applied = service.settle(db, proposal, owner)
+        applied = service.block_funds(db, proposal, owner)
     except service.SettlementError as exc:
         db.rollback()
-        # 409, not 400: the request was well-formed and was valid when staged;
-        # the account state changed underneath it.
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    proposal.confirmed_at = now
-    proposal.status = "CONFIRMED"
+    proposal.status = "PENDING"
+    
+    # --- In-App Notification Entegrasyonu ---
+    # Alım/Satım talebi alındığında kullanıcıya hemen beklemede olduğunu bildiren bir bildirim atıyoruz.
+    quantity = float(proposal.quantity or 0)
+    db.add(Notification(
+        user_id=proposal.user_id or user_id,
+        title="Talebiniz Alındı",
+        description=f"{quantity} lot {proposal.symbol} {proposal.transaction_type.lower()} talebiniz sıraya alındı.",
+        type="INFO",
+        link_url="/portfolio"
+    ))
+    # ----------------------------------------
+    
     db.commit()
+
+    trade_owner_id = proposal.user_id or user_id
+    user_obj = db.get(User, trade_owner_id)
+    
+    email_to = ""
+    if user_obj and user_obj.email:
+        prefs = getattr(user_obj, "notification_preferences", {}) or {}
+        should_send_email = prefs.get("transactions", {}).get("email", True)
+        if should_send_email:
+            email_to = user_obj.email
+            total_amount = abs(applied.get("cash_delta", 0.0))
+            quantity = float(proposal.quantity or 0)
+            price = (total_amount / quantity) if quantity > 0 else 0.0
+            
+            # Request received (PENDING) email
+            background_tasks.add_task(
+                send_transaction_request_email,
+                email_to=email_to,
+                transaction_type=proposal.transaction_type,
+                asset_symbol=proposal.symbol,
+                quantity=quantity,
+                price=price, 
+                total_amount=total_amount,
+                transaction_date=now
+            )
+
+    # Add background task for settlement after 3 minutes
+    background_tasks.add_task(
+        process_pending_transaction,
+        proposal_id=proposal.id,
+        email_to=email_to
+    )
 
     return {
         "proposal_id": proposal.id,
-        "status": "confirmed",
+        "status": "pending",
         "message": (
-            f"İşlem onaylandı (Öneri No: {proposal.id}). "
+            f"İşlem sıraya alındı (Öneri No: {proposal.id}). "
             f"Kalan bakiye: {applied['cash_after']:,.2f} TL."
         ),
     }
@@ -822,7 +1012,7 @@ def _confirm_transfer(db: Session, proposal, user_id, now) -> Dict[str, str]:
     response_model=List[Dict[str, Optional[str]]],
     summary="Sembol haritası (servisler arası)",
 )
-async def list_products(db: Session = Depends(get_db)):
+def list_products(db: Session = Depends(get_db)):
     """
     `ingestor` servisinin hangi sembolleri çekeceğini öğrendiği uç nokta.
 
@@ -854,3 +1044,153 @@ async def health_check():
     Sistemin ayakta olup olmadığını ve doğru modüle ulaşıldığını doğrulamak için kullanılır.
     """
     return {"status": "ok", "module": "investment"}
+
+
+# ---------------------------------------------------------------------------
+# Hedef dağılım ve ondan sapma
+#
+# Hedefi KULLANICI koyuyor, sistem değil. `compliance/rules.py:SUI-001`'in
+# gerekçesi: "sistem ölçüm ile kullanıcının kendi beyanını karşılaştırır, bir
+# ürünün kişiye uygunluğuna karar vermez." Bir model portföy önermek o kararı
+# vermek olurdu -- ve dört SPK ürün grubundan yalnızca hisse senedinin bu
+# sistemde enstrümanı olduğu için önerilenin çoğu uygulanamazdı.
+# ---------------------------------------------------------------------------
+
+
+def _targets_for(db: Session, user_id: Optional[str]) -> dict[str, float]:
+    """Okuma `service`'e taşındı: risk modülü de aynı satırları okuyor ve
+    tabloyu sahibi olan modülün okuması gerekiyor."""
+    return service.allocation_targets(db, user_id)
+
+
+@router.get(
+    "/allocation-target",
+    response_model=AllocationTargetOut,
+    summary="Hedef dağılımım",
+)
+def get_allocation_target(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """Kullanıcının kendi belirlediği hedef ağırlıklar."""
+    rows = (
+        db.query(AllocationTarget)
+        .filter(AllocationTarget.user_id == user_id)
+        .order_by(AllocationTarget.bucket)
+        .all()
+        if user_id
+        else []
+    )
+    return {
+        "hasTarget": bool(rows),
+        "targets": [
+            {
+                "bucket": row.bucket,
+                "label": allocation.label_for(row.bucket),
+                "targetPercent": float(row.target_percent),
+            }
+            for row in rows
+        ],
+        "updatedAt": max((row.updated_at for row in rows), default=None),
+    }
+
+
+@router.put(
+    "/allocation-target",
+    response_model=AllocationTargetOut,
+    summary="Hedef dağılımı belirle",
+)
+def set_allocation_target(
+    request: AllocationTargetRequest,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    Hedef ağırlıkları tamamen değiştirir; boş liste hedefi kaldırır.
+
+    Toplam 100 olmak ZORUNDA. Yüzde yüze tamamlanmayan bir hedef, sapma
+    hesabında her kovayı aynı anda "eksik" ya da "fazla" gösterir ve
+    kullanıcı hangi sayının yanlış olduğunu göremez.
+    """
+    seen: dict[str, float] = {}
+    for item in request.targets:
+        if item.bucket not in allocation.TARGETABLE:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"'{item.bucket}' hedef belirlenebilir bir kova değil; "
+                    f"geçerli değerler: {', '.join(allocation.TARGETABLE)}."
+                ),
+            )
+        if item.bucket in seen:
+            raise HTTPException(
+                status_code=422,
+                detail=f"'{item.bucket}' için iki hedef verildi.",
+            )
+        seen[item.bucket] = float(item.targetPercent)
+
+    if seen:
+        total = round(sum(seen.values()), 2)
+        if total != 100.0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Hedeflerin toplamı 100 olmalı; verilen toplam {total:g}.",
+            )
+
+    db.query(AllocationTarget).filter(AllocationTarget.user_id == user_id).delete()
+    now = datetime.now(timezone.utc)
+    for bucket, percent in seen.items():
+        db.add(AllocationTarget(
+            user_id=user_id, bucket=bucket, target_percent=percent, updated_at=now
+        ))
+    db.commit()
+    return get_allocation_target(db=db, user_id=user_id)
+
+
+@router.get(
+    "/allocation-drift",
+    response_model=AllocationDriftOut,
+    summary="Hedeften sapma",
+)
+def get_allocation_drift(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    Ölçülen ağırlıklar ile kullanıcının kendi hedefi arasındaki fark.
+
+    Tavsiye değil, iki olgunun çıkarması: biri portföyden ölçülüyor, diğeri
+    kullanıcının kendi girdiği sayı. Hiçbir yerde ne yapılması gerektiği
+    söylenmiyor -- yalnızca hedefe ulaşmak için kaç lira fark olduğu.
+    """
+    rows = market_service.holdings(db, user_id=user_id)
+    quotes = market_service.latest_quotes(db)
+    rates = ai_service.fx_rates(quotes)
+    account = market_service.account(db, user_id=user_id)
+
+    valued = [
+        (row, value)
+        for row, value in ((row, ai_service.holding_value(row, rates)) for row in rows)
+        if value is not None
+    ]
+    amounts = allocation.current_amounts(
+        valued, float(account.cash_balance) if account else 0.0
+    )
+    result = allocation.drift(amounts, _targets_for(db, user_id))
+    return {
+        "hasTarget": result["has_target"],
+        "totalValue": result["total_value"],
+        "buckets": [
+            {
+                "bucket": row["bucket"],
+                "label": row["label"],
+                "amount": row["amount"],
+                "currentPercent": row["current_percent"],
+                "targetPercent": row["target_percent"],
+                "gapPoints": row["gap_points"],
+                "gapAmount": row["gap_amount"],
+            }
+            for row in result["buckets"]
+        ],
+        "statement": result["statement"],
+    }

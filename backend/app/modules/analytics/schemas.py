@@ -9,7 +9,7 @@ the allocation to sum to 100%, which is only meaningful if the parts are real.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,6 +23,18 @@ class AllocationSlice(BaseModel):
 class TrendPoint(BaseModel):
     date: datetime
     value: float
+
+
+class BenchmarkSeries(BaseModel):
+    """The index the portfolio is shown against, on the portfolio's own dates.
+
+    Raw closes, not rescaled: the chart decides how to put two series with
+    different units on one axis, and an already-normalised number would leave
+    the page unable to say what the index actually did.
+    """
+
+    symbol: str
+    points: List[TrendPoint] = Field(default_factory=list)
 
 
 class PerformanceSummary(BaseModel):
@@ -68,6 +80,10 @@ class PortfolioAnalysis(BaseModel):
     allocation: List[AllocationSlice] = Field(default_factory=list)
     sectors: List[AllocationSlice] = Field(default_factory=list)
     trend: List[TrendPoint] = Field(default_factory=list)
+    #: None when the index has no overlapping history. A comparison line drawn
+    #: from a partial overlap would show the portfolio and the index diverging
+    #: on days one of them simply had no bar.
+    benchmark: Optional[BenchmarkSeries] = None
     performance: PerformanceSummary
     activity: ActivitySummary
 
@@ -76,3 +92,41 @@ class PortfolioAnalysis(BaseModel):
     #: portfolio is not the portfolio's trend.
     excluded_symbols: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+
+class ReportSection(BaseModel):
+    """Raporun bir bölümü.
+
+    `summary` KODDA kurulmuş tek cümle; ekran, PDF ve sohbet onu olduğu gibi
+    okuyor. `lines` insan okuru için hazır satırlar, `rows` ise tabloyu çizen
+    yapısal veri -- ikisi aynı bilgiyi taşıyor çünkü PDF satırları, ekran
+    tabloyu istiyor.
+    """
+
+    key: str
+    title: str
+    summary: str = ""
+    lines: List[str] = Field(default_factory=list)
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PortfolioReport(BaseModel):
+    #: Belgenin ÜRETİLDİĞİ an.
+    generated_at: str
+    currency_code: str = "TRY"
+    #: İçindeki FİYATLARIN ait olduğu an -- `generated_at` ile aynı şey değil.
+    #: Rapor, gecikmeyi söylemeyen tek yüzey olmamalı: sohbet, portföy ucu ve
+    #: gösterge paneli hepsi söylüyor.
+    as_of: str = ""
+    is_delayed: bool = False
+    #: Sağlayıcının BESLEME gecikmesi. Gözlemin yaşı DEĞİL -- ikisi bir dönem
+    #: toplanıyordu ve kapalı bir borsanın son kapanışı "1095 dakika
+    #: gecikmeli" diye raporlanıyordu.
+    delay_minutes: int = 0
+    #: Gözlemin kendisi eskidiyse. Piyasa kapalıyken normal (son kapanış),
+    #: açıkken arıza işareti; ikisi de bildirilir ama yalnızca biri gecikmedir.
+    is_stale: bool = False
+    #: Eskiliğin sebebi, BİLİNİYORSA. "MARKET_CLOSED" ya da None. None,
+    #: "sebep bilinmiyor" demek -- kapalılık iddia edilmez.
+    stale_reason: Optional[str] = None
+    sections: List[ReportSection] = Field(default_factory=list)

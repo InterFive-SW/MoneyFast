@@ -96,8 +96,35 @@ ROUTES = {
     "/investment/portfolio/": "portfolio",
     "/investment/transactions/stage": "stage",
     "/risk/calculate": "risk",
+    "/analytics/report/": "report",
+    "/risk/profile/": "risk_summary",
+    # v2.13. Üçü de kullanıcıyı yoldan alıyor, `risk/profile/` gibi.
+    "/risk/scenario": "scenario",
+    "/risk/stress": "stress",
+    "/risk/simulate": "simulate",
     "/market/instruments": "instruments",
+    # v2.19. `/market/search` ile `/market/instruments` ayrı yollar; ikisi de
+    # enstrüman döndürüyor ama biri tarama, diğeri ad->sembol sözlüğü.
+    "/market/search": "instrument_search",
+    # v2.11. Listed before the bare "/market/" fragments would matter; the
+    # paths do not overlap, but naming it keeps the mapping readable.
+    "/market/news/portfolio": "portfolio_news",
+    "/market/technicals": "technicals",
+    # v2.14. `/market/fundamentals` ile `/market/fundamentals/ingest` ayrı
+    # yollar; ikincisine bu suite hiç dokunmuyor.
+    "/market/fundamentals": "fundamentals",
+    "/market/quarterly": "quarterly",
+    # v2.12. `/market/portfolio/technical` ile `/market/technicals` ayrı
+    # yollar; ilki bu satırdan ÖNCE eşleşmeli diye değil, hiç çakışmadıkları
+    # için ayrı yazılı.
+    "/market/portfolio/technical": "portfolio_technical",
     "/compliance/validate": "compliance",
+    # v2.8 banking. `payments/stage` is listed BEFORE the investment stage
+    # route would ever be consulted for it; the two paths do not overlap, but
+    # naming both keeps the mapping explicit.
+    "/banking/cash-flow": "cash_flow",
+    "/banking/bills/lookup": "lookup",
+    "/banking/payments/stage": "payment_stage",
     # Served by the rag service on its own base URL, matched on path alone.
     "/search": "search",
 }
@@ -169,7 +196,8 @@ class FakeBackend:
 
 @pytest.fixture(autouse=True)
 def fake_backend(
-    portfolio_payload, search_payload, risk_payload, compliance_payload, stage_payload
+    portfolio_payload, search_payload, risk_payload, risk_summary_payload,
+    compliance_payload, stage_payload,
 ):
     """Install the transport double, preloaded with valid responses.
 
@@ -180,6 +208,7 @@ def fake_backend(
     backend.json("portfolio", portfolio_payload)
     backend.json("search", search_payload)
     backend.json("risk", risk_payload)
+    backend.json("risk_summary", risk_summary_payload)
     backend.json("compliance", compliance_payload)
     backend.json("stage", stage_payload)
 
@@ -306,6 +335,53 @@ def risk_payload() -> dict[str, Any]:
 
 
 @pytest.fixture()
+def risk_summary_payload() -> dict[str, Any]:
+    """What GET /risk/profile/{user_id} returns for a measured portfolio.
+
+    No source/is_delayed block: this payload is an interpretation computed
+    from a price feed, not a reading of one, and stamping it with a provider
+    name would attribute the score to something that never produced it.
+    """
+    return {
+        "as_of": "2026-08-27T09:15:00Z",
+        "score": 83.4,
+        "level": "Düşük",
+        "position_count": 14,
+        "suitability": {
+            "measured_level": "Düşük",
+            "declared_tolerance": "Orta",
+            "alignment": "PORTFOLIO_CALMER",
+            "statement": "Ölçülen portföy riskiniz \"Düşük\" seviyesinde.",
+        },
+        "declared": {
+            "tolerance_level": "Orta",
+            "investment_horizon": "LONG",
+            "assessed_at": "2026-08-26T11:02:00Z",
+            "questionnaire_version": "v1",
+        },
+        "metrics": {
+            "volatility_annualized": 0.1842,
+            "max_drawdown": -0.1104,
+            "hhi": 0.1601,
+            "effective_n": 6.246,
+            "top_3_weight": 0.4412,
+            "largest_position": {"symbol": "TEST-THYAO", "weight": 0.19},
+        },
+        "findings": [
+            {"label": "Yoğunlaşma", "detail": "Portföy 6 pozisyona denk dağılmış.",
+             "severity": "INFO"},
+        ],
+        "data_quality": {
+            "coverage": 1.0,
+            "excluded_symbols": [],
+            "gap_filled_days": 0,
+            "is_statistically_reliable": True,
+        },
+        "warnings": [],
+    }
+
+
+@pytest.fixture()
 def compliance_payload() -> dict[str, Any]:
     return {
         "verdict": "PASS",
@@ -358,6 +434,10 @@ def portfolio_top_level_keys() -> frozenset[str]:
     return frozenset(
         {
             "as_of", "source", "is_delayed", "delay_minutes", "base_currency",
+            # v2.19: gözlemin YAŞI, beslemenin gecikmesinden ayrı bir alan.
+            # İkisi toplanıyordu ve kapalı bir borsanın son kapanışı
+            # "1095 dakika gecikmeli" diye raporlanıyordu.
+            "is_stale",
             "positions", "totals", "warnings",
         }
     )

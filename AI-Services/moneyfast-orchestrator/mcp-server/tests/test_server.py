@@ -25,9 +25,48 @@ EXPECTED_TOOLS = {
     "get_market_data",
     "rag_semantic_market_search",
     "calculate_portfolio_risk_metrics",
+    "get_risk_profile_summary",
     "validate_compliance_rules",
     "classify_and_route_intent",
     "prepare_transaction_proposal",
+    # v2.8: banking. Both stop at a proposal -- there is no execute tool.
+    "lookup_bill",
+    "prepare_payment_proposal",
+    # v2.10: trend state for one instrument. Separate from get_market_data
+    # because it needs price HISTORY, and the history can be too short to
+    # answer -- a failure mode a current quote does not have.
+    "get_technical_signals",
+    # v2.11: haberin kullanıcının SAHİP OLDUĞU hisselerle kesişimi. Belge
+    # aramasından ayrı, çünkü bu bir sorgu değil bir kesişim: eşleşme sembol
+    # eşitliğiyle kesin, semantik yakınlıkla değil.
+    "get_portfolio_news",
+    # v2.12: aynı okuma, her POZİSYON için, artı tek bir toplam cümlesi.
+    # Tek-sembol aracının n kez çağrılmasıyla aynı şey değil: sayı ile değer
+    # ayrışıyor ve toplamı modele hesaplatmak her turda başka bir sayı
+    # üretirdi.
+    "get_portfolio_technicals",
+    # v2.13: "ne olurdu" ailesi. Üçü de ölçüm; ikisi geçmiş getirilerin
+    # aritmetiği, biri gerçekten olan günler.
+    "run_portfolio_scenario",
+    "get_portfolio_stress_test",
+    "simulate_position_change",
+    # v2.14: şirketin işi nasıl gidiyor. Yeni veri değil -- zaten toplanan
+    # otuz beş alan, ajana ilk kez ulaşıyor.
+    "get_company_fundamentals",
+    # v2.15: tek SERİ taşıyan araç. Anlık görüntünün cevaplayamadığı soru.
+    "get_quarterly_financials",
+    # v2.16: neye SAHİP olduğu değil, ne kazanıp ne harcadığı. Portföyle
+    # bütçe arasındaki köprü; hesaplama zaten vardı, ajan göremiyordu.
+    "get_cash_flow_summary",
+    # v2.18: hepsi birden. Diğerleri birer soruyu cevaplıyor; bu, hiçbirinin
+    # tek başına cevaplayamadığı "genel durum" sorusunu.
+    "get_portfolio_report",
+    # v2.19: şirket ADINDAN sembole. Belge aramasından ayrı, çünkü bu bir
+    # benzerlik değil bir sözlük araması: "türk hava yolları" ile THYAO
+    # arasındaki bağ kayıtlı bir gerçek. Bu araç olmadan yönlendiricinin
+    # çıkardığı `company_names` hiçbir yerde okunmuyordu ve adla sorulan her
+    # soru süzgeçsiz aramaya düşüyordu.
+    "resolve_instruments",
 }
 
 #: Every tool that reaches the backend. classify_and_route_intent is
@@ -41,7 +80,11 @@ HTTP_TOOLS = EXPECTED_TOOLS - {"classify_and_route_intent"}
 class TestWiring:
     def test_server_identity_constants(self):
         assert server.SERVER_NAME == "moneyfast"
-        assert server.CONTRACT_VERSION == "v2.2"
+        # v2.10: `get_technical_signals` eklendi. Bilerek yapılan bir
+        # sözleşme değişikliği, dolayısıyla iddia gevşetilmiyor, onunla
+        # birlikte taşınıyor.
+        # v2.19: `resolve_instruments`.
+        assert server.CONTRACT_VERSION == "v2.19"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -52,11 +95,13 @@ class TestWiring:
         assert "Fail closed" in instructions
         assert "stages only" in instructions
 
-    def test_domain_modules_cover_all_seven_domains(self):
+    def test_domain_modules_cover_every_domain(self):
         domains = {name for name, _ in server.DOMAIN_MODULES}
         assert domains == {
             "orchestrator", "portfolio", "market_data", "market_research",
-            "risk_strategy", "compliance", "transaction",
+            "risk_strategy", "compliance", "transaction", "banking",
+            "technical", "news", "scenario", "fundamentals", "cash_flow",
+            "report", "instrument",
         }
 
     def test_every_domain_module_exposes_register(self):
@@ -96,7 +141,7 @@ class TestWiring:
 # ==========================================================================
 class TestDiscovery:
     @pytest.mark.asyncio
-    async def test_all_seven_tools_are_discoverable(self):
+    async def test_every_tool_is_discoverable(self):
         tools = await server.mcp.list_tools()
         assert {t.name for t in tools} == EXPECTED_TOOLS
 

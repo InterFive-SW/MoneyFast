@@ -16,6 +16,10 @@ import store
 
 
 class FakeCursor:
+    #: DELETE kaç satır etkiledi. `delete_document` bunu okuyor ve
+    #: "gerçekten bir şey silindi mi" sorusunun cevabı bu.
+    rowcount = 0
+
     def __init__(self, rows):
         self._rows = rows
 
@@ -30,10 +34,14 @@ class FakeConnection:
     def __init__(self, rows):
         self._rows = rows
         self.executed: list[tuple] = []
+        #: Testin ayarladığı DELETE sonucu.
+        self.rowcount = 0
 
     async def execute(self, sql, params=None):
         self.executed.append((sql, params))
-        return FakeCursor(self._rows)
+        cursor = FakeCursor(self._rows)
+        cursor.rowcount = self.rowcount
+        return cursor
 
     @asynccontextmanager
     async def transaction(self):
@@ -85,6 +93,7 @@ class TestMatchChunks:
     async def test_parameters_are_passed_by_name_in_the_documented_order(self, pool):
         await store.match_chunks(
             "[0.1,0.2]",
+            None,
             top_k=5,
             min_similarity=0.7,
             tickers=["THYAO"],
@@ -104,19 +113,21 @@ class TestMatchChunks:
         """The contract allows 25; rag.match_chunks raises above 20. Clamping
         here keeps a legal tool call from surfacing as "sources could not be
         consulted"."""
-        await store.match_chunks("[0.1]", top_k=25, min_similarity=None)
+        await store.match_chunks("[0.1]", None, top_k=25, min_similarity=None)
         assert pool.conn.executed[-1][1]["top_k"] == store.MAX_TOP_K
 
     @pytest.mark.asyncio
     async def test_top_k_below_one_is_raised_to_one(self, pool):
-        await store.match_chunks("[0.1]", top_k=0, min_similarity=None)
+        await store.match_chunks("[0.1]", None, top_k=0, min_similarity=None)
         assert pool.conn.executed[-1][1]["top_k"] == 1
 
     @pytest.mark.asyncio
     async def test_rows_are_returned_unchanged(self, monkeypatch):
         fake = FakePool(rows=[{"chunk_id": "c1"}])
         monkeypatch.setattr(store, "_pool", fake)
-        assert await store.match_chunks("[0.1]", top_k=5, min_similarity=None) == [{"chunk_id": "c1"}]
+        assert await store.match_chunks(
+            "[0.1]", None, top_k=5, min_similarity=None
+        ) == [{"chunk_id": "c1"}]
 
 
 class TestIndexSnapshot:
@@ -234,3 +245,126 @@ class TestPoolConstruction:
         # Constructed lazily and then reused; a second call must not rebuild.
         assert await store.open_pool() is pool
         monkeypatch.setattr(store, "_pool", None)
+
+
+class TestOwnership:
+    """Whose documents a search may reach.
+
+    Retrieval was written for one shared public corpus of news. Once users can
+    upload their own files, a document that any other user's query can return
+    is a disclosure, not a bug in a feature. These tests pin the mechanism on
+    the Python side; the SQL side is pinned by 0004 and the permissions test.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_owner_is_passed_to_the_sql_function(self, pool):
+        await store.match_chunks(
+            "[0.1]", "11111111-1111-1111-1111-111111111111",
+            top_k=5, min_similarity=None,
+        )
+        _sql, params = pool.conn.executed[-1]
+        assert params["owner"] == "11111111-1111-1111-1111-111111111111"
+
+    @pytest.mark.asyncio
+    async def test_anonymous_passes_null_rather_than_a_wildcard(self, pool):
+        """There is deliberately no value meaning "everyone's documents".
+        NULL means the public corpus alone, because `owner = NULL` is never
+        true for any row."""
+        await store.match_chunks("[0.1]", None, top_k=5, min_similarity=None)
+        _sql, params = pool.conn.executed[-1]
+        assert params["owner"] is None
+
+    @pytest.mark.asyncio
+    async def test_the_owner_argument_cannot_be_omitted(self, pool):
+        """The whole safety property. A call site that was never updated must
+        break, not quietly widen its results."""
+        with pytest.raises(TypeError):
+            await store.match_chunks("[0.1]", top_k=5, min_similarity=None)
+
+    @pytest.mark.asyncio
+    async def test_the_owner_is_cast_so_a_text_id_cannot_widen_the_match(self, pool):
+        sql, _params = pool.conn.executed[-1] if pool.conn.executed else ("", {})
+        await store.match_chunks("[0.1]", None, top_k=5, min_similarity=None)
+        sql, _ = pool.conn.executed[-1]
+        assert "%(owner)s::uuid" in sql
+
+
+class TestDeleteDocument:
+    """Silmenin SQL tarafı: sahiplik WHERE'in içinde, açık derlem korunuyor."""
+
+    @pytest.mark.asyncio
+    async def test_the_owner_is_part_of_the_where_clause(self, pool):
+        pool.conn.rowcount = 1
+        await store.delete_document(
+            "33333333-3333-3333-3333-333333333333",
+            "11111111-1111-1111-1111-111111111111",
+        )
+        sql, params = pool.conn.executed[-1]
+        assert "owner_user_id = %(owner)s::uuid" in sql
+        assert params["owner"] == "11111111-1111-1111-1111-111111111111"
+
+    @pytest.mark.asyncio
+    async def test_the_public_corpus_cannot_be_deleted_through_this(self, pool):
+        """`owner_user_id IS NOT NULL` ayrıca yazılı. Bir kullanıcı isteğinin
+        ortak haber derleminden satır düşürebilmesi, silme yetkisinin
+        sızması olurdu."""
+        pool.conn.rowcount = 0
+        await store.delete_document("id", "owner")
+        sql, _ = pool.conn.executed[-1]
+        assert "owner_user_id IS NOT NULL" in sql
+
+    @pytest.mark.asyncio
+    async def test_it_reports_whether_a_row_actually_went(self, pool):
+        pool.conn.rowcount = 1
+        assert await store.delete_document("id", "owner") is True
+        pool.conn.rowcount = 0
+        assert await store.delete_document("id", "owner") is False
+
+
+class TestKnownUrls:
+    """`ingestor`'ın gövde indirmeden ÖNCE sorduğu soru.
+
+    Ölçüldü: panoda 28.984 KAP bildirimi varken derlemde 147 gövde vardı.
+    Pahalı olan listeleme değil, bildirim başına bir istek olan gövde
+    indirme; bu uç onu atlamayı mümkün kılıyor.
+    """
+
+    @pytest.mark.asyncio
+    async def test_it_returns_the_urls_already_held(self, pool):
+        pool.conn._rows = [{"source_url": "https://www.kap.org.tr/tr/Bildirim/1"}]
+        got = await store.known_urls([
+            "https://www.kap.org.tr/tr/Bildirim/1",
+            "https://www.kap.org.tr/tr/Bildirim/2",
+        ])
+        assert got == {"https://www.kap.org.tr/tr/Bildirim/1"}
+
+    @pytest.mark.asyncio
+    async def test_rows_are_read_by_name_not_by_position(self, pool):
+        """Havuz `dict_row` ile kuruluyor. Konumla okumak `KeyError: 0`
+        veriyor ve uç 503 dönüyordu -- gerçek bir çalıştırmada ölçüldü."""
+        pool.conn._rows = [{"source_url": "https://x/1"}]
+        assert await store.known_urls(["https://x/1"]) == {"https://x/1"}
+
+    @pytest.mark.asyncio
+    async def test_a_null_url_is_not_returned(self, pool):
+        pool.conn._rows = [{"source_url": None}]
+        assert await store.known_urls(["https://x/1"]) == set()
+
+    @pytest.mark.asyncio
+    async def test_an_empty_list_asks_nothing(self, pool):
+        assert await store.known_urls([]) == set()
+        assert pool.conn.executed == []
+
+    @pytest.mark.asyncio
+    async def test_only_the_public_corpus_is_visible(self, pool):
+        """Bir kullanıcının kendi belgesinin adresi buraya cevap verseydi,
+        o belgenin VARLIĞI servisler arası bir uçtan sızardı."""
+        await store.known_urls(["https://x/1"])
+        sql, _ = pool.conn.executed[-1]
+        assert "owner_user_id IS NULL" in sql
+
+    @pytest.mark.asyncio
+    async def test_the_request_is_capped(self, pool):
+        await store.known_urls([f"https://x/{i}" for i in range(5_000)])
+        _, params = pool.conn.executed[-1]
+        assert len(params["urls"]) == store.MAX_URL_QUERY

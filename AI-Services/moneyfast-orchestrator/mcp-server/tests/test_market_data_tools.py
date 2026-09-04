@@ -116,6 +116,56 @@ class TestMissingFundamentals:
         assert any("bilinmeyen" in w for w in payload["warnings"])
 
 
+class TestUnresolvedSuggestions:
+    """A name that did not resolve is a question, not a dead end.
+
+    "koz" matches KOZAL and KOZAA. Reporting only "bulunamadı" while both are
+    sitting in the same payload reads to the user as the system being broken.
+    """
+
+    @pytest.mark.asyncio
+    async def test_candidates_become_a_did_you_mean_warning(self, fake_backend):
+        fake_backend.set("instruments", httpx.Response(200, json={
+            "instruments": [],
+            "unresolved": [{"query": "koz", "candidates": ["KOZAL", "KOZAA"]}],
+        }))
+        payload = await market_data_tools.get_market_data(symbols=["koz"])
+        warning = " ".join(payload["warnings"])
+        assert "KOZAL" in warning and "KOZAA" in warning
+        assert "bulunamadı veya fiyatı yok" not in warning
+
+    @pytest.mark.asyncio
+    async def test_a_query_with_no_candidates_still_reports_plainly(self, fake_backend):
+        """"Nothing close to this" remains the honest answer when there is
+        genuinely nothing to suggest."""
+        fake_backend.set("instruments", httpx.Response(200, json={
+            "instruments": [],
+            "unresolved": [{"query": "zzzz", "candidates": []}],
+        }))
+        payload = await market_data_tools.get_market_data(symbols=["zzzz"])
+        assert any("bulunamadı veya fiyatı yok" in w for w in payload["warnings"])
+
+    @pytest.mark.asyncio
+    async def test_a_resolved_abbreviation_is_not_reported_as_missing(self, fake_backend):
+        """"THY" comes back as THYAO. Diffing what was typed against what was
+        returned marked it missing, so the user was told the stock was not
+        found while its price sat in the same payload. Which queries failed is
+        the backend's answer, not something to infer here."""
+        fake_backend.set("instruments", httpx.Response(200, json={
+            "instruments": [instrument()],
+            "unresolved": [],
+        }))
+        payload = await market_data_tools.get_market_data(symbols=["THY"])
+        assert payload["warnings"] == []
+
+    @pytest.mark.asyncio
+    async def test_a_backend_that_sends_no_suggestions_still_warns(self, fake_backend):
+        """Older backends predate the field; the plain warning must survive."""
+        fake_backend.set("instruments", httpx.Response(200, json={"instruments": []}))
+        payload = await market_data_tools.get_market_data(symbols=["zzzz"])
+        assert any("bulunamadı veya fiyatı yok" in w for w in payload["warnings"])
+
+
 class TestFreshness:
     @pytest.mark.asyncio
     async def test_as_of_is_the_oldest_quote_in_the_set(self, fake_backend):

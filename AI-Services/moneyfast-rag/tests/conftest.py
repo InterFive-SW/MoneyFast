@@ -64,11 +64,24 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "calls": [],
         "ingest_result": ("doc-1", 2),
         "ping": True,
+        "known_urls": set(),
     }
 
-    async def _match_chunks(query_vector, **kwargs):
-        state["calls"].append({"vector": query_vector, **kwargs})
+    async def _match_chunks(query_vector, owner_user_id, **kwargs):
+        # `owner_user_id` is positional here for the same reason it is
+        # positional in the real signature and in the SQL function: a caller
+        # that forgets it must fail, not silently search everything.
+        state["calls"].append(
+            {"vector": query_vector, "owner_user_id": owner_user_id, **kwargs}
+        )
         return state["rows"]
+
+    async def _known_urls(urls):
+        state["calls"].append({"known_urls": list(urls)})
+        result = state["known_urls"]
+        if isinstance(result, Exception):
+            raise result
+        return result
 
     async def _index_snapshot():
         return state["snapshot"]
@@ -77,6 +90,10 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         if state["ping"] is not True:
             raise state["ping"]
         return True
+
+    async def _delete_document(document_id, owner_user_id):
+        state["deleted"] = {"document_id": document_id, "owner": owner_user_id}
+        return state.get("delete_result", True)
 
     async def _ingest(conn_factory, document, chunks):
         state["ingested"] = {"document": document, "chunks": chunks}
@@ -89,7 +106,9 @@ def fake_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         return None
 
     monkeypatch.setattr(store, "match_chunks", _match_chunks)
+    monkeypatch.setattr(store, "delete_document", _delete_document)
     monkeypatch.setattr(store, "index_snapshot", _index_snapshot)
+    monkeypatch.setattr(store, "known_urls", _known_urls)
     monkeypatch.setattr(store, "ping", _ping)
     monkeypatch.setattr(store, "ingest", _ingest)
     monkeypatch.setattr(store, "open_pool", _open_pool)

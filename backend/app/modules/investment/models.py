@@ -17,13 +17,17 @@ fundamental attached to them is real.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from typing import Optional
 
 from sqlalchemy import (
+    Boolean,
     BigInteger,
+    Date,
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     String,
     UniqueConstraint,
@@ -166,6 +170,61 @@ class TransactionProposal(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
 
 
+class InstrumentQuarterly(Base):
+    """Çeyreklik gelir tablosu. Enstrüman başına DÖNEM DÖNEM bir satır.
+
+    `InstrumentFundamentals` bir anlık görüntü: alan başına tek güncel değer,
+    geçmiş yok. Bu yüzden "son çeyrek kârı önceki çeyreğe göre şu kadar arttı"
+    kurulamıyordu -- kıyaslanacak ikinci dönem hiç saklanmıyordu. Bu tablo o
+    boşluğu kapatıyor ve iki tablo AYRI duruyor, çünkü biri her gün üstüne
+    yazılıyor, diğeri birikiyor.
+
+    DOĞAL ANAHTAR (product_id, period_end). Sıra numarası değil: sağlayıcının
+    dönemleri ardışık gelmiyor -- ölçüldü, AKBNK/GARAN/EREGL'de 2025Q3 gelir
+    tablosunda hiç yok. "Son iki satırı al" diyen bir karşılaştırma o üç
+    hissede 2025Q2 ile 2025Q4'ü kıyaslar ve bunu söylemez; bitişiklik dönem
+    sonundan hesaplanmak zorunda.
+
+    Dört kalem saklanıyor. Sağlayıcının gelir tablosu şirkete göre 33-52 satır
+    ve derin örneklenen on iki sembolün hepsinde bulunan yirmi kalemden
+    yalnızca bunlar bu kartın sorusunu cevaplıyor. `Basic EPS` bilerek yok:
+    34 hissede son çeyrekte 32 kez dolu, bir önceki çeyrekte YALNIZCA 3 kez --
+    seri olarak saklamak neredeyse hep yarısı boş bir kolon açmak olurdu ve
+    hisse başına kâr zaten anlık tabloda duruyor.
+
+    Her sayısal kolon nullable. Ölçüldü: 34 hissenin 16'sında serinin bir
+    yerinde eksik değer var, ve sıfıra çevirmek "o çeyrek raporlandı, kâr
+    sıfır çıktı" demek olurdu.
+    """
+
+    __tablename__ = "instrument_quarterly"
+    __table_args__ = (
+        UniqueConstraint(
+            "product_id", "period_end", name="uq_instrument_quarterly_period"
+        ),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    product_id: Mapped[str] = mapped_column(
+        String, ForeignKey(f"{SCHEMA}.investment_products.id"), nullable=False, index=True
+    )
+    #: Çeyreğin BİTİŞ tarihi, sağlayıcının verdiği hâliyle. Etiket
+    #: ("2026Q2") saklanmıyor: tamamen bundan türetilebiliyor ve hiçbir zaman
+    #: değişmeyecek bir değer için ikinci bir sütun, ikisinin ayrışabileceği
+    #: bir yer açardı.
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
+
+    total_revenue: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    net_income: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    pretax_income: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    operating_expense: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+
+
 class InstrumentFundamentals(Base):
     """Valuation ratios and company facts. One row per product, refreshed daily.
 
@@ -193,7 +252,79 @@ class InstrumentFundamentals(Base):
     industry: Mapped[str | None] = mapped_column(String(120), nullable=True)
     week52_high: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
     week52_low: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+
+    # Gelir tablosu ve kârlılık (migration 0027). Sağlayıcıdan zaten gelen ama
+    # atılan alanlar; bunlar olmadan bir hissenin neye DEĞDİĞİ söylenebiliyor,
+    # nasıl GİTTİĞİ söylenemiyordu.
+    #
+    # Oranlar kesir: 0,1287 = %12,87. Yüzdeye çevirmek gösterim katmanının işi.
+    total_revenue: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    revenue_growth: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    gross_margin: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    operating_margin: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    ebitda_margin: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    profit_margin: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    return_on_equity: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    return_on_assets: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    debt_to_equity: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+    current_ratio: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    total_debt: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    total_cash: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    free_cash_flow: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    operating_cash_flow: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    enterprise_value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    beta: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    trailing_eps: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+    forward_eps: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+    forward_pe: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+    earnings_growth: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    payout_ratio: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    dividend_rate: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+
+    # Analist görüşü BAŞKASININ değerlendirmesi. "16 analistin ortalama hedefi
+    # 95,39 TL" aktarılabilir bir olgudur; ürünün kendi görüşü olarak
+    # aktarılması tavsiye olurdu ve prompt bunu ayrıca yasaklıyor.
+    recommendation_key: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    analyst_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_mean_price: Mapped[float | None] = mapped_column(Numeric(19, 4), nullable=True)
+
+    ex_dividend_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    earnings_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class IndexMembership(Base):
+    """Bir enstrümanın hangi endekste yer aldığı.
+
+    Ayrı bir tablo, çünkü üyelik ÇOKTAN ÇOĞA: AAPL hem Nasdaq-100'de hem de
+    S&P 500'de. `investment_products.market` bunu taşıyamaz -- o alan hissenin
+    işlem gördüğü BORSAYI söyler (AAPL için NASDAQ) ve bir hissenin tek bir
+    borsası vardır. İkisini aynı sütuna sıkıştırmak, S&P sekmesinde Apple'ın,
+    Microsoft'un ve Nvidia'nın görünmemesi demekti; endeksin en büyük
+    üyelerini göstermeyen bir "S&P" sekmesi eksik değil, yanıltıcı olurdu.
+
+    Üyelik listeleri lisanslı bir üründür; bu yüzden migration içinde elle ve
+    tarihli yazılıyorlar (bkz. 0006, 0010, 0019).
+    """
+
+    __tablename__ = "index_memberships"
+    __table_args__ = (
+        UniqueConstraint("product_id", "index_code", name="uq_index_membership"),
+        Index("idx_index_memberships_code", "index_code"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey(f"{SCHEMA}.investment_products.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    #: `BIST`, `SP500`, `NASDAQ100`. Ekranlardaki sekmelerin okuduğu değer.
+    index_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class InvestmentAccount(Base):
@@ -205,11 +336,53 @@ class InvestmentAccount(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     account_number: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    #: Aynı bankanın hesabı olduğu için IBAN'ı da var. Yokken hesap
+    #: "para gönder" ekranında adreslenemiyor ve hareketleri hiçbir yerde
+    #: görünmüyordu; kullanıcı için nakit tutan bir hesap, hareketi olmayan
+    #: bir bakiyeden ibaret kalıyordu.
+    iban: Mapped[Optional[str]] = mapped_column(String(34), unique=True, nullable=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="TRY")
     cash_balance: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+
+
+class CashMovement(Base):
+    """Yatırım hesabının nakit defteri.
+
+    Bakiyeyi üç ayrı yer yazıyordu -- alım/satım takası, bankacılık köprüsü ve
+    yöneticinin para ekleme işlemi -- ve hiçbiri iz bırakmıyordu. Bakiyeden
+    geriye doğru hesaplamak da mümkün değildi: yöneticinin eklediği para hiçbir
+    kayıtta görünmediği için yeniden oynatma sessizce kayıyordu.
+
+    Bu yüzden defter, bankacılıktaki `account_transactions` ile aynı biçimde
+    tutuluyor: her satır kendi `balance_before`/`balance_after` değerini
+    taşır, dolayısıyla hesabın belirli bir andaki durumu tüm geçmişi yeniden
+    oynatmadan okunabilir.
+    """
+
+    __tablename__ = "cash_movements"
+    __table_args__ = (
+        Index("idx_cash_movements_account", "account_id", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    #: DEBIT = hesaptan çıktı, CREDIT = hesaba girdi. Bankacılık tarafıyla
+    #: aynı sözlük; iki döküm yan yana okunabilsin.
+    direction: Mapped[str] = mapped_column(String(10), nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    balance_before: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    balance_after: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False)
+    #: İşlemi doğuran kayıt: takasta öneri id'si, virmanda banka referansı.
+    #: Yönetici düzeltmesinde None -- uydurmak yerine boş bırakılır.
+    reference: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    description: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
 
 
 class PortfolioPosition(Base):
@@ -269,4 +442,70 @@ class WatchlistItem(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class AllocationTarget(Base):
+    """Kullanıcının KENDİ belirlediği hedef ağırlık, kova başına bir satır.
+
+    Sistemin önerdiği bir model portföy DEĞİL ve bilerek öyle değil.
+    `compliance/rules.py:SUI-001`'in gerekçesi şunu söylüyor: "sistem ölçüm
+    ile kullanıcının kendi beyanını karşılaştırır, bir ürünün kişiye
+    uygunluğuna karar vermez." Hedefi sistemin koyması, tam olarak o kararı
+    vermek olurdu -- üstelik dört SPK ürün grubundan yalnızca birinin
+    (hisse) bu sistemde enstrümanı var, dolayısıyla önerilen hedefin çoğu
+    uygulanamaz bir talimat olurdu.
+
+    Kova ANAHTARLA saklanıyor, etiketle değil (`allocation.BUCKETS`): bir
+    etiketi düzeltmek kimsenin kayıtlı hedefini geçersizleştirmemeli.
+
+    `user_id` düz bir kolon, foreign key değil -- modüller birbirinin ORM
+    sınıfını import etmiyor (bkz. CLAUDE.md shared/ kuralı).
+    """
+
+    __tablename__ = "allocation_targets"
+    __table_args__ = (
+        # Kova başına tek hedef. İkinci bir satır, hangisinin geçerli olduğunu
+        # söyleyemeyen bir hedef bırakırdı.
+        UniqueConstraint("user_id", "bucket", name="uq_allocation_target_bucket"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    bucket: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: 0..100. Toplamın 100 olması router'da doğrulanıyor: burada saklamak
+    #: satır başına bir kısıt, toplam ise satırlar ARASI bir kural.
+    target_percent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+
+class MarketSession(Base):
+    """Bir piyasanın ŞU AN işlem görüp görmediği.
+
+    Saatler burada DEĞİL, `ingestor`'da (`config.MARKET_HOURS`) -- ve orada
+    kalmalı: ikinci bir liste tutmak, bu depoda defalarca ayrışan türden bir
+    şey. Backend'e KURAL değil OLGU geliyor: ingestor her turda hangi
+    piyasaların açık olduğunu bildiriyor, backend onu okuyor.
+
+    Neden gerekli: fiyatın eski olması iki şey demek olabilir -- piyasa
+    kapalı (normal, son kapanış) ya da veri akışı durmuş (arıza). İkisi
+    kullanıcıya farklı şekilde söylenmeli ve backend tek başına ayırt
+    edemiyordu, o yüzden "son işlem verisi" gibi sebebi söylemeyen bir cümle
+    kurmak zorundaydı.
+
+    `updated_at` da saklanıyor: ingestor'ın kendisi durursa bu tablo da
+    eskiyor ve o zaman "kapalı" demek yine bilinmeyeni tespite çevirmek
+    olurdu.
+    """
+
+    __tablename__ = "market_sessions"
+    __table_args__ = ({"schema": SCHEMA},)
+
+    market: Mapped[str] = mapped_column(String(32), primary_key=True)
+    is_open: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
     )

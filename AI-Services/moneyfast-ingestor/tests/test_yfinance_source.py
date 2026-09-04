@@ -14,6 +14,8 @@ import pytest
 
 from ingestor.sources import yfinance_source
 
+_REAL_TO_UTC = yfinance_source._to_utc
+
 PRODUCTS = [
     {"symbol": "TEST-THYAO", "data_symbol": "THYAO.IS"},
     {"symbol": "TEST-AAPL", "data_symbol": "AAPL"},
@@ -240,6 +242,11 @@ class TestFundamentals:
     """Per-symbol because the provider has no batch form — which is why this
     runs daily rather than every cycle."""
 
+    def test_products_without_a_data_symbol_are_skipped(self):
+        """Sağlayıcıda karşılığı olmayan bir enstrüman için istek atılmaz."""
+        assert yfinance_source.fetch_fundamentals([{"symbol": "X"}]) == []
+        assert yfinance_source.fetch_fundamentals([]) == []
+
     def _install(self, monkeypatch, info_by_symbol):
         import sys
         from types import SimpleNamespace
@@ -272,6 +279,96 @@ class TestFundamentals:
     def test_nan_is_treated_as_missing(self, monkeypatch):
         self._install(monkeypatch, {"THYAO.IS": {"trailingPE": float("nan")}})
         assert yfinance_source.fetch_fundamentals([PRODUCTS[0]])[0]["pe_ratio"] is None
+
+    # -- gelir tablosu ve kârlılık (0027) --------------------------------
+
+    def test_the_income_statement_fields_are_extracted(self, monkeypatch):
+        """Aynı `.info` çağrısının bugüne kadar atılan kısmı."""
+        self._install(monkeypatch, {"THYAO.IS": {
+            "totalRevenue": 26350999552, "revenueGrowth": 0.205,
+            "grossMargins": 0.12865, "operatingMargins": -0.02595,
+            "returnOnEquity": 0.13129, "debtToEquity": 89.393,
+            "trailingEps": -6.67, "beta": -0.03,
+        }})
+        row = yfinance_source.fetch_fundamentals([PRODUCTS[0]])[0]
+
+        assert row["total_revenue"] == 26350999552
+        assert row["revenue_growth"] == pytest.approx(0.205)
+        assert row["gross_margin"] == pytest.approx(0.12865)
+        assert row["return_on_equity"] == pytest.approx(0.13129)
+        assert row["debt_to_equity"] == pytest.approx(89.393)
+
+    def test_an_operating_loss_survives(self, monkeypatch):
+        """Negatif marj eksik veri değil, dönemin en bilgilendirici olgusu."""
+        self._install(monkeypatch, {"THYAO.IS": {"operatingMargins": -0.02595}})
+        row = yfinance_source.fetch_fundamentals([PRODUCTS[0]])[0]
+        assert row["operating_margin"] == pytest.approx(-0.02595)
+
+    def test_a_zero_margin_is_recorded_as_missing(self, monkeypatch):
+        """Ölçüldü: AKBNK `grossMargins: 0.0` ve `ebitdaMargins: 0.0` dönüyor
+        -- None değil, sıfır. Bankada brüt marj kalemi yok ve sağlayıcı
+        "yok"u sıfır yazıyor. Olduğu gibi saklanırsa ekranda "%0,0 brüt marj"
+        çıkar: olmayan bir ölçüm, olgu diye sunulmuş olur."""
+        self._install(monkeypatch, {"THYAO.IS": {
+            "grossMargins": 0.0, "ebitdaMargins": 0.0, "profitMargins": 0.2949,
+        }})
+        row = yfinance_source.fetch_fundamentals([PRODUCTS[0]])[0]
+
+        assert row["gross_margin"] is None
+        assert row["ebitda_margin"] is None
+        # Gerçek bir marj sıfırlanmıyor.
+        assert row["profit_margin"] == pytest.approx(0.2949)
+
+    def test_no_analyst_opinion_is_not_the_word_none(self, monkeypatch):
+        """Sağlayıcı "görüş yok"u `"none"` diye yazıyor. Metin olarak
+        saklanırsa tavsiye sütununda "none" görünür."""
+        self._install(monkeypatch, {"THYAO.IS": {
+            "recommendationKey": "none", "numberOfAnalystOpinions": 13,
+        }})
+        row = yfinance_source.fetch_fundamentals([PRODUCTS[0]])[0]
+
+        assert row["recommendation_key"] is None
+        # Analist SAYISI ayrı bir olgu ve duruyor.
+        assert row["analyst_count"] == 13
+
+    def test_a_real_recommendation_is_kept(self, monkeypatch):
+        self._install(monkeypatch, {"THYAO.IS": {"recommendationKey": "BUY"}})
+        assert yfinance_source.fetch_fundamentals(
+            [PRODUCTS[0]]
+        )[0]["recommendation_key"] == "buy"
+
+    def test_a_non_string_recommendation_is_dropped(self, monkeypatch):
+        self._install(monkeypatch, {"THYAO.IS": {"recommendationKey": 3}})
+        assert yfinance_source.fetch_fundamentals(
+            [PRODUCTS[0]]
+        )[0]["recommendation_key"] is None
+
+    def test_epoch_dates_become_iso(self, monkeypatch):
+        self._install(monkeypatch, {"THYAO.IS": {
+            "exDividendDate": 1756771200, "earningsTimestamp": 1785942000,
+        }})
+        row = yfinance_source.fetch_fundamentals([PRODUCTS[0]])[0]
+
+        assert row["ex_dividend_date"].startswith("2025-09-02")
+        assert row["earnings_date"].startswith("2026-08-05")
+
+    def test_a_missing_or_zero_epoch_is_not_the_unix_epoch(self, monkeypatch):
+        """0 tarihi "1 Ocak 1970"tır ve o bir temettü tarihi değildir."""
+        self._install(monkeypatch, {"THYAO.IS": {
+            "exDividendDate": 0, "earningsTimestamp": None,
+        }})
+        row = yfinance_source.fetch_fundamentals([PRODUCTS[0]])[0]
+
+        assert row["ex_dividend_date"] is None
+        assert row["earnings_date"] is None
+
+    def test_an_out_of_range_epoch_is_dropped_not_raised(self, monkeypatch):
+        """A provider glitch must not take the whole fundamentals cycle
+        down with it."""
+        self._install(monkeypatch, {"THYAO.IS": {"exDividendDate": 1e30}})
+        assert yfinance_source.fetch_fundamentals(
+            [PRODUCTS[0]]
+        )[0]["ex_dividend_date"] is None
 
     def test_non_numeric_is_treated_as_missing(self, monkeypatch):
         self._install(monkeypatch, {"THYAO.IS": {"trailingPE": "N/A"}})
@@ -325,6 +422,19 @@ class TestCandles:
         install_tickers(monkeypatch, {"THYAO.IS": ticker(history=frame)})
         rows = yfinance_source.fetch_candles([PRODUCTS[0]])
         assert rows[0]["timestamp"].tzinfo is timezone.utc
+
+    def test_a_nan_bar_is_left_out_of_the_batch(self, monkeypatch):
+        """Gün içi seride işlem olmayan aralıklar NaN geliyor ve tek bir NaN
+        JSON'u geçersiz kılarak bütün partiyi düşürüyordu."""
+        stamp = datetime(2026, 8, 19, tzinfo=timezone.utc)
+        gap = {"Open": float("nan"), "High": float("nan"),
+               "Low": float("nan"), "Close": float("nan"), "Volume": 0}
+        frame = FakeFrame([(stamp, gap), (stamp, self._bar())])
+        install_tickers(monkeypatch, {"THYAO.IS": ticker(history=frame)})
+        rows = yfinance_source.fetch_candles([PRODUCTS[0]], interval="5m")
+        assert len(rows) == 1
+        assert rows[0]["close"] == 300.0
+        assert rows[0]["interval"] == "5m"
 
     def test_empty_history_is_skipped(self, monkeypatch):
         install_tickers(monkeypatch, {"THYAO.IS": ticker(history=FakeFrame([]))})
@@ -460,3 +570,183 @@ class TestFundamentalsSelection:
             {"symbol": "THYAO", "data_symbol": "THYAO.IS"},
         ])
         assert asked == ["THYAO.IS"], "only the quoted symbol should be requested"
+
+
+class TestNaNBarsAreSkipped:
+    """Gün içi serilerde işlem olmayan aralıklar NaN geliyor.
+
+    NaN bir bar değil, boşluktur -- ve JSON'a girmez: bir tanesi otuz günlük
+    94.055 barlık partinin tamamını düşürüyordu
+    (`Out of range float values are not JSON compliant: nan`).
+    """
+
+    def test_a_nan_bar_is_dropped(self):
+        assert yfinance_source._finite_ohlc(
+            {"Open": float("nan"), "High": 1.0, "Low": 1.0, "Close": 1.0}
+        ) is None
+
+    def test_an_infinite_bar_is_dropped(self):
+        assert yfinance_source._finite_ohlc(
+            {"Open": 1.0, "High": float("inf"), "Low": 1.0, "Close": 1.0}
+        ) is None
+
+    def test_a_missing_field_is_dropped_rather_than_raising(self):
+        assert yfinance_source._finite_ohlc({"Open": 1.0}) is None
+        assert yfinance_source._finite_ohlc({
+            "Open": "x", "High": 1.0, "Low": 1.0, "Close": 1.0,
+        }) is None
+
+    def test_a_finite_bar_comes_through(self):
+        assert yfinance_source._finite_ohlc(
+            {"Open": 1.0, "High": 2.0, "Low": 0.5, "Close": 1.5}
+        ) == (1.0, 2.0, 0.5, 1.5)
+
+
+class TestQuarterlyFinancials:
+    """Çeyreklik gelir tablosu — anlık görüntünün tutamadığı seri.
+
+    Ölçülen kapsama (evrenden 40 BIST hissesi): 34'ünde veri var, 6'sında
+    hiç yok; veri olanların 33'ünde son çeyrek, bir öncesi ve bir yıl öncesi
+    dolu. Buradaki testlerin çoğu o ölçümde görülen kusurları koruyor.
+    """
+
+    def _frame(self, columns, rows):
+        """Sağlayıcının döndürdüğü biçim: satırlar kalem, sütunlar dönem."""
+        import pandas as pd
+
+        return pd.DataFrame.from_dict(rows, orient="index", columns=columns)
+
+    def _install(self, monkeypatch, frame_by_symbol):
+        import sys
+        from types import SimpleNamespace
+
+        def ticker(symbol):
+            value = frame_by_symbol.get(symbol)
+            if isinstance(value, Exception):
+                raise value
+            return SimpleNamespace(quarterly_income_stmt=value)
+
+        monkeypatch.setitem(
+            sys.modules, "yfinance",
+            SimpleNamespace(Ticker=ticker, download=lambda *a, **k: None),
+        )
+
+    def test_products_without_a_data_symbol_are_skipped(self):
+        assert yfinance_source.fetch_quarterly_financials([{"symbol": "X"}]) == []
+        assert yfinance_source.fetch_quarterly_financials([]) == []
+
+    def test_each_column_becomes_one_row(self, monkeypatch):
+        import pandas as pd
+
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            [pd.Timestamp("2026-06-30"), pd.Timestamp("2026-03-31")],
+            {"Total Revenue": [100, 90], "Net Income": [15, 19]},
+        )})
+        rows = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])
+
+        assert [row["period_end"] for row in rows] == ["2026-06-30", "2026-03-31"]
+        assert rows[0]["net_income"] == 15
+        assert rows[0]["symbol"] == PRODUCTS[0]["symbol"]
+
+    def test_the_newest_quarter_comes_first(self, monkeypatch):
+        """Sağlayıcı sütun sırasını garanti etmiyor; "son çeyrek" sorusunun
+        cevabı ilk satır olmalı."""
+        import pandas as pd
+
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            [pd.Timestamp("2025-12-31"), pd.Timestamp("2026-06-30")],
+            {"Net Income": [8, 15]},
+        )})
+        rows = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])
+        assert [row["period_end"] for row in rows] == ["2026-06-30", "2025-12-31"]
+
+    def test_a_missing_line_is_none_not_an_error(self, monkeypatch):
+        """Bankada bazı kalemler hiç yok; `KeyError` normal işleyişin parçası."""
+        import pandas as pd
+
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            [pd.Timestamp("2026-06-30")], {"Net Income": [15]},
+        )})
+        row = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])[0]
+        assert row["net_income"] == 15
+        assert row["total_revenue"] is None
+        assert row["operating_expense"] is None
+
+    def test_an_entirely_empty_quarter_is_not_stored(self, monkeypatch):
+        """Ölçüldü: 34 hissenin 16'sında serinin bir yerinde NaN var. Boş bir
+        satır saklamak, o çeyrek raporlanmış ama sıfır çıkmış gibi görünürdü."""
+        import pandas as pd
+
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            [pd.Timestamp("2026-06-30"), pd.Timestamp("2026-03-31")],
+            {"Net Income": [15, float("nan")]},
+        )})
+        rows = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])
+        assert [row["period_end"] for row in rows] == ["2026-06-30"]
+
+    def test_the_series_is_capped(self, monkeypatch):
+        import pandas as pd
+
+        columns = [pd.Timestamp("2026-06-30") - pd.DateOffset(months=3 * i)
+                   for i in range(yfinance_source.MAX_QUARTERS + 4)]
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            columns, {"Net Income": list(range(len(columns)))},
+        )})
+        rows = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])
+        assert len(rows) == yfinance_source.MAX_QUARTERS
+
+    def test_an_empty_frame_yields_nothing(self, monkeypatch):
+        """Ölçüldü: 40 hissenin 6'sında hiç çeyreklik veri yok."""
+        import pandas as pd
+
+        self._install(monkeypatch, {"THYAO.IS": pd.DataFrame()})
+        assert yfinance_source.fetch_quarterly_financials([PRODUCTS[0]]) == []
+
+    def test_a_none_frame_yields_nothing(self, monkeypatch):
+        self._install(monkeypatch, {"THYAO.IS": None})
+        assert yfinance_source.fetch_quarterly_financials([PRODUCTS[0]]) == []
+
+    def test_one_broken_symbol_does_not_take_the_cycle_down(self, monkeypatch):
+        import pandas as pd
+
+        self._install(monkeypatch, {
+            "THYAO.IS": RuntimeError("provider said no"),
+            "AAPL": self._frame([pd.Timestamp("2026-06-30")], {"Net Income": [7]}),
+        })
+        rows = yfinance_source.fetch_quarterly_financials([
+            PRODUCTS[0], {"symbol": "AAPL", "data_symbol": "AAPL"},
+        ])
+        assert [row["symbol"] for row in rows] == ["AAPL"]
+
+    def test_a_column_index_that_cannot_be_sorted_drops_only_that_symbol(
+        self, monkeypatch
+    ):
+        """Sıralama da sağlayıcının tiplerine bağlı ve karışık bir dizin
+        `TypeError` veriyor. Koruma isteği değil, sembolün TAMAMINI sarmalı --
+        aksi hâlde tek bozuk sembol `pool.map` üzerinden turun tamamını
+        düşürüyor."""
+        import pandas as pd
+
+        self._install(monkeypatch, {
+            "THYAO.IS": self._frame(
+                ["bilinmeyen", pd.Timestamp("2026-06-30")], {"Net Income": [1, 15]},
+            ),
+            "AAPL": self._frame([pd.Timestamp("2026-06-30")], {"Net Income": [7]}),
+        })
+        rows = yfinance_source.fetch_quarterly_financials([
+            PRODUCTS[0], {"symbol": "AAPL", "data_symbol": "AAPL"},
+        ])
+        assert [row["symbol"] for row in rows] == ["AAPL"]
+
+    def test_an_unparseable_period_end_is_skipped(self, monkeypatch):
+        """Tarihsiz bir çeyrek, bitişikliği hesaplanamayan bir çeyrektir."""
+        import pandas as pd
+
+        monkeypatch.setattr(yfinance_source, "_to_utc",
+                            lambda column: None if column.day == 31 else _REAL_TO_UTC(column))
+        self._install(monkeypatch, {"THYAO.IS": self._frame(
+            [pd.Timestamp("2026-06-30"), pd.Timestamp("2026-03-31")],
+            {"Net Income": [15, 1]},
+        )})
+        rows = yfinance_source.fetch_quarterly_financials([PRODUCTS[0]])
+        assert [row["period_end"] for row in rows] == ["2026-06-30"]

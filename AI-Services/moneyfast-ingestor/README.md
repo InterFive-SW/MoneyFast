@@ -6,8 +6,11 @@ then pushes all of it to the services that own the data.
 ```
 ingestor ──yfinance──► quotes + daily candles ──POST──► backend /api/market/ingest
          ──RSS feeds──► news ─────────────────┬───────► backend /api/market/news/ingest
-                                              └───────► rag     /ingest
+         ──KAP────────► disclosures ──────────┘   └───► rag     /ingest
 ```
+
+(Disclosure bodies reach the corpus too; the listing pass shown here writes
+only the headline, issuer and permalink.)
 
 ## What it does not do
 
@@ -48,6 +51,29 @@ someone else's server:
 |---|---|---|
 | yfinance | Prices, previous close, daily OHLCV | no |
 | Turkish financial RSS | Headlines, summaries, publication dates | no |
+| KAP | BIST company disclosures, with issuer, timestamp and permalink | no |
+
+**KAP fits the stance above rather than stretching it.** It is Turkey's
+*mandatory* public disclosure platform — the content exists specifically so it
+can be read — and it fronts a JSON API that answers our honest `User-Agent`
+with no `Referer`, no session warm-up and no challenge. That last part was
+measured on 2026-09-01 rather than assumed: responses are byte-identical with
+and without a spoofed referrer, so we send none. Third-party notes on this API
+recommend both; we do not need either, and would have picked a different
+source if we had.
+
+KAP serves no `robots.txt` (the apex 404s, `www` answers with a non-200
+oddity), which the courtesy layer reads as permission — the same convention
+it applies to any host without one, and the same one RFC 9309 states.
+
+**Only disclosures naming an instrument we carry are kept.** That is an
+allowlist, deliberately the opposite of the RSS section filter, because here
+the target set is enumerable: a disclosure that names no symbol in
+`investment_products` has nowhere in this product to appear. Measured over one
+week, 592 of 1.101 disclosures matched — and 218 of those matched *only*
+through `relatedStocks`, where a broker files a notice about a company other
+than itself. Reading the filer's own code alone would silently lose a third of
+the coverage.
 
 BIST tickers reach yfinance as `<SYMBOL>.IS`. The mapping from our symbols
 (`TEST-THYAO`) to the provider's (`THYAO.IS`) lives in
@@ -57,6 +83,41 @@ adding an instrument is a database row, not a redeploy of this service.
 **Price history is what makes real risk metrics possible.** Volatility,
 drawdown, VaR, beta and Sharpe have nothing to compute from without OHLCV
 bars; the nightly candle job is what fills that gap.
+
+## KAP attachments, and why they are the fragile part
+
+A financial report's substance is in its attached PDF, not its disclosure
+body, so attachments are downloaded and read. Two things about that endpoint
+are worth knowing before touching it.
+
+**The response is not a PDF, whatever the header says.** `Content-Type` is
+`application/pdf` and the body is a serialized Java byte array:
+`ac ed 00 05 ... 78 70 <4-byte big-endian length> %PDF-1.4`. The unwrap
+looks for the marker, reads the length, slices — and then **checks for
+`%PDF-`**, because `78 70` can also occur inside a class descriptor, so the
+first match is not guaranteed to be the right one. A wrong offset becomes
+`None` rather than garbage in the corpus, and unwrap failures are counted:
+this is an undocumented, unversioned interface, and the counter is the only
+way its breaking becomes visible.
+
+**Some PDFs cannot be read at all, and `pypdf` will not say so.** They embed
+subset fonts with no `ToUnicode` map, and extraction returns plausible-looking
+nonsense — `§işlıııııi*ı, §ıın,'I'iı:.,,l.Ş.` — rather than raising. Text like
+that in a shared corpus is worse than no text: it is searchable garbage, and
+it competes for the retrieval slots of the company it is filed under.
+
+The discriminator is the density of symbol characters that ordinary Turkish
+prose never contains. Measured across six attachments: a mangled one scored
+**0.0617**, and every readable one scored **0.0000–0.0001** — including
+numeric price bulletins, which a word-frequency test would have thrown away
+(they scored as low as 0.0056 on that measure, against 0.0025 for the mangled
+text — far too close to separate on). The threshold sits at 0.01, two orders
+of magnitude clear of both ends.
+
+Attachments are read only for disclosures inside `INGESTOR_KAP_PDF_WINDOW_DAYS`
+(30). Each one is a second request on top of the body; opening the window
+across a six-month backfill would spend a third of its wall clock on old
+filings nobody will ask about.
 
 ## Idempotency
 
@@ -69,6 +130,13 @@ cycle self-healing instead of something to reconcile by hand:
 * **News** is deduplicated on a SHA-256 of the article text — not the URL,
   because the same wire story is republished under different links and some
   feeds renumber their URLs on every rebuild.
+* **Disclosures** are deduplicated on a SHA-256 of KAP's own `disclosureIndex`,
+  because unlike a wire story a filing *has* a stable identifier. Two
+  consequences: re-offering a stored disclosure writes nothing, and the key is
+  computable from a listing alone — so a backfill can ask what is already held
+  before spending a request on each body. An amendment is filed under its own
+  index and therefore stored as its own row; collapsing it into the original
+  would be rewriting a filings archive.
 
 ## Isolation
 

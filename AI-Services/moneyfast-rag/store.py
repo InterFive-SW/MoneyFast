@@ -80,6 +80,7 @@ def _array(values: Optional[Sequence[str]]) -> Optional[list[str]]:
 
 async def match_chunks(
     query_vector: str,
+    owner_user_id: Optional[str],
     top_k: int,
     min_similarity: Optional[float],
     tickers: Optional[Sequence[str]] = None,
@@ -90,7 +91,12 @@ async def match_chunks(
     published_before: Optional[str] = None,
     publishers: Optional[Sequence[str]] = None,
 ) -> list[dict[str, Any]]:
-    """Run exact (or HNSW, if the optional migration is applied) retrieval."""
+    """Run exact (or HNSW, if the optional migration is applied) retrieval.
+
+    `owner_user_id` is positional and has no default, here and in the SQL
+    function, so a caller cannot omit it. NULL means anonymous: the public
+    corpus only, because `owner_user_id = NULL` is never true for any row.
+    """
     pool = await open_pool()
     async with pool.connection() as conn:
         cursor = await conn.execute(
@@ -98,6 +104,7 @@ async def match_chunks(
             SELECT *
             FROM rag.match_chunks(
                 %(embedding)s::vector,
+                %(owner)s::uuid,
                 %(top_k)s,
                 %(threshold)s,
                 %(tickers)s,
@@ -111,6 +118,7 @@ async def match_chunks(
             """,
             {
                 "embedding": query_vector,
+                "owner": owner_user_id,
                 "top_k": max(1, min(MAX_TOP_K, top_k)),
                 "threshold": min_similarity,
                 "tickers": _array(tickers),
@@ -162,27 +170,44 @@ async def upsert_document(
     ticker: Optional[str],
     period: Optional[str],
     published_at: Optional[str],
+    owner_user_id: Optional[str] = None,
 ) -> Optional[str]:
-    """Insert a document, or return None when the content hash already exists.
+    """Insert a document, or return None when this OWNER already has it.
 
-    The unique constraint on content_hash is the deduplication mechanism, so
-    re-ingesting an unchanged corpus is a no-op rather than a duplicate set of
-    chunks competing for the same retrieval slots.
+    Deduplication keeps a re-ingested corpus from writing duplicate chunks
+    that compete for the same retrieval slots. It is scoped per owner (0004):
+    globally unique content hashes meant the second person to upload a given
+    file got "duplicate" and no document of their own.
+
+    Two partial indexes back this, so the conflict target differs by branch --
+    `(content_hash) WHERE owner IS NULL` for the public corpus and
+    `(owner_user_id, content_hash)` for private ones. A single statement
+    cannot name both.
     """
     cursor = await conn.execute(
         """
         INSERT INTO rag.documents (
             title, source, source_url, category, language,
-            ticker, document_type, period, published_at, content_hash
+            ticker, document_type, period, published_at, content_hash,
+            owner_user_id
         )
         VALUES (
             %(title)s, %(source)s, %(source_url)s, %(category)s, %(language)s,
-            %(ticker)s, %(document_type)s, %(period)s, %(published_at)s, %(content_hash)s
+            %(ticker)s, %(document_type)s, %(period)s, %(published_at)s,
+            %(content_hash)s, %(owner_user_id)s::uuid
         )
-        ON CONFLICT (content_hash) DO NOTHING
+        """
+        + (
+            "ON CONFLICT (content_hash) WHERE owner_user_id IS NULL DO NOTHING"
+            if owner_user_id is None
+            else "ON CONFLICT (owner_user_id, content_hash) "
+                 "WHERE owner_user_id IS NOT NULL DO NOTHING"
+        )
+        + """
         RETURNING id
         """,
         {
+            "owner_user_id": owner_user_id,
             "title": title,
             "source": source,
             "source_url": source_url,
@@ -242,3 +267,62 @@ async def ingest(conn_factory, document: dict[str, Any], chunks: Sequence[tuple[
                 return None, 0
             written = await insert_chunks(conn, document_id, chunks)
     return document_id, written
+
+
+#: Tek istekte sorulabilecek en fazla adres. Sınırsız bir liste, indeksli
+#: aramayı isteğe bağlı bir tablo taramasına çevirmenin en kolay yolu.
+MAX_URL_QUERY = 2_000
+
+
+async def known_urls(urls: list[str]) -> set[str]:
+    """Bu adreslerden hangileri kamuya açık derlemde zaten var.
+
+    `ingestor`'ın gövde indirmeden ÖNCE sorduğu soru -- backend'deki
+    `known-hashes` ile aynı desen, aynı gerekçe: pahalı olan listeleme değil,
+    bildirim başına bir istek olan gövde indirme.
+
+    Yalnızca `owner_user_id IS NULL` satırlarına bakıyor. Kullanıcının kendi
+    yüklediği bir belgenin adresi buraya cevap verseydi, bir kullanıcının
+    özel belgesinin varlığı servisler arası bir uçtan sızardı.
+    """
+    if not urls:
+        return set()
+    pool = await open_pool()
+    async with pool.connection() as conn:
+        cursor = await conn.execute(
+            """
+            SELECT source_url FROM rag.documents
+            WHERE owner_user_id IS NULL AND source_url = ANY(%(urls)s)
+            """,
+            {"urls": list(urls)[:MAX_URL_QUERY]},
+        )
+        rows = await cursor.fetchall()
+    # Havuz `dict_row` ile kuruluyor (bkz. `open_pool`), yani satırlar
+    # demet değil sözlük. Konumla okumak `KeyError: 0` veriyor ve uç 503
+    # dönüyordu -- ölçüldü.
+    return {row["source_url"] for row in rows if row.get("source_url")}
+
+
+async def delete_document(document_id: str, owner_user_id: str) -> bool:
+    """Bir kullanıcının kendi belgesini siler. Chunk'lar CASCADE ile gider.
+
+    Sahiplik WHERE'in İÇİNDE ve `owner_user_id IS NOT NULL` şartı ayrıca
+    yazılı. İkisi de kasıtlı: id'yi bilen birinin başkasının belgesini
+    silememesi için birincisi, kamuya açık haber derleminin bu uçtan
+    silinememesi için ikincisi -- bir kullanıcı isteğinin ortak derlemden
+    haber düşürebilmesi, silme yetkisinin sızması olurdu.
+
+    Dönen değer: gerçekten bir satır silindi mi.
+    """
+    pool = await open_pool()
+    async with pool.connection() as conn:
+        cursor = await conn.execute(
+            """
+            DELETE FROM rag.documents
+            WHERE id = %(id)s::uuid
+              AND owner_user_id IS NOT NULL
+              AND owner_user_id = %(owner)s::uuid
+            """,
+            {"id": document_id, "owner": owner_user_id},
+        )
+        return cursor.rowcount > 0

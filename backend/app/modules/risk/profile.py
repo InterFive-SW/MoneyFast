@@ -249,3 +249,189 @@ def suggestions_from(metrics: dict[str, Any]) -> list[dict[str, Any]]:
         })
 
     return out
+
+
+# ---------------------------------------------------------------------------
+# Suitability: measurement against the user's own declared tolerance
+# ---------------------------------------------------------------------------
+#: Ordered low to high so the two labels can be compared by position. The
+#: comparison is deliberately made on LABELS, never on the two scores: the
+#: measured score is inverted (100 = calm) and the questionnaire's raw score is
+#: not, so any arithmetic between them would be read backwards by someone
+#: eventually. On the label scale there is no arithmetic to get wrong.
+_LEVEL_ORDER = ("Düşük", "Orta", "Yüksek")
+
+ALIGNMENT_UNKNOWN = "UNKNOWN"
+ALIGNMENT_ALIGNED = "ALIGNED"
+ALIGNMENT_RISKIER = "PORTFOLIO_RISKIER"
+ALIGNMENT_CALMER = "PORTFOLIO_CALMER"
+
+
+def suitability(
+    measured_level: Optional[str], declared_tolerance: Optional[str]
+) -> dict[str, Any]:
+    """Compare what was measured against what the user said they tolerate.
+
+    This is the one place the product is allowed to put those two things in the
+    same sentence, and it stays on the right side of the advisory line because
+    both halves are facts: one is computed from price history, the other is
+    what the user themselves answered. Neither is a judgement about them, and
+    nothing here says what to do about a mismatch.
+
+    `compliance/rules.py:SUI-001` blocks "risk profilinize uygun" because a
+    suitability CLAIM has no basis. A comparison is not that claim, and the
+    wording below avoids the banned phrasing on purpose rather than by luck.
+    """
+    if measured_level not in _LEVEL_ORDER or declared_tolerance not in _LEVEL_ORDER:
+        return {
+            "measured_level": measured_level,
+            "declared_tolerance": declared_tolerance,
+            "alignment": ALIGNMENT_UNKNOWN,
+            "statement": (
+                "Karşılaştırma için hem ölçülebilir bir portföy hem de "
+                "tamamlanmış bir risk anketi gerekiyor."
+            ),
+        }
+
+    measured_index = _LEVEL_ORDER.index(measured_level)
+    declared_index = _LEVEL_ORDER.index(declared_tolerance)
+
+    if measured_index == declared_index:
+        alignment = ALIGNMENT_ALIGNED
+        statement = (
+            f"Ölçülen portföy riskiniz \"{measured_level}\" seviyesinde ve ankette "
+            f"belirttiğiniz tolerans da \"{declared_tolerance}\". İkisi aynı bandda."
+        )
+    elif measured_index > declared_index:
+        alignment = ALIGNMENT_RISKIER
+        statement = (
+            f"Ölçülen portföy riskiniz \"{measured_level}\" seviyesinde; ankette "
+            f"belirttiğiniz tolerans \"{declared_tolerance}\". Portföy, beyan "
+            "ettiğiniz bandın üzerinde ölçülüyor."
+        )
+    else:
+        alignment = ALIGNMENT_CALMER
+        statement = (
+            f"Ölçülen portföy riskiniz \"{measured_level}\" seviyesinde; ankette "
+            f"belirttiğiniz tolerans \"{declared_tolerance}\". Portföy, beyan "
+            "ettiğiniz bandın altında ölçülüyor."
+        )
+
+    return {
+        "measured_level": measured_level,
+        "declared_tolerance": declared_tolerance,
+        "alignment": alignment,
+        "statement": statement,
+    }
+
+
+#: Enstrüman türünden SPK ürün grubuna. YALNIZCA testin gerçekten kapsadığı
+#: eşleme yazılı.
+#:
+#: `equity` grubunun etiketi "Ortaklık Payı (Hisse Senedi), Eurobond, Dövizli
+#: Tahviller" -- hisse senedi orada. Spot altın ve döviz paritesi DÖRT GRUBUN
+#: HİÇBİRİNDE yok, dolayısıyla buraya da yazılmadılar: bir enstrümanı ona ait
+#: olmayan bir gruba sokmak, o grup için verilmiş bir yeterlilik beyanını
+#: hakkında hiç soru sorulmamış bir ürüne uygulamak olurdu. Kapsanmayan
+#: pozisyon düşürülmez, kapsanmadığı SÖYLENİR.
+GROUP_BY_PRODUCT_TYPE = {"stock": "equity"}
+
+EXPOSURE_COVERED = "COVERED"
+EXPOSURE_NOT_ASSESSED = "NOT_ASSESSED"
+EXPOSURE_OUTSIDE_TEST = "OUTSIDE_TEST"
+
+
+def group_exposure(
+    positions: list[dict[str, Any]],
+    product_groups: Optional[list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Hangi SPK ürün grubunda ne kadar duruyor, ve test o grup için ne demişti.
+
+    `suitability()` ile aynı çizgide ve aynı sebeple: iki OLGU yan yana
+    konuyor -- portföyde ölçülen ağırlık, ve kullanıcının ankette kendi
+    verdiği bilgi/tecrübe beyanı. Hiçbiri kişi hakkında bir yargı değil ve
+    hiçbir yerde ne yapması gerektiği söylenmiyor.
+
+    `compliance/rules.py:SUI-001` "size uygun" kalıbını engelliyor çünkü bir
+    uygunluk İDDİASININ dayanağı yok. Aşağıdaki cümleler o kalıptan şans
+    eseri değil, bilerek kaçınıyor: "beyan etmediniz" kullanıcının kendi
+    cevabını aktarır, "size uygun değil" ise onun hakkında karar verir.
+    """
+    total = sum(float(row.get("market_value") or 0.0) for row in positions)
+    by_group: dict[str, float] = {}
+    outside = 0.0
+    outside_types: set[str] = set()
+
+    for row in positions:
+        product_type = str(row.get("asset_class") or "").lower()
+        value = float(row.get("market_value") or 0.0)
+        group = GROUP_BY_PRODUCT_TYPE.get(product_type)
+        if group is None:
+            outside += value
+            outside_types.add(product_type or "bilinmiyor")
+            continue
+        by_group[group] = by_group.get(group, 0.0) + value
+
+    assessed = {
+        str(entry.get("key")): entry for entry in (product_groups or [])
+    }
+
+    rows: list[dict[str, Any]] = []
+    for group, value in sorted(by_group.items(), key=lambda item: -item[1]):
+        entry = assessed.get(group)
+        share = round(value / total * 100, 1) if total else None
+        label = str(entry.get("label")) if entry else group
+        if entry is None:
+            status, statement = EXPOSURE_NOT_ASSESSED, (
+                f"Portföyünüzün %{share} kadarı bu grupta; uygunluk testinde "
+                f"bu grup için bir kaydınız yok."
+            )
+        elif entry.get("eligible"):
+            status, statement = EXPOSURE_COVERED, (
+                f"Portföyünüzün %{share} kadarı bu grupta. Ankette bu grup için "
+                f"bilgi ve tecrübe beyan etmiştiniz."
+            )
+        else:
+            # "Beyan etmediniz" kullanıcının KENDİ cevabını aktarıyor.
+            # "Size uygun değil" onun hakkında karar verirdi ve SUI-001 tam
+            # olarak o cümleyi engelliyor.
+            status, statement = EXPOSURE_NOT_ASSESSED, (
+                f"Portföyünüzün %{share} kadarı bu grupta. Ankette bu grup için "
+                f"yeterli bilgi ve tecrübe beyan etmemiştiniz; beyanınızı "
+                f"testi yenileyerek güncelleyebilirsiniz."
+            )
+        rows.append({
+            "group": group,
+            "label": label,
+            "value": round(value, 2),
+            "share_percent": share,
+            "status": status,
+            "eligible": None if entry is None else bool(entry.get("eligible")),
+            "reason": (entry or {}).get("reason"),
+            "statement": statement,
+        })
+
+    if outside > 0:
+        share = round(outside / total * 100, 1) if total else None
+        rows.append({
+            "group": None,
+            "label": "Uygunluk testinin kapsamadığı varlıklar",
+            "value": round(outside, 2),
+            "share_percent": share,
+            "status": EXPOSURE_OUTSIDE_TEST,
+            "eligible": None,
+            "reason": None,
+            # Kapsanmayan pozisyonu sessizce düşürmek, portföyün bir kısmını
+            # değerlendirilmiş gibi göstermek olurdu.
+            "statement": (
+                f"Portföyünüzün %{share} kadarı ({', '.join(sorted(outside_types))}) "
+                f"uygunluk testindeki dört ürün grubunun hiçbirine girmiyor; "
+                f"bunlar hakkında ankette soru sorulmuyor."
+            ),
+        })
+
+    return {
+        "assessed": bool(product_groups),
+        "total_value": round(total, 2),
+        "groups": rows,
+    }

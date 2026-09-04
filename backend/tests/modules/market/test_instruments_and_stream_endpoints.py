@@ -85,7 +85,17 @@ class TestInstruments:
 
     @pytest.mark.parametrize("rows", [[]])
     def test_no_matches_is_an_empty_list_not_an_error(self, api):
-        assert api.get("/api/market/instruments?max_pe=1").json() == {"instruments": []}
+        # `unresolved` rides along so a query that matched nothing can say
+        # what it might have meant instead of a bare "bulunamadı".
+        assert api.get("/api/market/instruments?max_pe=1").json() == {
+            "instruments": [], "unresolved": []
+        }
+
+    def test_the_whole_universe_fits_in_one_request(self, api):
+        """Süzgeç paneli istemcide çalışıyor; bir SAYFA üzerinde çalıştırmak
+        "F/K'sı 10'un altı" sorgusunu o sayfaya düşen eşleşmelerle
+        sınırlardı. Tavan bu yüzden evrenin tamamını kapsıyor."""
+        assert api.get("/api/market/instruments?limit=1014").status_code == 200
 
     def test_limit_is_bounded(self, api):
         assert api.get("/api/market/instruments?limit=0").status_code == 422

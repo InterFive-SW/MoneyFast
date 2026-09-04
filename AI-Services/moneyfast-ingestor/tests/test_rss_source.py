@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from ingestor import config
-from ingestor.sources import rss_source
+from ingestor.sources import courtesy, rss_source
 from conftest import FEED_XML
 from types import SimpleNamespace
 
@@ -182,7 +182,7 @@ class TestFailureHandling:
 class TestRateLimiting:
     def test_requests_to_one_host_are_spaced(self, no_robots, monkeypatch):
         slept = []
-        monkeypatch.setattr(rss_source.time, "sleep", lambda seconds: slept.append(seconds))
+        monkeypatch.setattr(courtesy.time, "sleep", lambda seconds: slept.append(seconds))
         client = client_for(feed_handler())
         rss_source.fetch_feed(FEED_URL, client)
         rss_source.fetch_feed(FEED_URL, client)
@@ -190,7 +190,7 @@ class TestRateLimiting:
 
     def test_first_request_to_a_host_does_not_wait(self, no_robots, monkeypatch):
         slept = []
-        monkeypatch.setattr(rss_source.time, "sleep", lambda seconds: slept.append(seconds))
+        monkeypatch.setattr(courtesy.time, "sleep", lambda seconds: slept.append(seconds))
         rss_source.fetch_feed(FEED_URL, client_for(feed_handler()))
         assert slept == []
 
@@ -292,18 +292,18 @@ class TestPolitenessDelayBranches:
         """The delay exists to avoid hammering a host, not to slow down a run
         that is already spaced out."""
         slept = []
-        monkeypatch.setattr(rss_source.time, "sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(courtesy.time, "sleep", lambda s: slept.append(s))
         monkeypatch.setattr(rss_source.config, "per_host_delay", lambda: 1.0)
-        rss_source._last_request["news.example"] = rss_source.time.monotonic() - 60
-        rss_source._wait_for_host(FEED_URL)
+        courtesy._last_request["news.example"] = courtesy.time.monotonic() - 60
+        courtesy.wait_for_host(FEED_URL)
         assert slept == []
 
     def test_a_recent_request_waits(self, monkeypatch):
         slept = []
-        monkeypatch.setattr(rss_source.time, "sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(courtesy.time, "sleep", lambda s: slept.append(s))
         monkeypatch.setattr(rss_source.config, "per_host_delay", lambda: 5.0)
-        rss_source._last_request["news.example"] = rss_source.time.monotonic()
-        rss_source._wait_for_host(FEED_URL)
+        courtesy._last_request["news.example"] = courtesy.time.monotonic()
+        courtesy.wait_for_host(FEED_URL)
         assert slept and slept[0] > 0
 
 
@@ -319,3 +319,62 @@ class TestTickerTagFiltering:
     def test_tags_that_all_fail_yield_nothing(self):
         entry = SimpleNamespace(tags=[{"term": "x"}, {"term": "12345"}])
         assert rss_source._tickers(entry) == []
+
+
+class TestSummaryCleaning:
+    """Özetten işaretlemeyi atmak.
+
+    İki yeri birden düzeltiyor. Sembol eşleştirmesi: temizlenmemiş metinde
+    `<img align="right">` özniteliği Align Technology'ye bağlanıyordu. Ve daha
+    önemlisi RAG: ingestor özeti korpusa `content` olarak gönderiyor, yani
+    gömme vektörleri haberin metni yerine HTML gürültüsünü de taşıyordu --
+    ölçüldü, korpustaki 876 parça işaretleme içeriyordu.
+    """
+
+    def test_tags_are_removed_whole(self):
+        """Etiketin İÇİ değil KENDİSİ gider: öznitelik adları ve URL'ler
+        haberin metni değildir."""
+        cleaned = rss_source.clean_summary(
+            '<img align="right" src="https://img.example.com/a.jpg" />Akaryakıt zamlandı.'
+        )
+        assert cleaned == "Akaryakıt zamlandı."
+
+    def test_entities_are_decoded_not_deleted(self):
+        """Silinseydi "Türkiye nin" kalırdı; çözülünce metin okunur kalıyor."""
+        assert rss_source.clean_summary("Türkiye&#039;nin ihracatı") == (
+            "Türkiye'nin ihracatı"
+        )
+
+    def test_double_escaped_entities_are_resolved(self):
+        """Ölçülen veride `LPG&amp;#039;nin` var: besleme çift kaçışlı
+        gönderiyor ve tek geçiş `&#039;`de bırakıyor."""
+        assert rss_source.clean_summary("LPG&amp;#039;nin fiyatı") == "LPG'nin fiyatı"
+
+    def test_an_ampersand_survives_as_itself(self):
+        assert rss_source.clean_summary("Marks &amp; Spencer") == "Marks & Spencer"
+
+    def test_whitespace_is_collapsed(self):
+        assert rss_source.clean_summary("bir\n\n  iki   üç") == "bir iki üç"
+
+    def test_empty_input_is_safe(self):
+        assert rss_source.clean_summary("") == ""
+        assert rss_source.clean_summary(None) == ""
+
+    def test_the_stored_summary_is_clean_but_the_hash_is_not(self, no_robots):
+        """Temizlik saklanan metne uygulanıyor, kimliğe DEĞİL.
+
+        Hash tanımı da değişseydi daha önce alınmış her haberin kimliği
+        değişir ve arşivin tamamı "yeni" sayılıp yeniden yazılırdı.
+        """
+        raw = '&lt;img align="right" /&gt;Havayolu şirketi kargo segmentinde büyüme bildirdi.'
+        xml = FEED_XML.replace(
+            "Havayolu şirketi kargo segmentinde büyüme bildirdi.", raw, 1
+        )
+        items = rss_source.fetch_feed(FEED_URL, client_for(feed_handler(body=xml)))
+        stored = items[0]["summary"] or ""
+        assert "<img" not in stored and "align" not in stored
+        assert stored == "Havayolu şirketi kargo segmentinde büyüme bildirdi."
+        # Kimlik ham metinden: temizlenmiş hâlinin hash'i FARKLI olmalı.
+        assert items[0]["content_hash"] != rss_source.content_hash(
+            items[0]["title"], stored
+        )

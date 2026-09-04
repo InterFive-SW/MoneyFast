@@ -14,8 +14,12 @@ whole freshness contract exists to prevent.
 from __future__ import annotations
 
 import logging
+import math
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator, Optional
+
+from .. import config
 
 log = logging.getLogger("moneyfast.ingestor.yfinance")
 
@@ -170,63 +174,177 @@ def fetch_fundamentals(products: Iterable[dict[str, str]]) -> list[dict[str, Any
     Per-symbol, because the provider exposes no batch form for this. That is
     why it runs daily rather than every cycle.
 
-    Missing values are passed through as None. Coverage is genuinely partial —
-    THYAO has no trailing P/E while AAPL does — and coalescing a gap to zero
+    **Paralel.** Sağlayıcı toplu bir uç sunmuyor, dolayısıyla sembol başına bir
+    istek gerekiyor; sırayla yapıldığında 190 enstrüman için kabul edilebilirdi
+    ama evren 1009'a çıkınca saatler sürüyor. Ölçüm: 12 iş parçacığıyla 513
+    sembol 48 saniyede geldi. Eşzamanlılık sınırı düşük tutuluyor -- amaç turu
+    hızlandırmak, sağlayıcıyı zorlamak değil; 429 gelirse zaten geri çekilme
+    merdiveni devreye giriyor.
+
+    Missing values are passed through as None. Coverage is genuinely partial --
+    THYAO has no trailing P/E while AAPL does -- and coalescing a gap to zero
     would put a company with no published earnings at the top of a "lowest
     P/E" screen.
     """
     import yfinance as yf
 
-    rows: list[dict[str, Any]] = []
-    for product in products:
-        data_symbol = product.get("data_symbol")
-        if not data_symbol:
-            continue
+    wanted = [p for p in products if p.get("data_symbol")]
+    if not wanted:
+        return []
+
+    def one(product: dict[str, str]) -> Optional[dict[str, Any]]:
+        data_symbol = product["data_symbol"]
         try:
             info = yf.Ticker(data_symbol).info or {}
         except Exception as exc:
             log.warning("fundamentals failed for %s: %s", data_symbol, exc)
-            continue
+            return None
 
-        rows.append(
-            {
-                "symbol": product["symbol"],
-                # The company's real name. 84 of 97 products are stored with
-                # name = ticker, so "Aselsan" could not be resolved at all:
-                # 'ASELS' LIKE '%ASELSAN%' is false because the stored name is
-                # SHORTER than what the user typed.
-                "name": info.get("longName") or info.get("shortName") or None,
-                "pe_ratio": _clean_number(info.get("trailingPE")),
-                "pb_ratio": _clean_number(info.get("priceToBook")),
-                "market_cap": _int_or_none(info.get("marketCap")),
-                "dividend_yield": _clean_number(info.get("dividendYield")),
-                "sector": info.get("sector") or None,
-                "industry": info.get("industry") or None,
-                "week52_high": _clean_number(info.get("fiftyTwoWeekHigh")),
-                "week52_low": _clean_number(info.get("fiftyTwoWeekLow")),
-            }
-        )
-    return rows
+        return {
+            "symbol": product["symbol"],
+            # The company's real name. 84 of 97 products are stored with
+            # name = ticker, so "Aselsan" could not be resolved at all:
+            # 'ASELS' LIKE '%ASELSAN%' is false because the stored name is
+            # SHORTER than what the user typed.
+            "name": info.get("longName") or info.get("shortName") or None,
+            "pe_ratio": _clean_number(info.get("trailingPE")),
+            "pb_ratio": _clean_number(info.get("priceToBook")),
+            "market_cap": _int_or_none(info.get("marketCap")),
+            "dividend_yield": _clean_number(info.get("dividendYield")),
+            "sector": info.get("sector") or None,
+            "industry": info.get("industry") or None,
+            "week52_high": _clean_number(info.get("fiftyTwoWeekHigh")),
+            "week52_low": _clean_number(info.get("fiftyTwoWeekLow")),
+
+            # Gelir tablosu ve kârlılık. Aynı `.info` çağrısının atılan
+            # kısmı: yeni istek yok, yeni kota maliyeti yok.
+            "total_revenue": _int_or_none(info.get("totalRevenue")),
+            "revenue_growth": _clean_number(info.get("revenueGrowth")),
+            "gross_margin": _margin(info.get("grossMargins")),
+            "operating_margin": _margin(info.get("operatingMargins")),
+            "ebitda_margin": _margin(info.get("ebitdaMargins")),
+            "profit_margin": _margin(info.get("profitMargins")),
+            "return_on_equity": _clean_number(info.get("returnOnEquity")),
+            "return_on_assets": _clean_number(info.get("returnOnAssets")),
+            "debt_to_equity": _clean_number(info.get("debtToEquity")),
+            "current_ratio": _clean_number(info.get("currentRatio")),
+            "total_debt": _int_or_none(info.get("totalDebt")),
+            "total_cash": _int_or_none(info.get("totalCash")),
+            "free_cash_flow": _int_or_none(info.get("freeCashflow")),
+            "operating_cash_flow": _int_or_none(info.get("operatingCashflow")),
+            "enterprise_value": _int_or_none(info.get("enterpriseValue")),
+            "beta": _clean_number(info.get("beta")),
+            "trailing_eps": _clean_number(info.get("trailingEps")),
+            "forward_eps": _clean_number(info.get("forwardEps")),
+            "forward_pe": _clean_number(info.get("forwardPE")),
+            "earnings_growth": _clean_number(info.get("earningsGrowth")),
+            "payout_ratio": _clean_number(info.get("payoutRatio")),
+            "dividend_rate": _clean_number(info.get("dividendRate")),
+
+            # Analist görüşü: başkasının değerlendirmesi, aktarılabilir bir
+            # olgu. "none" sağlayıcının "görüş yok" yazma biçimi.
+            "recommendation_key": _recommendation(info.get("recommendationKey")),
+            "analyst_count": _int_or_none(info.get("numberOfAnalystOpinions")),
+            "target_mean_price": _clean_number(info.get("targetMeanPrice")),
+
+            "ex_dividend_date": _epoch_to_iso(info.get("exDividendDate")),
+            "earnings_date": _epoch_to_iso(info.get("earningsTimestamp")),
+        }
+
+    with ThreadPoolExecutor(max_workers=config.fundamentals_workers()) as pool:
+        return [row for row in pool.map(one, wanted) if row is not None]
+
+
+def _margin(value: Any) -> Optional[float]:
+    """Bir marj, ya da None. TAM SIFIR yoktur.
+
+    Ölçüldü: AKBNK `grossMargins: 0.0` ve `ebitdaMargins: 0.0` dönüyor --
+    None değil, sıfır. Banka muhasebesinde brüt marj diye bir kalem yok ve
+    sağlayıcı "yok"u sıfır olarak veriyor. Olduğu gibi saklanırsa ekranda
+    "%0,0 brüt marj" yazar: olmayan bir ölçüm, olgu diye sunulmuş olur.
+
+    Gerçek bir şirketin marjı tam 0,0000 çıkmaz; kayıp bilgi, yanlış
+    bilgiden iyidir. `instrument_fundamentals`'ın kendi kuralı bu:
+    "defaulting a missing ratio to zero would make a stock with no earnings
+    data look like the cheapest name on the screen."
+    """
+    number = _clean_number(value)
+    return None if number == 0.0 else number
+
+
+def _recommendation(value: Any) -> Optional[str]:
+    """Analist konsensüsü. Sağlayıcı "görüş yok"u `"none"` diye yazıyor ve o
+    bir tavsiye değil; metin olarak saklanırsa ekranda tavsiye sütununda
+    "none" görünür."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lower()
+    return text or None if text not in ("none", "n/a") else None
+
+
+def _epoch_to_iso(value: Any) -> Optional[str]:
+    """Unix saniyesi -> ISO. Sağlayıcı tarihleri epoch olarak veriyor."""
+    number = _clean_number(value)
+    if number is None or number <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(number, tz=timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _clean_number(value: Any) -> Optional[float]:
-    """A number, or None. Never a coerced zero, never a NaN."""
+    """A number, or None. Never a coerced zero, never a NaN, never infinite.
+
+    Sonsuz da eleniyor, yalnızca NaN değil: ikisi de JSON'a girmiyor
+    (`Out of range float values are not JSON compliant`) ve tek bir tanesi
+    bütün partiyi düşürüyor. 828 enstrümanlık temel veri turu tam bu yüzden
+    hiçbir şey yazmadan dönmüştü -- sıfır bölmesinden gelen bir oran yetiyor.
+    """
     if value is None or isinstance(value, bool):
         return None
     try:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    return None if number != number else number
+    return number if math.isfinite(number) else None
 
 
-def fetch_candles(products: Iterable[dict[str, str]], days: int = 400) -> list[dict[str, Any]]:
-    """Daily OHLCV bars.
+
+def _finite_ohlc(bar: Any) -> Optional[tuple[float, float, float, float]]:
+    """Barın OHLC değerleri, hepsi sonlu sayıysa.
+
+    Sağlayıcı gün içi serilerde işlem olmayan aralıklar için NaN döndürüyor.
+    Bunları taşımak JSON'u geçersiz kılıyor (`Out of range float values are not
+    JSON compliant`) ve tek bir NaN bütün partiyi düşürüyor.
+    """
+    try:
+        values = (
+            float(bar["Open"]), float(bar["High"]),
+            float(bar["Low"]), float(bar["Close"]),
+        )
+    except (TypeError, ValueError, KeyError):
+        return None
+    return values if all(math.isfinite(value) for value in values) else None
+
+
+def fetch_candles(
+    products: Iterable[dict[str, str]],
+    days: int = 400,
+    interval: str = "1d",
+) -> list[dict[str, Any]]:
+    """OHLCV bars.
 
     Re-requesting the same window every night is intentional and cheap: the
     backend's unique constraint on (product, interval, timestamp) discards
     what it already holds, so a backfill is idempotent and a gap left by a
     failed run repairs itself on the next one.
+
+    `interval` gün içi barlar için de kullanılıyor (`15m`). Bunlar sağlayıcıdan
+    GERÇEK OHLC olarak geliyor; anlık fiyattan bar üretmek, açılış-yüksek-düşük
+    değerlerini uydurmak olurdu ve mum grafiği o uydurma fitilleri gerçekmiş
+    gibi çizerdi. Sağlayıcı gün içi barları yalnızca son ~60 gün için veriyor,
+    dolayısıyla bu seri geçmişe doğru derin değil -- gün görünümü için yeterli.
     """
     import yfinance as yf
 
@@ -236,7 +354,7 @@ def fetch_candles(products: Iterable[dict[str, str]], days: int = 400) -> list[d
         if not data_symbol:
             continue
         try:
-            frame = yf.Ticker(data_symbol).history(period=f"{days}d", interval="1d")
+            frame = yf.Ticker(data_symbol).history(period=f"{days}d", interval=interval)
             if frame is None or frame.empty:
                 log.warning("no history for %s", data_symbol)
                 continue
@@ -244,15 +362,22 @@ def fetch_candles(products: Iterable[dict[str, str]], days: int = 400) -> list[d
                 timestamp = _to_utc(index)
                 if timestamp is None:
                     continue
+                prices = _finite_ohlc(bar)
+                if prices is None:
+                    # Sağlayıcı, işlem olmayan gün içi aralıklar için NaN'lı
+                    # satırlar döndürüyor. NaN bir bar değil, boşluktur --
+                    # ve JSON'a girmez: bir tanesi otuz günlük 94.055 barlık
+                    # partinin tamamını düşürüyordu.
+                    continue
                 rows.append(
                     {
                         "symbol": product["symbol"],
-                        "interval": "1d",
+                        "interval": interval,
                         "timestamp": timestamp,
-                        "open": float(bar["Open"]),
-                        "high": float(bar["High"]),
-                        "low": float(bar["Low"]),
-                        "close": float(bar["Close"]),
+                        "open": prices[0],
+                        "high": prices[1],
+                        "low": prices[2],
+                        "close": prices[3],
                         "volume": _int_or_none(bar.get("Volume")),
                         "source": "yfinance",
                     }
@@ -275,9 +400,137 @@ def _first_number(info: Any, *names: str) -> Optional[float]:
 
 
 def _int_or_none(value: Any) -> Optional[int]:
+    """Bir tamsayı, ya da None. Sonsuz ve NaN elenir -- ikisi de JSON'a
+    girmiyor ve `int(float("inf"))` zaten OverflowError veriyor."""
     try:
-        if value is None or value != value:
+        if value is None or not math.isfinite(float(value)):
             return None
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
+
+
+# ── Çeyreklik finansallar ────────────────────────────────────────────────────
+#
+# `fetch_fundamentals` bir ANLIK GÖRÜNTÜ topluyor: alan başına tek güncel
+# değer, geçmiş yok. Bu yüzden "son çeyrek kârı önceki çeyreğe göre şu kadar
+# arttı" gibi bir cümle kurulamıyordu -- kıyaslanacak ikinci dönem hiç
+# saklanmıyordu.
+#
+# Bu toplayıcı dönem dönem saklıyor. Şema tasarlanmadan ÖNCE ölçüldü;
+# rakamlar aşağıdaki kararların hepsinin gerekçesi.
+
+#: Saklanan kalemler ve sağlayıcıdaki satır adları.
+#:
+#: Sağlayıcının gelir tablosu şirkete göre 33-52 satır arasında değişiyor.
+#: Derin örneklenen 12 sembolün HEPSİNDE bulunan yirmi kalemden yalnızca bu
+#: dördü saklanıyor; gerisi ya türetilebilir ya da bu kartın sorusunu
+#: cevaplamıyor. `EBITDA` ve `EBIT` bilerek dışarıda: 12 sembolün 10'unda var
+#: ve eksik olan ikisi banka -- banka muhasebesinde o kalem yok, sıfır değil.
+QUARTERLY_LINES = {
+    "total_revenue": "Total Revenue",
+    "net_income": "Net Income",
+    "pretax_income": "Pretax Income",
+    "operating_expense": "Operating Expense",
+}
+
+#: `Basic EPS` SAKLANMIYOR ve bu ölçülmüş bir karar. 34 hissede son çeyrekte
+#: 32 kez dolu, bir önceki çeyrekte yalnızca 3 kez. Seri olarak saklamak,
+#: neredeyse her zaman yarısı boş bir kolon açmak olurdu; hisse başına kâr
+#: zaten `instrument_fundamentals`'ta anlık değer olarak duruyor.
+
+#: Kaç çeyrek geriye yazılıyor. Sağlayıcı 5-7 dönem veriyor (ölçülen ortalama
+#: 5,5) ve hepsi alınıyor: fazlası zaten gelmiyor, azını almak yıllık
+#: karşılaştırmayı imkânsız kılardı -- geçen yılın aynı çeyreği beşinci
+#: sütunda.
+MAX_QUARTERS = 8
+
+
+def fetch_quarterly_financials(
+    products: Iterable[dict[str, str]]
+) -> list[dict[str, Any]]:
+    """Çeyreklik gelir tablosu satırları, enstrüman başına birden çok dönem.
+
+    Ölçülen kapsama (evrenden rastgele 40 BIST hissesi): 34'ünde veri var,
+    6'sında hiç yok. Veri olanların 33'ünde hem son çeyrek, hem bir önceki,
+    hem de bir yıl öncesi dolu -- yani hem çeyreklik hem yıllık karşılaştırma
+    yapılabiliyor. Boşluklar SERİNİN ESKİ UCUNDA toplanıyor.
+
+    DÖNEM SONU SAKLANIYOR, sıra değil. Ölçüldü: AKBNK, GARAN ve EREGL'de
+    2025Q3 gelir tablosunda hiç yok (nakit akışında var). "Son iki satırı al"
+    diyen bir karşılaştırma, o üç hissede 2025Q2 ile 2025Q4'ü kıyaslar ve
+    bunu söylemez. Bitişiklik dönem sonundan hesaplanmalı.
+
+    Rakamlar KÜMÜLATİF DEĞİL, her sütun kendi çeyreğinin rakamı. Türk
+    şirketlerinde kümülatif raporlama yaygın olduğu için ayrıca kontrol
+    edildi: AKBNK 53,9 → 48,4 → 67,3 → 75,5 → 71,0 milyar; artan değil.
+
+    `fetch_fundamentals` ile aynı paralellik ve aynı sebep: sağlayıcı toplu
+    bir uç sunmuyor. Ölçülen hız ~0,8 sn/sembol, dolayısıyla evrenin tamamı
+    tek iş parçacığıyla ~13 dakika.
+    """
+    import yfinance as yf
+
+    wanted = [p for p in products if p.get("data_symbol")]
+    if not wanted:
+        return []
+
+    def one(product: dict[str, str]) -> list[dict[str, Any]]:
+        # Tek sembolün TAMAMI korunuyor, yalnızca isteği değil. Sütunları
+        # sıralamak da sağlayıcının verdiği tiplere bağlı ve karışık bir
+        # dizin `TypeError` veriyor; bir sembolde patlayan sıralama, tur
+        # `ThreadPoolExecutor.map` üzerinden toplandığı için ÇEYREKLİK TURUN
+        # TAMAMINI düşürüyordu.
+        try:
+            return _quarters_for(yf, product)
+        except Exception as exc:
+            log.warning("quarterly financials failed for %s: %s",
+                        product["data_symbol"], exc)
+            return []
+
+    with ThreadPoolExecutor(max_workers=config.fundamentals_workers()) as pool:
+        return [row for rows in pool.map(one, wanted) for row in rows]
+
+
+def _quarters_for(yf: Any, product: dict[str, str]) -> list[dict[str, Any]]:
+    """Tek enstrümanın çeyrekleri. Hatayı çağıran yakalıyor."""
+    frame = yf.Ticker(product["data_symbol"]).quarterly_income_stmt
+    if frame is None or getattr(frame, "empty", True):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    # En yeniden eskiye; `MAX_QUARTERS` fazlasını kesiyor.
+    for column in sorted(frame.columns, reverse=True)[:MAX_QUARTERS]:
+        period_end = _to_utc(column)
+        if period_end is None:
+            continue
+        values = {
+            field: _int_or_none(_cell(frame, line, column))
+            for field, line in QUARTERLY_LINES.items()
+        }
+        # Hiçbir kalemi olmayan bir dönem YAZILMIYOR. Sütun var ama içi boş
+        # olabiliyor: ölçüldü, 34 hissenin 16'sında serinin bir yerinde NaN
+        # var. Boş bir satır saklamak, o çeyrek raporlanmış ama sıfır çıkmış
+        # gibi görünürdü.
+        if all(value is None for value in values.values()):
+            continue
+        rows.append({
+            "symbol": product["symbol"],
+            "period_end": period_end.date().isoformat(),
+            **values,
+        })
+    return rows
+
+
+def _cell(frame: Any, line: str, column: Any) -> Any:
+    """Bir hücre, ya da None. Eksik satır bir hata değil.
+
+    Sağlayıcının satır kümesi şirkete göre değişiyor -- bankada `EBITDA` yok,
+    havayolunda `Net Interest Income` yok -- dolayısıyla `KeyError` normal
+    işleyişin parçası.
+    """
+    try:
+        value = frame.loc[line, column]
+    except (KeyError, TypeError):
+        return None
+    return value

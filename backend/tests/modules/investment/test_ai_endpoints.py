@@ -24,6 +24,8 @@ from app.main import app
 from app.modules.investment import ai_service, market_service
 
 PORTFOLIO_URL = "/api/investment/portfolio/TEST-USER-1/positions"
+SERVICE_TOKEN = "TEST-service-key"
+SERVICE_AUTH = {"Authorization": f"Bearer {SERVICE_TOKEN}"}
 STAGE_URL = "/api/investment/transactions/stage"
 
 NOW = datetime.now(timezone.utc)
@@ -80,7 +82,7 @@ def cash() -> float:
 
 
 @pytest.fixture
-def ai_client(mocker, holdings, quotes, resolved, cash):
+def ai_client(mocker, holdings, quotes, resolved, cash, monkeypatch):
     from fastapi.testclient import TestClient
 
     mocker.patch.object(market_service, "holdings", return_value=holdings)
@@ -90,8 +92,12 @@ def ai_client(mocker, holdings, quotes, resolved, cash):
         market_service, "account", return_value=SimpleNamespace(id="acct-1", cash_balance=cash, currency_code="TRY", account_number="TR-TEST-0001")
     )
     app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
+    # `/portfolio/{user_id}/positions` konusunu YOLDA adlandırıyor, dolayısıyla
+    # servis token'ı istiyor. Testlerin çoğu sözleşmenin gövdesiyle ilgili;
+    # imzayı burada bir kez atmak, her testin başına eklemekten okunaklı.
+    monkeypatch.setenv("BACKEND_API_KEY", SERVICE_TOKEN)
     try:
-        with TestClient(app) as client:
+        with TestClient(app, headers=SERVICE_AUTH) as client:
             yield client
     finally:
         app.dependency_overrides.pop(get_db, None)
@@ -112,7 +118,7 @@ def resolved():
     """Default resolver: knows THYAO and AAPL, nothing else."""
     known = {"THYAO": Product("THYAO"), "AAPL": Product("AAPL", "USD", "NASDAQ")}
 
-    def _resolve(_db, text):
+    def _resolve(_db, text, **_kwargs):
         if not text:
             return None
         return known.get(str(text).upper().removeprefix("TEST-").removesuffix(".IS"))
@@ -134,6 +140,32 @@ def stage_body(**overrides):
     return body
 
 
+class TestServiceGuard:
+    """Ölçüldü, koruma eklenmeden önce: imzasız bir GET başka bir kullanıcının
+    on bir pozisyonunu ve 1.083.211,99 TL'lik toplam piyasa değerini döndü.
+
+    `/investment/positions` etkilenmiyor -- o farklı bir tüketici için farklı
+    bir uç ve kullanıcısını token'dan çözüyor, dolayısıyla ancak çağıranın
+    kendi verisini döndürebiliyor. Bu döndüremez, bu yüzden kimin verisini
+    adlandırdığı konusunda güvenilmesi gerekiyor.
+    """
+
+    def test_an_unsigned_request_is_refused(self, ai_client):
+        assert ai_client.get(PORTFOLIO_URL, headers={"Authorization": ""}).status_code == 401
+
+    def test_a_wrong_token_is_refused(self, ai_client):
+        response = ai_client.get(
+            PORTFOLIO_URL, headers={"Authorization": "Bearer nope"}
+        )
+        assert response.status_code == 401
+
+    def test_an_unconfigured_key_refuses_rather_than_opens(self, ai_client, monkeypatch):
+        """503 rather than 401: nothing is wrong with the caller's
+        credentials, the deployment never configured any."""
+        monkeypatch.delenv("BACKEND_API_KEY", raising=False)
+        assert ai_client.get(PORTFOLIO_URL).status_code == 503
+
+
 class TestPortfolioContract:
     def test_top_level_keys_are_complete(self, ai_client):
         assert set(ai_client.get(PORTFOLIO_URL).json()) == REQUIRED_TOP_LEVEL
@@ -150,6 +182,40 @@ class TestPortfolioContract:
     def test_as_of_reflects_the_quote_not_now(self, ai_client):
         body = ai_client.get(PORTFOLIO_URL).json()
         assert body["as_of"].startswith(NOW.strftime("%Y-%m-%dT%H:%M"))
+
+
+class TestVenue:
+    """`exchange` UÇ NOKTADAN geçmeli, yalnızca `build_portfolio`'dan değil.
+
+    Alan bir dönem `str` olarak zorunluydu ve eşleşmeyen her piyasa "XIST"
+    ile dolduruluyordu -- yani döviz ve altın ajana "Borsa İstanbul'da işlem
+    görüyor" diye gidiyordu. None'a çevrildiğinde yanıt modeli 500 verdi ve
+    birim testler bunu görmedi, çünkü hepsi `build_portfolio`'yu doğrudan
+    çağırıp yanıt modelini atlıyor. Bu sınıf o boşluğu kapatıyor.
+    """
+
+    @pytest.mark.parametrize(
+        "holdings",
+        [[{**HOLDINGS[0], "symbol": "USDTRY", "market": "FX"}]],
+    )
+    def test_a_currency_pair_serialises_with_a_null_venue(self, ai_client):
+        response = ai_client.get(PORTFOLIO_URL)
+        assert response.status_code == 200
+        assert response.json()["positions"][0]["exchange"] is None
+
+    @pytest.mark.parametrize(
+        "holdings",
+        [[{**HOLDINGS[0], "symbol": "XAUUSD", "market": "COMEX"}]],
+    )
+    def test_gold_serialises_with_a_null_venue(self, ai_client):
+        response = ai_client.get(PORTFOLIO_URL)
+        assert response.status_code == 200
+        assert response.json()["positions"][0]["exchange"] is None
+
+    def test_a_listed_share_still_reports_its_mic(self, ai_client):
+        body = ai_client.get(PORTFOLIO_URL).json()
+        thyao = next(p for p in body["positions"] if p["symbol"] == "THYAO")
+        assert thyao["exchange"] == "XIST"
 
 
 class TestValuation:
@@ -336,7 +402,7 @@ class TestForeignCurrencyStaging:
 
     @pytest.fixture
     def resolved(self):
-        def _resolve(_db, text):
+        def _resolve(_db, text, **_kwargs):
             symbol = (text or "").upper()
             if symbol in {"AAPL", "XAUUSD"}:
                 return Product(symbol, "USD", "NASDAQ")
@@ -395,7 +461,7 @@ class TestMissingExchangeRate:
 
     @pytest.fixture
     def resolved(self):
-        return lambda _db, text: (
+        return lambda _db, text, **_kwargs: (
             Product("AAPL", "USD", "NASDAQ") if (text or "").upper() == "AAPL" else None
         )
 

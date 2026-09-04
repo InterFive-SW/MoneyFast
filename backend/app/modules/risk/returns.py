@@ -128,9 +128,16 @@ def max_drawdown(
             break
 
     def stamp(index: Optional[int]) -> Optional[str]:
+        """The date at `index`, whether the caller indexed by day or instant.
+
+        `value_series` works in whole days and hands back `date`; callers that
+        pass raw candle timestamps hand back `datetime`. Insisting on one of
+        them would make this helper's type the reason a date is missing.
+        """
         if index is None or not stamps or index >= len(stamps):
             return None
-        return stamps[index].date().isoformat()
+        moment = stamps[index]
+        return (moment.date() if hasattr(moment, "date") else moment).isoformat()
 
     return {
         "value": round(worst, 6),
@@ -222,27 +229,278 @@ def sharpe(returns: Sequence[float], risk_free_rate: float) -> Optional[float]:
     return round((annual_return - risk_free_rate) / volatility, 4)
 
 
-def portfolio_returns(
-    series: dict[str, list[float]], weights: dict[str, float]
-) -> list[float]:
-    """Weighted return series for the whole portfolio.
+def _currency_of(holding: Any, base_currency: str) -> str:
+    """The instrument's own currency, under either key the callers use.
 
-    Truncated to the shortest constituent history so every date has a value
-    from every holding. Padding a short series would silently assume the
-    missing days were flat, understating the portfolio's volatility.
+    `risk` builds positions with `instrument_currency`; `analytics` reads
+    holdings straight from `market_service` where the key is `currency`. The
+    two grew separately and neither is wrong, so this reads both rather than
+    forcing one caller to rename a field the MCP contract has frozen.
     """
-    usable = {s: r for s, r in series.items() if len(r) >= 2 and weights.get(s)}
-    if not usable:
-        return []
+    return (
+        holding.get("instrument_currency")
+        or holding.get("currency")
+        or base_currency
+    ).upper()
 
-    length = min(len(r) for r in usable.values())
-    total_weight = sum(weights[s] for s in usable)
-    if total_weight == 0:
-        return []
 
-    combined = []
-    for index in range(-length, 0):
-        combined.append(
-            sum(usable[s][index] * weights[s] for s in usable) / total_weight
+def _day_map(bars: Sequence[tuple]) -> dict[Any, float]:
+    """[(timestamp, close), ...] -> {date: close}, dropping unusable prices."""
+    out: dict[Any, float] = {}
+    for stamp, close in bars:
+        value = float(close)
+        if value <= 0:
+            # A zero or negative close is bad data. Kept, it produces an
+            # infinite return that poisons every statistic downstream.
+            continue
+        out[stamp.date() if hasattr(stamp, "date") else stamp] = value
+    return out
+
+
+def value_series(
+    holdings: Sequence[Any],
+    closes_for: Any,
+    base_currency: str = "TRY",
+) -> tuple[list[Any], list[float], list[str]]:
+    """Portfolio value per day, in the base currency, on real shared dates.
+
+    Returns `(dates, values, excluded_symbols)` oldest first.
+
+    **One series, two consumers.** `risk` and `analytics` each built their own
+    and the two disagreed about the same portfolio, in three separate ways:
+
+    1. *Alignment.* `risk` lined series up by tail INDEX. Measured on live
+       data: DOAS had 395 bars and XU100 392 — four days missing from the
+       index (2025-12-24, 2026-05-26/27/28) — so everything before May 2026
+       was compared against prices three days out of step, and beta against
+       XU100 for a 94%-DOAS portfolio came out as 0.0062. A Turkish equity
+       portfolio is not uncorrelated with the Turkish index; the number was
+       not missing, it was wrong. Only dates where EVERY holding traded are
+       used here.
+
+    2. *What was being computed.* A weighted average of constituent returns
+       with FIXED weights is a DAILY-REBALANCED portfolio. `assumptions`
+       reported `BUY_AND_HOLD`. Deriving returns from a value series is
+       buy-and-hold, so the label becomes true.
+
+    3. *Currency.* `analytics` summed `quantity x close` across holdings with
+       no conversion, adding dollars to lira. Each holding is converted here,
+       per day, at that day's rate.
+
+    Quantities are never read. Each holding is carried as its market value
+    scaled by its own price index, so the last day reproduces exactly the
+    portfolio's current value. `market_value` is always present and already
+    in the base currency; `quantity` defaults to 0 in the MCP schema, and a
+    caller that omitted it would otherwise have its holding silently valued
+    at nothing.
+    """
+    priced, values, excluded = _base_prices(holdings, closes_for, base_currency)
+    if not priced:
+        return [], [], excluded
+
+    common = sorted(set.intersection(*(set(days) for days in priced.values())))
+    if len(common) < 2:
+        return [], [], excluded
+
+    last = common[-1]
+    series = []
+    for day in common:
+        series.append(
+            sum(
+                values[symbol] * (days[day] / days[last])
+                for symbol, days in priced.items()
+            )
         )
-    return combined
+    return common, series, excluded
+
+
+def _base_prices(
+    holdings: Sequence[Any], closes_for: Any, base_currency: str = "TRY"
+) -> tuple[dict[str, dict[Any, float]], dict[str, float], list[str]]:
+    """Each holding's price history, converted to the base currency per day.
+
+    Shared by `value_series` and `rebalanced_returns` so the currency rule --
+    convert at THAT day's rate, drop a day with no rate rather than invent one
+    -- has a single implementation. Returns `(prices, market_values, excluded)`.
+    """
+    base = (base_currency or "TRY").upper()
+    priced: dict[str, dict[Any, float]] = {}
+    values: dict[str, float] = {}
+    excluded: list[str] = []
+    fx_cache: dict[str, dict[Any, float]] = {}
+
+    for holding in holdings:
+        symbol = holding["symbol"]
+        market_value = abs(float(holding.get("market_value") or 0.0))
+        if market_value == 0:
+            # Contributes nothing either way. Skipped silently rather than
+            # named as excluded: it is not missing history, and letting its
+            # trading days constrain the shared date set would shorten the
+            # window for every other holding on account of a holding worth
+            # nothing.
+            continue
+
+        bars = _day_map(list(closes_for(symbol)) if closes_for else [])
+        if len(bars) < 3:
+            # Same threshold the return series needs: three closes give two
+            # returns, which is the least that can be called a series.
+            excluded.append(symbol)
+            continue
+
+        currency = _currency_of(holding, base)
+        if currency != base:
+            if currency not in fx_cache:
+                fx_cache[currency] = _day_map(
+                    list(closes_for(f"{currency}{base}")) if closes_for else []
+                )
+            rates = fx_cache[currency]
+            # Only days with BOTH a price and a rate. Valuing a dollar holding
+            # in lira on a day with no rate would need an invented one, and
+            # CLAUDE.md's currency rule is explicit that 1.0 is never assumed.
+            bars = {day: close * rates[day] for day, close in bars.items() if day in rates}
+            if len(bars) < 3:
+                excluded.append(symbol)
+                continue
+
+        priced[symbol] = bars
+        values[symbol] = market_value
+
+    return priced, values, sorted(excluded)
+
+
+def rebalanced_returns(
+    holdings: Sequence[Any], closes_for: Any, base_currency: str = "TRY"
+) -> list[float]:
+    """Portfolio returns under DAILY_REBALANCE, on the shared dates.
+
+    Weights are reset to target every day, so this is the weighted average of
+    the constituents' daily returns rather than the return of a value series
+    that drifts with them. The two are genuinely different portfolios and the
+    contract lets the caller pick; before this, the parameter was accepted,
+    echoed, and ignored -- whichever assumption was asked for, one fixed
+    computation came back under its name.
+    """
+    priced, values, _ = _base_prices(holdings, closes_for, base_currency)
+    if not priced:
+        return []
+
+    common = sorted(set.intersection(*(set(days) for days in priced.values())))
+    if len(common) < 3:
+        return []
+
+    # No zero guard: `_base_prices` skips worthless holdings before they reach
+    # here, so a non-empty `priced` always carries a positive total.
+    total = sum(values[symbol] for symbol in priced)
+
+    per_symbol = {
+        symbol: simple_returns([days[day] for day in common])
+        for symbol, days in priced.items()
+    }
+    length = min(len(r) for r in per_symbol.values())
+    return [
+        sum(per_symbol[symbol][index] * values[symbol] for symbol in priced) / total
+        for index in range(length)
+    ]
+
+
+def align_to(
+    dates: Sequence[Any], bars: Sequence[tuple]
+) -> list[float]:
+    """Another instrument's closes, on exactly `dates`.
+
+    Days the instrument did not trade are dropped along with the portfolio's
+    value for that day, which is what `paired_returns` handles. Returning a
+    short list here rather than padding is deliberate: a forward-filled
+    benchmark shows the index flat on a day it was simply closed.
+    """
+    day_map = _day_map(bars)
+    return [day_map[day] for day in dates if day in day_map]
+
+
+def paired_returns(
+    dates: Sequence[Any], values: Sequence[float], bars: Sequence[tuple]
+) -> tuple[list[float], list[float]]:
+    """Portfolio and benchmark returns over the dates BOTH actually have.
+
+    Beta and correlation were computed from `portfolio[-size:]` against
+    `benchmark[-size:]`, which lines up two series by length rather than by
+    date. When the benchmark is missing days the holdings have — and it was,
+    four of them — every earlier observation is paired with the wrong day.
+    """
+    day_map = _day_map(bars)
+    shared = [(day, value) for day, value in zip(dates, values) if day in day_map]
+    if len(shared) < 3:
+        return [], []
+    return (
+        simple_returns([value for _, value in shared]),
+        simple_returns([day_map[day] for day, _ in shared]),
+    )
+
+
+def risk_contributions(
+    holdings: Sequence[Any], closes_for: Any, base_currency: str = "TRY"
+) -> list[dict[str, Any]]:
+    """Each holding's share of the portfolio's volatility, largest first.
+
+    Answers the question that follows "your risk is High" and had no answer:
+    which position is it coming from.
+
+    **Weight is not risk.** Concentration reports that five positions carry a
+    fifth each; if all five are banks they move together and the portfolio is
+    far less diversified than the weights suggest. Conversely a large holding
+    that moves against the rest can carry less risk than its weight implies.
+    The gap between the two numbers is the whole point, which is why both are
+    returned.
+
+    Marginal contribution to variance: `w_i * cov(r_i, r_p) / var(r_p)`. The
+    shares sum to 1.0 by construction, because the weighted covariances of the
+    constituents with the portfolio ARE the portfolio's variance.
+
+    A share can be negative -- that is a holding that has been damping the
+    portfolio's swings, not an error.
+    """
+    priced, values, _ = _base_prices(holdings, closes_for, base_currency)
+    if not priced:
+        return []
+
+    common = sorted(set.intersection(*(set(days) for days in priced.values())))
+    if len(common) < 3:
+        return []
+
+    total = sum(values[symbol] for symbol in priced)
+    per_symbol = {
+        symbol: simple_returns([days[day] for day in common])
+        for symbol, days in priced.items()
+    }
+    # Decomposed against the CURRENT-WEIGHT portfolio, not the drifting
+    # buy-and-hold one. Two reasons, and they agree:
+    #
+    # The question is "which of the positions I hold TODAY drives my risk",
+    # and today's weights are fixed weights. And the identity only holds for
+    # fixed weights -- measured against the drifting series the shares summed
+    # to 1.00988, which is not a rounding artefact but a different portfolio.
+    length = min(len(r) for r in per_symbol.values())
+    portfolio = [
+        sum(per_symbol[symbol][index] * values[symbol] for symbol in priced) / total
+        for index in range(length)
+    ]
+    variance = stdev(portfolio) ** 2
+    if variance == 0:
+        # A portfolio that never moved has no risk to apportion. Zero shares
+        # would claim each holding contributes nothing, which is a different
+        # statement from "there is nothing to divide".
+        return []
+
+    out = []
+    for symbol, series in per_symbol.items():
+        weight = values[symbol] / total
+        out.append(
+            {
+                "symbol": symbol,
+                "weight": round(weight, 6),
+                "contribution": round(
+                    weight * covariance(series, portfolio) / variance, 6
+                ),
+            }
+        )
+    return sorted(out, key=lambda row: row["contribution"], reverse=True)

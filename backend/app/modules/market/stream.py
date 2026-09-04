@@ -19,6 +19,7 @@ Design notes worth keeping:
 
 from __future__ import annotations
 
+import anyio
 import asyncio
 import logging
 from typing import Any, Optional
@@ -38,9 +39,15 @@ HEARTBEAT_SECONDS = 20.0
 #: Frames buffered per subscriber before the oldest is dropped.
 QUEUE_SIZE = 8
 
-#: Republish an unchanged frame at least this often, so the age the browser
-#: displays keeps growing while the market is closed.
+#: Republish at least this often, so the age the browser displays keeps
+#: growing while the market is closed. Bu kare artık YALNIZCA tazelik bilgisini
+#: taşıyor: 1011 kotasyonu yeniden yollamak, değişmemiş fiyatlar için dakikada
+#: 88 KB demekti.
 FRESHNESS_REFRESH_SECONDS = 60.0
+
+#: Tam kare aralığı. Fark kareleri kaçan bir istemcinin sürüklenmemesi için
+#: ara sıra her şey yeniden yollanıyor; dakikada bir değil, seyrek olarak.
+FULL_RESYNC_SECONDS = 600.0
 
 _subscribers: set[asyncio.Queue] = set()
 _poller: Optional[asyncio.Task] = None
@@ -105,17 +112,46 @@ def publish(frame: dict[str, Any]) -> None:
             pass
 
 
+def _changed_quotes(
+    quotes: dict, previous: Optional[dict]
+) -> dict:
+    """Yalnızca DEĞİŞEN kotasyonlar.
+
+    Evren 190 enstrümandan 1010'a çıkınca her kare 88 KB oldu ve fiyat her
+    değiştiğinde açık olan her sekmeye gidiyordu: o boyutta bir JSON'u
+    ayrıştırmak ve React'e yaymak, menülerde hissedilen takılmanın bir
+    parçasıydı.
+
+    Fiyatların çoğu bir turdan diğerine kıpırdamıyor -- borsa kapalıyken
+    hiçbiri kıpırdamıyor -- dolayısıyla kare, gerçekten değişenler kadar
+    küçülüyor.
+    """
+    if previous is None:
+        return quotes
+    return {
+        symbol: value
+        for symbol, value in quotes.items()
+        if previous.get(symbol) != value
+    }
+
+
 async def _poll_forever() -> None:
     global _poller
     current = asyncio.current_task()
-    previous: Optional[str] = None
+    previous_quotes: Optional[dict] = None
+    last_full = 0.0
     last_published = 0.0
     try:
         while _subscribers:
             try:
-                frame = _reader() if _reader else None
+                # AYRI iş parçacığında. `_reader` 1.011 kotasyonu okuyup
+                # ORM nesnesi kuruyor ve bu senkron bir psycopg2 çağrısı;
+                # doğrudan burada çalıştırıldığında olay döngüsünü 5 saniyede
+                # bir, açık bir sekme olduğu sürece sonsuza kadar donduruyor
+                # -- yani tek bir açık sayfa bütün uygulamayı yavaşlatıyordu.
+                frame = await anyio.to_thread.run_sync(_reader) if _reader else None
                 if frame:
-                    fingerprint = repr(sorted(frame.get("quotes", {}).items()))
+                    quotes = frame.get("quotes", {}) or {}
                     now = asyncio.get_running_loop().time()
                     # Prices unchanged is the normal state outside session
                     # hours, and suppressing every frame then meant `as_of`
@@ -123,11 +159,28 @@ async def _poll_forever() -> None:
                     # "15 dk gecikmeli" all weekend while the data aged for
                     # days. A periodic frame refreshes the age even when no
                     # price moved.
-                    aged_out = (now - last_published) >= FRESHNESS_REFRESH_SECONDS
-                    if fingerprint != previous or aged_out:
-                        previous = fingerprint
+                    delta = _changed_quotes(quotes, previous_quotes)
+                    needs_resync = (now - last_full) >= FULL_RESYNC_SECONDS
+
+                    if previous_quotes is None or needs_resync:
+                        # Tam kare: bağlantının başında ve seyrek aralıklarla.
+                        # Akışa ortadan katılan bir istemci yalnızca farkları
+                        # alsaydı, hiç görmediği sembollerde boşluk kalırdı.
+                        previous_quotes = quotes
+                        last_full = now
                         last_published = now
-                        publish(frame)
+                        publish({**frame, "quotes": quotes, "partial": False})
+                    elif delta:
+                        previous_quotes = quotes
+                        last_published = now
+                        publish({**frame, "quotes": delta, "partial": True})
+                    elif (now - last_published) >= FRESHNESS_REFRESH_SECONDS:
+                        # Hiçbir fiyat kıpırdamadı ama tarayıcının gösterdiği
+                        # yaş ilerlemeli. Bunun için 1011 kotasyonu yeniden
+                        # yollamak gerekmiyor -- kare yalnızca tazelik
+                        # bilgisini taşıyor.
+                        last_published = now
+                        publish({**frame, "quotes": {}, "partial": True})
             except Exception as exc:
                 # A database hiccup must not kill the stream for everyone; the
                 # next tick retries.

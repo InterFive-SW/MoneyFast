@@ -220,7 +220,8 @@ async def request(
     params: Optional[Mapping[str, Any]] = None,
     json_body: Optional[Mapping[str, Any]] = None,
     headers: Optional[Mapping[str, str]] = None,
-) -> dict:
+    allow_list: bool = False,
+) -> Any:
     """Call the backend and return the decoded JSON object.
 
     Args:
@@ -281,9 +282,19 @@ async def request(
                     f"{tool}: backend returned a non-JSON body. {_excerpt(response)}"
                 ) from exc
 
-            if not isinstance(payload, dict):
+            # Bir dizi varsayılan olarak sözleşme ihlali. Sebep: uçların
+            # ezici çoğunluğu nesne döndürüyor ve bir gün liste döndürmeye
+            # başlayan bir uç, `payload["..."]` yazan aracın elinde
+            # anlaşılmaz bir `TypeError`a dönüşürdü.
+            #
+            # `allow_list` bunu ÇAĞRI BAŞINA gevşetiyor, genel olarak değil:
+            # `/market/search` gerçekten bir dizi döndürüyor ve onu nesneye
+            # sarmak arayüzü bozardı -- aynı ucu `InstrumentSuggestion[]`
+            # olarak okuyan bir açılır liste var.
+            if not isinstance(payload, list if allow_list else dict):
+                expected = "a JSON array" if allow_list else "a JSON object"
                 raise ContractViolationError(
-                    f"{tool}: expected a JSON object, got {type(payload).__name__}."
+                    f"{tool}: expected {expected}, got {type(payload).__name__}."
                 )
             return payload
 

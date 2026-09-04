@@ -122,18 +122,61 @@ def per_host_delay() -> float:
     return _float("INGESTOR_HOST_DELAY_SECONDS", 2.0)
 
 
-def quote_interval_seconds() -> int:
-    """How often to refresh prices.
+#: Üst şeritteki enstrümanlar: kur, altın ve endeks. Küçük bir küme olduğu
+#: için sık çekilebiliyor.
+BAND_MARKETS: set[str] = {"FX", "COMEX"}
 
-    Ten seconds is achievable because the whole universe is fetched in ONE
-    batched request (measured 3.3-5.4s for ~95 symbols). The floor of 5s is a
-    guard against a config typo turning this into a request flood.
+#: Şeride endeksler de giriyor; bunlar bir borsada işlem görüyor ama fiyatları
+#: tek tek hisselerden bağımsız okunuyor.
+BAND_PRODUCT_TYPES: set[str] = {"index"}
+
+
+def band_interval_seconds() -> int:
+    """Şerit ne sıklıkta tazelenir.
+
+    Dört-beş sembol, dolayısıyla otuz saniye rahatça yetiyor: ekranın tepesinde
+    sürekli değişen bir kur bandı, bütün evreni aynı sıklıkta çekmeyi
+    gerektirmiyor.
     """
-    # 30s, not 10s. Measured with ~190 symbols across two markets: a clean
-    # cycle is a handful of seconds, but a chunk that has to time out pushes
-    # it past ten, and every overrun was logged as a skipped run. A budget the
-    # cycle can actually meet is worth more than a number that looks live.
-    return max(5, _int("INGESTOR_QUOTE_INTERVAL_SECONDS", 30))
+    return max(5, _int("INGESTOR_BAND_INTERVAL_SECONDS", 30))
+
+
+def quote_interval_seconds() -> int:
+    """Hisse fiyatları ne sıklıkta tazelenir.
+
+    Beş dakika. Gün içi grafiğin bir işlem gününde 78 noktası olsun diye:
+    5 dakikalık barlar bir seansa tam bu kadar sığıyor ve barlar sağlayıcıdan
+    gerçek OHLC olarak geliyor.
+
+    Bütçe dar ama ölçülebilir. Zorlanmış bir ısınma turu 1009 sembolü 272
+    saniyede çekmişti; normal turlar yalnızca O AN AÇIK olan piyasalara
+    süzülüyor (~493 BIST ya da ~517 ABD), yani kabaca yarısı. Tur bütçesini
+    aşarsa `run_quotes` bunu uyarı olarak yazıyor ve mevcut geri çekilme
+    merdiveni devreye giriyor; kalıcı olarak aşıyorsa değer 10 dakikaya
+    çekilmeli.
+
+    Önceden bu değer 30 SANİYEDİ ve bütün evreni kapsıyordu --
+    `docker-compose.yml` `INGESTOR_QUOTE_INTERVAL_MINUTES: 15` diye bir değer
+    veriyordu ama bu ada bakan hiçbir kod yoktu, dolayısıyla ayar hiçbir zaman
+    işlemedi. Evren binlerce enstrümana çıkarken saniyelik bir tur, sağlayıcıya
+    dakikada iki bin istek demek.
+
+    Şerit ayrı ve hızlı (`band_interval_seconds`); sohbetin sorduğu tek bir
+    sembol ise `/refresh` ile anında çekiliyor, dolayısıyla onbeş dakika
+    hiçbir yerde "eski fiyat" anlamına gelmiyor.
+
+    5 saniyelik taban, bir yazım hatasının bunu istek seline çevirmesine karşı.
+    """
+    minutes = _int("INGESTOR_QUOTE_INTERVAL_MINUTES", 5)
+    return max(5, _int("INGESTOR_QUOTE_INTERVAL_SECONDS", minutes * 60))
+
+
+def is_band_product(product: dict) -> bool:
+    """Enstrüman hızlı (şerit) katmanına mı ait."""
+    return (
+        product.get("market") in BAND_MARKETS
+        or product.get("product_type") in BAND_PRODUCT_TYPES
+    )
 
 
 def news_interval_minutes() -> int:
@@ -142,7 +185,7 @@ def news_interval_minutes() -> int:
 
 def history_days() -> int:
     """How much daily history to request on the nightly candle job."""
-    return _int("INGESTOR_HISTORY_DAYS", 400)
+    return _int("INGESTOR_HISTORY_DAYS", 730)
 
 
 #: Below this many daily bars, the start-up backfill treats an instrument as
@@ -168,3 +211,96 @@ def respect_robots() -> bool:
 #: is what "without getting stopped" actually looks like: backing off when
 #: asked, rather than pretending to be a browser.
 BACKOFF_LADDER = (1, 3, 6)
+
+
+def refresh_port() -> int:
+    """Anlık fiyat tazeleme uç noktasının dinlediği port.
+
+    Yalnızca `moneyfast-net` üzerinden erişilebilir; compose'da host'a
+    açılmıyor.
+    """
+    return _int("INGESTOR_REFRESH_PORT", 8200)
+
+
+def intraday_history_days() -> int:
+    """Açılışta çekilecek gün içi geçmiş, gün olarak.
+
+    Aylık grafik 5 dakikalık barların saatlik kovalarından çiziliyor, yani otuz
+    günlük gün içi veriye ihtiyaç duyuyor. Sağlayıcı bu barları ~60 gün geriye
+    veriyor; üstünü istemek boş döner.
+    """
+    return max(1, min(60, _int("INGESTOR_INTRADAY_HISTORY_DAYS", 30)))
+
+
+def fundamentals_workers() -> int:
+    """Temel veri turunda eşzamanlı istek sayısı.
+
+    Sağlayıcı toplu bir uç sunmadığı için sembol başına bir istek gerekiyor;
+    sırayla 1009 sembol saatler sürüyor.
+
+    Altı, on iki değil: on iki iş parçacığıyla 828 sembol denendiğinde sağlayıcı
+    "Too Many Requests" döndürmeye başladı ve tur boş veriyle geri geldi. `.info`
+    uç noktası `download`'dan çok daha pahalı; amaç turu hızlandırmak,
+    sağlayıcıyı zorlamak değil.
+    """
+    return max(1, min(16, _int("INGESTOR_FUNDAMENTALS_WORKERS", 6)))
+
+
+# ── KAP ──────────────────────────────────────────────────────────────────────
+# Kamuyu Aydınlatma Platformu. Ayrı bir kaynak, ayrı bir tempo: bildirimler
+# haber akışından seyrek gelir ama fiyat etkisi daha yüksektir.
+
+
+def kap_base_url() -> str:
+    return os.getenv("INGESTOR_KAP_BASE_URL", "https://www.kap.org.tr").rstrip("/")
+
+
+def kap_interval_minutes() -> int:
+    """Bildirim yoklama aralığı.
+
+    Piyasa saatlerine BAĞLANMIYOR: fiyata en çok etki eden bildirimler
+    18:00 kapanışından sonra ve açılıştan önce yayımlanıyor. Seansa
+    kısıtlamak, tam da beklenmesi gereken açıklamaları kaçırmak olurdu.
+    """
+    return max(1, _int("INGESTOR_KAP_INTERVAL_MINUTES", 20))
+
+
+def kap_window_days() -> int:
+    """Tek `byCriteria` çağrısının kapsadığı gün sayısı.
+
+    Ölçüldü: bir haftada 1101, altmış günde tam 2000 (yani tavan). Üç gün
+    ~470 satır demek, tavanın çok altında — dolayısıyla olağan durumda
+    pencere hiç ikiye bölünmüyor.
+    """
+    return max(1, _int("INGESTOR_KAP_WINDOW_DAYS", 3))
+
+
+def kap_backfill_days() -> int:
+    """Geçmişe dönük tarama derinliği. 183 = altı ay."""
+    return max(1, _int("INGESTOR_KAP_BACKFILL_DAYS", 183))
+
+
+def kap_pdf_window_days() -> int:
+    """Ekli PDF'lerin okunacağı geriye dönük pencere, gün.
+
+    Ekler gövdeden pahalı: ek başına bir indirme daha, artı ayrıştırma.
+    Altı aylık taramanın tamamında açık bırakmak, sürenin üçte birini
+    kimsenin sormayacağı eski bilanço eklerine harcamak olurdu. Güncel
+    bildirimlerde açık, derin taramada kapalı.
+    """
+    return max(0, _int("INGESTOR_KAP_PDF_WINDOW_DAYS", 30))
+
+
+def kap_corpus_page() -> int:
+    """Arşiv taramasında tek seferde okunan bildirim sayısı."""
+    return max(1, _int("INGESTOR_KAP_CORPUS_PAGE", 300))
+
+
+def kap_corpus_budget() -> int:
+    """Tek turda kaç eksik gövde indirilir.
+
+    Gövde başına bir istek ve host başına iki saniye var. Sınırsız
+    bırakmak, 28.984 bildirimlik arşivde tek bir turun saatlerce sürmesi ve
+    bu arada başka hiçbir işin sıra bulamaması demekti.
+    """
+    return max(0, _int("INGESTOR_KAP_CORPUS_BUDGET", 120))

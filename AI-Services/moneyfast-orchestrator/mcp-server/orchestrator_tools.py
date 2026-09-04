@@ -79,7 +79,14 @@ _SELF_HARM_PATTERNS = (
     r"suicid",
     r"self.?harm",
     r"want to die",
-    r"jump off",
+    # Inflected forms. `jump off` did not match "jumping off a cliff", which
+    # is how a real turn reached the handoff carrying only the model's flag
+    # -- and the model spells it `SELF_HARM`, not `SELF_HARM_RISK`. The
+    # normalisation in `handoff_category` is the actual guard; this closes
+    # the hole that made it necessary.
+    r"jump\w*\s+(off|from)",
+    r"throw(ing)? myself",
+    r"kendimi (asag[iı]ya |yukar[iı]dan )?(at|birak|birakti|atacag)",
 )
 
 #: Severe financial hardship. Real distress, but the response is budgeting and
@@ -238,7 +245,13 @@ def classify_and_route_intent(
             descending.
         is_compound (bool): True when the message holds multiple separable requests
             requiring different agents.
-        sub_requests (list[str]): Self-contained restatements of each request.
+        sub_requests (list[dict]): One entry per request, each with `request` (a
+            self-contained restatement) and `agent` (the specialist for THAT
+            request alone). The agent travels with the request so a compound turn
+            costs ONE routing call rather than one per part -- measured, the
+            per-part version hit the provider's per-minute token limit and the
+            second half of the turn was lost to a 429.
+            Formerly a plain list of strings.
             Non-empty only when is_compound is True. Process sequentially; do not
             merge into a single agent call.
         entities (dict):

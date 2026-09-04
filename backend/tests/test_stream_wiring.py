@@ -30,7 +30,7 @@ def reader(mocker):
         return_value={"THYAO": {"price": 304.0, "change_amount": 3.0,
                                 "change_percent": 1.0, "received_at": NOW}},
     )
-    mocker.patch.object(market_service, "freshness", return_value=(NOW, 15, True))
+    mocker.patch.object(market_service, "freshness", return_value=(NOW, 15, True, False))
 
     import app.main as main
 
@@ -55,7 +55,7 @@ class TestReadFrame:
         from app.modules.investment import market_service
 
         mocker.patch.object(market_service, "latest_quotes", return_value={})
-        mocker.patch.object(market_service, "freshness", return_value=(None, 0, True))
+        mocker.patch.object(market_service, "freshness", return_value=(None, 0, True, True))
         frame = reader()
         assert frame["as_of"] is None
         assert frame["quotes"] == {}

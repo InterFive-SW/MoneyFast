@@ -66,6 +66,15 @@ def _iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+#: Piyasa -> ISO 10383 işlem yeri kodu. Yalnızca gerçekten bir borsada işlem
+#: gören enstrümanlar için: döviz paritelerinin ve altının merkezî bir işlem
+#: yeri yok, dolayısıyla burada karşılıkları da yok.
+#:
+#: Eşleşmeyen piyasa NONE döner, "XIST" DEĞİL. Varsayılan "XIST"ti ve USDTRY
+#: ile XAUUSD ajana "Borsa İstanbul'da işlem görüyor" diye gidiyordu -- MCP
+#: sözleşmesinin kendisi bu alan için "provider has not classified the
+#: instrument" durumunda None bekliyor. Bilinmeyeni bir olguya çevirmek,
+#: kurun yokluğunda 1.0 varsaymakla aynı hata.
 _EXCHANGE_BY_MARKET = {"BIST": "XIST", "NASDAQ": "XNAS", "NYSE": "XNYS"}
 
 #: Product type to the contract's asset_class vocabulary.
@@ -176,7 +185,9 @@ def build_portfolio(
             "Kapatılmış pozisyonlar bu ortamda saklanmıyor; yalnızca açık pozisyonlar döndürüldü."
         )
 
-    live_as_of, live_delay, live_is_delayed = freshness or (None, 0, False)
+    live_as_of, live_delay, live_is_delayed, live_is_stale = (
+        freshness or (None, 0, False, False)
+    )
 
     rows: List[Dict[str, Any]] = []
     unpriced: List[str] = []
@@ -227,7 +238,7 @@ def build_portfolio(
                 # every portfolio as 100% UNCLASSIFIED while this was absent.
                 "sector": holding.get("sector"),
                 "market": holding.get("market"),
-                "exchange": _EXCHANGE_BY_MARKET.get(holding.get("market") or "", "XIST"),
+                "exchange": _EXCHANGE_BY_MARKET.get(holding.get("market") or ""),
                 "quantity": quantity,
                 "avg_cost": avg_cost,
                 "instrument_currency": currency,
@@ -270,6 +281,9 @@ def build_portfolio(
         "source": VALUATION_SOURCE,
         "is_delayed": live_is_delayed,
         "delay_minutes": live_delay,
+        # Gözlem ESKİ mi -- beslemenin gecikmesinden ayrı bir şey. Piyasa
+        # kapalıyken normal (son kapanış), açıkken arıza işareti.
+        "is_stale": live_is_stale,
         "base_currency": base_currency,
         "positions": rows,
         "totals": {
@@ -398,6 +412,7 @@ def stage_transaction(
     reference_price: Optional[float] = None,
     held_quantity: Optional[float] = None,
     resolved_symbol: Optional[str] = None,
+    symbol_suggestions: Optional[list[str]] = None,
     currency: str = "TRY",
     available_cash: Optional[float] = None,
     cash_currency: str = "TRY",
@@ -440,7 +455,25 @@ def stage_transaction(
     if resolved_symbol:
         symbol = resolved_symbol
     if is_securities_order and symbol and reference_price is None:
-        blockers.append(f"Fiyat bilgisi bulunamayan enstrüman: {symbol}")
+        if resolved_symbol is None:
+            # The NAME failed, not the price. Reporting a missing price for
+            # "aple" told the user their data was unavailable when in fact
+            # nothing by that name exists.
+            if symbol_suggestions:
+                # "A, B veya C" -- not "A veya B veya C", which reads like a
+                # machine listing rather than a question a person would ask.
+                names = symbol_suggestions[:3]
+                listed = names[0] if len(names) == 1 else (
+                    ", ".join(names[:-1]) + " veya " + names[-1]
+                )
+                blockers.append(
+                    f"«{symbol}» diye bir enstrüman bulunamadı. "
+                    f"{listed} mı demek istediniz?"
+                )
+            else:
+                blockers.append(f"«{symbol}» diye bir enstrüman bulunamadı.")
+        else:
+            blockers.append(f"Fiyat bilgisi bulunamayan enstrüman: {symbol}")
 
     # A sell is checked against what is actually sellable. Staging a sell for
     # more than the user holds would present an impossible order as pending.

@@ -83,6 +83,54 @@ class TestLeavesRealAnswersAlone:
         assert "39.010,69 TL" in out
 
 
+class TestRiskProfileIdentifiers:
+    """The risk summary added a second enum family to leak.
+
+    A source enum ("YFINANCE_DELAYED") names the plumbing behind a number the
+    user can still read. An alignment enum IS the finding: strip it and the
+    sentence loses its verb, so these get a Turkish meaning rather than a
+    category noun.
+    """
+
+    def test_alignment_enums_become_the_thing_they_mean(self):
+        out, found = sanitize.sanitize("Durumunuz: PORTFOLIO_RISKIER.")
+        assert out == "Durumunuz: beyan ettiğiniz bandın üzerinde."
+        assert found == ["PORTFOLIO_RISKIER"]
+
+    def test_the_calm_side_is_not_left_as_an_enum(self):
+        out, _ = sanitize.sanitize("Sonuç PORTFOLIO_CALMER çıktı.")
+        assert "beyan ettiğiniz bandın altında" in out
+        assert "PORTFOLIO_CALMER" not in out
+
+    def test_agreement_reads_as_agreement(self):
+        out, _ = sanitize.sanitize("Sonuç ALIGNED.")
+        assert out == "Sonuç beyan ettiğiniz bandla aynı."
+
+    def test_the_two_halves_of_the_comparison_are_never_named(self):
+        """`measured_level` and `declared_tolerance` are the likeliest field
+        names in this payload to be written out, because the reply is ABOUT
+        the two things they name."""
+        out, found = sanitize.sanitize(
+            "measured_level Yüksek, declared_tolerance Orta."
+        )
+        assert "measured_level" not in out and "declared_tolerance" not in out
+        assert set(found) == {"measured_level", "declared_tolerance"}
+        assert "Yüksek" in out and "Orta" in out
+
+    def test_the_turkish_band_labels_survive(self):
+        """The bands are the answer. Only the keys around them go."""
+        text = "Ölçülen seviyeniz Düşük, beyanınız Orta."
+        assert sanitize.sanitize(text) == (text, [])
+
+    def test_quality_keys_do_not_reach_the_user(self):
+        out, found = sanitize.sanitize(
+            "Ölçüm 249 gözlem üzerinden (is_statistically_reliable true)."
+        )
+        assert "is_statistically_reliable" not in out
+        assert "249 gözlem" in out
+        assert "is_statistically_reliable" in found
+
+
 class TestSanitizedWrapper:
     def test_reports_what_it_removed(self, caplog):
         with caplog.at_level("WARNING"):

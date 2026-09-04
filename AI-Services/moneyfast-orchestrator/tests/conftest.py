@@ -97,15 +97,21 @@ def fake_llm(mocker):
 
         fake_llm.set_response('{"arguments": {}}')
         fake_llm.set_responses(["first", "second"])   # one per call
+
+    A queued Exception is RAISED rather than returned, which is how a
+    provider outage is expressed -- the retry path has no other way to be
+    tested, and the client wraps Groq's 429 instead of raising a typed
+    error, so the text of the exception is what matters.
     """
     llm = mocker.MagicMock(name="ChatGroq")
     llm._queue = []
 
     async def _ainvoke(messages):
         llm.calls.append(messages)
-        if llm._queue:
-            return FakeMessage(llm._queue.pop(0))
-        return FakeMessage(llm._default)
+        nxt = llm._queue.pop(0) if llm._queue else llm._default
+        if isinstance(nxt, Exception):
+            raise nxt
+        return FakeMessage(nxt)
 
     llm.calls = []
     llm._default = "Taslak yanıt."
@@ -136,6 +142,11 @@ def fake_mcp(mocker):
     async def _call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         client.calls.append((name, arguments))
         outcome = client.responses.get(name, {})
+        # A list is a QUEUE, not a payload: the next call pops one and the
+        # last entry repeats. Drives retry paths (fail, then succeed) the way
+        # FakeBackend does for the tool suite.
+        if isinstance(outcome, list):
+            outcome = outcome[0] if len(outcome) == 1 else outcome.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
@@ -237,6 +248,38 @@ def positions_payload() -> dict[str, Any]:
 @pytest.fixture()
 def empty_positions_payload(positions_payload) -> dict[str, Any]:
     return {**positions_payload, "positions": [], "totals": {"position_count": 0}}
+
+
+@pytest.fixture()
+def risk_summary_payload() -> dict[str, Any]:
+    """What get_risk_profile_summary returns (v2.4).
+
+    The score is INVERTED -- 83,4 is a calm portfolio, which is why the band
+    beside it reads "Düşük". Tests that touch both must not quietly assume
+    they run the same direction.
+    """
+    return {
+        "as_of": "2026-08-27T09:15:00Z",
+        "score": 83.4,
+        "level": "Düşük",
+        "position_count": 1,
+        "suitability": {
+            "measured_level": "Düşük",
+            "declared_tolerance": "Orta",
+            "alignment": "PORTFOLIO_CALMER",
+            "statement": "Ölçülen portföy riskiniz \"Düşük\" seviyesinde.",
+        },
+        "declared": {
+            "tolerance_level": "Orta",
+            "investment_horizon": "LONG",
+            "assessed_at": "2026-08-26T11:02:00Z",
+            "questionnaire_version": "v1",
+        },
+        "metrics": {"volatility_annualized": 0.1842, "hhi": 0.1601},
+        "findings": [],
+        "data_quality": {"coverage": 1.0, "is_statistically_reliable": True},
+        "warnings": [],
+    }
 
 
 @pytest.fixture()

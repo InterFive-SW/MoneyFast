@@ -1466,6 +1466,14 @@ class ApiClient {
     async markAllNotificationsAsRead(): Promise<{ message: string }> {
         return this.post<{ message: string }>('/notification/me/notifications/mark-all-read');
     }
+
+    /**
+     * Kullanıcının isteği üzerine (On-Demand) piyasa bültenini anında tetikler.
+     * Bu istek BackgroundTasks ile çalıştığı için anında 202 Accepted döner.
+     */
+    async sendMarketBriefingNow(): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/news/me/market-briefing/send-now');
+    }
 }
 
 /**

@@ -19,3 +19,4 @@ fpdf2>=2.7.9
 pypdf>=5.0.0
 openpyxl>=3.1.2
 python-pptx>=1.0.0
+apscheduler==3.10.4

@@ -1408,3 +1408,50 @@ describe('bildirimler', () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST')
   })
 })
+
+describe('postForm', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('sends the FormData untouched and sets no Content-Type', () => {
+    /* multipart sınırını (`boundary=...`) tarayıcı üretiyor. Elle yazılan bir
+       Content-Type onu ezer ve gövde sunucuda ayrıştırılamaz hâle gelir --
+       istemcinin sessizce bozabileceği türden bir hata. */
+    const fetchMock = mockFetch({ url: '/media/a.png' })
+    const body = new FormData()
+    body.append('file', new Blob(['x']), 'a.png')
+    apiClient.postForm('/auth/profile-picture', body)
+
+    expect(calledUrl(fetchMock)).toBe('/api/auth/profile-picture')
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(init.body).toBe(body)
+    expect(JSON.stringify(init.headers ?? {})).not.toContain('Content-Type')
+  })
+
+  it('strips a leading /api rather than doubling it', () => {
+    const fetchMock = mockFetch({})
+    apiClient.postForm('/api/auth/profile-picture', new FormData())
+    expect(calledUrl(fetchMock)).toBe('/api/auth/profile-picture')
+  })
+
+  it('leaves an absolute URL alone', () => {
+    const fetchMock = mockFetch({})
+    apiClient.postForm('https://cdn.example/upload', new FormData())
+    expect(calledUrl(fetchMock)).toBe('https://cdn.example/upload')
+  })
+
+  it('throws on a non-2xx instead of returning an empty body', async () => {
+    mockFetch({ detail: 'Dosya çok büyük' }, 413)
+    await expect(
+      apiClient.postForm('/auth/profile-picture', new FormData()),
+    ).rejects.toThrow()
+  })
+
+  it('rethrows a network failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    await expect(
+      apiClient.postForm('/auth/profile-picture', new FormData()),
+    ).rejects.toThrow('offline')
+  })
+})

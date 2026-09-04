@@ -971,10 +971,15 @@ class ApiClient {
             `/investment/transactions/${encodeURIComponent(proposalId)}/confirm`,
             {}
         );
-        // Trigger a notification refresh immediately so the user sees the PENDING transaction notification
-        if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event("refreshNotifications"));
-        }
+        // Onaydan hemen sonra bildirimleri tazele, yoksa kullanıcı bekleyen
+        // işlemi bir sonraki yoklamaya kadar göremiyor.
+        //
+        // `typeof window !== 'undefined'` koruması vardı: bu istemci yalnızca
+        // tarayıcıda çalışıyor (aynı dosya `localStorage`'ı korumasız
+        // okuyor), dolayısıyla koruma hiçbir zaman yanlış olamayan bir dal
+        // ekliyordu -- test edilemeyen ve bu yüzden kapsama kapısını kıran
+        // bir dal.
+        window.dispatchEvent(new Event('refreshNotifications'));
         return response;
     }
 

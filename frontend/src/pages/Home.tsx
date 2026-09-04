@@ -26,7 +26,8 @@ import {
 import { useMarketStream } from '../hooks/useMarketStream'
 import { useWatchlist } from '../hooks/useWatchlist'
 import MarketBand from '../components/markets/MarketBand'
-import { BASE_CURRENCY, convert, formatMoney } from '../lib/money'
+import { BASE_CURRENCY, convert, formatCompact, formatMoney } from '../lib/money'
+import { paddedDomain } from '../lib/chartFormat'
 import { formatDate, formatTime } from '../lib/datetime'
 
 /** Hesap türü etiketleri; ekranda görünen ad sunumun işi, kaydın değil. */
@@ -247,6 +248,17 @@ export default function Home() {
       }))
   }, [analysis, intradayAnalysis, active])
 
+  /**
+   * Y ekseni aralığı. Recharts'ın varsayılanı `[0, 'auto']` ve portföy değeri
+   * sıfırdan çok uzakta dar bir bantta geziniyor: 1,41-1,43 Mn arası hareket,
+   * sıfırdan başlayan bir eksende grafiğin %1,4'ü kadar yer kaplıyordu ve
+   * çizgi düz görünüyordu.
+   */
+  const trendDomain = useMemo(
+    () => paddedDomain(trend.map((point) => point.value)),
+    [trend],
+  )
+
   // ── Risk bileşenleri ─────────────────────────────────────────────────────
   // Ölçülemeyen bileşen çubuğa dönüşmez: sıfır ceza ile "ölçülemedi" aynı şey
   // değil ve sıfır çubuk, düşük risk gibi okunur.
@@ -416,7 +428,16 @@ export default function Home() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trend} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                   <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} minTickGap={24} />
-                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} width={56} />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: '#94a3b8' }}
+                    tickLine={false}
+                    axisLine={false}
+                    width={56}
+                    domain={trendDomain}
+                    /* Tam biçim eksende taşıyor: altı tane ₺1.412.905,33
+                       ya üst üste biniyor ya paneli itiyor. */
+                    tickFormatter={formatCompact}
+                  />
                   <Tooltip
                     formatter={(value: unknown) => formatMoney(Number(value))}
                     contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, fontSize: 12 }}

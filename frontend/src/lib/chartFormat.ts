@@ -27,3 +27,28 @@ export function signedPercent(value: unknown): string {
 export function seriesName(name: unknown): string {
   return typeof name === 'string' ? name : String(name ?? '')
 }
+
+/**
+ * Bir serinin Y ekseni aralığı: en düşük ve en yüksek değerin biraz dışı.
+ *
+ * Recharts'ın sayısal eksende varsayılanı `[0, 'auto']`. Portföy değeri gibi
+ * sıfırdan çok uzakta, dar bantta gezinen bir seride bu, çizginin tamamını
+ * grafiğin en üst yüzdelik diliminde düz bir çizgiye çeviriyor: ölçülen
+ * portföyde 1,41 Mn ile 1,43 Mn arasındaki hareket, 0'dan başlayan bir eksende
+ * grafiğin %1,4'ü kadar yer kaplıyordu ve kullanıcı hiçbir şey göremiyordu.
+ *
+ * Boşluk aralığın KENDİSİNİN yüzdesi kadar, sabit bir miktar değil: yatay bir
+ * günü tepe-dip arası bir günmüş gibi göstermek, düz çizgiden farklı bir
+ * yalan olurdu. Aralık sıfıra çok yakınsa (tek nokta, ya da hiç değişmemiş
+ * bir seri) değerin kendisinden türetiliyor, yoksa sıfır yükseklikte bir
+ * eksen kalırdı.
+ */
+export function paddedDomain(values: number[]): [number, number] {
+  const finite = values.filter((value) => Number.isFinite(value))
+  if (finite.length === 0) return [0, 1]
+  const min = Math.min(...finite)
+  const max = Math.max(...finite)
+  const span = max - min
+  const pad = span > 0 ? span * 0.08 : Math.max(Math.abs(max) * 0.01, 1)
+  return [min - pad, max + pad]
+}

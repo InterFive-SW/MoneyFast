@@ -81,6 +81,8 @@ export interface PortfolioAccount {
     /** Vadeli hesabın saklanan yıllık oranı ve vadesi; vadesizde null. */
     interest_rate?: number | null
     term_days?: number | null
+    /** Kullanıcının hesabına verdiği ad; yoksa arayüz türden türetir. */
+    nickname?: string | null
     is_investment: boolean
 }
 
@@ -1201,6 +1203,28 @@ class ApiClient {
             /** Kimlikten türetilen, kullanıcıya özel müşteri numarası. */
             customer_no?: string | null
         }>('/auth/me');
+    }
+
+    /**
+     * Yeni bir mevduat hesabı açar.
+     *
+     * Bu uç nokta yoktu ve arayüzdeki beş adımlık sihirbaz rastgele bir IBAN
+     * üretip hesabı yalnızca bileşenin state'ine yazıyordu -- bir sonraki
+     * veri tazelemesinde hesap kayboluyordu.
+     */
+    openBankAccount(request: {
+        account_type: 'vadesiz' | 'vadeli'
+        currency_code?: string
+        nickname?: string | null
+    }) {
+        return this.post<BankAccount>('/banking/accounts', request)
+    }
+
+    /** Hesabı kapatır. Bakiyesi varsa backend reddeder. */
+    closeBankAccount(accountNumber: string) {
+        return this.post<BankAccount>(
+            `/banking/accounts/${encodeURIComponent(accountNumber)}/close`, {},
+        )
     }
 
     getMarketTickers() {

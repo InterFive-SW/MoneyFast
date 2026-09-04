@@ -1486,3 +1486,27 @@ describe('getMarketNews', () => {
         expect(calledUrl(fetchMock)).toBe('/api/market/news')
     })
 })
+
+describe('bank account lifecycle', () => {
+    beforeEach(() => localStorage.clear())
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('opens an account', () => {
+        const fetchMock = mockFetch({ id: 'a-2' })
+        apiClient.openBankAccount({ account_type: 'vadeli', currency_code: 'USD' })
+        expect(calledUrl(fetchMock)).toBe('/api/banking/accounts')
+        expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+    })
+
+    it('closes an account by number', () => {
+        const fetchMock = mockFetch({ id: 'a-2' })
+        apiClient.closeBankAccount('1000000000002')
+        expect(calledUrl(fetchMock)).toBe('/api/banking/accounts/1000000000002/close')
+    })
+
+    it('escapes the account number rather than pasting it into the path', () => {
+        const fetchMock = mockFetch({})
+        apiClient.closeBankAccount('a/b')
+        expect(calledUrl(fetchMock)).toBe('/api/banking/accounts/a%2Fb/close')
+    })
+})

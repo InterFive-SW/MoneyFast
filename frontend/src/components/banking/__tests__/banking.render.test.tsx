@@ -22,6 +22,7 @@ import AccountsView from '../AccountsView'
 import AccountTransactionsView from '../AccountTransactionsView'
 import CardsView from '../CardsView'
 import MoneyTransferWizard from '../MoneyTransferWizard'
+import NewAccountWizard from '../NewAccountWizard'
 import { apiClient } from '../../../api/client'
 
 const ACCOUNT = {
@@ -93,6 +94,8 @@ beforeEach(() => {
     { account_number: 'TR-INV-0001', balance: 0, currency_code: 'TRY', movements: [] } as never,
   )
   vi.spyOn(apiClient, 'createTransfer').mockResolvedValue({} as never)
+  vi.spyOn(apiClient, 'openBankAccount').mockResolvedValue(ACCOUNT as never)
+  vi.spyOn(apiClient, 'closeBankAccount').mockResolvedValue(ACCOUNT as never)
 })
 
 afterEach(() => {
@@ -111,6 +114,7 @@ async function mountAt(path: string) {
           <Route path="accounts/:accountId" element={<AccountTransactionsView />} />
           <Route path="cards" element={<CardsView />} />
           <Route path="transfer" element={<MoneyTransferWizard />} />
+          <Route path="new-account" element={<NewAccountWizard />} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -169,20 +173,47 @@ describe('banking', () => {
   })
 
   /**
-   * Opening and closing an account have no backend endpoint. The wizard used
-   * to add a row to component state and report success, so the account was
-   * gone on the next refresh. Both entry points say "not ready" until the
-   * endpoints exist -- if someone re-wires them, this fails.
+   * Hesap açma ve kapatma artık backend'e gidiyor.
+   *
+   * Bu test daha önce tersini korumak için vardı: iki giriş noktası da
+   * "yakında" kutusu açıyordu, çünkü uç nokta yoktu ve sihirbaz hesabı
+   * yalnızca bileşenin state'ine yazıp "başarıyla oluşturuldu" diyordu --
+   * hesap ilk tazelemede kayboluyordu. `POST /api/banking/accounts` ile
+   * gerçek oldu; korunan şey artık ekranın SAHİDEN yazdırdığı.
    */
-  it('does not pretend to open or close accounts', async () => {
+  it('opens an account through the endpoint, not component state', async () => {
+    await mountAt('/banking/new-account')
+
+    fireEvent.click(screen.getByText('Vadeli Hesap'))
+    fireEvent.click(screen.getByText('Devam Et'))          // 1 -> 2 (tür)
+    fireEvent.click(screen.getByText('Euro'))
+    fireEvent.click(screen.getByText('Devam Et'))          // 2 -> 3 (para birimi)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Tatil fonu' } })
+    fireEvent.click(screen.getByText('Devam Et'))          // 3 -> 4 (ad)
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByText('Hesabı Oluştur'))
+
+    await waitFor(() => expect(apiClient.openBankAccount).toHaveBeenCalledWith({
+      account_type: 'vadeli',
+      currency_code: 'EUR',
+      nickname: 'Tatil fonu',
+    }))
+  })
+
+  it('offers no currency the system has no rate for', async () => {
+    /* GBP seçilebiliyordu. Kuru olmayan bir bakiye hiçbir toplama katılamaz
+       ve `transfer`in para birimi kapısı yüzünden hiçbir yere gönderilemez --
+       açılabilen ama hiçbir şey yapılamayan bir hesap olurdu. */
+    await mountAt('/banking/new-account')
+    fireEvent.click(screen.getByText('Devam Et'))
+    expect(screen.queryByText('İngiliz Sterlini')).toBeNull()
+    expect(screen.getByText('Türk Lirası')).toBeTruthy()
+  })
+
+  it('closes an account through the endpoint', async () => {
     await mountAt('/banking/accounts')
-
-    fireEvent.click(screen.getByText('Yeni Hesap Aç'))
-    expect(await screen.findByText(/geliştirme aşamasındadır/i)).toBeTruthy()
-    fireEvent.click(screen.getByText('Anladım'))
-
     fireEvent.click(screen.getByText('Hesap Kapama'))
-    expect(await screen.findByText(/geliştirme aşamasındadır/i)).toBeTruthy()
+    expect(await screen.findByText(/Hesap Kapatma Onayı/i)).toBeTruthy()
   })
 
   /** Walks recipient -> sender -> amount -> details and stops on step 4. */

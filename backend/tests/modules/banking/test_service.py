@@ -549,6 +549,7 @@ class TestPortfolioAccounts:
         bank = SimpleNamespace(
             id="a-1", account_number="1", iban="TR1", account_type="vadesiz",
             currency_code="TRY", balance=100.0, interest_rate=None, term_days=None,
+            nickname="Maaş hesabım",
         )
         mocker.patch.object(service, "accounts_for", return_value=[bank])
         mocker.patch.object(ms, "account", return_value=SimpleNamespace(
@@ -563,6 +564,21 @@ class TestPortfolioAccounts:
         # IBAN'ı artık var. None döndüğü sürece hesap "para gönder" ekranında
         # adreslenemiyor ve bankacılık arayüzü dökümünü isteyemiyordu.
         assert investment[0]["iban"] == "TR00INV"
+
+    def test_a_users_own_name_for_an_account_is_carried(self, mocker):
+        """Sihirbaz bu adı bir dönem soruyor ama saklamıyordu; listede de
+        yalnızca türden türetilen etiket görünüyordu."""
+        import app.modules.investment.market_service as ms
+
+        bank = SimpleNamespace(
+            id="a-1", account_number="1", iban="TR1", account_type="vadesiz",
+            currency_code="TRY", balance=100.0, interest_rate=None, term_days=None,
+            nickname="Maaş hesabım",
+        )
+        mocker.patch.object(service, "accounts_for", return_value=[bank])
+        mocker.patch.object(ms, "account", return_value=None)
+        rows = service.portfolio_accounts(MagicMock(spec=Session), "u-1")
+        assert rows[0]["nickname"] == "Maaş hesabım"
 
     def test_an_investment_account_without_a_stored_iban_still_gets_one(self, mocker):
         """Migration öncesi açılmış bir hesap da adreslenebilir kalmalı.
@@ -710,8 +726,13 @@ class TestTransferRoutesToTheBridge:
     def _wire(self, mocker, bank=None):
         import app.modules.investment.market_service as ms
 
+        # `iban` gerçek satırda VAR (migration 0017) ve ekran kullanıcıya onu
+        # gösteriyor. İkizde yokken `transfer()` yalnızca numarayı
+        # karşılaştırıyordu ve bu, IBAN gönderen arayüzün her transferini
+        # "Alıcı hesap bulunamadı" ile reddetmesi demekti.
         mocker.patch.object(ms, "account", return_value=SimpleNamespace(
-            id="ia-1", account_number="TR-INV", currency_code="TRY", cash_balance=500.0,
+            id="ia-1", account_number="TR-INV", iban="TR00INV0000000000000",
+            currency_code="TRY", cash_balance=500.0,
         ))
         mocker.patch.object(service, "find_account", return_value=bank)
         return MagicMock(spec=Session)
@@ -729,6 +750,31 @@ class TestTransferRoutesToTheBridge:
         service.transfer(
             db, user_id="u-1", source_reference="1",
             destination_reference="TR-INV", amount=100,
+        )
+        assert bridged.call_args.kwargs["to_investment"] is True
+
+    def test_the_investment_account_is_matched_by_its_IBAN_too(self, mocker):
+        """Arayüzün gerçekten gönderdiği değer bu.
+
+        `portfolio_accounts` yatırım satırına bir IBAN dolduruyor ve
+        `Banking.tsx` IBAN'ı `accountNumber` olarak taşıyor, dolayısıyla
+        "Kendi Hesaplarım"dan yatırım hesabını seçen herkes buraya IBAN
+        gönderiyor. Yalnızca hesap numarasına bakan karşılaştırma bunu
+        tanımıyor, satır `banking.accounts`'ta aranıyor, orada yok ve
+        kullanıcı kendi hesabına para gönderirken 422 alıyordu.
+        """
+        bank = SimpleNamespace(
+            id="a-1", user_id="u-1", account_number="1", iban="TR1",
+            account_type="vadesiz", currency_code="TRY", balance=1000.0,
+            status="active", updated_at=None,
+        )
+        db = self._wire(mocker, bank)
+        bridged = mocker.patch.object(
+            service, "transfer_with_investment", return_value={"reference_number": "T"},
+        )
+        service.transfer(
+            db, user_id="u-1", source_reference="1",
+            destination_reference="TR00 INV0 0000 0000 0000", amount=100,
         )
         assert bridged.call_args.kwargs["to_investment"] is True
 
@@ -968,3 +1014,143 @@ class TestCashFlow:
         assert banking_service.CASH_FLOW_WINDOW_DAYS == 90
         db = self._db(mocker, self.BOUNDS, 1.0, self.CATEGORIES, 1)
         assert banking_service.cash_flow(db, "user-1")["period_days"] == 90
+
+
+class TestOpenAccount:
+    """İkinci hesabın numarası.
+
+    `_digits_for` yalnızca kullanıcı kimliğinden türüyordu, dolayısıyla aynı
+    türden ikinci bir hesap her zaman AYNI numarayı üretiyor ve `unique`
+    kısıtına çarpıyordu. Uç nokta bu yüzden hiç yazılmamıştı.
+    """
+
+    def _db(self, taken=None):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.side_effect = taken or [None]
+        return db
+
+    def test_the_first_account_keeps_the_number_ensure_account_would_give(self):
+        """Numara kullanıcıya gösteriliyor ve dökümlerde yazılı; sessizce
+        değişmesi kabul edilemez."""
+        first = next(service._account_number_candidates("u-1", "vadesiz"))
+        assert first == f"1{service._digits_for('u-1', 12)}"
+
+    def test_the_second_candidate_differs(self):
+        candidates = service._account_number_candidates("u-1", "vadeli")
+        first, second = next(candidates), next(candidates)
+        assert first != second
+        assert first.startswith("2") and second.startswith("2")
+
+    def test_the_sequence_is_not_written_into_the_number(self):
+        """`...0001`, `...0002` diye gitmek kaç hesabı olduğunu numaranın
+        içine gömerdi."""
+        candidates = list(zip(range(3), service._account_number_candidates("u-1", "vadesiz")))
+        numbers = [number for _, number in candidates]
+        assert not numbers[1].endswith("1")
+
+    def test_a_taken_number_is_skipped(self):
+        db = self._db(taken=[SimpleNamespace(id="existing"), None])
+        account = service.open_account(db, user_id="u-1", account_type="vadesiz")
+        assert account.account_number != f"1{service._digits_for('u-1', 12)}"
+
+    def test_it_opens_empty_not_with_the_demo_balance(self):
+        """`STARTING_BALANCE` yeni bir KULLANICIYA demo parası vermek için
+        var. Her "yeni hesap" düğmesine basışta yeniden vermek para basmaktı."""
+        account = service.open_account(self._db(), user_id="u-1", account_type="vadesiz")
+        assert account.balance == 0
+
+    def test_it_opens_without_an_invented_interest_rate(self):
+        """Arayüzde bir dönem hiçbir kayda dayanmayan %42,50 yazıyordu."""
+        account = service.open_account(self._db(), user_id="u-1", account_type="vadeli")
+        assert account.interest_rate is None
+
+    def test_a_nickname_is_stored(self):
+        """Sihirbaz üçüncü adımda bir ad soruyor ve özette gösteriyordu ama
+        saklanacak sütun yoktu -- sorulup atılan bir girdi, hiç
+        sorulmamasından kötü."""
+        account = service.open_account(
+            self._db(), user_id="u-1", account_type="vadesiz", nickname="Tatil fonu",
+        )
+        assert account.nickname == "Tatil fonu"
+
+    def test_a_blank_nickname_is_stored_as_absent_not_as_an_empty_string(self):
+        """İkisini ayırmak zorunda kalan her okuyucu bir dal daha taşır."""
+        account = service.open_account(
+            self._db(), user_id="u-1", account_type="vadesiz", nickname="   ",
+        )
+        assert account.nickname is None
+
+    def test_the_iban_follows_the_number(self):
+        account = service.open_account(self._db(), user_id="u-1", account_type="vadesiz")
+        assert account.iban == service._iban_for(account.account_number)
+
+    def test_an_unknown_type_is_refused(self):
+        with pytest.raises(service.TransferError):
+            service.open_account(self._db(), user_id="u-1", account_type="kripto")
+
+    def test_a_currency_with_no_rate_is_refused(self):
+        with pytest.raises(service.TransferError, match="GBP"):
+            service.open_account(
+                self._db(), user_id="u-1", account_type="vadesiz", currency_code="GBP",
+            )
+
+    def test_the_currency_is_upper_cased(self):
+        account = service.open_account(
+            self._db(), user_id="u-1", account_type="vadesiz", currency_code="usd",
+        )
+        assert account.currency_code == "USD"
+
+    def test_running_out_of_candidates_raises_rather_than_colliding(self):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(id="x")
+        with pytest.raises(service.TransferError, match="üretilemedi"):
+            service.open_account(db, user_id="u-1", account_type="vadesiz")
+
+
+class TestCloseAccount:
+    def test_it_marks_the_row_closed_rather_than_deleting_it(self, mocker):
+        """Geçmiş hareketler `account_transactions` içinde duruyor; satırı
+        silmek dökümü okunamaz hâle getirirdi."""
+        account = SimpleNamespace(
+            user_id="u-1", account_number="1", status="active", balance=0.0,
+            updated_at=None,
+        )
+        mocker.patch.object(service, "find_account", return_value=account)
+        service.close_account(MagicMock(spec=Session), user_id="u-1", reference="1")
+        assert account.status == "closed"
+
+    def test_a_funded_account_cannot_be_closed(self, mocker):
+        """Kapatmak parayı yok etmek değil."""
+        mocker.patch.object(service, "find_account", return_value=SimpleNamespace(
+            user_id="u-1", account_number="1", status="active", balance=12.5,
+        ))
+        with pytest.raises(service.TransferError, match="Bakiyesi"):
+            service.close_account(MagicMock(spec=Session), user_id="u-1", reference="1")
+
+    def test_a_rounding_dust_balance_still_closes(self, mocker):
+        account = SimpleNamespace(
+            user_id="u-1", account_number="1", status="active", balance=0.001,
+            updated_at=None,
+        )
+        mocker.patch.object(service, "find_account", return_value=account)
+        service.close_account(MagicMock(spec=Session), user_id="u-1", reference="1")
+        assert account.status == "closed"
+
+    def test_someone_elses_account_is_indistinguishable_from_a_missing_one(self, mocker):
+        mocker.patch.object(service, "find_account", return_value=SimpleNamespace(
+            user_id="u-2", account_number="1", status="active", balance=0.0,
+        ))
+        with pytest.raises(service.TransferError, match="bulunamadı"):
+            service.close_account(MagicMock(spec=Session), user_id="u-1", reference="1")
+
+    def test_a_missing_account_is_refused(self, mocker):
+        mocker.patch.object(service, "find_account", return_value=None)
+        with pytest.raises(service.TransferError, match="bulunamadı"):
+            service.close_account(MagicMock(spec=Session), user_id="u-1", reference="9")
+
+    def test_an_already_closed_account_is_refused(self, mocker):
+        mocker.patch.object(service, "find_account", return_value=SimpleNamespace(
+            user_id="u-1", account_number="1", status="closed", balance=0.0,
+        ))
+        with pytest.raises(service.TransferError, match="zaten kapalı"):
+            service.close_account(MagicMock(spec=Session), user_id="u-1", reference="1")

@@ -1510,3 +1510,15 @@ describe('bank account lifecycle', () => {
         expect(calledUrl(fetchMock)).toBe('/api/banking/accounts/a%2Fb/close')
     })
 })
+
+describe('sendMarketBriefingNow', () => {
+    beforeEach(() => localStorage.clear())
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('posts to the on-demand briefing endpoint', () => {
+        const fetchMock = mockFetch({ message: 'kuyruğa alındı' })
+        apiClient.sendMarketBriefingNow()
+        expect(calledUrl(fetchMock)).toBe('/api/news/me/market-briefing/send-now')
+        expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+    })
+})

@@ -1455,3 +1455,34 @@ describe('postForm', () => {
     ).rejects.toThrow('offline')
   })
 })
+
+describe('getMarketNews', () => {
+    beforeEach(() => localStorage.clear())
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('sends no query when nothing is asked for', () => {
+        const fetchMock = mockFetch([])
+        apiClient.getMarketNews()
+        expect(calledUrl(fetchMock)).toBe('/api/market/news')
+    })
+
+    it('sends symbols as a repeated key, not a comma list', () => {
+        // FastAPI reads List[str] from repeated keys; a comma list arrives as
+        // one symbol named "THYAO,AAPL" and matches nothing.
+        const fetchMock = mockFetch([])
+        apiClient.getMarketNews({ symbols: ['THYAO', 'AAPL'] })
+        expect(calledUrl(fetchMock)).toBe('/api/market/news?symbols=THYAO&symbols=AAPL')
+    })
+
+    it('sends the limit', () => {
+        const fetchMock = mockFetch([])
+        apiClient.getMarketNews({ limit: 50 })
+        expect(calledUrl(fetchMock)).toBe('/api/market/news?limit=50')
+    })
+
+    it('an empty params object still sends no query', () => {
+        const fetchMock = mockFetch([])
+        apiClient.getMarketNews({})
+        expect(calledUrl(fetchMock)).toBe('/api/market/news')
+    })
+})

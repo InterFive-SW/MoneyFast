@@ -1207,8 +1207,20 @@ class ApiClient {
         return this.request<MarketTicker[]>('/market/tickers');
     }
 
-    getMarketNews() {
-        return this.request<NewsItem[]>('/market/news');
+    /**
+     * Piyasa haber akışı. `symbols` verilirse süzgeç SUNUCUDA uygulanır.
+     *
+     * Dönen sayfayı istemcide süzmek yalnızca çekilen satırları daraltıyor:
+     * "en yeni 20"de AAPL yoksa ekranda "haber yok" yazıyor, oysa soru hiç
+     * sorulmamış oluyor.
+     */
+    getMarketNews(params?: { limit?: number; symbols?: string[] }) {
+        const query = new URLSearchParams();
+        if (params?.limit != null) query.set('limit', String(params.limit));
+        // Repeated key, not a comma list: FastAPI reads List[str] that way.
+        params?.symbols?.forEach((symbol) => query.append('symbols', symbol));
+        const suffix = query.toString() ? `?${query}` : '';
+        return this.request<NewsItem[]>(`/market/news${suffix}`);
     }
 
     /**

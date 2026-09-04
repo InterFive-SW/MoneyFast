@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 
 import httpx
 
@@ -216,10 +216,27 @@ def news_archive(
     )
 
 
-def latest_news(db: Session, limit: int = 20) -> list[NewsItem]:
+def latest_news(
+    db: Session,
+    limit: int = 20,
+    symbols: Optional[Sequence[str]] = None,
+) -> list[NewsItem]:
+    """En yeni haberler; `symbols` verilirse yalnızca o hisselere bağlı olanlar.
+
+    Süzgeç sunucuda, çünkü istemci tarafında süzmek yalnızca ÇEKİLEN satırları
+    daraltabiliyor: hisse detay sayfası "en yeni 20" içinden AAPL'i ayıklamaya
+    çalıştığında, o yirmide AAPL yoksa sonuç "bu hissenin haberi yok" gibi
+    okunuyor -- oysa soru hiç sorulmamış oluyor.
+
+    `portfolio_news` ile aynı `overlap` deseni; orası kullanıcının
+    pozisyonlarını, burası çağıranın verdiği listeyi kullanıyor.
+    """
+    query = db.query(NewsItem)
+    wanted = [symbol for symbol in dict.fromkeys(symbols or []) if symbol]
+    if wanted:
+        query = query.filter(NewsItem.related_symbols.overlap(wanted))
     return (
-        db.query(NewsItem)
-        .order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
+        query.order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
         .limit(limit)
         .all()
     )

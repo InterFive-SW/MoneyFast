@@ -26,20 +26,30 @@ export default function NewsWidget({ symbols }: { symbols?: string[] } = {}) {
    *  bu ise onun içinde tek bir hisseye odaklanıyor. */
   const [focused, setFocused] = useState<string | null>(null)
 
+  // `symbols` verildiğinde süzgeç SUNUCUYA gidiyor: en yeni 20 haberi çekip
+  // içinden bir hisseyi ayıklamak, o yirmide hisse yoksa "haber yok" cevabı
+  // üretiyordu -- oysa soru hiç sorulmamış oluyordu.
+  const scope = symbols?.length ? symbols.join(',') : ''
   useEffect(() => {
+    let cancelled = false
+    setLoading(true)
     apiClient
-      .getMarketNews()
-      .then(setNews)
+      .getMarketNews(scope ? { symbols: scope.split(',') } : undefined)
+      .then((rows) => {
+        if (!cancelled) setNews(rows)
+      })
       .catch((error) => console.error('Failed to load news', error))
-      .finally(() => setLoading(false))
-  }, [])
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [scope])
 
-  const inScope = symbols?.length
-    ? news.filter((item) => item.relatedSymbols.some((symbol) => symbols.includes(symbol)))
-    : news
   const visible = focused
-    ? inScope.filter((item) => item.relatedSymbols.includes(focused))
-    : inScope
+    ? news.filter((item) => item.relatedSymbols.includes(focused))
+    : news
 
   if (loading) {
     return (

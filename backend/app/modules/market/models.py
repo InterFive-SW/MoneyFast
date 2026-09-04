@@ -35,6 +35,14 @@ class NewsItem(Base):
     __tablename__ = "news_items"
     __table_args__ = (
         Index("idx_news_items_published", "published_at"),
+        # `related_symbols` üzerinde `overlap` (`&&`) çalışan iki sorgu var --
+        # portföye dokunan haberler ve hisse detayının haber listesi. Dizi
+        # çakışması B-tree ile hızlanmaz; GIN olmadan ikisi de tam tarama.
+        Index(
+            "idx_news_items_related_symbols",
+            "related_symbols",
+            postgresql_using="gin",
+        ),
         {"schema": SCHEMA},
     )
 

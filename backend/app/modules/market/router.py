@@ -76,6 +76,10 @@ def get_market_tickers(db: Session = Depends(get_db)):
 @router.get("/news", response_model=List[NewsItem])
 def get_market_news(
     limit: int = Query(default=20, ge=1, le=100),
+    symbols: Optional[List[str]] = Query(
+        default=None,
+        description="Yalnızca bu hisselere bağlı haberler. Tekrarlanan anahtar.",
+    ),
     db: Session = Depends(get_db),
 ):
     """
@@ -84,6 +88,11 @@ def get_market_news(
     Aynı haberler `rag` servisine de gönderiliyor; oradaki kopya semantik
     aramaya, buradaki kopya "en yeni 20 haber" listesine hizmet ediyor. İki
     farklı erişim deseni, iki farklı depo.
+
+    `symbols` verilirse süzgeç SORGUDA uygulanır, dönen sayfada değil. Fark
+    şurada: hisse detay sayfası "en yeni 20"yi çekip içinden AAPL'i ayıklarsa,
+    o yirmide AAPL yoksa ekranda "haber yok" yazıyor -- oysa soru hiç
+    sorulmamış oluyor.
 
     Veri yoksa boş liste döner; uydurma haber başlığı göstermek, boş bir akış
     göstermekten çok daha kötü.
@@ -102,7 +111,7 @@ def get_market_news(
             "sentiment": "neutral",
             "relatedSymbols": list(row.related_symbols or []),
         }
-        for row in service.latest_news(db, limit=limit)
+        for row in service.latest_news(db, limit=limit, symbols=symbols)
     ]
 
 

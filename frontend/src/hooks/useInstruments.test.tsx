@@ -175,6 +175,18 @@ describe('adapter fallbacks', () => {
     expect(result.current.instruments[0].market).toBe('Diğer')
   })
 
+  it('a sectorless row on an unknown venue is still "Bilinmiyor"', async () => {
+    /* `row.sector ?? (...)` kısa devre yaptığı için sektörü DOLU olan bir
+       satır, içerideki `row.market ?? ''` dalını hiç çalıştırmıyordu. Sektör
+       de piyasa da boş olan satır tek geçiş: boşluk gerçek bir boşluk,
+       dolayısıyla etiket 'Bilinmiyor' -- FX/COMEX'teki gibi boş dize değil,
+       çünkü orada sektör bir gün öğrenilecek bir şey değil, hiç yok. */
+    mockApi([apiRow({ market: null, sector: null })])
+    const { result } = renderHook(() => useInstruments())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.instruments[0].sector).toBe('Bilinmiyor')
+  })
+
   it.each([
     ['FX', 'Döviz'],
     ['COMEX', 'Altın'],

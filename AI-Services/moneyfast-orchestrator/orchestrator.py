@@ -695,7 +695,7 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
         "carried_ticker": carried,
         "meta_request": meta_request,
         "sub_requests": sub_requests,
-        "entities": result.get("entities") or {},        "safety_flags": flags,
+        "safety_flags": flags,
         "needs_clarification": needs_clarification,
         "clarifying_question": result.get("clarifying_question"),
         "tools_used": ["classify_and_route_intent"],
@@ -971,6 +971,101 @@ def _first_ticker(state: MoneyFastState) -> Optional[str]:
     return tickers[0] if tickers else state.get("carried_ticker")
 
 
+#: Şirket adının sonundaki hukuki ekler. `symbol_match._LEGAL_SUFFIX` ile aynı
+#: liste, aynı gerekçeyle: "TÜRK HAVA YOLLARI A.O." ile haberdeki "Türk Hava
+#: Yolları" arasındaki tek fark bu ek. `holding` BİLEREK yok -- adın parçası
+#: olduğu şirketler var ve atmak onları birbirine karıştırırdı.
+_LEGAL_SUFFIXES = (" a.s.", " t.a.s.", " a.o.", " a.ş.", " t.a.ş.", " a.o")
+
+#: Adın anlamlı sayılması için gereken en az uzunluk. Kısa bir ad parçası
+#: ilgisiz metinlerde de geçiyor ve kapı bir kapı olmaktan çıkıyor.
+MIN_ALIAS_LENGTH = 6
+
+
+def _name_aliases(name: str) -> tuple[str, ...]:
+    """Kayıtlı şirket adından, metinde aranacak biçim.
+
+    Yalnızca hukuki ek atılıyor. Kısaltma ÜRETİLMİYOR: "Türk Hava
+    Yolları"ndan "THY" türetmek bulanık eşleşmedir ve bu depo onu ölçerek
+    reddetti (`symbol_match`: tek kelimelik takma adlar 1.540 haberlik bir
+    derlemde eşleşmeyi 54'ten 167'ye çıkarırken `ZOREN <- "ZORLU sınavı"`
+    üretiyordu). Elle yazılmış bir takma ad tablosu ayrı bir iş ve ayrı bir
+    kalibrasyon gerektiriyor.
+    """
+    cleaned = (name or "").strip()
+    folded = _fold(cleaned)
+    for suffix in _LEGAL_SUFFIXES:
+        if folded.endswith(_fold(suffix)):
+            cleaned = cleaned[: len(cleaned) - len(suffix)].strip()
+            break
+    return (cleaned,) if len(cleaned) >= MIN_ALIAS_LENGTH else ()
+
+
+async def _resolve_named_company(
+    state: MoneyFastState,
+) -> Optional[tuple[str, str]]:
+    """Yönlendiricinin çıkardığı ŞİRKET ADINI sembole çevirir.
+
+    Bu fonksiyonun yokluğu ölçülmüş bir hataya yol açtı: kullanıcı "türk hava
+    yolları ne durumda yeni haberler var mı gündemde?" diye sordu ve cevapta
+    kaynak olarak üç EKGYO bildirimi listelendi.
+
+    `prompts.py` yönlendiriciden `entities.company_names` istiyor ve
+    yönlendirici bunu üretiyordu -- ama orkestratörde o alanı OKUYAN tek satır
+    yoktu (grep tek isabet veriyordu: istemin kendisi). "Türk Hava Yolları"
+    bir ad, `_TICKER_SHAPE` ise büyük harfli 3-6 harflik dizileri arıyor,
+    dolayısıyla `_first_ticker` `None` döndü, arama süzgeçsiz çalıştı ve
+    ~29.000 Türkçe bildirimden 0,45 kosinüs eşiğini geçen ilk sekizi geri
+    geldi.
+
+    Çözüm ARAMA değil SÖZLÜK: "türk hava yolları" ile THYAO arasındaki bağ
+    ölçülen bir benzerlik değil, kayıtlı bir gerçek. Backend'in
+    `GET /market/search` ucu bunu Türkçe katlamasıyla zaten yapıyor.
+
+    Tek bir ad çözülüyor ve yalnızca TEK bir aday döndüyse kullanılıyor: iki
+    aday "benzer adlı FARKLI şirketler" demek ve birini seçmek, kullanıcının
+    sormadığı şirket hakkında güvenle cevap vermek olurdu. Çözülemeyen ad
+    turu DÜŞÜRMÜYOR -- süzgeçsiz arama hâlâ bir cevap, sadece daha zayıf bir
+    cevap.
+
+    Sembolün yanında ADI da dönüyor, çünkü ilgi kapısının ikisine de ihtiyacı
+    var: derlemdeki bir haber şirketi koduyla değil adıyla anıyor
+    ("Türk Hava Yolları'ndan yeni hamle"), ve yalnızca koda bakan bir kapı
+    onu da eler.
+    """
+    message = _fold(state.get("user_message") or "")
+    names = [
+        str(name).strip()
+        for name in ((state.get("entities") or {}).get("company_names") or [])
+        # BU TURDA yazılmış ad. Yönlendirici önceki turun adını taşıyabiliyor:
+        # ölçüldü, kullanıcı "peki aselsan için ne var?" yazdı ve
+        # `company_names` hâlâ "Türk Hava Yolları" idi -- arama, sorulmayan
+        # şirkete süzüldü. Zamirle devam eden bir tur (`onun haberleri`) zaten
+        # `carried_ticker` üzerinden yürüyor, dolayısıyla bu kapı o yolu
+        # kapatmıyor.
+        if str(name).strip() and _fold(str(name)) in message
+    ]
+    if not names:
+        return None
+
+    result = await _run_tool(state, "resolve_instruments", {"query": names[0]})
+    rows = ((result.get("specialist_output") or {}).get("data") or {}).get(
+        "instruments"
+    )
+    if not isinstance(rows, list) or len(rows) != 1:
+        log.info(
+            "company name %r resolved to %d instruments; not filtering",
+            names[0], len(rows) if isinstance(rows, list) else 0,
+        )
+        return None
+
+    symbol = str(rows[0].get("symbol") or "").strip().upper()
+    if not symbol:
+        return None
+    log.info("company name %r resolved to %s", names[0], symbol)
+    return symbol, str(rows[0].get("name") or "")
+
+
 #: Dar arama bu kadar satır bulamazsa süzgeç kaldırılıp yeniden aranır.
 WIDEN_FLOOR = 3
 
@@ -998,7 +1093,7 @@ TICKER_FILTERED_MIN_SIMILARITY = float(
 )
 
 
-def _research_query(state: MoneyFastState) -> str:
+def _research_query(state: MoneyFastState, ticker: Optional[str] = None) -> str:
     """Aramaya gidecek metin.
 
     Planlayıcının ürettiği sorgu KULLANILMIYOR, ve uzman istemi zaten ona
@@ -1016,14 +1111,18 @@ def _research_query(state: MoneyFastState) -> str:
     Daraltmak sorgunun değil süzgecin işi.
     """
     message = state["user_message"]
-    ticker = _first_ticker(state)
+    ticker = ticker or _first_ticker(state)
     if not ticker or _fold(ticker) in _fold(message):
         return message
     return f"{ticker} {message}"
 
 
 async def _narrow_then_widen(
-    state: MoneyFastState, args: dict[str, Any], ticker: Optional[str], assumptions: list
+    state: MoneyFastState,
+    args: dict[str, Any],
+    ticker: Optional[str],
+    assumptions: list,
+    aliases: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Önce hisseye süzülmüş, yetmezse süzgeçsiz arama.
 
@@ -1091,9 +1190,16 @@ async def _narrow_then_widen(
     # Amaç "konuyla ilgisiz haberle doldurmak" değil. Hisseyi hiç anmayan bir
     # satır bu soruya cevap değil, ve derlemede o şirkete dair bir şey yoksa
     # doğru cevap "yok" -- `results == []` zaten TAM bir cevap sayılıyor.
-    wide_rows = [row for row in _result_rows(wide) if _mentions(row, ticker)]
+    wide_rows = [row for row in _result_rows(wide) if _mentions(row, ticker, aliases)]
     if not wide_rows:
-        return narrow if narrow_rows else wide
+        # Dar geçiş bir şey bulduysa o. Bulmadıysa BOŞ -- `wide` DEĞİL.
+        #
+        # Buradan `wide` dönüyordu: hisseyi hiç anmayan satırların tamamı,
+        # süzülmemiş hâliyle. Hemen üstteki yorum "hisseyi hiç anmayan bir
+        # satır bu soruya cevap değil" diyor ve bu satır tam da onu geri
+        # veriyordu. Uzman istemi zaten `results == []`i TAM bir cevap
+        # sayıyor, dolayısıyla boş dönmenin aşağı akışta karşılığı var.
+        return narrow if narrow_rows else _emptied(wide)
 
     seen = {row.get("chunk_id") for row in narrow_rows}
     merged = narrow_rows + [r for r in wide_rows if r.get("chunk_id") not in seen]
@@ -1106,14 +1212,40 @@ async def _narrow_then_widen(
     return {**wide, "specialist_output": output}
 
 
-def _mentions(row: dict[str, Any], ticker: str) -> bool:
-    """Belge bu hisseyi anıyor mu -- etiketinde ya da metninde."""
+def _emptied(result: dict[str, Any]) -> dict[str, Any]:
+    """Aynı zarf, sonuçları boşaltılmış hâlde.
+
+    Zarfın kendisi korunuyor (`as_of`, `source`, tazelik alanları) çünkü arama
+    GERÇEKTEN yapıldı; boş dönen şey sonuç kümesi, turun tamamı değil.
+    """
+    output = dict((result.get("specialist_output") or {}))
+    data = dict(output.get("data") or {})
+    data["results"] = []
+    output["data"] = data
+    return {**result, "specialist_output": output}
+
+
+def _mentions(
+    row: dict[str, Any], ticker: str, aliases: tuple[str, ...] = ()
+) -> bool:
+    """Belge bu şirketi anıyor mu -- etiketinde, kodunda ya da adıyla.
+
+    Ad da aranıyor çünkü derlemdeki haberlerin çoğu şirketi koduyla değil
+    adıyla anıyor ("Türk Hava Yolları'ndan yeni hamle"), ve yalnızca koda
+    bakan bir kapı onları da elerdi -- yani ilgisiz sonuçları elerken ilgili
+    olanları da.
+
+    `aliases` yalnızca `resolve_instruments`'ın döndürdüğü KAYITLI addan
+    geliyor, modelin ürettiği bir varyanttan değil: burada bulanık eşleşme
+    yok, bu deponun `symbol_match` kuralıyla aynı duruş.
+    """
     if ticker in (row.get("tickers") or []):
         return True
-    folded = _fold(ticker)
-    return any(
-        folded in _fold(str(row.get(field) or "")) for field in ("title", "snippet")
+    needles = [_fold(ticker)] + [_fold(alias) for alias in aliases if alias]
+    haystack = " ".join(
+        _fold(str(row.get(field) or "")) for field in ("title", "snippet")
     )
+    return any(needle and needle in haystack for needle in needles)
 
 
 def _result_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1141,7 +1273,6 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
         SPECIALIST_PROMPTS["MARKET_RESEARCH_AGENT"], _specialist_task(state), fast=True
     )
     args = plan.get("arguments") or {}
-    args["query"] = _research_query(state)
     args.setdefault("top_k", 8)
     # Cosine thresholds are a property of the embedding model, not a product
     # constant. The tool contract documents 0.62, which is calibrated for E5;
@@ -1175,8 +1306,21 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     (args.get("filters") or {}).pop("languages", None)
     # The retriever scans this reversed and folds in the newest user turn it
     # finds, so the count only affects payload size, not what gets resolved.
-    args["conversation_context"] = (state.get("conversation_history") or [])[
-        -HISTORY_MAX_TURNS:
+    #
+    # YALNIZCA `role` ve `content` geçiyor. Tur sözlükleri bu ikisinden
+    # fazlasını taşıyor -- kaynak listesi eklendiğinden beri bir `sources`
+    # DİZİSİ de var -- ve aracın şeması `dict[str, str]`. Tam turu geçirmek
+    # şunu üretiyordu:
+    #
+    #   conversation_context.1.sources
+    #     Input should be a valid string [input_value=[{'url': ...}]]
+    #
+    # Yani ilk kaynaklı turdan SONRAKİ her araştırma turu doğrulamada
+    # düşüyordu ve kullanıcı "verilere ulaşamadım" cevabı alıyordu. Sözleşme
+    # ne istiyorsa o gönderiliyor; fazlası zaten okunmuyordu.
+    args["conversation_context"] = [
+        {"role": str(turn.get("role") or ""), "content": str(turn.get("content") or "")}
+        for turn in (state.get("conversation_history") or [])[-HISTORY_MAX_TURNS:]
     ]
     # Whose uploaded documents this search may reach, on top of the public
     # news corpus. Deliberately NOT the `"unknown"` sentinel the other nodes
@@ -1185,8 +1329,33 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     # second thing, which is what an anonymous turn actually is.
     args["user_id"] = state.get("user_id") or None
 
+    # Şirket ADI varsa ÖNCE o çözülüyor, taşınan sembole bakılmadan.
+    #
+    # Ters sıra denendi ve yetmedi: kullanıcı "türk hava yolları ne durumda"
+    # yazdığında yönlendirici `entities.tickers`e **"TÜRK"** koydu -- dört
+    # büyük harf, `_TICKER_SHAPE`e uyuyor, ve hiçbir enstrümana karşılık
+    # gelmiyor. `_first_ticker` onu döndürdüğü sürece ad hiç çözülmüyor ve
+    # arama olmayan bir hisseye süzülüyordu (ölçüldü: `tickers=['TÜRK']`,
+    # `results=0`).
+    #
+    # Ad, enstrüman evrenine karşı ÇÖZÜLÜYOR; modelin ürettiği bir kod ise
+    # yalnızca bir tahmin. Doğrulanmış olan kazanıyor. Çözülemezse taşınan
+    # sembole düşülüyor -- kullanıcı gerçekten kodu yazdıysa yolu bu.
+    ticker = _first_ticker(state)
+    aliases: tuple[str, ...] = ()
+    resolved = await _resolve_named_company(state)
+    if resolved is not None:
+        ticker, name = resolved
+        aliases = _name_aliases(name)
+
+    # Sorgu, sembol ÇÖZÜLDÜKTEN sonra kuruluyor. Önce kurulduğunda
+    # `_research_query` doğrulanmamış sembolü kullanıyordu ve ölçülen sonuç
+    # şuydu: `query='TÜRK peki aselsan için ne var?'` -- kullanıcının hiç
+    # yazmadığı bir kod, sorduğu şirketin adının önüne eklenmiş hâlde.
+    args["query"] = _research_query(state, ticker)
+
     result = await _narrow_then_widen(
-        state, args, _first_ticker(state), plan.get("assumptions") or []
+        state, args, ticker, plan.get("assumptions") or [], aliases
     )
     return _slim_results(await _fold_in_own_documents(state, args, result))
 

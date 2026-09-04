@@ -49,11 +49,37 @@ class TestGetLLM:
         assert orchestrator.get_llm(False) is not orchestrator.get_llm(True)
 
     def test_missing_api_key_raises_a_clear_error(self, monkeypatch):
-        """Edge case: the container starts without GROQ_API_KEY. Failing at
-        first use with a named error beats an opaque auth 401 later."""
+        """Edge case: the container starts without a key. Failing at first use
+        with a named error beats an opaque auth 401 later.
+
+        İKİ ad da siliniyor. Sağlayıcı kaydı geldiğinde anahtar
+        `LLM_API_KEY or GROQ_API_KEY` sırasıyla okunmaya başladı ve yalnızca
+        ikincisini silen bu test, birincisi ayakta olduğu için hiçbir zaman
+        yükselmeyen bir çağrıyı bekliyordu. Kaynak ağacından çalışırken
+        yeşildi; `LLM_API_KEY`i de tanımlayan konteynerde kırmızıydı.
+        """
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
         monkeypatch.delenv("GROQ_API_KEY", raising=False)
         orchestrator.get_llm.cache_clear()
         with pytest.raises(RuntimeError, match="GROQ_API_KEY is not set"):
+            orchestrator.get_llm()
+
+    def test_the_generic_key_is_enough_on_its_own(self, monkeypatch):
+        """`LLM_API_KEY` compose'un verdiği ad; sağlayıcıya özel ad yoksa da
+        çalışmalı, yoksa sağlayıcı değiştirmek iki değişken düzenlemek olurdu."""
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        monkeypatch.setenv("LLM_API_KEY", "generic-key")
+        orchestrator.get_llm.cache_clear()
+        assert orchestrator.get_llm() is not None
+
+    def test_the_error_names_the_provider_in_effect(self, monkeypatch):
+        """`NVIDIA_API_KEY is not set` demek, `GROQ_API_KEY` demekten farklı
+        bir tamir talimatı."""
+        monkeypatch.setenv("LLM_PROVIDER", "nvidia")
+        monkeypatch.delenv("LLM_API_KEY", raising=False)
+        monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+        orchestrator.get_llm.cache_clear()
+        with pytest.raises(RuntimeError, match="NVIDIA_API_KEY is not set"):
             orchestrator.get_llm()
 
     def test_model_names_fall_back_when_env_is_absent(self, monkeypatch):
@@ -216,7 +242,7 @@ class TestPlannerFilters:
         }))
         seen = {}
 
-        async def fake(state, args, ticker, assumptions):
+        async def fake(state, args, ticker, assumptions, aliases=()):
             seen["filters"] = args.get("filters")
             return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT",
                                           "status": "EMPTY", "data": {}}}
@@ -233,10 +259,257 @@ class TestPlannerFilters:
     async def test_a_plan_without_filters_is_fine(self, mocker, patched_llm):
         patched_llm.set_response('{"arguments": {}}')
         mocker.patch.object(orchestrator, "_narrow_then_widen",
-                            side_effect=lambda s, a, t, x: {"specialist_output": {}})
+                            side_effect=lambda s, a, t, x, al=(): {"specialist_output": {}})
         mocker.patch.object(orchestrator, "_fold_in_own_documents",
                             side_effect=lambda s, a, r: r)
         assert await orchestrator.market_research_node({"user_message": "haberler"}) is not None
+
+
+class TestResearchNodeResolvesNames:
+    """Düğüm seviyesinde bağlantı: sembol yoksa ad çözülüyor ve süzgeç
+    gerçekten kuruluyor. Bu bağ olmadan `_resolve_named_company` yazılmış ama
+    çağrılmamış bir fonksiyon olurdu -- `company_names`in başına gelen şey.
+    """
+
+    def _node(self, mocker, patched_llm, resolved):
+        patched_llm.set_response('{"arguments": {}}')
+        seen = {}
+
+        async def widen(state, args, ticker, assumptions, aliases=()):
+            seen["ticker"] = ticker
+            seen["aliases"] = aliases
+            return {"specialist_output": {}}
+
+        mocker.patch.object(orchestrator, "_narrow_then_widen", side_effect=widen)
+        mocker.patch.object(orchestrator, "_fold_in_own_documents",
+                            side_effect=lambda s, a, r: r)
+
+        async def resolve(state):
+            return resolved
+
+        mocker.patch.object(orchestrator, "_resolve_named_company", side_effect=resolve)
+        return seen
+
+    @pytest.mark.asyncio
+    async def test_a_named_company_becomes_a_filter(self, mocker, patched_llm):
+        seen = self._node(mocker, patched_llm, ("THYAO", "TÜRK HAVA YOLLARI A.O."))
+        await orchestrator.market_research_node({
+            "user_message": "türk hava yolları ne durumda",
+            "entities": {"company_names": ["türk hava yolları"]},
+        })
+        assert seen["ticker"] == "THYAO"
+        assert seen["aliases"] == ("TÜRK HAVA YOLLARI",)
+
+    @pytest.mark.asyncio
+    async def test_an_unresolvable_name_leaves_the_search_unfiltered(
+        self, mocker, patched_llm,
+    ):
+        """Çözülemeyen ad turu DÜŞÜRMÜYOR: süzgeçsiz arama hâlâ bir cevap."""
+        seen = self._node(mocker, patched_llm, None)
+        await orchestrator.market_research_node({
+            "user_message": "havacılık sektörü nasıl",
+            "entities": {"company_names": ["havacılık"]},
+        })
+        assert seen["ticker"] is None
+        assert seen["aliases"] == ()
+
+    @pytest.mark.asyncio
+    async def test_a_resolved_name_beats_a_guessed_symbol(self, mocker, patched_llm):
+        """Ölçüldü: "türk hava yolları ne durumda" sorusunda yönlendirici
+        `entities.tickers`e **"TÜRK"** koydu -- dört büyük harf,
+        `_TICKER_SHAPE`e uyuyor, hiçbir enstrümana karşılık gelmiyor. Arama
+        olmayan bir hisseye süzüldü ve sıfır satır döndü.
+
+        Ad enstrüman evrenine karşı ÇÖZÜLÜYOR; modelin ürettiği kod yalnızca
+        bir tahmin. Doğrulanmış olan kazanıyor."""
+        seen = self._node(mocker, patched_llm, ("THYAO", "TÜRK HAVA YOLLARI A.O."))
+        await orchestrator.market_research_node({
+            "user_message": "türk hava yolları ne durumda",
+            "entities": {"tickers": ["TÜRK"],
+                         "company_names": ["türk hava yolları"]},
+        })
+        assert seen["ticker"] == "THYAO"
+
+    @pytest.mark.asyncio
+    async def test_a_symbol_survives_when_no_name_resolves(self, mocker, patched_llm):
+        """Kullanıcı gerçekten kodu yazdıysa yol bu."""
+        seen = self._node(mocker, patched_llm, None)
+        await orchestrator.market_research_node({
+            "user_message": "THYAO nasıl",
+            "entities": {"tickers": ["THYAO"]},
+        })
+        assert seen["ticker"] == "THYAO"
+        assert seen["aliases"] == ()
+
+    @pytest.mark.asyncio
+    async def test_the_context_carries_only_role_and_content(
+        self, mocker, patched_llm,
+    ):
+        """Tur sözlükleri kaynak listesi de taşıyor ve aracın şeması
+        `dict[str, str]`. Tam turu geçirmek, ilk kaynaklı turdan SONRAKİ her
+        araştırma turunu doğrulamada düşürüyordu:
+
+            conversation_context.1.sources
+              Input should be a valid string [input_value=[{'url': ...}]]
+        """
+        patched_llm.set_response('{"arguments": {}}')
+        seen = {}
+
+        async def widen(state, args, ticker, assumptions, aliases=()):
+            seen["ctx"] = args["conversation_context"]
+            return {"specialist_output": {}}
+
+        mocker.patch.object(orchestrator, "_narrow_then_widen", side_effect=widen)
+        mocker.patch.object(orchestrator, "_fold_in_own_documents",
+                            side_effect=lambda s, a, r: r)
+        await orchestrator.market_research_node({
+            "user_message": "peki ya şimdi",
+            "conversation_history": [
+                {"role": "user", "content": "thyao"},
+                {"role": "assistant", "content": "cevap",
+                 "sources": [{"url": "https://example.invalid", "label": "x"}],
+                 "widget": {"kind": "CHART"}},
+            ],
+        })
+        assert seen["ctx"] == [
+            {"role": "user", "content": "thyao"},
+            {"role": "assistant", "content": "cevap"},
+        ]
+
+
+class TestNameAliases:
+    """Kayıtlı şirket adından metinde aranacak biçim.
+
+    Kısaltma ÜRETİLMİYOR. "Türk Hava Yolları"ndan "THY" türetmek bulanık
+    eşleşmedir ve bu depo onu ölçerek reddetti: tek kelimelik takma adlar
+    1.540 haberlik bir derlemde eşleşmeyi 54'ten 167'ye çıkarırken
+    `ZOREN <- "ZORLU sınavı"` üretiyordu.
+    """
+
+    def test_the_legal_suffix_is_stripped(self):
+        """Haberdeki "Türk Hava Yolları" ile kayıttaki "TÜRK HAVA YOLLARI
+        A.O." arasındaki tek fark bu ek."""
+        assert orchestrator._name_aliases("TÜRK HAVA YOLLARI A.O.") == (
+            "TÜRK HAVA YOLLARI",
+        )
+
+    def test_holding_is_not_stripped(self):
+        """Adın parçası olduğu şirketler var ve atmak onları karıştırırdı."""
+        assert orchestrator._name_aliases("KOÇ HOLDING A.Ş.") == ("KOÇ HOLDING",)
+
+    def test_a_name_without_a_suffix_is_kept_whole(self):
+        assert orchestrator._name_aliases("ASELSAN") == ("ASELSAN",)
+
+    def test_a_short_name_yields_no_alias(self):
+        """Kısa bir ad parçası ilgisiz metinlerde de geçiyor ve kapı bir kapı
+        olmaktan çıkıyor."""
+        assert orchestrator._name_aliases("BIM") == ()
+        assert orchestrator._name_aliases("") == ()
+
+    def test_a_name_that_is_only_a_suffix_yields_no_alias(self):
+        assert orchestrator._name_aliases("A.Ş.") == ()
+
+
+class TestResolveNamedCompany:
+    """Yönlendirici `entities.company_names` çıkarıyordu ve hiç kimse okumuyordu.
+
+    Ölçülen sonuç: "türk hava yolları ne durumda yeni haberler var mı
+    gündemde?" sorusuna kaynak olarak dört EKGYO bildirimi gösterildi. Ad
+    sembole çevrilmediği için arama süzgeçsiz çalışmıştı.
+    """
+
+    def _tool(self, mocker, instruments):
+        async def fake(state, tool, args, **kw):
+            assert tool == "resolve_instruments"
+            return {"specialist_output": {"agent": "X", "status": "OK",
+                                          "data": {"query": args["query"],
+                                                   "instruments": instruments}}}
+        return mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+
+    @pytest.mark.asyncio
+    async def test_a_single_match_resolves(self, mocker):
+        self._tool(mocker, [{"symbol": "THYAO", "name": "TÜRK HAVA YOLLARI A.O."}])
+        assert await orchestrator._resolve_named_company({
+            "user_message": "türk hava yolları ne durumda",
+            "entities": {"company_names": ["türk hava yolları"]},
+        }) == ("THYAO", "TÜRK HAVA YOLLARI A.O.")
+
+    @pytest.mark.asyncio
+    async def test_no_company_name_asks_nothing(self, mocker):
+        called = self._tool(mocker, [])
+        assert await orchestrator._resolve_named_company(
+            {"user_message": "haberler", "entities": {}},
+        ) is None
+        assert not called.called
+
+    @pytest.mark.asyncio
+    async def test_a_blank_name_is_not_a_name(self, mocker):
+        called = self._tool(mocker, [])
+        assert await orchestrator._resolve_named_company(
+            {"user_message": "haberler", "entities": {"company_names": ["  ", ""]}},
+        ) is None
+        assert not called.called
+
+    @pytest.mark.asyncio
+    async def test_two_matches_do_not_resolve(self, mocker):
+        """İki aday "benzer adlı FARKLI şirketler" demek. Birini seçmek,
+        kullanıcının sormadığı şirket hakkında güvenle cevap vermek olurdu."""
+        self._tool(mocker, [{"symbol": "KCHOL"}, {"symbol": "KRDMD"}])
+        assert await orchestrator._resolve_named_company(
+            {"user_message": "koç nasıl", "entities": {"company_names": ["koç"]}},
+        ) is None
+
+    @pytest.mark.asyncio
+    async def test_nothing_found_does_not_resolve(self, mocker):
+        self._tool(mocker, [])
+        assert await orchestrator._resolve_named_company({
+            "user_message": "olmayan şirket nasıl",
+            "entities": {"company_names": ["olmayan şirket"]},
+        }) is None
+
+    @pytest.mark.asyncio
+    async def test_a_malformed_payload_does_not_resolve(self, mocker):
+        """Araç ulaşılamazsa `_run_tool` hata zarfı döndürüyor; tur
+        DÜŞMÜYOR, yalnızca süzgeçsiz aramaya devam ediyor."""
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"data": {}}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        assert await orchestrator._resolve_named_company({
+            "user_message": "türk hava yolları nasıl",
+            "entities": {"company_names": ["türk hava yolları"]},
+        }) is None
+
+    @pytest.mark.asyncio
+    async def test_a_row_without_a_symbol_does_not_resolve(self, mocker):
+        self._tool(mocker, [{"name": "TÜRK HAVA YOLLARI A.O."}])
+        assert await orchestrator._resolve_named_company({
+            "user_message": "türk hava yolları nasıl",
+            "entities": {"company_names": ["türk hava yolları"]},
+        }) is None
+
+    @pytest.mark.asyncio
+    async def test_a_row_without_a_name_still_resolves_the_symbol(self, mocker):
+        self._tool(mocker, [{"symbol": "THYAO"}])
+        assert await orchestrator._resolve_named_company({
+            "user_message": "türk hava yolları nasıl",
+            "entities": {"company_names": ["türk hava yolları"]},
+        }) == ("THYAO", "")
+
+    @pytest.mark.asyncio
+    async def test_a_name_the_user_did_not_write_this_turn_is_ignored(self, mocker):
+        """Yönlendirici önceki turun adını taşıyabiliyor. Ölçüldü: kullanıcı
+        "peki aselsan için ne var?" yazdı, `company_names` hâlâ "Türk Hava
+        Yolları" idi ve arama sorulmayan şirkete süzüldü.
+
+        Zamirle devam eden tur (`onun haberleri`) zaten `carried_ticker`
+        üzerinden yürüyor, dolayısıyla bu kapı o yolu kapatmıyor."""
+        called = self._tool(mocker, [{"symbol": "THYAO"}])
+        assert await orchestrator._resolve_named_company({
+            "user_message": "peki aselsan için ne var?",
+            "entities": {"company_names": ["Türk Hava Yolları"]},
+        }) is None
+        assert not called.called
 
 
 class TestNarrowThenWiden:
@@ -316,6 +589,59 @@ class TestNarrowThenWiden:
         mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
         out = await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
         assert [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]] == ["n0"]
+
+    @pytest.mark.asyncio
+    async def test_nothing_relevant_reports_nothing_rather_than_the_junk(self, mocker):
+        """Dar geçiş boş ve geniş geçişin HİÇBİR satırı hisseyi anmıyorsa
+        cevap BOŞ -- süzülmemiş geniş sonuç değil.
+
+        Buradan `wide` dönüyordu, yani hisseyi hiç anmayan satırların tamamı.
+        Gerçek turda ölçüldü: "türk hava yolları ne durumda yeni haberler var
+        mı gündemde?" sorusuna kaynak olarak dört EKGYO bildirimi gösterildi.
+        """
+        results = [[], self._rows(4, "w", mentions=False)]
+
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(results.pop(0))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        out = await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
+        assert out["specialist_output"]["data"]["results"] == []
+
+    @pytest.mark.asyncio
+    async def test_the_envelope_survives_an_emptied_result(self, mocker):
+        """Arama GERÇEKTEN yapıldı; boşalan şey sonuç kümesi, turun tamamı
+        değil. Tazelik alanları düşerse cevap kaynağını tarifleyemez."""
+        results = [[], self._rows(2, "w", mentions=False)]
+
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(results.pop(0))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        out = await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
+        assert out["specialist_output"]["data"]["source"] == "VECTOR_STORE::v1"
+
+    @pytest.mark.asyncio
+    async def test_a_document_naming_the_company_survives_the_gate(self, mocker):
+        """Derlemdeki haberlerin çoğu şirketi KODUYLA değil ADIYLA anıyor.
+        Yalnızca koda bakan bir kapı, ilgisizleri elerken ilgilileri de eler.
+        """
+        rows = [{"chunk_id": "w0", "title": "Türk Hava Yolları'ndan yeni hamle",
+                 "publisher": "Dünya", "snippet": "havacılık",
+                 "published_at": "2026-09-01"}]
+        results = [[], rows]
+
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(results.pop(0))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        out = await orchestrator._narrow_then_widen(
+            {}, {"query": "q"}, "THYAO", [], ("TÜRK HAVA YOLLARI",),
+        )
+        assert [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]] == ["w0"]
 
     @pytest.mark.asyncio
     async def test_a_planner_ticker_filter_does_not_survive_the_widening(self, mocker):

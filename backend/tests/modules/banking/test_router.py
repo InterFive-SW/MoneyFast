@@ -48,6 +48,75 @@ def bank_client():
         app.dependency_overrides.pop(get_optional_user_id, None)
 
 
+class TestOpenAndCloseAccount:
+    """Bu iki uç nokta YOKTU.
+
+    Arayüzde beş adımlık bir sihirbaz duruyor ve sonunda rastgele bir IBAN
+    üretip hesabı yalnızca bileşenin state'ine yazıyordu -- bir sonraki veri
+    tazelemesinde hesap kayboluyordu. Sihirbaz bu yüzden route'suz bırakılmıştı.
+    """
+
+    def test_a_second_account_can_be_opened(self, bank_client, mocker):
+        opened = mocker.patch.object(
+            service, "open_account", return_value=bank_account(number="1000000000002"),
+        )
+        response = bank_client.post(
+            "/api/banking/accounts", json={"account_type": "vadeli", "currency_code": "USD"},
+        )
+        assert response.status_code == 201
+        assert opened.call_args.kwargs["account_type"] == "vadeli"
+        assert opened.call_args.kwargs["currency_code"] == "USD"
+        assert opened.call_args.kwargs["user_id"] == "user-1"
+
+    def test_the_currency_defaults_to_lira(self, bank_client, mocker):
+        opened = mocker.patch.object(service, "open_account", return_value=bank_account())
+        bank_client.post("/api/banking/accounts", json={"account_type": "vadesiz"})
+        assert opened.call_args.kwargs["currency_code"] == "TRY"
+
+    def test_an_unknown_account_type_is_refused_by_the_schema(self, bank_client):
+        response = bank_client.post(
+            "/api/banking/accounts", json={"account_type": "kripto"},
+        )
+        assert response.status_code == 422
+
+    def test_a_currency_with_no_rate_is_refused(self, bank_client):
+        """GBP arayüzde seçilebiliyordu ama sistemde GBP/TRY kuru yok. Kuru
+        olmayan bir bakiye hiçbir toplama katılamaz ve `transfer`in para
+        birimi kapısı yüzünden hiçbir yere gönderilemez."""
+        response = bank_client.post(
+            "/api/banking/accounts",
+            json={"account_type": "vadesiz", "currency_code": "GBP"},
+        )
+        assert response.status_code == 422
+
+    def test_a_refusal_from_the_service_becomes_422(self, bank_client, mocker):
+        mocker.patch.object(
+            service, "open_account",
+            side_effect=service.TransferError("Yeni hesap numarası üretilemedi."),
+        )
+        response = bank_client.post(
+            "/api/banking/accounts", json={"account_type": "vadesiz"},
+        )
+        assert response.status_code == 422
+        assert "üretilemedi" in response.json()["detail"]
+
+    def test_an_account_can_be_closed(self, bank_client, mocker):
+        closed = mocker.patch.object(
+            service, "close_account", return_value=bank_account(),
+        )
+        response = bank_client.post("/api/banking/accounts/1000000000001/close")
+        assert response.status_code == 200
+        assert closed.call_args.kwargs["reference"] == "1000000000001"
+
+    def test_closing_a_funded_account_is_refused(self, bank_client, mocker):
+        mocker.patch.object(
+            service, "close_account",
+            side_effect=service.TransferError("Bakiyesi olan hesap kapatılamaz."),
+        )
+        response = bank_client.post("/api/banking/accounts/1000000000001/close")
+        assert response.status_code == 422
+
+
 class TestAccounts:
     def test_the_users_accounts_are_listed(self, bank_client, mocker):
         mocker.patch.object(service, "accounts_for", return_value=[bank_account()])

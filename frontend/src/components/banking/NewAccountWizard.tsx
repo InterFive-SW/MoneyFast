@@ -2,17 +2,28 @@ import { useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
 
+/**
+ * Yeni hesap sihirbazı.
+ *
+ * Bir dönem route'suz duruyordu: sonunda rastgele bir IBAN üretip hesabı
+ * yalnızca `Banking`in state'ine yazıyordu ve hesap ilk tazelemede
+ * kayboluyordu. Artık `POST /api/banking/accounts`'a gidiyor; numarayı ve
+ * IBAN'ı backend üretiyor -- ikisi de `unique` ve istemcinin uydurduğu bir
+ * numaranın çakışmayacağının garantisi yok.
+ */
 export default function NewAccountWizard() {
   const navigate = useNavigate()
   const { handleAccountCreate } = useOutletContext<BankingContextType>()
-  
+
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
-  
+
   // Form State
   const [accountType, setAccountType] = useState<'checking' | 'savings'>('checking')
-  const [currency, setCurrency] = useState<'TRY' | 'USD' | 'EUR' | 'GBP'>('TRY')
+  const [currency, setCurrency] = useState<'TRY' | 'USD' | 'EUR'>('TRY')
   const [accountName, setAccountName] = useState('')
   const [acceptedTerms, setAcceptedTerms] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const handleNext = () => setStep(s => (s + 1) as any)
   const handleBack = () => {
@@ -20,16 +31,21 @@ export default function NewAccountWizard() {
     else navigate('/banking')
   }
 
-  const handleCreate = () => {
-    if (!acceptedTerms) return
-    const fakeIban = `TR${Math.floor(Math.random() * 90 + 10)} 0006 2001 0450 0006 6677 ${Math.floor(Math.random() * 90 + 10)}`
-    handleAccountCreate(
-      currency,
-      accountType,
-      accountName || `${currency} ${accountType === 'checking' ? 'Vadesiz' : 'Vadeli'} Hesap`,
-      fakeIban
-    )
-    setStep(5) // Başarı Ekranı
+  const handleCreate = async () => {
+    if (!acceptedTerms || busy) return
+    setError(null)
+    setBusy(true)
+    try {
+      await handleAccountCreate(currency, accountType, accountName)
+      setStep(5) // Başarı Ekranı
+    } catch (caught) {
+      // Başarı ekranına ancak hesap GERÇEKTEN açıldıysa geçiliyor.
+      // "Başarıyla oluşturuldu" deyip hiçbir yere yazmamak, özelliği
+      // kapatmaktan daha kötü.
+      setError(caught instanceof Error ? caught.message : 'Hesap açılamadı.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -141,12 +157,15 @@ export default function NewAccountWizard() {
               <p className="text-slate-400">Hesabınızın hangi para biriminde olacağını seçin.</p>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
                 { code: 'TRY', name: 'Türk Lirası', symbol: '₺' },
                 { code: 'USD', name: 'Amerikan Doları', symbol: '$' },
                 { code: 'EUR', name: 'Euro', symbol: '€' },
-                { code: 'GBP', name: 'İngiliz Sterlini', symbol: '£' },
+                // GBP kaldırıldı: sistemde GBP/TRY kuru yok. Kuru olmayan bir
+                // bakiye hiçbir toplama katılamaz ve `transfer`in para birimi
+                // kapısı yüzünden hiçbir yere gönderilemez -- açılabilen ama
+                // hiçbir şey yapılamayan bir hesap olurdu.
               ].map(curr => (
                 <button
                   key={curr.code}
@@ -256,16 +275,20 @@ export default function NewAccountWizard() {
               </label>
             </div>
             
+            {error && (
+              <p className="text-sm text-rose-300" role="alert">{error}</p>
+            )}
+
             <button
               onClick={handleCreate}
-              disabled={!acceptedTerms}
+              disabled={!acceptedTerms || busy}
               className={`mt-4 w-full font-bold py-4 rounded-xl transition-all shadow-lg ${
-                acceptedTerms 
-                  ? 'bg-brandBlue hover:bg-blue-600 text-white shadow-brandBlue/20' 
+                acceptedTerms && !busy
+                  ? 'bg-brandBlue hover:bg-blue-600 text-white shadow-brandBlue/20'
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed'
               }`}
             >
-              Hesabı Oluştur
+              {busy ? 'Hesap açılıyor…' : 'Hesabı Oluştur'}
             </button>
           </div>
         )}

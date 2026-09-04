@@ -122,6 +122,134 @@ def ensure_savings_account(db: Session, user_id: str) -> BankAccount:
     return account
 
 
+#: Hesap türü -> hesap numarasının ilk hanesi. `ensure_account` ve
+#: `ensure_savings_account` bunları zaten kullanıyordu; tek yere alındı ki
+#: yeni bir tür eklendiğinde numaralama iki yerde ayrışmasın.
+ACCOUNT_TYPE_PREFIX = {"vadesiz": "1", "vadeli": "2"}
+
+#: Hesap açılabilen para birimleri.
+#:
+#: GBP arayüzde seçilebiliyordu ama sistemde GBP/TRY kuru YOK ve bu deponun
+#: kuralı kuru olmayan bir tutarın toplanmaması. Kuru bulunmayan bir para
+#: biriminde hesap açmak, bakiyesi hiçbir toplama katılamayan -- ve
+#: `transfer`in para birimi kapısı yüzünden hiçbir yere gönderilemeyen --
+#: bir hesap yaratmak olurdu.
+OPENABLE_CURRENCIES = ("TRY", "USD", "EUR")
+
+#: Aynı türden kaçıncı hesabın numarasını üretmeye çalışacağımızın tavanı.
+_MAX_NUMBER_ATTEMPTS = 50
+
+
+def _account_number_candidates(user_id: str, account_type: str):
+    """Bu kullanıcı ve tür için numara adayları, sırayla.
+
+    İlk aday `ensure_account`'un ürettiğinin AYNISI, dolayısıyla mevcut
+    hesapların numarası değişmiyor -- numara kullanıcıya gösteriliyor ve
+    dökümlerde yazılı, sessizce değişmesi kabul edilemez.
+
+    Sonrakiler kullanıcı kimliğine bir sıra eki eklenerek türetiliyor.
+    Sıranın kendisini numaraya yazmak (`...0001`, `...0002`) kaç hesabı
+    olduğunu numaranın içine gömerdi.
+    """
+    prefix = ACCOUNT_TYPE_PREFIX[account_type]
+    yield f"{prefix}{_digits_for(user_id, 12)}"
+    for index in range(1, _MAX_NUMBER_ATTEMPTS):
+        yield f"{prefix}{_digits_for(f'{user_id}#{index}', 12)}"
+
+
+def open_account(
+    db: Session,
+    user_id: str,
+    account_type: str,
+    currency_code: str = "TRY",
+    nickname: Optional[str] = None,
+) -> BankAccount:
+    """Kullanıcının isteğiyle yeni bir hesap açar. Commit ETMEZ.
+
+    `ensure_account` ile farkı niyeti: o, hesabı OLMAYAN bir kullanıcıya
+    ilkini açıyor ve varsa mevcut olanı döndürüyor. Bu, kullanıcı "yeni hesap
+    aç" dediğinde ikinciyi, üçüncüyü açıyor.
+
+    Açılış bakiyesi SIFIR -- `ensure_account`'un `STARTING_BALANCE`'ı yeni bir
+    kullanıcıya demo parası vermek için var. Her "yeni hesap" düğmesine
+    basışta aynı parayı yeniden vermek, para basmak olurdu.
+
+    Faiz oranı da boş bırakılıyor: sistemde vadeli hesap oranını belirleyen
+    bir ürün tanımı yok ve arayüzde bir dönem hiçbir kayda dayanmayan
+    `%42,50` yazıyordu. Oranı olmayan hesap faiz işlemez (`accrue_interest`
+    `interest_rate IS NOT NULL` süzüyor); uydurulmuş bir oran ödemekten iyi.
+    """
+    if account_type not in ACCOUNT_TYPE_PREFIX:
+        raise TransferError(f"Bilinmeyen hesap türü: {account_type}")
+    currency = (currency_code or "TRY").upper()
+    if currency not in OPENABLE_CURRENCIES:
+        raise TransferError(
+            f"{currency} cinsinden hesap açılamıyor "
+            f"(desteklenen: {', '.join(OPENABLE_CURRENCIES)})."
+        )
+
+    for number in _account_number_candidates(user_id, account_type):
+        iban = _iban_for(number)
+        taken = (
+            db.query(BankAccount)
+            .filter(
+                (BankAccount.account_number == number) | (BankAccount.iban == iban)
+            )
+            .first()
+        )
+        if taken is not None:
+            continue
+        account = BankAccount(
+            user_id=user_id,
+            account_number=number,
+            iban=iban,
+            account_type=account_type,
+            currency_code=currency,
+            # Boş bir ad `None` olarak yazılıyor, boş dize olarak değil:
+            # ikisini ayırmak zorunda kalan her okuyucu bir dal daha taşır.
+            nickname=(nickname or "").strip() or None,
+            balance=0,
+            status="active",
+        )
+        db.add(account)
+        db.flush()
+        log.info("opened %s account %s for user %s", account_type, number, user_id)
+        return account
+
+    # Elli deneme aynı kullanıcı için tükendiyse sorun numara üreticisinde,
+    # kullanıcıda değil. Sessizce çakışan bir satır yazmaktansa yükseliyor.
+    raise TransferError("Yeni hesap numarası üretilemedi.")
+
+
+def close_account(db: Session, user_id: str, reference: str) -> BankAccount:
+    """Hesabı kapatır. Commit ETMEZ.
+
+    Silmiyor, `status`'u değiştiriyor: hesabın geçmiş hareketleri
+    `account_transactions` içinde duruyor ve satırı silmek dökümü
+    okunamaz hâle getirirdi.
+
+    Bakiyesi olan hesap kapanmaz. Kapatmak parayı yok etmek değil; kullanıcı
+    önce parayı başka bir hesaba göndermeli, yoksa kapanan hesapla birlikte
+    bakiye de görünmez oluyor.
+    """
+    account = find_account(db, reference)
+    if account is None or account.user_id != user_id:
+        # "Başkasının" ile "yok" ayırt edilmiyor: bir hesabın var olduğunu ama
+        # başkasına ait olduğunu doğrulamak, çağıranın öğrenmesi gerekenden
+        # fazlası. `transfer` de aynı gerekçeyle böyle davranıyor.
+        raise TransferError(f"Hesap bulunamadı: {reference}")
+    if account.status != "active":
+        raise TransferError("Hesap zaten kapalı.")
+    if round(float(account.balance), 2) != 0:
+        raise TransferError(
+            "Bakiyesi olan hesap kapatılamaz; önce bakiyeyi başka bir hesaba aktarın."
+        )
+    account.status = "closed"
+    account.updated_at = datetime.now(timezone.utc)
+    log.info("closed account %s for user %s", account.account_number, user_id)
+    return account
+
+
 def accounts_for(db: Session, user_id: str) -> list[BankAccount]:
     """Every REAL banking account row. Not the investment account.
 
@@ -184,6 +312,7 @@ def portfolio_accounts(db: Session, user_id: str) -> list[dict[str, Any]]:
                 float(account.interest_rate) if account.interest_rate is not None else None
             ),
             "term_days": account.term_days,
+            "nickname": account.nickname,
             "is_investment": False,
         }
         for account in accounts_for(db, user_id)
@@ -247,13 +376,30 @@ def transfer(
     # Routed here rather than in the router so every caller -- the panel, the
     # chat's confirm, the admin -- gets the same behaviour.
     from app.modules.investment import market_service
+    from app.modules.investment import service as investment_service
 
     investment = market_service.account(db, user_id=user_id, allow_demo_fallback=False)
-    investment_number = investment.account_number if investment is not None else None
+    # Hesap numarası VE IBAN, ikisi de. Ekran kullanıcıya IBAN'ı gösteriyor
+    # (`portfolio_accounts` migration 0017'den beri bir IBAN dolduruyor ve
+    # arayüz onu `accountNumber` olarak taşıyor), dolayısıyla "Kendi
+    # Hesaplarım"dan yatırım hesabı seçen herkes buraya IBAN gönderiyordu.
+    # Yalnızca numaraya bakan bir karşılaştırma bunu tanımıyor, satır
+    # `banking.accounts`'ta aranıyor, orada yok, ve kullanıcı kendi
+    # hesabına para gönderirken "Alıcı hesap bulunamadı" alıyordu.
+    investment_refs = set()
+    if investment is not None:
+        # `iban_for` her zaman bir dize döndürüyor (biçimi sabit), dolayısıyla
+        # burada boşluk denetimi yok: olamayacak bir durum için yazılan dal
+        # test edilemez ve kapsama kapısını kırar.
+        iban = investment.iban or investment_service.iban_for(investment.account_number)
+        investment_refs = {
+            reference.replace(" ", "").strip().upper()
+            for reference in (investment.account_number, iban)
+        }
 
     def _is_investment(reference: Optional[str]) -> bool:
         cleaned = (reference or "").replace(" ", "").strip().upper()
-        return bool(investment_number) and cleaned == investment_number.upper()
+        return bool(cleaned) and cleaned in investment_refs
 
     if _is_investment(destination_reference) or _is_investment(source_reference):
         to_investment = _is_investment(destination_reference)

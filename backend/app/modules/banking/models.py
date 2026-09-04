@@ -46,6 +46,11 @@ class BankAccount(Base):
     account_number: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     iban: Mapped[str] = mapped_column(String(34), unique=True, nullable=False)
     account_type: Mapped[str] = mapped_column(String(20), nullable=False, default="vadesiz")
+    #: Kullanıcının hesabına verdiği ad. Sihirbaz bunu bir dönem soruyor ama
+    #: hiçbir yere yazmıyordu; sorulup atılan bir girdi, hiç sorulmamasından
+    #: kötü. Boş olabilir -- adı olmayan hesap türünden ve para biriminden
+    #: türetilen etiketle görünüyor.
+    nickname: Mapped[str | None] = mapped_column(String(60), nullable=True)
     currency_code: Mapped[str] = mapped_column(String(3), nullable=False, default="TRY")
     balance: Mapped[float] = mapped_column(Numeric(19, 4), nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")

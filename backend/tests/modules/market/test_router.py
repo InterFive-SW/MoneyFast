@@ -126,6 +126,20 @@ class TestNews:
         assert market_client.get("/api/market/news?limit=0").status_code == 422
         assert market_client.get("/api/market/news?limit=500").status_code == 422
 
+    @pytest.mark.parametrize("news", [[article()]])
+    def test_symbols_reach_the_service(self, market_client):
+        """Tekrarlanan anahtar, virgüllü liste değil: FastAPI `List[str]`i
+        böyle okuyor ve virgüllü hâli tek bir sembol adı sanılırdı."""
+        market_client.get("/api/market/news?symbols=THYAO&symbols=AAPL")
+        _, kwargs = market_module_service.latest_news.call_args
+        assert kwargs["symbols"] == ["THYAO", "AAPL"]
+
+    @pytest.mark.parametrize("news", [[article()]])
+    def test_no_symbols_passes_none_not_an_empty_list(self, market_client):
+        market_client.get("/api/market/news")
+        _, kwargs = market_module_service.latest_news.call_args
+        assert kwargs["symbols"] is None
+
 
 class TestRelativeTime:
     @pytest.mark.parametrize(

@@ -7,7 +7,7 @@
  * sessizlik bildirmek olurdu.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { NEWS_ERROR, usePortfolioNews } from './usePortfolioNews'
 import { apiClient } from '../api/client'
 
@@ -15,6 +15,7 @@ const NEWS = {
     windowDays: 90,
     symbols: [
         { symbol: 'AKBNK', name: 'Akbank T.A.Ş.', count: 2 },
+        { symbol: 'GARAN', name: 'Garanti BBVA', count: 1 },
         { symbol: 'DOAS', name: 'Doğuş Otomotiv', count: 0 },
         { symbol: 'AEFES', name: 'Anadolu Efes', count: 0 },
     ],
@@ -30,6 +31,17 @@ const NEWS = {
             relatedSymbols: ['AKBNK', 'THYAO', 'SASA'],
             heldSymbols: ['AKBNK'],
         },
+        {
+            id: 'n2',
+            source: 'KAP',
+            title: 'GARAN — Kredi Komitesi Üye Değişikliği',
+            url: 'https://example.invalid/n2',
+            time: '16 saat önce',
+            publishedAt: '2026-09-03T06:00:00Z',
+            sentiment: 'neutral',
+            relatedSymbols: ['GARAN'],
+            heldSymbols: ['GARAN'],
+        },
     ],
 }
 
@@ -43,7 +55,7 @@ describe('usePortfolioNews', () => {
         const { result } = renderHook(() => usePortfolioNews())
         await waitFor(() => expect(result.current.loading).toBe(false))
         expect(result.current.news?.windowDays).toBe(90)
-        expect(result.current.news?.items).toHaveLength(1)
+        expect(result.current.news?.items).toHaveLength(2)
         expect(result.current.error).toBeNull()
     })
 
@@ -119,5 +131,79 @@ describe('usePortfolioNews', () => {
         await waitFor(() => expect(result.current.loading).toBe(false))
         await result.current.reload()
         expect(read).toHaveBeenCalledTimes(2)
+    })
+})
+
+describe('sembol süzgeci', () => {
+    it('seçim yokken liste olduğu gibi', async () => {
+        const { result } = renderHook(() => usePortfolioNews())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        expect(result.current.selected).toEqual([])
+        expect(result.current.visibleItems).toHaveLength(2)
+    })
+
+    it('bir rozete basınca liste o hisseye iniyor', async () => {
+        const { result } = renderHook(() => usePortfolioNews())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        act(() => result.current.toggleSymbol('GARAN'))
+        expect(result.current.selected).toEqual(['GARAN'])
+        expect(result.current.visibleItems.map((item) => item.id)).toEqual(['n2'])
+    })
+
+    it('ikinci rozet listeyi DARALTMIYOR, genişletiyor', async () => {
+        /* Seçim birleşim, kesişim değil: "GARAN ve AKBNK" diyen kullanıcı
+           ikisine birden dokunan haberi değil, ikisinden herhangi birine
+           dokunanları soruyor. */
+        const { result } = renderHook(() => usePortfolioNews())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        act(() => result.current.toggleSymbol('GARAN'))
+        act(() => result.current.toggleSymbol('AKBNK'))
+        expect(result.current.visibleItems).toHaveLength(2)
+    })
+
+    it('aynı rozete tekrar basmak seçimi kaldırıyor', async () => {
+        const { result } = renderHook(() => usePortfolioNews())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        act(() => result.current.toggleSymbol('GARAN'))
+        act(() => result.current.toggleSymbol('GARAN'))
+        expect(result.current.selected).toEqual([])
+        expect(result.current.visibleItems).toHaveLength(2)
+    })
+
+    it('"Tümü" süzgeci sıfırlıyor', async () => {
+        const { result } = renderHook(() => usePortfolioNews())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        act(() => result.current.toggleSymbol('GARAN'))
+        act(() => result.current.clearSelection())
+        expect(result.current.selected).toEqual([])
+        expect(result.current.visibleItems).toHaveLength(2)
+    })
+
+    it('haberi olmayan bir hisse seçilince liste boşalıyor', async () => {
+        /* Bu doğru cevap: "DOAS için bu pencerede haber yok" ölçülmüş bir
+           sessizlik ve rozetteki 0 zaten onu söylüyor. */
+        const { result } = renderHook(() => usePortfolioNews())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        act(() => result.current.toggleSymbol('DOAS'))
+        expect(result.current.visibleItems).toEqual([])
+    })
+
+    it('etiketi olmayan haber hiçbir süzgeçten geçmiyor', async () => {
+        vi.spyOn(apiClient, 'getPortfolioNews').mockResolvedValue({
+            ...NEWS,
+            items: [{ ...NEWS.items[0], heldSymbols: undefined }],
+        } as never)
+        const { result } = renderHook(() => usePortfolioNews())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        act(() => result.current.toggleSymbol('AKBNK'))
+        expect(result.current.visibleItems).toEqual([])
+    })
+
+    it('veri yokken süzgeç boş liste veriyor', async () => {
+        vi.spyOn(apiClient, 'getPortfolioNews').mockRejectedValue(new Error('down'))
+        const { result } = renderHook(() => usePortfolioNews())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        expect(result.current.error).toBe(NEWS_ERROR)
+        expect(result.current.visibleItems).toEqual([])
     })
 })

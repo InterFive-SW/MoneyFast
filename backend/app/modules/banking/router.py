@@ -37,6 +37,7 @@ from .schemas import (
     SavingsGoalOut,
     SpendingSummaryOut,
     StagePaymentRequest,
+    OpenAccountRequest,
     StatementOut,
     TransferOut,
     TransferRequest,
@@ -59,6 +60,64 @@ def list_accounts(
         accounts = service.accounts_for(db, user_id)
     return accounts
 
+
+
+@router.post(
+    "/accounts",
+    response_model=BankAccountOut,
+    status_code=201,
+    summary="Yeni hesap aç",
+)
+def open_account(
+    request: OpenAccountRequest,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Kullanıcının isteğiyle ikinci (üçüncü, ...) bir hesap açar.
+
+    Bu uç nokta YOKTU. Arayüzde beş adımlık bir "Yeni Hesap Aç" sihirbazı
+    duruyordu ve sonunda rastgele bir IBAN üretip hesabı yalnızca bileşenin
+    state'ine yazıyordu: bir sonraki veri tazelemesinde hesap kayboluyordu.
+    Sihirbaz bu yüzden bilerek route'suz bırakılmıştı.
+    """
+    try:
+        account = service.open_account(
+            db,
+            user_id=user_id,
+            account_type=request.account_type,
+            currency_code=request.currency_code,
+            nickname=request.nickname,
+        )
+    except service.TransferError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+@router.post(
+    "/accounts/{account_number}/close",
+    response_model=BankAccountOut,
+    summary="Hesabı kapat",
+)
+def close_account(
+    account_number: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Hesabı kapatır -- silmez.
+
+    Geçmiş hareketler `account_transactions` içinde duruyor ve satırı silmek
+    dökümü okunamaz hâle getirirdi. Bakiyesi olan hesap kapanmaz: kapatmak
+    parayı yok etmek değil.
+    """
+    try:
+        account = service.close_account(db, user_id=user_id, reference=account_number)
+    except service.TransferError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    db.commit()
+    db.refresh(account)
+    return account
 
 
 @router.post(

@@ -508,6 +508,38 @@ class TestLatestNews:
         assert news_service.latest_news(db, limit=5) == rows
         db.query.return_value.order_by.return_value.limit.assert_called_once_with(5)
 
+    def test_no_symbols_means_no_filter(self):
+        """Boş bir sembol listesi "hiçbir haber" değil "süzgeç yok" demek."""
+        db = MagicMock(spec=Session)
+        news_service.latest_news(db, limit=5, symbols=[])
+        db.query.return_value.filter.assert_not_called()
+        news_service.latest_news(db, limit=5, symbols=None)
+        db.query.return_value.filter.assert_not_called()
+
+    def test_symbols_filter_on_array_overlap(self):
+        """Süzgeç SORGUDA: dönen sayfayı süzmek, "en yeni 20"de o hisse yoksa
+        "haber yok" cevabı üretiyordu -- oysa soru hiç sorulmamış oluyordu."""
+        db = MagicMock(spec=Session)
+        rows = [SimpleNamespace(id="n-1")]
+        filtered = db.query.return_value.filter.return_value
+        filtered.order_by.return_value.limit.return_value.all.return_value = rows
+        assert news_service.latest_news(db, limit=5, symbols=["AAPL"]) == rows
+        db.query.return_value.filter.assert_called_once()
+
+    def test_symbols_are_deduplicated_and_blanks_dropped(self):
+        """Aynı deseni `portfolio_news` de kullanıyor; boş bir dize hiçbir
+        satırla çakışmaz ama sorguyu gereksiz yere büyütür."""
+        db = MagicMock(spec=Session)
+        captured = {}
+
+        def remember(clause):
+            captured["clause"] = clause
+            return db.query.return_value.filter.return_value
+
+        db.query.return_value.filter.side_effect = remember
+        news_service.latest_news(db, symbols=["AAPL", "AAPL", "", "MSFT"])
+        assert captured["clause"].right.value == ["AAPL", "MSFT"]
+
 
 class TestNewsIdHelper:
     def test_generated_ids_are_unique(self):

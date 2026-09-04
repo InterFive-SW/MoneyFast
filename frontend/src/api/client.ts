@@ -81,6 +81,8 @@ export interface PortfolioAccount {
     /** Vadeli hesabın saklanan yıllık oranı ve vadesi; vadesizde null. */
     interest_rate?: number | null
     term_days?: number | null
+    /** Kullanıcının hesabına verdiği ad; yoksa arayüz türden türetir. */
+    nickname?: string | null
     is_investment: boolean
 }
 
@@ -971,10 +973,15 @@ class ApiClient {
             `/investment/transactions/${encodeURIComponent(proposalId)}/confirm`,
             {}
         );
-        // Trigger a notification refresh immediately so the user sees the PENDING transaction notification
-        if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event("refreshNotifications"));
-        }
+        // Onaydan hemen sonra bildirimleri tazele, yoksa kullanıcı bekleyen
+        // işlemi bir sonraki yoklamaya kadar göremiyor.
+        //
+        // `typeof window !== 'undefined'` koruması vardı: bu istemci yalnızca
+        // tarayıcıda çalışıyor (aynı dosya `localStorage`'ı korumasız
+        // okuyor), dolayısıyla koruma hiçbir zaman yanlış olamayan bir dal
+        // ekliyordu -- test edilemeyen ve bu yüzden kapsama kapısını kıran
+        // bir dal.
+        window.dispatchEvent(new Event('refreshNotifications'));
         return response;
     }
 
@@ -1198,12 +1205,46 @@ class ApiClient {
         }>('/auth/me');
     }
 
+    /**
+     * Yeni bir mevduat hesabı açar.
+     *
+     * Bu uç nokta yoktu ve arayüzdeki beş adımlık sihirbaz rastgele bir IBAN
+     * üretip hesabı yalnızca bileşenin state'ine yazıyordu -- bir sonraki
+     * veri tazelemesinde hesap kayboluyordu.
+     */
+    openBankAccount(request: {
+        account_type: 'vadesiz' | 'vadeli'
+        currency_code?: string
+        nickname?: string | null
+    }) {
+        return this.post<BankAccount>('/banking/accounts', request)
+    }
+
+    /** Hesabı kapatır. Bakiyesi varsa backend reddeder. */
+    closeBankAccount(accountNumber: string) {
+        return this.post<BankAccount>(
+            `/banking/accounts/${encodeURIComponent(accountNumber)}/close`, {},
+        )
+    }
+
     getMarketTickers() {
         return this.request<MarketTicker[]>('/market/tickers');
     }
 
-    getMarketNews() {
-        return this.request<NewsItem[]>('/market/news');
+    /**
+     * Piyasa haber akışı. `symbols` verilirse süzgeç SUNUCUDA uygulanır.
+     *
+     * Dönen sayfayı istemcide süzmek yalnızca çekilen satırları daraltıyor:
+     * "en yeni 20"de AAPL yoksa ekranda "haber yok" yazıyor, oysa soru hiç
+     * sorulmamış oluyor.
+     */
+    getMarketNews(params?: { limit?: number; symbols?: string[] }) {
+        const query = new URLSearchParams();
+        if (params?.limit != null) query.set('limit', String(params.limit));
+        // Repeated key, not a comma list: FastAPI reads List[str] that way.
+        params?.symbols?.forEach((symbol) => query.append('symbols', symbol));
+        const suffix = query.toString() ? `?${query}` : '';
+        return this.request<NewsItem[]>(`/market/news${suffix}`);
     }
 
     /**

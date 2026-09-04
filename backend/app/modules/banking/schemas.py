@@ -16,6 +16,21 @@ class BankAccountOut(BaseModel):
     currency_code: str
     balance: float
     status: str
+    #: Kullanıcının verdiği ad; yoksa arayüz türden ve para biriminden türetir.
+    nickname: Optional[str] = None
+
+
+class OpenAccountRequest(BaseModel):
+    #: `vadesiz` ya da `vadeli`. Arayüzün `checking`/`savings` sözcükleri
+    #: burada çözülmüyor: uç nokta veritabanının kullandığı adları alıyor ve
+    #: çeviri istemcide tek yerde duruyor.
+    account_type: str = Field(..., pattern="^(vadesiz|vadeli)$")
+    #: GBP kabul edilmiyor: sistemde GBP/TRY kuru yok ve kuru olmayan bir
+    #: bakiye hiçbir toplama katılamaz.
+    currency_code: str = Field(default="TRY", pattern="^(TRY|USD|EUR)$")
+    #: Opsiyonel. Boş bırakılırsa hesap türünden ve para biriminden türetilen
+    #: etiketle görünür; uydurulmuş bir ad yazılmaz.
+    nickname: Optional[str] = Field(default=None, max_length=60)
 
 
 class TransferRequest(BaseModel):
@@ -207,6 +222,9 @@ class PortfolioAccountOut(BaseModel):
     #: ve hiçbir zaman ödenmeyen bir vaatti. Vadesiz hesapta boş kalır.
     interest_rate: Optional[float] = None
     term_days: Optional[int] = None
+    #: Kullanıcının verdiği ad. Yatırım hesabında yok -- o bir bankacılık
+    #: satırı değil ve adı türünden geliyor.
+    nickname: Optional[str] = None
     is_investment: bool = False
 
 

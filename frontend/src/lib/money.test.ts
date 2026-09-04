@@ -6,9 +6,7 @@
  * lira. Buying AAPL used to show "₺314,88" for a dollar-priced stock.
  */
 import { describe, expect, it } from 'vitest'
-import {
-  baseEquivalent, convert, currencySymbol, formatAmount, formatMoney, formatWithBase,
-} from './money'
+import { baseEquivalent, convert, currencySymbol, formatAmount, formatCompact, formatMoney, formatWithBase } from './money'
 
 const RATES = { USD: 47.9479, EUR: 56.0921 }
 
@@ -145,5 +143,36 @@ describe('missing currency defaults', () => {
 
   it('renders an empty symbol for an absent currency code', () => {
     expect(currencySymbol(undefined as never)).toBe('')
+  })
+})
+
+describe('formatCompact', () => {
+  it('milyonu kısaltır', () => {
+    expect(formatCompact(1_412_905)).toBe('1,4 Mn')
+  })
+
+  it('bin ve milyar ayrı ekler alır', () => {
+    /* `B` bin, `Mr` milyar. İngilizce `B` milyar demek ve eksende bunu
+       ayırt edecek yer yok. */
+    expect(formatCompact(812_400)).toBe('812 B')
+    expect(formatCompact(2_300_000_000)).toBe('2,3 Mr')
+  })
+
+  it('binin altında ek yok', () => {
+    expect(formatCompact(47)).toBe('47')
+  })
+
+  it('ondan büyük kısaltmalarda ondalık yok', () => {
+    /* `412,9 B` eksende kimsenin okumadığı bir hane ekliyor. */
+    expect(formatCompact(412_900)).toBe('413 B')
+  })
+
+  it('işaret korunur', () => {
+    expect(formatCompact(-1_500_000)).toBe('-1,5 Mn')
+  })
+
+  it('sayı olmayan değer tire', () => {
+    expect(formatCompact(Number.NaN)).toBe('—')
+    expect(formatCompact(null as unknown as number)).toBe('—')
   })
 })

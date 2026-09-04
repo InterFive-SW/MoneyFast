@@ -6,7 +6,9 @@ Each module exposes a `register(mcp)` function; the tool callables stay at
 module level so they can be imported and unit-tested without a running
 server.
 
-Contracts follow "MCP Tools Interface Definitions v2.9", the union of two
+Contracts follow "MCP Tools Interface Definitions v2.19" (see
+CONTRACT_VERSION below -- that constant is the authority; this paragraph
+described v2.9 long after the constant had moved on). It is the union of two
 lineages that developed in parallel: v2.4 on main added
 get_risk_profile_summary, v2.8 on the banking branch added lookup_bill and
 prepare_payment_proposal. Both are kept; the version is bumped past both
@@ -48,6 +50,7 @@ import compliance_tools
 import cash_flow_tools
 import report_tools
 import fundamentals_tools
+import instrument_tools
 import market_data_tools
 import market_research_tools
 import news_tools
@@ -95,10 +98,17 @@ SERVER_NAME = "moneyfast"
 #: saklıyor ve "son çeyrek kârı" sorusunu cevaplayabilen tek yol. Sağlayıcı
 #: çeyrek atlıyor -- 40 hissenin 3'ünde 2025Q3 yok -- dolayısıyla bitişiklik
 #: bayrak olarak taşınıyor ve karşılaştırma ona bağlı.
-CONTRACT_VERSION = "v2.18"
+#: v2.19: `resolve_instruments`. Ölçülmüş bir hatanın karşılığı: kullanıcı
+#: "türk hava yolları ne durumda" diye sordu, cevapta kaynak olarak üç EKGYO
+#: bildirimi listelendi. Yönlendirici `entities.company_names` çıkarıyordu ama
+#: orkestratörde o alanı OKUYAN tek satır yoktu, dolayısıyla adı sembole
+#: çeviren hiçbir şey yoktu ve arama süzgeçsiz çalıştı.
+#: `rag_semantic_market_search` genişletilmedi: "türk hava yolları" ile THYAO
+#: arasındaki bağ ölçülen bir benzerlik değil, kayıtlı bir gerçek.
+CONTRACT_VERSION = "v2.19"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Twenty tools across fourteen domains.
+MoneyFast tool server. Twenty-one tools across fifteen domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -166,6 +176,7 @@ DOMAIN_MODULES = (
     ("fundamentals", fundamentals_tools),
     ("cash_flow", cash_flow_tools),
     ("report", report_tools),
+    ("instrument", instrument_tools),
 )
 
 

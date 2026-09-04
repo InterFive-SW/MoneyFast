@@ -747,7 +747,7 @@ async def process_pending_transaction(proposal_id: str, email_to: str):
     """
     3 dakika bekleyip, işlemi finalize eden background task.
     """
-    await asyncio.sleep(180)  # 3 minutes delay
+    await asyncio.sleep(15)  # 15 seconds delay
     
     with SessionLocal() as db:
         proposal = db.get(TransactionProposal, proposal_id)

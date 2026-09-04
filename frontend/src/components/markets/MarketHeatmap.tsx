@@ -5,7 +5,7 @@ import { apiClient } from '../../api/client'
 import { useMarketStream } from '../../hooks/useMarketStream'
 import { formatWithBase } from '../../lib/money'
 import type { HeatmapTile } from '../../api/client'
-import { LEGEND_STEPS, TILE_TEXT_COLOUR, tileColour } from '../../lib/heatmapColour'
+import { LEGEND_STEPS, tileColour, tileTextColour } from '../../lib/heatmapColour'
 
 interface MarketHeatmapProps {
   /** Grid yerleşiminden gelen yükseklik birimi; widget olarak kullanıldığında. */
@@ -16,25 +16,8 @@ interface MarketHeatmapProps {
 const MARKETS = [
   { label: 'BIST', value: 'BIST' },
   { label: 'S&P 500', value: 'SP500' },
-  // 'NASDAQ' borsanın kendisi (183 satır), 'NASDAQ100' endeks (96). Etiket
-  // endeksi söylediği için değer de endeksi göstermeli; ikisi bir dönem
-  // ayrışmıştı ve düğme, adını taşımadığı bir kümeyi çiziyordu.
-  { label: 'Nasdaq 100', value: 'NASDAQ100' },
+  { label: 'Nasdaq', value: 'NASDAQ' },
 ] as const
-
-/**
- * Çizilen kutu sayısı.
- *
- * Uç nokta S&P 500 için 483 satır döndürüyor ve hepsi haritaya sığmıyor:
- * ölçüldüğünde kutuların ezici çoğunluğu `showSymbol` eşiğinin altında
- * kalıyor, yani ADSIZ çiziliyordu. Adsız kutu bilgi değil; harita "S&P 500"
- * düğmesine basan kullanıcıya gri bir mozaik gösteriyordu.
- *
- * Satırlar piyasa değerine göre sıralı geldiği için ilk N tanesi haritanın
- * ağırlığının da ezici çoğunluğu. Kaçının çizildiği altta yazıyor -- kırpmayı
- * sessiz yapmak, haritayı piyasanın tamamıymış gibi sunmak olurdu.
- */
-const MAX_TILES = 60
 
 interface TileProps {
   x?: number
@@ -50,8 +33,7 @@ interface TileProps {
 /**
  * Bir kutu. Sembol ve yüzde ancak SIĞDIĞINDA yazılıyor.
  *
- * Sığmayan kutu adsız kalıyor; `MAX_TILES` bunu nadir hâle getiriyor ama
- * ortadan kaldırmıyor (dar bir ekranda kuyruktaki kutular yine küçük).
+ * Sığmadığında kutu adsız kalıyor -- S&P 500 boyutunda çoğu kutu bu durumda.
  * Bu yüzden üzerine gelince (ve klavyeyle odaklanınca) ad, fiyat ve değişim
  * bir kartta gösteriliyor: yalnızca fareyle ulaşılabilen bir etiket, etiket
  * sayılmaz.
@@ -97,7 +79,7 @@ function Tile({
           x={x + width / 2}
           y={y + height / 2 - (showChange ? 6 : 0)}
           textAnchor="middle"
-          fill={TILE_TEXT_COLOUR}
+          fill={tileTextColour(change)}
           fontSize={Math.min(13, Math.max(9, width / 6))}
           fontWeight={600}
         >
@@ -109,7 +91,7 @@ function Tile({
           x={x + width / 2}
           y={y + height / 2 + 10}
           textAnchor="middle"
-          fill={TILE_TEXT_COLOUR}
+          fill={tileTextColour(change)}
           fontSize={Math.min(11, Math.max(8, width / 8))}
           opacity={0.9}
         >
@@ -165,7 +147,7 @@ export default function MarketHeatmap({ h = 5 }: MarketHeatmapProps) {
 
   const data = useMemo(
     () =>
-      tiles.slice(0, MAX_TILES).map((tile) => ({
+      tiles.map((tile) => ({
         name: tile.symbol,
         symbol: tile.symbol,
         // Recharts alanı `size`'dan hesaplıyor.
@@ -177,10 +159,7 @@ export default function MarketHeatmap({ h = 5 }: MarketHeatmapProps) {
     [tiles],
   )
 
-  // Kutu başına düşen alan, etiketin yazılıp yazılmayacağını belirliyor:
-  // `showSymbol` 42x24 piksel istiyor. 300 piksellik bir pencerede 60 kutu bu
-  // eşiği geçemiyordu.
-  const height = Math.max(340, h * 84)
+  const height = Math.max(260, h * 60)
 
   return (
     <div className="flex h-full flex-col rounded-[2rem] border border-white/10 bg-slate-900/50 p-5 shadow-2xl backdrop-blur-xl">
@@ -280,15 +259,9 @@ export default function MarketHeatmap({ h = 5 }: MarketHeatmapProps) {
         ))}
       </div>
 
-      {(missing > 0 || tiles.length > MAX_TILES) && (
+      {missing > 0 && (
         <p className="mt-2 text-center text-[10px] text-slate-500">
-          {tiles.length > MAX_TILES
-            ? `Piyasa değerine göre ilk ${MAX_TILES} enstrüman gösteriliyor (${tiles.length} içinden).`
-            : null}
-          {tiles.length > MAX_TILES && missing > 0 ? ' ' : null}
-          {missing > 0
-            ? `${missing} enstrüman piyasa değeri bilinmediği için haritada yok.`
-            : null}
+          {missing} enstrüman piyasa değeri bilinmediği için haritada yok.
         </p>
       )}
     </div>

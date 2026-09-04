@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import logo from '../assets/logo.png'
+import logo from '../assets/logo-icon.png'
 import { api } from '../api/client'
 
 export default function VerifyEmail() {
@@ -12,7 +12,7 @@ export default function VerifyEmail() {
   useEffect(() => {
     if (!token) {
       setStatus('error')
-      setMessage('Geçersiz veya eksik doğrulama bağlantısı.')
+      setMessage('Geçersiz veya eksik doğrulama bağlantısı')
       return
     }
 
@@ -23,13 +23,13 @@ export default function VerifyEmail() {
       .then((res: any) => {
         if (isMounted) {
           setStatus('success')
-          setMessage(res.message || 'Hesabınız başarıyla doğrulandı. Şimdi giriş yapabilirsiniz.')
+          setMessage(res.message || 'Hesabınız başarıyla doğrulandı, şimdi giriş yapabilirsiniz')
         }
       })
       .catch((err: any) => {
         if (isMounted) {
           setStatus('error')
-          setMessage(err.message || 'Hesap doğrulanırken bir hata oluştu. Bağlantının süresi dolmuş olabilir.')
+          setMessage(err.message || 'E-posta doğrulaması başarısız oldu, bağlantı süresi dolmuş olabilir')
         }
       })
 
@@ -39,29 +39,25 @@ export default function VerifyEmail() {
   }, [token])
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-slate-950">
-      {/* Animated background blobs */}
-      <div className="pointer-events-none absolute -left-40 top-20 h-96 w-96 rounded-full bg-brandBlue/20 blur-[100px]" />
-      <div className="pointer-events-none absolute -bottom-40 -right-40 h-96 w-96 rounded-full bg-emerald-500/10 blur-[100px]" />
-
+    <div className="relative min-h-screen antialiased bg-hologram-global text-slate-300 overflow-hidden">
       {/* Logo */}
       <header className="absolute left-6 top-6 z-10 sm:left-10 sm:top-8">
         <Link to="/" className="flex items-center gap-3">
-          <img src={logo} alt="MoneyFast Logo" className="h-20 sm:h-28 w-auto object-contain transition-transform duration-300 hover:scale-105" />
+          <img src={logo} alt="MoneyFast Logo" className="h-10 sm:h-12 w-auto object-contain transition-transform duration-300 hover:scale-105" />
         </Link>
       </header>
 
       {/* İçerik */}
       <main className="flex min-h-screen items-center justify-center px-5 pb-10 pt-28 sm:px-8">
-        <section className="w-full max-w-xl rounded-[2.5rem] border border-white/10 bg-slate-900/50 px-7 py-10 shadow-[0_24px_70px_-30px_rgba(0,0,0,0.5)] backdrop-blur-xl sm:px-12 sm:py-12">
-          <div className="mx-auto max-w-md text-center">
+        <section className="relative z-10 w-full max-w-xl rounded-[2.5rem] bg-slate-900/50 backdrop-blur-xl border border-white/10 px-7 py-10 shadow-2xl sm:px-12 sm:py-12">
+          <div className="mx-auto max-w-md text-center flex flex-col items-center">
             {status === 'loading' && (
               <>
                 <div className="mx-auto mb-6 flex h-16 w-16 animate-pulse items-center justify-center rounded-full bg-slate-800 text-slate-400">
                   <div className="h-6 w-6 rounded-full border-4 border-slate-500 border-t-brandBlue animate-spin" />
                 </div>
-                <h2 className="mb-4 text-2xl font-bold text-white">Doğrulanıyor...</h2>
-                <p className="text-slate-400">Hesabınız onaylanıyor, lütfen bekleyin.</p>
+                <h2 className="mb-4 text-3xl font-bold tracking-tight text-gradient-hero inline-block">Doğrulanıyor...</h2>
+                <p className="text-slate-400">Hesabınız onaylanıyor, lütfen bekleyin</p>
               </>
             )}
 
@@ -72,7 +68,7 @@ export default function VerifyEmail() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <h2 className="mb-4 text-2xl font-bold text-white">Doğrulama Başarılı</h2>
+                <h2 className="mb-4 text-3xl font-bold tracking-tight text-gradient-hero inline-block">Doğrulama Başarılı</h2>
                 <p className="mb-8 text-slate-400">{message}</p>
                 <Link
                   to="/login"
@@ -90,14 +86,14 @@ export default function VerifyEmail() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </div>
-                <h2 className="mb-4 text-2xl font-bold text-white">Doğrulama Başarısız</h2>
+                <h2 className="mb-4 text-3xl font-bold tracking-tight text-gradient-hero inline-block">Doğrulama Başarısız</h2>
                 <p className="mb-8 text-slate-400">{message}</p>
                 <div className="flex flex-col gap-3">
                   <Link
                     to="/login"
                     className="inline-flex w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 font-semibold text-white transition hover:bg-white/10"
                   >
-                    Giriş Ekranına Dön
+                    ← Giriş ekranına dön
                   </Link>
                 </div>
               </>

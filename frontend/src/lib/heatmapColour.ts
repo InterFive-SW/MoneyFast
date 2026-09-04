@@ -20,49 +20,38 @@ export const LEGEND_STEPS = [-3, -2, -1, 0, 1, 2, 3]
 const NEUTRAL = '#3f4654'
 
 /**
- * Kutunun üzerindeki yazı rengi -- her kutuda aynı.
- *
- * Bir dönem açık kutularda koyu (`#0f172a`), koyu kutularda beyaz yazılıyordu.
- * İki renk arasında gidip gelen bir etiket, ölçeğin kendisiyle yarışan ikinci
- * bir sinyal üretiyordu: yan yana iki kutunun yazı rengi farklı olduğunda göz
- * bunu bir anlam sanıyor. Yazı artık sabit; okunabilirliği sağlayan şey
- * ZEMİN -- `tileLightness` en açık uçta bile beyazla 4,5:1 kontrastı
- * geçecek kadar koyu kalıyor (bkz. aşağısı).
- */
-export const TILE_TEXT_COLOUR = '#ffffff'
-
-/**
- * Ölçeğin açıklık eğrisi. Tek yerde, çünkü hem renk hem de o rengin
- * okunabilirlik iddiası buradan türüyor; iki kopya sessizce ayrışırdı.
- *
- * **Büyük hareket KOYU, küçük hareket açık.** Önceki ölçek tersiydi: koyu bir
- * tabandan tam renge doğru karıştığı için %+3 en PARLAK yeşildi ve sakin bir
- * gün en koyu kutuydu. Ölçek açıklıkla iniyor -- gözün en çok takıldığı kutu,
- * gerçekten en çok hareket eden kutu.
- *
- * Tavan %38, %62 değil. Beyaz yazı %62 açıklıktaki bir yeşilde 2,2:1
- * kontrastla okunmuyordu; ölçeğin açık ucu bu yüzden aşağı çekildi.
- * Hesaplanan en kötü hâl `hsl(142, 38%, 38%)` üzerinde beyaz = **4,48:1**
- * (WCAG AA eşiği 4,5:1, kalın 12px+ metin için 3:1). Kırmızı uç çok daha
- * rahat: `hsl(0, 38%, 38%)` üzerinde 7,75:1.
- */
-export function tileLightness(intensity: number): number {
-  return 38 - intensity * 14
-}
-
-/**
  * Yüzde değişimi renge çevirir: kazanç yeşil, kayıp kırmızı.
  *
  * Doygunluk hareketin BÜYÜKLÜĞÜYLE artıyor -- %0,2'lik bir kıpırdanma ile
  * %8'lik bir sıçrama aynı renkte olsaydı harita hangi hissenin gerçekten
  * hareket ettiğini söylemezdi. Sıfıra çok yakın değerler nötr gri kalıyor:
  * yuvarlanmış bir sıfırı yeşile boyamak, olmayan bir kazancı göstermek olurdu.
+ *
+ * **Büyük hareket KOYU, küçük hareket açık.** Önceki ölçek tersiydi: koyu bir
+ * tabandan tam renge doğru karıştığı için %+3 en PARLAK yeşildi ve sakin bir
+ * gün en koyu kutuydu. Ölçek artık açıklıkla iniyor -- gözün en çok takıldığı
+ * kutu, gerçekten en çok hareket eden kutu.
  */
 export function tileColour(changePercent: number): string {
   if (Math.abs(changePercent) < 0.05) return NEUTRAL
   const intensity = Math.min(1, Math.abs(changePercent) / FULL_SCALE)
   const hue = changePercent > 0 ? 142 : 0
+  // Açıklık %62'den %26'ya iniyor: küçük hareket soluk, büyük hareket derin.
+  const lightness = 62 - intensity * 36
   // Doygunluk da büyüklükle artıyor, yoksa soluk uç griye çok yaklaşıyor.
   const saturation = 38 + intensity * 34
-  return `hsl(${hue}, ${Math.round(saturation)}%, ${Math.round(tileLightness(intensity))}%)`
+  return `hsl(${hue}, ${Math.round(saturation)}%, ${Math.round(lightness)}%)`
+}
+
+/**
+ * Kutunun üzerindeki yazı rengi.
+ *
+ * Ölçek terse döndüğü için küçük hareketler artık AÇIK renkli ve sabit beyaz
+ * yazı orada okunmuyordu -- rengi düzeltirken okunabilirliği bozmak, bir hatayı
+ * başkasıyla değiştirmek olurdu. Eşik açıklık ölçeğinin ortası.
+ */
+export function tileTextColour(changePercent: number): string {
+  if (Math.abs(changePercent) < 0.05) return '#ffffff'
+  const intensity = Math.min(1, Math.abs(changePercent) / FULL_SCALE)
+  return 62 - intensity * 36 > 45 ? '#0f172a' : '#ffffff'
 }

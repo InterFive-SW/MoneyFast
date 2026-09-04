@@ -127,7 +127,7 @@ export function formatWithBase(
   }
   const converted = convert(amount, currency, BASE_CURRENCY, rates);
   if (converted == null) return native;
-  return `${native} · ≈${formatMoney(converted, BASE_CURRENCY)}`;
+  return `${native} (${formatMoney(converted, BASE_CURRENCY)})`;
 }
 
 /**
@@ -141,5 +141,5 @@ export function baseEquivalent(
 ): string {
   if (amount == null || (currency ?? BASE_CURRENCY).toUpperCase() === BASE_CURRENCY) return '';
   const converted = convert(amount, currency, BASE_CURRENCY, rates);
-  return converted == null ? '' : `≈${formatMoney(converted, BASE_CURRENCY)}`;
+  return converted == null ? '' : `(${formatMoney(converted, BASE_CURRENCY)})`;
 }

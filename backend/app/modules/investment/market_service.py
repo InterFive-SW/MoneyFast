@@ -1419,7 +1419,34 @@ def sector_by_symbol(db: Session) -> dict[str, str]:
               InstrumentFundamentals.product_id == InvestmentProduct.id)
         .where(InstrumentFundamentals.sector.isnot(None))
     )
-    return {symbol: sector for symbol, sector in db.execute(statement).all()}
+    sectors = {symbol: sector for symbol, sector in db.execute(statement).all()}
+    
+    # -- EKLENEN MOCK VERİ KISMI --
+    mock_sectors = {
+        "THYAO": "Ulaştırma", "PGSUS": "Ulaştırma",
+        "GARAN": "Bankacılık", "AKBNK": "Bankacılık", "ISCTR": "Bankacılık", "YKBNK": "Bankacılık",
+        "TUPRS": "Enerji", "TCELL": "İletişim", "TTKOM": "İletişim",
+        "KCHOL": "Holding", "SAHOL": "Holding",
+        "SISE": "Sanayi", "EREGL": "Metal", "KRDMD": "Metal",
+        "ASELS": "Savunma", "BIMAS": "Perakende", "MGROS": "Perakende",
+        "AAPL": "Teknoloji (ABD)", "MSFT": "Teknoloji (ABD)", 
+        "TSLA": "Otomotiv (ABD)", "AMZN": "Perakende (ABD)", "NVDA": "Teknoloji (ABD)"
+    }
+    for symbol, mock_sector in mock_sectors.items():
+        if symbol not in sectors:
+            sectors[symbol] = mock_sector
+            
+    return sectors
+
+# def sector_by_symbol(db: Session) -> dict[str, str]:
+#     """Sector per symbol, for allocation and heatmap breakdowns."""
+#     statement = (
+#         select(InvestmentProduct.symbol, InstrumentFundamentals.sector)
+#         .join(InstrumentFundamentals,
+#               InstrumentFundamentals.product_id == InvestmentProduct.id)
+#         .where(InstrumentFundamentals.sector.isnot(None))
+#     )
+#     return {symbol: sector for symbol, sector in db.execute(statement).all()}
 
 
 def recent_orders(db: Session, limit: int = 20) -> list[dict[str, Any]]:

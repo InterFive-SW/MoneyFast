@@ -812,40 +812,7 @@ export interface paths {
          */
         get: operations["list_accounts_api_banking_accounts_get"];
         put?: never;
-        /**
-         * Yeni hesap aç
-         * @description Kullanıcının isteğiyle ikinci (üçüncü, ...) bir hesap açar.
-         *
-         *     Bu uç nokta YOKTU. Arayüzde beş adımlık bir "Yeni Hesap Aç" sihirbazı
-         *     duruyordu ve sonunda rastgele bir IBAN üretip hesabı yalnızca bileşenin
-         *     state'ine yazıyordu: bir sonraki veri tazelemesinde hesap kayboluyordu.
-         *     Sihirbaz bu yüzden bilerek route'suz bırakılmıştı.
-         */
-        post: operations["open_account_api_banking_accounts_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/banking/accounts/{account_number}/close": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Hesabı kapat
-         * @description Hesabı kapatır -- silmez.
-         *
-         *     Geçmiş hareketler `account_transactions` içinde duruyor ve satırı silmek
-         *     dökümü okunamaz hâle getirirdi. Bakiyesi olan hesap kapanmaz: kapatmak
-         *     parayı yok etmek değil.
-         */
-        post: operations["close_account_api_banking_accounts__account_number__close_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1808,11 +1775,6 @@ export interface paths {
          *     aramaya, buradaki kopya "en yeni 20 haber" listesine hizmet ediyor. İki
          *     farklı erişim deseni, iki farklı depo.
          *
-         *     `symbols` verilirse süzgeç SORGUDA uygulanır, dönen sayfada değil. Fark
-         *     şurada: hisse detay sayfası "en yeni 20"yi çekip içinden AAPL'i ayıklarsa,
-         *     o yirmide AAPL yoksa ekranda "haber yok" yazıyor -- oysa soru hiç
-         *     sorulmamış oluyor.
-         *
          *     Veri yoksa boş liste döner; uydurma haber başlığı göstermek, boş bir akış
          *     göstermekten çok daha kötü.
          */
@@ -2332,54 +2294,6 @@ export interface paths {
         put?: never;
         /** Haber yükle (servisler arası) */
         post: operations["ingest_news_api_market_news_ingest_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/market/news/coverage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Kaynak başına haber kapsaması (servisler arası)
-         * @description `ingestor`'ın "nereden devam edeyim" sorusu.
-         *
-         *     `candles/coverage` ile aynı desen. KAP bildirim numarası monoton
-         *     olduğu için en yüksek numara, bir tarihten daha kesin bir su seviyesi.
-         */
-        get: operations["news_coverage_api_market_news_coverage_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/market/news/archive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Saklanan bildirimleri sayfa sayfa oku (servisler arası)
-         * @description `ingestor`'ın "hangi bildirimin gövdesi hâlâ eksik" taramasını
-         *     beslediği uç.
-         *
-         *     Panoya 28.984 bildirim düştü ama derlemde yalnızca yeni gelenlerin
-         *     gövdesi var: gövde çekimi bildirim başına bir istek ve tur başına
-         *     bütçeli. Bu uç, arşivin geri kalanını kapatan işin girdisi.
-         */
-        get: operations["news_archive_api_market_news_archive_get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3212,8 +3126,6 @@ export interface components {
             balance: number;
             /** Status */
             status: string;
-            /** Nickname */
-            nickname?: string | null;
         };
         /**
          * BenchmarkSeries
@@ -3692,10 +3604,6 @@ export interface components {
             } | null;
             /** Context Topic */
             context_topic?: string | null;
-            /** Sources */
-            sources?: {
-                [key: string]: unknown;
-            }[];
             /** Conversation Id */
             conversation_id?: string | null;
             /**
@@ -3728,10 +3636,6 @@ export interface components {
             role: "user" | "assistant";
             /** Content */
             content: string;
-            /** Sources */
-            sources?: {
-                [key: string]: unknown;
-            }[];
         };
         /** ComplianceRequest */
         ComplianceRequest: {
@@ -4548,10 +4452,6 @@ export interface components {
             created_at: string;
             /** Disclosures */
             disclosures?: string[];
-            /** Sources */
-            sources?: {
-                [key: string]: unknown;
-            }[];
         };
         /**
          * MovementOut
@@ -4677,18 +4577,6 @@ export interface components {
              */
             currency: string;
         };
-        /** OpenAccountRequest */
-        OpenAccountRequest: {
-            /** Account Type */
-            account_type: string;
-            /**
-             * Currency Code
-             * @default TRY
-             */
-            currency_code: string;
-            /** Nickname */
-            nickname?: string | null;
-        };
         /** Order */
         Order: {
             /** Id */
@@ -4807,8 +4695,6 @@ export interface components {
             interest_rate?: number | null;
             /** Term Days */
             term_days?: number | null;
-            /** Nickname */
-            nickname?: string | null;
             /**
              * Is Investment
              * @default false
@@ -7668,70 +7554,6 @@ export interface operations {
             };
         };
     };
-    open_account_api_banking_accounts_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OpenAccountRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BankAccountOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    close_account_api_banking_accounts__account_number__close_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                account_number: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BankAccountOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     accrue_interest_api_banking_interest_accrue_post: {
         parameters: {
             query?: never;
@@ -8936,8 +8758,6 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                /** @description Yalnızca bu hisselere bağlı haberler. Tekrarlanan anahtar. */
-                symbols?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -9583,72 +9403,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IngestResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    news_coverage_api_market_news_coverage_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    news_archive_api_market_news_archive_get: {
-        parameters: {
-            query?: {
-                source?: string;
-                limit?: number;
-                offset?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

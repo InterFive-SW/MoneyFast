@@ -26,14 +26,6 @@ export interface PortfolioNewsData {
     hasHoldings: boolean
     /** Bir haberin kullanıcının hangi hisselerine dokunduğu, okunabilir hâlde. */
     heldLabel: (item: PortfolioNewsItem) => string
-    /** Seçili semboller. Boşken süzgeç yok, yani liste olduğu gibi. */
-    selected: string[]
-    /** Süzgece bir sembol ekler ya da çıkarır. */
-    toggleSymbol: (symbol: string) => void
-    /** Süzgeci kaldırır. */
-    clearSelection: () => void
-    /** Süzgeçten geçmiş haberler; seçim yokken `news.items`'ın aynısı. */
-    visibleItems: PortfolioNewsItem[]
     reload: () => Promise<void>
 }
 
@@ -41,7 +33,6 @@ export function usePortfolioNews(): PortfolioNewsData {
     const [news, setNews] = useState<PortfolioNews | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
-    const [selected, setSelected] = useState<string[]>([])
 
     const load = useCallback(async () => {
         setLoading(true)
@@ -64,35 +55,6 @@ export function usePortfolioNews(): PortfolioNewsData {
         void load()
     }, [load])
 
-    /**
-     * Süzgeç, sunucuya değil listeye uygulanıyor.
-     *
-     * Uç nokta zaten HABER BAŞINA `heldSymbols` döndürüyor, dolayısıyla
-     * "yalnızca GARAN" sorusunun cevabı elde: yeni bir istek atmak, kullanıcı
-     * rozete her dokunduğunda bir gidiş-dönüş beklemesi demek olurdu.
-     *
-     * Aynı sebeple pencere DEĞİŞMİYOR: rozetteki sayı da, liste de aynı 90
-     * günün içinden geliyor, yani "GARAN · 78" yazan rozete basınca 78 haber
-     * çıkıyor. Süzgeç sunucuya taşınsaydı iki sayı ayrışabilirdi.
-     */
-    const toggleSymbol = useCallback((symbol: string) => {
-        setSelected((current) =>
-            current.includes(symbol)
-                ? current.filter((entry) => entry !== symbol)
-                : [...current, symbol],
-        )
-    }, [])
-
-    const clearSelection = useCallback(() => setSelected([]), [])
-
-    const visibleItems = useMemo(() => {
-        const items = news?.items ?? []
-        if (selected.length === 0) return items
-        return items.filter((item) =>
-            (item.heldSymbols ?? []).some((symbol) => selected.includes(symbol)),
-        )
-    }, [news, selected])
-
     const quietSymbols = useMemo(
         () => (news?.symbols ?? []).filter((row) => row.count === 0).map((row) => row.symbol),
         [news],
@@ -109,10 +71,6 @@ export function usePortfolioNews(): PortfolioNewsData {
         // olabiliyor. Listede DURMA SEBEBİ okunabilir olmalı; tüm etiketleri
         // yazmak, sahip olunmayan hisseleri portföydeymiş gibi gösterirdi.
         heldLabel: (item: PortfolioNewsItem) => (item.heldSymbols ?? []).join(', '),
-        selected,
-        toggleSymbol,
-        clearSelection,
-        visibleItems,
         reload: load,
     }
 }

@@ -21,10 +21,7 @@ function timeLabel(item: { time: string; publishedAt: string }): string {
 }
 
 export default function PortfoyHaberleri() {
-    const {
-        news, loading, error, quietSymbols, hasHoldings, heldLabel,
-        selected, toggleSymbol, clearSelection, visibleItems,
-    } = usePortfolioNews()
+    const { news, loading, error, quietSymbols, hasHoldings, heldLabel } = usePortfolioNews()
 
     return (
         <div className="mb-6 rounded-[2rem] border border-white/10 bg-slate-900/50 p-5 backdrop-blur-xl">
@@ -51,62 +48,32 @@ export default function PortfoyHaberleri() {
                         </p>
                     )}
 
-                    {/* Rozet artık düğme: bir hisseye dokununca liste ona
-                        iniyor. Süzgeç istemcide, çünkü uç nokta zaten haber
-                        başına `heldSymbols` döndürüyor -- her dokunuşta bir
-                        gidiş-dönüş beklemek için sebep yok. */}
                     {hasHoldings && (
-                        <div className="mb-4 flex flex-wrap items-center gap-2">
-                            {news.symbols.map((row) => {
-                                const active = selected.includes(row.symbol)
-                                return (
-                                    <button
-                                        key={row.symbol}
-                                        type="button"
-                                        onClick={() => toggleSymbol(row.symbol)}
-                                        aria-pressed={active}
-                                        title={row.name ?? undefined}
-                                        className={`rounded-full border px-2.5 py-1 text-[11px] tabular-nums transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 ${
-                                            active
-                                                ? 'border-sky-300 bg-sky-400/25 text-white'
-                                                : row.count > 0
-                                                    ? 'border-sky-400/30 bg-sky-400/10 text-sky-200 hover:border-sky-300/60'
-                                                    : 'border-white/10 bg-white/5 text-slate-500 hover:border-white/20'
-                                        }`}
-                                    >
-                                        {row.symbol} · {row.count}
-                                    </button>
-                                )
-                            })}
-                            {selected.length > 0 && (
-                                <button
-                                    type="button"
-                                    onClick={clearSelection}
-                                    className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-white/25 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
+                        <div className="mb-4 flex flex-wrap gap-2">
+                            {news.symbols.map((row) => (
+                                <span
+                                    key={row.symbol}
+                                    title={row.name}
+                                    className={`rounded-full border px-2.5 py-1 text-[11px] tabular-nums ${
+                                        row.count > 0
+                                            ? 'border-sky-400/30 bg-sky-400/10 text-sky-200'
+                                            : 'border-white/10 bg-white/5 text-slate-500'
+                                    }`}
                                 >
-                                    Tümü
-                                </button>
-                            )}
+                                    {row.symbol} · {row.count}
+                                </span>
+                            ))}
                         </div>
                     )}
 
-                    {/* Süzgeç yüzünden boşalan liste ile hiç haber olmaması
-                        AYRI şeyler: ikisini aynı cümleyle anlatmak,
-                        kullanıcıya olmayan bir sessizlik bildirmek olurdu. */}
                     {hasHoldings && news.items.length === 0 && (
                         <p className="text-sm text-slate-400">
                             Bu pencerede hisselerinize dair bir haber eşleşmedi.
                         </p>
                     )}
 
-                    {hasHoldings && news.items.length > 0 && visibleItems.length === 0 && (
-                        <p className="text-sm text-slate-400">
-                            {selected.join(', ')} için bu pencerede haber yok.
-                        </p>
-                    )}
-
                     <ul className="flex flex-col divide-y divide-white/5">
-                        {visibleItems.map((item) => (
+                        {news.items.map((item) => (
                             <li key={item.id} className="py-3 first:pt-0 last:pb-0">
                                 <a
                                     href={item.url}
@@ -132,8 +99,7 @@ export default function PortfoyHaberleri() {
                         ))}
                     </ul>
 
-                    {hasHoldings && quietSymbols.length > 0 && visibleItems.length > 0
-                        && selected.length === 0 && (
+                    {hasHoldings && quietSymbols.length > 0 && news.items.length > 0 && (
                         <p className="mt-3 text-xs text-slate-500">
                             {quietSymbols.join(', ')} için bu pencerede eşleşen haber yok.
                         </p>

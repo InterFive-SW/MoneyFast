@@ -6,14 +6,11 @@ import {
   Cell,
   Line,
   LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
-
 import {
   apiClient,
   type ApiCard,
@@ -23,13 +20,12 @@ import {
   type RiskProfile,
   type RiskSnapshot,
 } from '../api/client'
+import { RingChart } from '../components/ui/RingChart'
 import { useMarketStream } from '../hooks/useMarketStream'
 import { useWatchlist } from '../hooks/useWatchlist'
 import MarketBand from '../components/markets/MarketBand'
-import { BASE_CURRENCY, convert, formatCompact, formatMoney } from '../lib/money'
-import { paddedDomain } from '../lib/chartFormat'
+import { BASE_CURRENCY, convert, formatMoney } from '../lib/money'
 import { formatDate, formatTime } from '../lib/datetime'
-
 /** Hesap türü etiketleri; ekranda görünen ad sunumun işi, kaydın değil. */
 const ACCOUNT_LABELS: Record<string, string> = {
   vadesiz: 'Vadesiz Hesap',
@@ -248,17 +244,6 @@ export default function Home() {
       }))
   }, [analysis, intradayAnalysis, active])
 
-  /**
-   * Y ekseni aralığı. Recharts'ın varsayılanı `[0, 'auto']` ve portföy değeri
-   * sıfırdan çok uzakta dar bir bantta geziniyor: 1,41-1,43 Mn arası hareket,
-   * sıfırdan başlayan bir eksende grafiğin %1,4'ü kadar yer kaplıyordu ve
-   * çizgi düz görünüyordu.
-   */
-  const trendDomain = useMemo(
-    () => paddedDomain(trend.map((point) => point.value)),
-    [trend],
-  )
-
   // ── Risk bileşenleri ─────────────────────────────────────────────────────
   // Ölçülemeyen bileşen çubuğa dönüşmez: sıfır ceza ile "ölçülemedi" aynı şey
   // değil ve sıfır çubuk, düşük risk gibi okunur.
@@ -319,7 +304,7 @@ export default function Home() {
           <button
             onClick={() => void load(true)}
             disabled={refreshing}
-            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brandBlue/60 disabled:opacity-50"
+            className="rounded-lg border border-slate-700 bg-black/40 backdrop-blur-md px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brandBlue/60 disabled:opacity-50"
           >
             {refreshing ? 'Yenileniyor…' : 'Yenile'}
           </button>
@@ -327,7 +312,7 @@ export default function Home() {
               kurmak yerine oraya bağlanıyor. */}
           <Link
             to="/hizli-finans"
-            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brandBlue/60"
+            className="rounded-lg border border-slate-700 bg-black/40 backdrop-blur-md px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brandBlue/60"
           >
             Paneli düzenle
           </Link>
@@ -342,53 +327,19 @@ export default function Home() {
 
       {/* ── 1. sıra: dağılım · performans · hızlı işlemler ───────────────── */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-black/40 backdrop-blur-md p-5">
           <h2 className="text-sm font-semibold text-white">Toplam Varlık</h2>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-white">
-            {formatMoney(total)}
-          </p>
           {slices.length === 0 ? (
             <p className="mt-6 text-sm text-slate-400">Gösterilecek bakiye yok.</p>
           ) : (
-            <>
-              <div className="mt-2 h-40">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={slices}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius="60%"
-                      outerRadius="90%"
-                      stroke="none"
-                    >
-                      {slices.map((slice, index) => (
-                        <Cell key={slice.name} fill={SLICE_COLORS[index % SLICE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value: unknown) => formatMoney(Number(value))}
-                      contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, fontSize: 12 }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <ul className="mt-2 space-y-1">
-                {slices.map((slice, index) => (
-                  <li key={slice.name} className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-2 text-slate-300">
-                      <span
-                        aria-hidden
-                        className="h-2 w-2 rounded-full"
-                        style={{ background: SLICE_COLORS[index % SLICE_COLORS.length] }}
-                      />
-                      {slice.name}
-                    </span>
-                    <span className="tabular-nums text-slate-200">{formatMoney(slice.value)}</span>
-                  </li>
-                ))}
-              </ul>
-            </>
+            <div className="mt-4">
+              <RingChart
+                data={slices}
+                totalValue={formatMoney(total)}
+                totalLabel="Toplam Varlık"
+                size={220}
+              />
+            </div>
           )}
           {unconvertible.length > 0 && (
             <p className="mt-3 text-xs text-amber-400">
@@ -398,7 +349,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-black/40 backdrop-blur-md p-5">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">Portföy Performansı</h2>
             <div className="flex rounded-lg border border-slate-700 p-0.5">
@@ -428,16 +379,7 @@ export default function Home() {
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trend} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                   <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} minTickGap={24} />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: '#94a3b8' }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={56}
-                    domain={trendDomain}
-                    /* Tam biçim eksende taşıyor: altı tane ₺1.412.905,33
-                       ya üst üste biniyor ya paneli itiyor. */
-                    tickFormatter={formatCompact}
-                  />
+                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} width={56} />
                   <Tooltip
                     formatter={(value: unknown) => formatMoney(Number(value))}
                     contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, fontSize: 12 }}
@@ -458,7 +400,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-black/40 backdrop-blur-md p-5">
           <h2 className="text-sm font-semibold text-white">Hızlı İşlemler</h2>
           <div className="mt-4 grid grid-cols-2 gap-4">
             {ACTIONS.map((action) => (
@@ -479,7 +421,7 @@ export default function Home() {
           </div>
 
           {investment && (
-            <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <div className="mt-6 rounded-xl border border-slate-800 bg-black/50 backdrop-blur-md p-3">
               <p className="text-[11px] uppercase tracking-wide text-slate-500">
                 Yatırım nakdi
               </p>
@@ -493,7 +435,7 @@ export default function Home() {
 
       {/* ── 2. sıra: pozisyonlar · risk · asistan ────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5 lg:col-span-1">
+        <section className="rounded-2xl border border-slate-800 bg-black/40 backdrop-blur-md p-5 lg:col-span-1">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">Son Pozisyonlar</h2>
             <Link to="/portfolio" className="text-xs text-brandBlue hover:underline">
@@ -536,7 +478,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-black/40 backdrop-blur-md p-5">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">Risk Skoru</h2>
             <Link to="/risk" className="text-xs text-brandBlue hover:underline">
@@ -698,7 +640,7 @@ export default function Home() {
             <Link
               key={account.id}
               to="/banking/accounts"
-              className="rounded-xl border border-slate-800 bg-slate-900 p-4 transition hover:border-slate-700"
+              className="rounded-xl border border-slate-800 bg-black/40 backdrop-blur-md p-4 transition hover:border-slate-700"
             >
               <p className="text-sm font-medium text-white">
                 {ACCOUNT_LABELS[account.account_type] ?? 'Hesap'}
@@ -724,7 +666,7 @@ export default function Home() {
         </div>
 
         {cards.length === 0 ? (
-          <p className="mt-3 rounded-xl border border-slate-800 bg-slate-900 p-5 text-sm text-slate-400">
+          <p className="mt-3 rounded-xl border border-slate-800 bg-black/40 backdrop-blur-md p-5 text-sm text-slate-400">
             Henüz kartınız yok.
           </p>
         ) : (
@@ -774,3 +716,4 @@ export default function Home() {
     </div>
   )
 }
+

@@ -86,7 +86,7 @@ export default function MarketBand({ symbols, quotes, rates }: MarketBandProps) 
   return (
     <div
       ref={containerRef}
-      className="group relative overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60 py-2.5"
+      className="group relative overflow-hidden rounded-xl border border-slate-800 bg-black/40 py-2.5"
       aria-label="Canlı piyasa şeridi"
     >
       <div

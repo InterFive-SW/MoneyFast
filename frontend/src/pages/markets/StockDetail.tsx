@@ -4,8 +4,6 @@ import { MOCK_EARNINGS_REPORTS, MOCK_DIVIDEND_ANNOUNCEMENTS, MOCK_FUNDS } from '
 import { useInstrument } from '../../hooks/useInstrument'
 import SampleDataBadge from '../../components/markets/SampleDataBadge'
 import TeknikGorunum from '../../components/markets/TeknikGorunum'
-import InstrumentCandleChart from '../../components/markets/InstrumentCandleChart'
-import NewsWidget from '../../components/widgets/NewsWidget'
 import { compact, pct, ratio, useFundamentals } from '../../hooks/useFundamentals'
 
 type DetailTab = 'ozet' | 'finansallar' | 'oran-analizi' | 'temettu' | 'fon-pozisyonlari'
@@ -154,22 +152,10 @@ export default function StockDetail() {
             ))}
           </div>
 
-          {/* Fiyatın kendisi, istatistiklerden hemen sonra: sayfanın cevap
-              verdiği ilk soru "bu hisse nasıl davrandı" ve buna tek bir
-              günlük yüzdeyle cevap verilemiyordu. */}
-          <InstrumentCandleChart symbol={symbol.toUpperCase()} />
-
           {/* Hesaplanmış eğilim. Sohbetin okuduğu uç noktanın AYNISI: ikisi
               ayrı hesaplasaydı aynı hisse için farklı bir eğilim
               söyleyebilirlerdi. */}
           <TeknikGorunum symbol={symbol.toUpperCase()} />
-
-          {/* Bu hisseye bağlı haberler. Süzgeç sunucuda: en yeni yirmiyi
-              çekip içinden bu hisseyi ayıklamak, o yirmide o hisse yoksa
-              "haber yok" cevabı üretirdi -- oysa soru hiç sorulmamış olur. */}
-          <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
-            <NewsWidget symbols={[symbol.toUpperCase()]} />
-          </div>
           </div>
         )}
 

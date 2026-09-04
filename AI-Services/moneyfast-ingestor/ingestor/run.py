@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from . import config, refresh_server, sinks
-from .sources import kap_source, rss_source, yfinance_source
+from .sources import kap_archive, kap_source, rss_source, yfinance_source
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -548,6 +548,240 @@ def run_news(client: httpx.Client) -> dict:
     }
 
 
+def _disclosure_index(url: Optional[str]) -> Optional[int]:
+    """Kalıcı bağlantının sonundaki bildirim numarası.
+
+    Numara ayrı bir sütunda saklanmıyor: bağlantı zaten atıf için tutuluyor
+    ve aynı bilgiyi ikinci bir yerde saklamak, ikisinin ayrışabileceği bir
+    yer açardı. Backend `known-ids` ucunda aynı okumayı yapıyor.
+    """
+    tail = (url or "").rstrip("/").rsplit("/", 1)[-1]
+    return int(tail) if tail.isdigit() else None
+
+
+def bist_universe(client: httpx.Client) -> set:
+    """Symbols a KAP disclosure could usefully be about.
+
+    Read from the backend rather than configured here, for the reason
+    `fetch_products` already gives: adding an instrument should be one row in
+    the database, not a redeploy. It also means the filter widens by itself
+    when the universe grows.
+    """
+    return {
+        product["symbol"]
+        for product in sinks.fetch_products(client)
+        if product.get("market") == "BIST"
+    }
+
+
+#: Bir turda kaç yeni bildirimin gövdesi çekilir. Gövde başına bir istek ve
+#: host başına iki saniye var; sınırsız bırakmak, ilk turun saatlerce
+#: sürmesi ve bu arada başka hiçbir bildirimin panoya düşmemesi demekti.
+KAP_BODY_BUDGET = 60
+
+
+def run_kap(client: httpx.Client, since=None, until=None, bodies: bool = True) -> dict:
+    """Poll KAP for disclosures naming an instrument we carry.
+
+    Two passes, and the order matters. The listing is one request for a whole
+    window, so every matched disclosure reaches the dashboard immediately. Only
+    then do we ask the backend which of them are NEW and spend a request each
+    on their bodies — in steady state a handful, not four hundred.
+
+    Pushed through the same news sink as RSS: a disclosure IS market news, it
+    just arrives with an issuer attached and a permanent link.
+    """
+    today = datetime.now(ISTANBUL).date()
+    until = until or today
+    # A window rather than a point: a disclosure filed while the previous
+    # cycle was mid-flight would otherwise fall between two polls, and
+    # re-offering a stored one costs nothing (`ON CONFLICT DO NOTHING`).
+    since = since or (until - timedelta(days=config.kap_window_days() - 1))
+
+    items = kap_archive.fetch_all(bist_universe(client), since, until, client)
+
+    # Which bodies to read is decided BEFORE the listing is stored, because
+    # storing it is what would make them all look already-known.
+    fresh = []
+    if bodies and items:
+        # Tek bir "elimizde ne var" ucu. Numara kalıcı bağlantının içinde,
+        # dolayısıyla ayrı bir hash sorgusu ikinci bir cevap kaynağı olurdu.
+        known = sinks.fetch_known_news_ids(client, kap_source.SOURCE)
+        fresh = [
+            item for item in items
+            if _disclosure_index(item.get("url")) not in known
+        ][:KAP_BODY_BUDGET]
+
+    backend_result = sinks.push_news_to_backend(client, items) or {}
+    embedded = sinks.push_disclosures_to_rag(client, _with_bodies(fresh, client))
+
+    unread = kap_archive.last_run_failures
+    log.info(
+        "kap cycle %s..%s: %d matched, %s stored, %d bodies embedded%s",
+        since, until, len(items), backend_result.get("news_written", 0), embedded,
+        f" -- INCOMPLETE, {unread} windows unread" if unread else "",
+    )
+    result = {"fetched": len(items), "embedded": embedded, **backend_result}
+    if unread:
+        # Yüzeye çıkıyor, çünkü bir sonraki turun aynı pencereyi yeniden
+        # sunması yalnızca yoklama penceresi için doğru; geri doldurmada
+        # kaçırılan pencere, kimsenin fark etmediği bir boşluk demek.
+        result["windows_unread"] = unread
+    return result
+
+
+#: Su seviyesinin gerisine ne kadar bakılacağı. Örtüşme bedava
+#: (`ON CONFLICT DO NOTHING`), boşluk değil.
+KAP_TOPUP_MARGIN_DAYS = 3
+
+
+def backfill_kap_corpus(client: httpx.Client) -> dict:
+    """Panoya düşmüş ama derlemde METNİ olmayan bildirimlerin gövdesini çek.
+
+    Bu iş, listeleme ile gövde arasındaki açığı kapatıyor ve o açık ölçüldü:
+    panoda 28.984 KAP bildirimi varken derlemde 147 gövde vardı. Sohbete
+    "THYAO'da son gelişmeler neler" diye sorulduğunda arşivde o şirketin 47
+    bildirimi duruyor, derlemde sıfır -- yani pano dolu, asistan boş.
+
+    Sebebi tasarımdı: gövde yalnızca YENİ gelen bildirimler için çekiliyor
+    (`run_kap`), çünkü tur başına bütçe var. Geriye dönük arşivin gövdesini
+    kimse çekmiyordu.
+
+    Yeniden eskiye ilerliyor ve tur başına bütçeli: birkaç turda kapanıyor,
+    tek bir tur saatlerce sürmüyor, ve yarıda kesilirse bitişik ve güncel
+    bir derlem bırakıyor.
+    """
+    budget = config.kap_corpus_budget()
+    if budget <= 0:
+        return {"skipped": True}
+
+    page_size = config.kap_corpus_page()
+    missing: list[dict] = []
+    offset = 0
+    while len(missing) < budget:
+        page = sinks.fetch_news_archive(client, "KAP", page_size, offset)
+        if not page:
+            break
+        offset += len(page)
+        urls = [row["url"] for row in page if row.get("url")]
+        embedded = sinks.fetch_embedded_urls(client, urls)
+        missing.extend(row for row in page if row.get("url") not in embedded)
+
+    if not missing:
+        log.info("kap corpus: every stored disclosure already has its text")
+        return {"fetched": 0, "embedded": 0}
+
+    documents = _with_bodies(missing[:budget], client)
+    embedded = sinks.push_disclosures_to_rag(client, documents)
+    log.info(
+        "kap corpus backfill: %d disclosures without text, %d bodies embedded",
+        len(missing), embedded,
+    )
+    return {"fetched": len(documents), "embedded": embedded}
+
+
+def topup_kap(client: httpx.Client) -> dict:
+    """Kapalı kalınan aralığı kapat.
+
+    `topup_candles` ile aynı soru, aynı ayrım: geri doldurma "hiç yok"u,
+    bu "var ama eski"yi cevaplıyor. Yoklama üç günlük bir pencereye
+    bakıyor; on gün kapalı kalmış bir kurulumda o pencere yetmez.
+    """
+    coverage = sinks.fetch_news_coverage(client).get("KAP") or {}
+    if not coverage.get("items") or not coverage.get("last"):
+        # Hiçbir şey yoksa bu geri doldurmanın sorusu, bunun değil.
+        return {"skipped": True}
+
+    last = date.fromisoformat(coverage["last"])
+    since = last - timedelta(days=KAP_TOPUP_MARGIN_DAYS)
+    until = datetime.now(ISTANBUL).date()
+    if since >= until:
+        return {"fetched": 0}
+    log.info("kap top-up: newest held is %s, catching up from %s", last, since)
+    return run_kap(client, since=since, until=until)
+
+
+def backfill_kap(client: httpx.Client) -> dict:
+    """Altı aylık arşivi, yeniden başlatmalar boyunca doldur.
+
+    Üç şey bunu makul kılıyor:
+
+    * **Yeniden başlatılabilir.** Listeleme ucuz (pencere başına tek istek)
+      ve `known-hashes` elde olanı gövde harcamadan eliyor, dolayısıyla
+      yeniden başlayan bir süreç kaldığı yerden devam ediyor. Bu olmasaydı
+      her açılış sıfırdan başlar ve arşiv hiç tamamlanmazdı.
+    * **Yeniden en yeniden.** `fetch_all` pencereleri bugünden geriye
+      yürüyor, yani yarıda kesilen bir tarama rastgele bir serpinti değil,
+      BİTİŞİK ve GÜNCEL bir arşiv bırakıyor.
+    * **Tur başına bütçeli.** Tek bir açılışın sınırlı bir dilim alması,
+      "on beş saatlik bir iş başlat ve dua et"ten iyi.
+    """
+    until = datetime.now(ISTANBUL).date()
+    since = until - timedelta(days=config.kap_backfill_days())
+    return run_kap(client, since=since, until=until)
+
+
+def _within_pdf_window(published_at) -> bool:
+    """Ekleri yalnızca güncel bildirimler için oku.
+
+    Bir bildirimin gövdesi tek istek; ekleri her biri bir istek daha.
+    Altı aylık taramada hepsini açmak, süreyi katlayıp bunu eski
+    eklere harcamak demek.
+    """
+    window = config.kap_pdf_window_days()
+    if window <= 0:
+        return False
+    age = datetime.now(timezone.utc) - published_at
+    return age <= timedelta(days=window)
+
+
+def _as_datetime(value):
+    """Arşiv ucu ISO metin döndürüyor, yoklama ise datetime taşıyor."""
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
+
+
+def _with_bodies(items: list, client: httpx.Client) -> list:
+    """Read each disclosure's body and prepend the issuers it names.
+
+    The issuer line exists because `rag.documents.ticker` is a single column:
+    a merger notice naming two companies can only be FILTERED by one of them,
+    so naming both in the text is what keeps it findable for the other.
+    """
+    documents = []
+    for item in items:
+        # Bildirim numarası kalıcı bağlantının içinde. Bağlantısı olmayan bir
+        # satırın numarası da yok, dolayısıyla gövdesi çekilemez.
+        url = item.get("url") or ""
+        if "/" not in url:
+            continue
+        index = url.rsplit("/", 1)[-1]
+        detail = kap_archive.fetch_detail(index, client)
+        if detail is None:
+            continue
+        text = kap_archive.body_text(detail)
+        if not text:
+            continue
+        published = _as_datetime(item["published_at"])
+        if _within_pdf_window(published):
+            attachments = kap_archive.attachment_text(detail, client)
+            if attachments:
+                text = f"{text}\n\n{attachments}"
+        symbols = item.get("related_symbols") or []
+        header = f"İlgili şirketler: {', '.join(symbols)}" if symbols else ""
+        documents.append({
+            "title": item["title"],
+            "url": item["url"],
+            "published_at": published,
+            "related_symbols": symbols,
+            "text": f"{header}\n{item['title']}\n\n{text}".strip(),
+        })
+    return documents
+
+
+
+
 def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False) -> dict:
     results = {}
     with httpx.Client() as client:
@@ -640,6 +874,40 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    # Canlı KAP akışı `run_news`'in içinde: `kap_source` her haber turunda
+    # listeyi çekiyor. Buraya ikinci bir aralıklı iş koymak, iki fetcher'ın
+    # aynı pencere için birbirinden habersiz KAP'a gitmesi demekti --
+    # `courtesy` istekleri aralar ama işi tekrarlamayı engelleyemez.
+    # Aynı ikili, aynı gerekçe: `kap-topup` "elimizdeki en yeni bildirim
+    # eski mi", `kap-backfill` "hiç arşiv var mı" sorusunu cevaplıyor.
+    # `misfire_grace_time=None` zorunlu: run_date scheduler başlamadan
+    # hesaplanıyor ve satır içi ısınma ~80 saniye sürüyor.
+    scheduler.add_job(
+        _job("kap-topup", topup_kap),
+        "date",
+        run_date=datetime.now(ISTANBUL),
+        id="kap-topup",
+        misfire_grace_time=None,
+    )
+    scheduler.add_job(
+        _job("kap-backfill", backfill_kap),
+        "date",
+        run_date=datetime.now(ISTANBUL),
+        id="kap-backfill",
+        max_instances=1,
+        misfire_grace_time=None,
+    )
+    # Listeleme ile gövde arasındaki açığı kapatıyor. Ayrı bir iş, çünkü
+    # ayrı bir soruyu cevaplıyor: `kap-backfill` "bu bildirimi biliyor
+    # muyuz", bu "metnini okuduk mu".
+    scheduler.add_job(
+        _job("kap-corpus", backfill_kap_corpus),
+        "interval",
+        minutes=config.kap_interval_minutes() * 3,
+        id="kap-corpus",
+        max_instances=1,
+        coalesce=True,
+    )
     # After the close, so the day's final bar is settled.
     scheduler.add_job(
         _job("candles", run_candles),
@@ -661,10 +929,11 @@ def start_scheduler() -> None:
 
     log.info(
         "scheduler started: band every %ds, quotes every %ds (market hours), "
-        "news every %dm, candles daily at %d:15",
+        "news every %dm, kap every %dm, candles daily at %d:15",
         config.band_interval_seconds(),
         config.quote_interval_seconds(),
         config.news_interval_minutes(),
+        config.kap_interval_minutes(),
         config.MARKET_CLOSE_HOUR + 1,
     )
 

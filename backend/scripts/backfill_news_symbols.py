@@ -70,9 +70,11 @@ def run(dry_run: bool = False) -> int:
 
         linked = 0
         for row in rows:
-            text = " ".join(filter(None, (row.title, row.summary)))
-            # Ingest yolunun ta kendisi: politika tek yerde.
-            found = news_service.resolve_news_symbols(text, universe)
+            # Ingest yolunun ta kendisi, bildirim kuralı dahil: politika
+            # tek yerde.
+            found = news_service.resolve_item_symbols(
+                row.source, row.title, row.summary, universe
+            )
             if not found:
                 continue
             linked += 1

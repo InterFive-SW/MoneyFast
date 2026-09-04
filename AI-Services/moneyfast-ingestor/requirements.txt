@@ -15,3 +15,9 @@ yfinance>=0.2.40,<0.3
 # RSS. feedparser handles the four feed dialects Turkish outlets use between
 # them; parsing them by hand is a bug farm.
 feedparser>=6.0,<7
+
+# KAP disclosure attachments. Financial statements are filed as PDFs, and the
+# body of a quarterly report is entirely in the attachment. Same library the
+# backend already uses for user uploads (`documents.py`), so this adds a
+# consumer rather than a new dependency to the system.
+pypdf>=5.0.0,<7

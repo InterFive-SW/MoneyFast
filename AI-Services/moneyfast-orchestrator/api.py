@@ -18,8 +18,10 @@ from pydantic import BaseModel, Field
 
 import agent_trace
 import sanitize
+import sources
 import widgets
 from mcp_client import get_mcp_client
+import orchestrator
 from orchestrator import run_turn, run_turn_streaming
 
 log = logging.getLogger("moneyfast.api")
@@ -33,6 +35,11 @@ class Turn(BaseModel):
     #: enforces the same constraint; this one guards direct callers.
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1, max_length=2000)
+    #: Bu turda gösterilmiş kaynaklar. Modele HİÇ gitmiyor --
+    #: `_history_summary` yalnızca `role` ve `content` okuyor. Yalnızca
+    #: "bana kaynakça verir misin" turunun okuduğu şey; onlar olmadan o soru
+    #: bir aramaya dönüşüyor ve kota hatasına açık kalıyor.
+    sources: list[dict[str, Any]] = Field(default_factory=list, max_length=16)
 
 
 class ChatRequest(BaseModel):
@@ -58,6 +65,12 @@ class ChatResponse(BaseModel):
     # of the model. See widgets.py.
     widget: Optional[dict[str, Any]] = None
     context_topic: Optional[str] = None
+    #: Bu cevabın dayandığı kaynaklar. Widget'la aynı kural: modelden
+    #: istenmez, aracın döndürdüğünden kurulur. `sanitize` bunlara
+    #: dokunmuyor -- yalnızca `final_output` üzerinde çalışıyor -- o yüzden
+    #: buradaki her etiket Türkçe olarak KODDA kuruluyor, hiçbiri bir
+    #: yük anahtarından alınmıyor.
+    sources: list[dict[str, Any]] = []
 
 
 @app.get("/healthz")
@@ -71,7 +84,19 @@ async def readyz() -> dict[str, Any]:
         tools = await get_mcp_client().list_tools()
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"mcp unreachable: {exc}") from exc
-    return {"status": "ready", "mcp_tools": tools}
+    # Sağlayıcı ve model yankılanıyor: "bu container aslında hangi
+    # sağlayıcıyla konuşuyor" sorusu, container'a girmeden cevaplanabilmeli.
+    # `rag`'in `/readyz`'i model ve boyutu aynı sebeple döndürüyor.
+    #
+    # `model_name()` istemci KURMUYOR: kursaydı hazırlık yoklaması anahtarın
+    # varlığına bağlanır ve eksik bir anahtar, MCP erişilebilirliğini
+    # raporlamak için yazılmış bir ucu 503'e çevirirdi. Anahtar yankılanmıyor.
+    return {
+        "status": "ready",
+        "mcp_tools": tools,
+        "llm_provider": orchestrator.provider_name(),
+        "llm_model": orchestrator.model_name(fast=False),
+    }
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -105,6 +130,7 @@ def _response_payload(state: dict[str, Any]) -> ChatResponse:
         disclosures=state.get("disclosures") or [],
         widget=widget,
         context_topic=context_topic,
+        sources=sources.build(state),
     )
 
 

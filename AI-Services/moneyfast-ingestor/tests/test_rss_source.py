@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from ingestor import config
-from ingestor.sources import rss_source
+from ingestor.sources import courtesy, rss_source
 from conftest import FEED_XML
 from types import SimpleNamespace
 
@@ -182,7 +182,7 @@ class TestFailureHandling:
 class TestRateLimiting:
     def test_requests_to_one_host_are_spaced(self, no_robots, monkeypatch):
         slept = []
-        monkeypatch.setattr(rss_source.time, "sleep", lambda seconds: slept.append(seconds))
+        monkeypatch.setattr(courtesy.time, "sleep", lambda seconds: slept.append(seconds))
         client = client_for(feed_handler())
         rss_source.fetch_feed(FEED_URL, client)
         rss_source.fetch_feed(FEED_URL, client)
@@ -190,7 +190,7 @@ class TestRateLimiting:
 
     def test_first_request_to_a_host_does_not_wait(self, no_robots, monkeypatch):
         slept = []
-        monkeypatch.setattr(rss_source.time, "sleep", lambda seconds: slept.append(seconds))
+        monkeypatch.setattr(courtesy.time, "sleep", lambda seconds: slept.append(seconds))
         rss_source.fetch_feed(FEED_URL, client_for(feed_handler()))
         assert slept == []
 
@@ -292,18 +292,18 @@ class TestPolitenessDelayBranches:
         """The delay exists to avoid hammering a host, not to slow down a run
         that is already spaced out."""
         slept = []
-        monkeypatch.setattr(rss_source.time, "sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(courtesy.time, "sleep", lambda s: slept.append(s))
         monkeypatch.setattr(rss_source.config, "per_host_delay", lambda: 1.0)
-        rss_source._last_request["news.example"] = rss_source.time.monotonic() - 60
-        rss_source._wait_for_host(FEED_URL)
+        courtesy._last_request["news.example"] = courtesy.time.monotonic() - 60
+        courtesy.wait_for_host(FEED_URL)
         assert slept == []
 
     def test_a_recent_request_waits(self, monkeypatch):
         slept = []
-        monkeypatch.setattr(rss_source.time, "sleep", lambda s: slept.append(s))
+        monkeypatch.setattr(courtesy.time, "sleep", lambda s: slept.append(s))
         monkeypatch.setattr(rss_source.config, "per_host_delay", lambda: 5.0)
-        rss_source._last_request["news.example"] = rss_source.time.monotonic()
-        rss_source._wait_for_host(FEED_URL)
+        courtesy._last_request["news.example"] = courtesy.time.monotonic()
+        courtesy.wait_for_host(FEED_URL)
         assert slept and slept[0] > 0
 
 

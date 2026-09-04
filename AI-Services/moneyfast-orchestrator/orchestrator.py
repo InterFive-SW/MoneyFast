@@ -31,12 +31,13 @@ import os
 import re
 import sys
 from functools import lru_cache
-from typing import Any, Literal, Optional, TypedDict
+from typing import Any, Literal, NamedTuple, Optional, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
 import agent_trace
+import sources
 from mcp_client import MCPToolError, MCPUnavailable, get_mcp_client
 from prompts import (
     ORCHESTRATOR_SYSTEM_PROMPT,
@@ -116,10 +117,39 @@ _TOO_LARGE_MARKERS = (
     "context length", "maximum context",
 )
 
+#: Yapılandırma hatası: model adı artık geçerli değil. Kotadan da boyuttan
+#: da farklı, çünkü BEKLEMEK düzeltmiyor ve isteği daraltmak da düzeltmiyor
+#: -- düzeltecek olan tek şey `LLM_PROVIDER`/`*_MODEL` ayarını değiştirmek.
+#:
+#: ÖLÇÜLDÜ, ve tam da bu yüzden var: NVIDIA NIM'e geçerken belgelerin
+#: önerdiği iki model adı da bir hafta önce emekliye ayrılmıştı ve uç nokta
+#: `410 Gone` döndü: "The model 'meta/llama-3.3-70b-instruct' has reached its
+#: end of life on 2026-08-26". Kullanıcı "kısa bir süre sonra tekrar
+#: deneyin" cevabı aldı; bekleyerek geçmeyecek bir şey için.
+#:
+#: Adlar dar tutuldu. Çıplak "404" YOK: bir jeton sayısında ya da bir istek
+#: kimliğinde geçebilir ve kalıcı olmayan bir hatayı kalıcı diye anlatmak,
+#: bu dosyanın zaten bir kez düzelttiği hatanın aynadaki hâli olurdu.
+_CONFIG_ERROR_MARKERS = (
+    "end of life", "no longer available", "model_not_found",
+    "does not exist", "410",
+)
+
+MISCONFIGURED_TR = (
+    "Yapılandırılmış dil modeli şu anda kullanılamıyor, bu yüzden yanıt "
+    "üretemedim. Bu geçici bir yoğunluk değil: beklemek düzeltmez, ayarın "
+    "güncellenmesi gerekiyor."
+)
+
 #: Substrings that mark a provider quota/rate-limit refusal. Matched on the
 #: exception text because the LLM client wraps the provider's 429 rather than
 #: raising a typed error.
 _RATE_LIMIT_MARKERS = ("rate limit", "rate_limit", "429", "quota", "too many requests")
+
+#: Geçici taşıma hataları. Kota gibi bunlar da bir sonraki denemede
+#: geçebiliyor; kalıcı bir yapılandırma hatası (eksik anahtar) geçmiyor ve
+#: bu yüzden burada yok.
+_TRANSPORT_MARKERS = ("timeout", "timed out", "connection", "temporarily", "503", "502")
 
 #: Boyut hatası kullanıcıya beklemesini SÖYLEMEZ. Beklemek düzeltmiyor ve
 #: "birkaç dakika sonra deneyin" demek, kullanıcıyı hiç sonuçlanmayacak bir
@@ -142,6 +172,8 @@ def _failure_message(exc: Exception) -> str:
     text = str(exc).casefold()
     if any(m in text for m in _TOO_LARGE_MARKERS):
         return TOO_LARGE_TR
+    if any(m in text for m in _CONFIG_ERROR_MARKERS):
+        return MISCONFIGURED_TR
     return RATE_LIMITED_TR if any(m in text for m in _RATE_LIMIT_MARKERS) else GENERIC_FAILURE_TR
 
 
@@ -191,6 +223,13 @@ class MoneyFastState(TypedDict, total=False):
     user_id: str
     locale: str
     entities: dict[str, Any]
+    #: Bu turda adı geçen ya da önceki turlardan taşınan enstrüman.
+    #: `entities` her turda bilerek sıfırlanıyor (bkz. `_initial_state`), o
+    #: yüzden "kap verilerine göre nasıl" gibi bir devam sorusunda hisse
+    #: adı yalnızca 220 karaktere kırpılmış düzyazı özette kalıyordu.
+    carried_ticker: Optional[str]
+    #: Bu tur bir ARAMA değil, önceki turun kaynağına dair bir soru mu.
+    meta_request: Optional[str]
     #: Turda birden çok ayrı istek varsa, her birinin kendi başına ayakta
     #: duran hâli ve o istek için seçilen ajan. Boş liste = tek istek.
     #: Yönlendirici TEK çağrıda üretiyor, `compound` düğümü tüketiyor.
@@ -208,26 +247,188 @@ class MoneyFastState(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 # LLM
 # ---------------------------------------------------------------------------
+class Provider(NamedTuple):
+    """Bir sağlayıcının uç noktası, anahtar adı ve model adları."""
+
+    base_url: str
+    api_key_env: str
+    model_env: str
+    default_model: str
+    fast_env: str
+    default_fast: str
+    #: Sağlayıcıya özel gövde alanları. Boş bırakılabilir.
+    extra_body: dict = {}
+
+
+#: Desteklenen sağlayıcılar. Üçü de OpenAI-uyumlu `/chat/completions`
+#: konuşuyor, dolayısıyla tek istemci hepsini kapsıyor.
+#:
+#: **Model adları sağlayıcıya ÖZEL, ortak bir `LLM_MODEL` yok.**
+#: `llama-3.3-70b-versatile` ile `meta/llama-3.3-70b-instruct` birbirinin
+#: yerine geçen dizgeler değil; tek bir ortak değişken, sağlayıcı
+#: değiştirildiğinde yanlış id göndermek ve anlaşılmaz bir 404 almak demekti.
+PROVIDERS = {
+    "groq": Provider(
+        base_url="https://api.groq.com/openai/v1",
+        api_key_env="GROQ_API_KEY",
+        model_env="GROQ_MODEL", default_model="llama-3.3-70b-versatile",
+        fast_env="GROQ_FAST_MODEL", default_fast="llama-3.1-8b-instant",
+    ),
+    "nvidia": Provider(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key_env="NVIDIA_API_KEY",
+        # ADLAR ÖLÇÜLEREK SEÇİLDİ, belgeden kopyalanmadı. Belgelerin ve
+        # üçüncü taraf rehberlerin önerdiği `meta/llama-3.3-70b-instruct` ve
+        # `meta/llama-3.1-8b-instruct` 2026-08-26'da emekliye ayrılmış ve uç
+        # nokta `410 Gone` dönüyor. Katalogda görünen adların çoğu da bu
+        # hesapta 404: listelenmek, sunulmak demek değil.
+        model_env="NVIDIA_MODEL", default_model="nvidia/nemotron-3-super-120b-a12b",
+        fast_env="NVIDIA_FAST_MODEL", default_fast="nvidia/nemotron-3.5-lightning-30b-a3b",
+        # NIM'in nemotron-3 ailesi AKIL YÜRÜTEN modeller: varsayılan olarak
+        # düşünme adımlarını `content` alanına yazıyorlar ("Okay, the user is
+        # asking..."). O hâliyle yönlendirme JSON'u ayrıştırılamaz ve sentez
+        # çıktısı kullanıcıya modelin düşüncesini gösterirdi. Kapatınca
+        # temiz JSON dönüyor -- ölçüldü.
+        extra_body={"chat_template_kwargs": {"thinking": False}},
+    ),
+    "openai": Provider(
+        base_url="https://api.openai.com/v1",
+        api_key_env="OPENAI_API_KEY",
+        model_env="OPENAI_MODEL", default_model="gpt-4o",
+        fast_env="OPENAI_FAST_MODEL", default_fast="gpt-4o-mini",
+    ),
+}
+
+DEFAULT_PROVIDER = "groq"
+
+
+def provider_name() -> str:
+    return os.getenv("LLM_PROVIDER", DEFAULT_PROVIDER).strip().lower()
+
+
+def provider() -> Provider:
+    """Yapılandırılmış sağlayıcı.
+
+    Tanınmayan bir ad HATA veriyor, ve bu `embeddings.prefixes()`'ten
+    BİLEREK farklı. Orada bilinmeyen bir model güvenli varsayılana düşüyor,
+    çünkü yanlış bir önek recall'a mal olur ve eksik önek hiçbir şeye. Burada
+    güvenli bir varsayılan YOK: operatör `nvida` yazdığında Groq'a düşmek,
+    NVIDIA model adlarını Groq'a göndermek demek.
+    """
+    name = provider_name()
+    found = PROVIDERS.get(name)
+    if found is None:
+        raise RuntimeError(
+            f"LLM_PROVIDER={name!r} is not a known provider; "
+            f"choose one of {', '.join(sorted(PROVIDERS))}"
+        )
+    return found
+
+
+def model_name(fast: bool = False) -> str:
+    """Bu turda kullanılacak model adı. İSTEMCİ KURMUYOR.
+
+    `/readyz` bunu okuyor: istemci kurmak, hazırlık yoklamasını anahtarın
+    varlığına bağlar ve eksik bir anahtar MCP erişilebilirliğini raporlamak
+    için yazılmış bir ucu 503'e çevirirdi.
+    """
+    entry = provider()
+    return (
+        os.getenv(entry.fast_env, entry.default_fast) if fast
+        else os.getenv(entry.model_env, entry.default_model)
+    )
+
+
 @lru_cache(maxsize=2)
 def get_llm(fast: bool = False):
-    """Lazy so importing this module never requires a key."""
-    from langchain_groq import ChatGroq
+    """Lazy so importing this module never requires a key.
 
-    api_key = os.getenv("GROQ_API_KEY")
+    `lru_cache` TAŞIYICI: `tests/conftest.py`'deki autouse fixture
+    `get_llm.cache_clear()` çağırıyor. Dekoratör kalkarsa süitteki her test
+    kurulum aşamasında hata verir.
+    """
+    from langchain_openai import ChatOpenAI
+
+    entry = provider()
+    # Ortak ad önce: compose'da tek bir korumalı değişken var ve sağlayıcıya
+    # özel ad, geliştiricinin kendi `.env`'i için geriye dönük kapı.
+    api_key = os.getenv("LLM_API_KEY") or os.getenv(entry.api_key_env)
     if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not set")
-    model = (
-        os.getenv("GROQ_FAST_MODEL", "llama-3.1-8b-instant")
-        if fast
-        else os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        raise RuntimeError(
+            f"{entry.api_key_env} is not set (LLM_PROVIDER={provider_name()})"
+        )
+    return ChatOpenAI(
+        model=model_name(fast),
+        temperature=0,
+        api_key=api_key,
+        base_url=entry.base_url,
+        extra_body=dict(entry.extra_body) or None,
     )
-    return ChatGroq(model=model, temperature=0, api_key=api_key)
+
+
+#: Kota hatasında kaç kez yeniden denenir. Dakikalık pencere uygulayan bir
+#: sağlayıcıda birkaç saniyelik bekleme çoğu turu kurtarıyor.
+LLM_MAX_ATTEMPTS = int(os.getenv("LLM_MAX_ATTEMPTS", "3"))
+
+#: İlk bekleme, saniye. Sonrakiler ikiye katlanıyor.
+#:
+#: 1,5 saniye GROQ'un penceresine karşı ölçüldü; NVIDIA NIM için yeniden
+#: ölçülmedi. Sağlayıcı `Retry-After` döndürüyorsa onu okumak tahmin
+#: etmekten iyidir -- yapılmadı, ve yapılana kadar bu bir varsayım.
+LLM_BACKOFF_SECONDS = float(os.getenv("LLM_BACKOFF_SECONDS", "1.5"))
 
 
 async def _llm_text(system: str, user: str, fast: bool = False) -> str:
+    """Modele giden TEK yol -- `_llm_json` de buradan geçiyor.
+
+    Yeniden deneme YALNIZCA kota/taşıma hatasında. Bozuk JSON'da değil:
+    sıcaklık sıfır, yani aynı istem aynı baytları döndürür ve yeniden
+    denemek sağlayıcıya bedava bir yük bindirmekten başka bir şey yapmaz.
+
+    Buraya kadar hiçbir yerde yeniden deneme yoktu ve sonucu ölçüldü:
+    tek bir 429, kullanıcıya "yoğunluk sınırına takıldım" olarak döndü ve
+    tur orada bitti.
+    """
     llm = get_llm(fast)
-    reply = await llm.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
-    return (reply.content or "").strip()
+    messages = [SystemMessage(content=system), HumanMessage(content=user)]
+    delay = LLM_BACKOFF_SECONDS
+    for attempt in range(1, LLM_MAX_ATTEMPTS + 1):
+        try:
+            reply = await llm.ainvoke(messages)
+            return (reply.content or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            if attempt >= LLM_MAX_ATTEMPTS or not _is_retryable(exc):
+                raise
+            log.warning(
+                "llm attempt %d/%d failed (%s), retrying in %.1fs",
+                attempt, LLM_MAX_ATTEMPTS, exc, delay,
+            )
+            await asyncio.sleep(delay)
+            delay *= 2
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Yeniden denemeye değer bir hata mı.
+
+    `_failure_message` ile aynı metin eşlemesi, aynı sebeple: istemci
+    sağlayıcının 429'unu sarmalıyor ve tipli bir hata fırlatmıyor.
+
+    **Boyut kontrolü ÖNCE, ve `_failure_message` ile aynı sırada.**
+    Sağlayıcının 413'ü `rate_limit_exceeded` kodunu taşıyor ve gövdesinde
+    "Requested 8429, Limit 8000" gibi bir sayı geçiyor -- `_RATE_LIMIT_MARKERS`
+    içindeki çıplak "429" ona takılıyor. O koruma olmadan kalıcı bir hata üç
+    kez deneniyor: 4,5 saniye bekleme ve sağlayıcıya bedava üç istek, hepsi
+    aynı sonuçla.
+
+    Sınır: yalnızca "Requested 8429" yazan, hiçbir boyut işareti taşımayan
+    bir gövde hâlâ yeniden denenir. Koruma `413` / `request too large` /
+    `context length` gibi bir işaretin bulunmasına dayanıyor.
+    """
+    text = str(exc).casefold()
+    if any(marker in text for marker in _TOO_LARGE_MARKERS + _CONFIG_ERROR_MARKERS):
+        return False
+    return any(marker in text for marker in _RATE_LIMIT_MARKERS + _TRANSPORT_MARKERS)
 
 
 async def _llm_json(system: str, user: str, fast: bool = False) -> dict[str, Any]:
@@ -374,6 +575,10 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
             fast=True,
         )
     except Exception as exc:  # network, rate limit, malformed JSON
+        # Kota hatasında sessizce EDUCATION_AGENT'a düşmek kendi başına bir
+        # yanlış yönlendirme: kullanıcı konusuyla ilgisiz bir cevap alıyor ve
+        # hiçbir yerde bir hata görünmüyor. Hata artık turla birlikte
+        # taşınıyor ve sentez onu okuyabiliyor.
         log.error("router classification failed: %s", exc)
         # Deterministik kapı BU YOLDA DA geçerli -- hatta asıl burada.
         # Sınıflandırıcı düştüğünde tur EDUCATION_AGENT'a düşüyor ve o ajan
@@ -391,6 +596,8 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
             "target_agent": "HUMAN_HANDOFF" if "DISTRESS_SIGNAL" in flags else fallback,
             "sub_requests": [],
             "entities": {},
+            "carried_ticker": None,
+            "meta_request": None,
             "safety_flags": flags,
             "needs_clarification": False,
             "clarifying_question": None,
@@ -425,9 +632,50 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
     if float(result.get("confidence") or 0) < 0.60:
         needs_clarification = True
 
+    intent = result.get("primary_intent") or "OUT_OF_SCOPE"
+    entities = result.get("entities") or {}
+    tickers = entities.get("tickers") or []
+    message = state["user_message"]
+    reason = None
+
+    # Bu tur bir arama değil, önceki turun kaynağına dair bir soru mu.
+    # Yönlendirmeden ÖNCE bakılıyor: "bana kaynakça verir misin" araştırma
+    # ajanına gitse bile, kullanıcının cümlesini arama sorgusu olarak
+    # göndermek boş sonuçtan başka bir şey üretmiyor (ölçüldü).
+    meta_request = None
+    # Güvenlik her şeyi önceler. Aşağıdaki düzeltmelerin hiçbiri bir sıkıntı
+    # turunu yönlendirmeden çıkaramaz, o yüzden hepsi bu koşulun içinde.
+    if "DISTRESS_SIGNAL" not in flags:
+        if _is_sources_recap(state, tickers):
+            # Bu tur bir arama değil, önceki turun kaynağına dair bir soru.
+            # Kullanıcının cümlesini arama sorgusu olarak göndermek boş
+            # sonuçtan başka bir şey üretmiyor -- ölçüldü.
+            meta_request = "SOURCES_RECAP"
+            target, reason = "MARKET_RESEARCH_AGENT", "sources-recap"
+        elif intent.startswith("MARKET_RESEARCH") and target == "MARKET_DATA_AGENT":
+            # Yönlendiricinin kendi içinde çeliştiği durum. Ölçüldü: "kap
+            # verilerine göre nasıl" sorusunda `MARKET_RESEARCH` niyeti ile
+            # `MARKET_DATA_AGENT` ajanı BİRLİKTE döndü ve hiçbir yer bunu
+            # uzlaştırmıyordu. Niyet zaten doğruydu; eksik olan ona göre
+            # davranmaktı.
+            target, reason = "MARKET_RESEARCH_AGENT", "intent-agent-mismatch"
+        elif _mentions_filing(message) and target in ("MARKET_DATA_AGENT", "EDUCATION_AGENT"):
+            # Belge sözcüğü geçiyorsa tur araştırmaya gider. Piyasa verisi
+            # ajanının derleme hiçbir yolu yok; oraya düşen bir tur
+            # bildirimi ASLA göremez.
+            target, reason = "MARKET_RESEARCH_AGENT", "filing-keyword"
+
+        if reason:
+            log.info(
+                "router override (%s): %s -> %s",
+                reason, result.get("target_agent"), target,
+            )
+
+    carried = tickers[0] if tickers else _ticker_from_history(state)
+
     log.info(
-        "routed intent=%s agent=%s confidence=%s flags=%s",
-        result.get("primary_intent"), target, result.get("confidence"), flags,
+        "routed intent=%s agent=%s confidence=%s flags=%s ticker=%s",
+        intent, target, result.get("confidence"), flags, carried,
     )
     # Bileşiklik yalnızca GERÇEKTEN birden çok istek varsa taşınıyor:
     # `is_compound` true ama tek alt istek dönen bir sınıflandırma, turu
@@ -441,11 +689,13 @@ async def router_node(state: MoneyFastState) -> dict[str, Any]:
         sub_requests = []
 
     return {
-        "primary_intent": result.get("primary_intent") or "OUT_OF_SCOPE",
+        "primary_intent": intent,
         "target_agent": target,
+        "entities": entities,
+        "carried_ticker": carried,
+        "meta_request": meta_request,
         "sub_requests": sub_requests,
-        "entities": result.get("entities") or {},
-        "safety_flags": flags,
+        "entities": result.get("entities") or {},        "safety_flags": flags,
         "needs_clarification": needs_clarification,
         "clarifying_question": result.get("clarifying_question"),
         "tools_used": ["classify_and_route_intent"],
@@ -608,10 +858,282 @@ async def market_data_node(state: MoneyFastState) -> dict[str, Any]:
     )
 
 
+#: Belge sorusu olduğunu kesinleştiren sözcükler. Bunlardan biri geçiyorsa
+#: tur ARAŞTIRMA'ya gider, yönlendirici model ne derse desin.
+#:
+#: Neden gerekiyor: ölçüldü, "kap verilerine göre nasıl" sorusunda
+#: yönlendirici `primary_intent: MARKET_RESEARCH` VE
+#: `target_agent: MARKET_DATA_AGENT` döndürdü -- kendi içinde çelişen bir
+#: cevap. Piyasa verisi ajanının belge derlemine hiçbir yolu yok, dolayısıyla
+#: yanlış yönlendirilen bir tur bildirimi ASLA göremez.
+_FILING_WORDS = (
+    "kap", "bildirim", "özel durum", "açıklama", "açıkladı", "bilanço",
+    "finansal rapor", "faaliyet raporu", "temettü", "kâr payı", "kar payı",
+    "geri alım", "sermaye artırımı", "genel kurul",
+    # "Son dönemde öne çıkan GELİŞMELER neler" -- kullanıcının sorduğu ve
+    # hareketli ortalamalarla cevaplanan soru buydu. Bir gelişme sorusu
+    # olup biteni sorar, fiyatın nerede olduğunu değil.
+    "gelişme", "haber", "ne oldu", "neler oluyor",
+)
+
+#: Önceki turun kaynaklarını soran turlar. Bu bir arama DEĞİL.
+#:
+#: Liste bilerek dar. "kaynak" tek başına yok ve "kaynakları" da yok:
+#: "enerji kaynakları hakkında bilgi ver" ikisine de uyuyor ve bir eğitim
+#: sorusu. Kalanlar ya tek anlamlı ("kaynakça", "atıf") ya da iyelik ekiyle
+#: önceki söylenene işaret ediyor ("kaynaklarını", "neye dayanarak").
+_SOURCE_WORDS = ("kaynakça", "kaynakçası", "referans", "atıf",
+                 "kaynağın", "kaynağını", "kaynakların", "kaynaklarını",
+                 "hangi belge", "nereden ald", "neye dayanarak",
+                 "link ver", "bağlantı ver")
+
+#: Kaynağı SORMAK ile kaynağı ARAMAK'ı ayıran fiiller.
+_ASK_WORDS = ("ver", "paylaş", "göster", "söyle", "misin", "mısın", "nedir", "neler")
+
+
+def _mentions_filing(message: str) -> bool:
+    folded = _fold(message)
+    return any(_fold(word) in folded for word in _FILING_WORDS)
+
+
+def _is_sources_recap(state: MoneyFastState, tickers: list) -> bool:
+    """Önceki cevabın kaynağını soran bir tur mu.
+
+    ÜÇ koşul birden aranıyor ve üçüncüsü asıl ayırıcı olan:
+
+    1. Tek anlamlı bir kaynak sözcüğü geçiyor.
+    2. Sorma fiili var -- kaynağı SORMAK ile kaynağı ARAMAK farklı şeyler.
+    3. **Önceki turda gerçekten kaynak gösterilmiş.**
+
+    Üçüncüsü olmadan "enerji kaynaklarını anlat" gibi bir eğitim sorusu bu
+    yola düşüyordu; ölçüldü, testte yakalandı. Gösterilecek bir kaynak
+    yoksa özetlenecek bir şey de yok, dolayısıyla tur normal yönlendirmeye
+    bırakılıyor. Bu aynı zamanda güvenli tarafta başarısız oluyor: sözleşme
+    henüz kaynak taşımıyorsa bu dal hiç çalışmıyor.
+
+    Tur bir enstrüman ANIYORSA da bu bir aramadır -- "THYAO'nun kaynakları"
+    aranacak bir şey söylüyor, "bana kaynakça verir misin" söylemiyor.
+    """
+    if tickers:
+        return False
+    folded = _fold(message_of(state))
+    if not any(_fold(word) in folded for word in _SOURCE_WORDS):
+        return False
+    if not any(_fold(word) in folded for word in _ASK_WORDS):
+        return False
+    return bool(sources.prior(state))
+
+
+def message_of(state: MoneyFastState) -> str:
+    return state.get("user_message") or ""
+
+
+#: Sembol biçimine uyan ama sembol OLMAYAN sözcükler. Bir BIST kodu üç ila
+#: altı büyük harftir ve bu kalıba Türkçe kısaltmaların yarısı uyuyor --
+#: "kap verilerine göre nasıl" sorusunda "KAP"ın kendisi dahil.
+_NOT_TICKERS = frozenset({
+    "KAP", "BIST", "SPK", "MKK", "ABD", "USD", "EUR", "TRY", "GBP", "TL",
+    "ETF", "GYO", "AŞ", "ANO", "VYO", "IPO", "RSI", "SMA", "VAR", "PDF",
+    "XLS", "CSV", "API", "SSE", "HTML", "JSON", "ISIN", "IBAN", "TCKN",
+    "ODA", "DKB", "OLUR", "EVET", "HAYIR", "TAMAM", "NASIL", "NEDIR",
+})
+
+#: Bir BIST kodunun biçimi. Rakam yok: `THYAO` var ama `2026` yok.
+_TICKER_SHAPE = re.compile(r"\b[A-ZÇĞİÖŞÜ]{3,6}\b")
+
+
+def _ticker_from_history(state: MoneyFastState) -> Optional[str]:
+    """Son kullanıcı turlarında geçen son enstrüman adayı.
+
+    Yalnızca KULLANICI turlarına bakılıyor. Asistan turları özetlerken 220
+    karaktere kırpılıyor; oradan sembol okumak, konuyu rastgele bir kesme
+    noktasına bağlamak olurdu.
+
+    Evrene karşı DOĞRULANMIYOR: orchestrator'ın enstrüman listesi yok ve
+    her tur için bir tur daha atmak, çözdüğünden pahalı olurdu. Yanlış bir
+    aday da sınırlı zarar veriyor -- `_narrow_then_widen` süzgeç boş
+    dönünce süzgeçsiz aramaya düşüyor, yani en kötü durumda bugünkü
+    davranışa geri dönülüyor. Biçime uyan ama sembol olmayan sözcükler
+    (`KAP` dahil) `_NOT_TICKERS` ile eleniyor.
+    """
+    for turn in reversed(state.get("conversation_history") or []):
+        if turn.get("role") != "user":
+            continue
+        for token in _TICKER_SHAPE.findall((turn.get("content") or "").upper()):
+            if token not in _NOT_TICKERS:
+                return token
+    return None
+
+
 def _first_ticker(state: MoneyFastState) -> Optional[str]:
-    """The instrument the router extracted, when the plan named none."""
+    """The instrument this turn named, or the one carried from earlier turns."""
     tickers = (state.get("entities") or {}).get("tickers") or []
-    return tickers[0] if tickers else None
+    return tickers[0] if tickers else state.get("carried_ticker")
+
+
+#: Dar arama bu kadar satır bulamazsa süzgeç kaldırılıp yeniden aranır.
+WIDEN_FLOOR = 3
+
+#: Ticker süzgeçli bir aramada benzerlik tabanı. 0,45 (bkz.
+#: `market_research_node`) süzgeçSİZ aramalar için ölçülmüştü: orada
+#: benzerlik, belgenin konuyla ilgili olduğunu söyleyen TEK sinyal. Ticker
+#: etiketi bunu doğrudan söylüyor -- etiketi taşıyan belge o şirket
+#: hakkındadır -- ve puan yalnızca sıralıyor. Ölçüldü, aynı sorgu biçimiyle:
+#:
+#:   THYAO  "THY yılın ilk yarısında 18,86 milyar lira kar etti"  0,135
+#:   ASELS  "Aselsan 125,1 milyon dolarlık satışı KAP'a bildirdi" 0,363
+#:   TCELL  (aynı biçimde sorgu, aynı türden haber)                0,729
+#:
+#: Puan sorgunun başlıkla sözcük örtüşmesini izliyor ("THYAO" yazan sorgu,
+#: "THY" yazan başlık), haberin alakasını değil. 0,45 burada uygulanınca
+#: ASELS ve THYAO'nun etiketli haberlerinin TAMAMI, ticker süzgeci arşiv
+#: etiketlendikten sonra bile, siliniyordu.
+#:
+#: Sıfır: taban süzgeç uygulandıktan sonra koruyacağı bir şeyi yok, her
+#: değer gerçek sonuç kesiyor -- aynı beş THYAO haberi "THYAO hakkında
+#: haber" ile 0,171, "THYAO son haberler" ile 0,014 alıyor. `top_k` ve
+#: tarih sonuç kümesini zaten sınırlıyor.
+TICKER_FILTERED_MIN_SIMILARITY = float(
+    os.getenv("RAG_TICKER_MIN_SIMILARITY", "0.0")
+)
+
+
+def _research_query(state: MoneyFastState) -> str:
+    """Aramaya gidecek metin.
+
+    Planlayıcının ürettiği sorgu KULLANILMIYOR, ve uzman istemi zaten ona
+    "kullanıcının cümlesini olduğu gibi geçir, zamirleri çözme, alıcı taraf
+    sunucuda çözüyor" diyordu. **O sözleşme doğru değildi.**
+    `rag/app.py::_resolve_query` bağlamı yalnızca sorgunun HER kelimesi
+    zamir ya da dolgu ise katıyor; "kap verilerine göre nasıl" bu koşulu
+    sağlamıyor, dolayısıyla hisse adı hiç eklenmiyordu.
+
+    Yapılan tek şey, adı geçmiyorsa taşınan sembolü BAŞA eklemek. Daha
+    fazlası değil: bu depoda ölçüldü (bkz. `_fold_in_own_documents`
+    yorumları), kullanıcının gerçek cümlesi kendi belgesine karşı 0,289
+    alırken çıplak ölçüt 0,380 alıyor. Sorguyu "KAP bildirimi özel durum
+    açıklaması son gelişmeler" gibi doldurmak benzerliği DÜŞÜRÜRDÜ.
+    Daraltmak sorgunun değil süzgecin işi.
+    """
+    message = state["user_message"]
+    ticker = _first_ticker(state)
+    if not ticker or _fold(ticker) in _fold(message):
+        return message
+    return f"{ticker} {message}"
+
+
+async def _narrow_then_widen(
+    state: MoneyFastState, args: dict[str, Any], ticker: Optional[str], assumptions: list
+) -> dict[str, Any]:
+    """Önce hisseye süzülmüş, yetmezse süzgeçsiz arama.
+
+    Neden tek başına süzgeç YANLIŞ olurdu: korpusta hisse sütunu TEK ve
+    `sinks.push_disclosures_to_rag` yalnızca ilk sembolü yazıyor. İki
+    şirketli bir birleşme bildiriminin ikinci şirket için bulunabilmesi,
+    bilerek anlamsal aramaya bırakılmış. Sert bir süzgeç tam da onu
+    kapatırdı -- ölçüldü, eşleşmelerin %37'si ikinci koddan geliyor.
+
+    O yüzden süzgeç bir DARALTMA denemesi: yeterince satır getirirse
+    kullanılır, getirmezse süzgeçsiz arama sonucu eklenir. Geniş aramanın
+    başarısız olması dar sonuçları düşürmez -- `_fold_in_own_documents`
+    ile aynı yön.
+    """
+    if not ticker:
+        # Süzgeç `ticker`'dan (entity/carried_ticker'dan) gelmiyor olsa da
+        # planlayıcının kendi `arguments.filters.tickers`'ı bu çağrıyı yine
+        # ticker süzgeçli yapabilir; taban ona göre seçilir. `args` çağıranın
+        # -- kopyası değiştirilir, kendisi değil.
+        single_args = args
+        if (args.get("filters") or {}).get("tickers"):
+            single_args = {**args, "min_similarity": TICKER_FILTERED_MIN_SIMILARITY}
+        single = await _run_tool(
+            state, "rag_semantic_market_search", single_args,
+            assumptions=assumptions, empty_when=lambda p: not p.get("results"),
+        )
+        # Bu dal da loglanıyor. Loglanmadığı sürece "hiç arama yapılmadı" ile
+        # "arama yapıldı ve boş döndü" ayırt edilemiyordu ve boş dönen bir
+        # tur, iz dosyası okunmadan teşhis edilemedi.
+        _log_search(single_args, single, "single")
+        return single
+
+    base_filters = {k: v for k, v in (args.get("filters") or {}).items() if k != "tickers"}
+    # Dar geçiş HER ZAMAN ticker süzgeçli -- kendi süzgecini burada
+    # kuruyor -- dolayısıyla tabanı `args`'ın taşıdığından bağımsız olarak
+    # ticker tabanına sabitlenir.
+    narrow_args = {
+        **args,
+        "filters": {**base_filters, "tickers": [ticker]},
+        "min_similarity": TICKER_FILTERED_MIN_SIMILARITY,
+    }
+    narrow = await _run_tool(
+        state, "rag_semantic_market_search", narrow_args,
+        assumptions=assumptions, empty_when=lambda p: not p.get("results"),
+    )
+    narrow_rows = _result_rows(narrow)
+    _log_search(narrow_args, narrow, "narrow")
+    if len(narrow_rows) >= WIDEN_FLOOR:
+        return narrow
+
+    # Geniş geçiş, planlayıcının koyduğu hisse süzgecini de KALDIRIYOR.
+    # Kaldırmasaydı iki geçiş de aynı süzgeçle çalışır ve "geniş" hiçbir şey
+    # genişletmezdi -- ölçüldü, ilk turda planlayıcı `tickers` koydu ve iki
+    # geçiş de aynı sıfır sonucu döndürdü.
+    wide_args = {**args, "filters": base_filters} if base_filters else {
+        k: v for k, v in args.items() if k != "filters"
+    }
+    wide = await _run_tool(
+        state, "rag_semantic_market_search", wide_args,
+        assumptions=assumptions, empty_when=lambda p: not p.get("results"),
+    )
+    _log_search(wide_args, wide, "wide")
+    # Genişletmenin amacı, hissenin `ticker` sütununda DEĞİL metninde geçtiği
+    # belgeleri yakalamak -- iki şirketli bir bildirimde ikinci şirket gibi.
+    # Amaç "konuyla ilgisiz haberle doldurmak" değil. Hisseyi hiç anmayan bir
+    # satır bu soruya cevap değil, ve derlemede o şirkete dair bir şey yoksa
+    # doğru cevap "yok" -- `results == []` zaten TAM bir cevap sayılıyor.
+    wide_rows = [row for row in _result_rows(wide) if _mentions(row, ticker)]
+    if not wide_rows:
+        return narrow if narrow_rows else wide
+
+    seen = {row.get("chunk_id") for row in narrow_rows}
+    merged = narrow_rows + [r for r in wide_rows if r.get("chunk_id") not in seen]
+
+    output = dict((wide.get("specialist_output") or {}))
+    data = dict(output.get("data") or {})
+    data["results"] = merged
+    output["data"] = data
+    output["status"] = "OK"
+    return {**wide, "specialist_output": output}
+
+
+def _mentions(row: dict[str, Any], ticker: str) -> bool:
+    """Belge bu hisseyi anıyor mu -- etiketinde ya da metninde."""
+    if ticker in (row.get("tickers") or []):
+        return True
+    folded = _fold(ticker)
+    return any(
+        folded in _fold(str(row.get(field) or "")) for field in ("title", "snippet")
+    )
+
+
+def _result_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
+    data = ((result.get("specialist_output") or {}).get("data") or {})
+    rows = data.get("results")
+    return rows if isinstance(rows, list) else []
+
+
+def _log_search(args: dict[str, Any], result: dict[str, Any], pass_name: str) -> None:
+    """`query_echo` bugüne kadar döndürülüp atılıyordu.
+
+    Bu tek satır, kullanıcının "bana kaynakça verir misin" turunun neden boş
+    döndüğünü sohbet kaydını okumadan görünür kılardı.
+    """
+    data = ((result.get("specialist_output") or {}).get("data") or {})
+    log.info(
+        "research %s pass: query=%r echo=%r tickers=%s results=%d",
+        pass_name, args.get("query"), data.get("query_echo"),
+        (args.get("filters") or {}).get("tickers"), len(_result_rows(result)),
+    )
 
 
 async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
@@ -619,7 +1141,7 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
         SPECIALIST_PROMPTS["MARKET_RESEARCH_AGENT"], _specialist_task(state), fast=True
     )
     args = plan.get("arguments") or {}
-    args.setdefault("query", state["user_message"])
+    args["query"] = _research_query(state)
     args.setdefault("top_k", 8)
     # Cosine thresholds are a property of the embedding model, not a product
     # constant. The tool contract documents 0.62, which is calibrated for E5;
@@ -642,6 +1164,15 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     # Overridden here rather than in the tool, because the caller owns this
     # choice and the contract's default has to stay what it says.
     args["min_similarity"] = float(os.getenv("RAG_MIN_SIMILARITY", "0.45"))
+    # Dilin ne olduğu KORPUSUN özelliği, sorunun değil -- planlayıcının
+    # kararı olamaz. Süzgeç bırakılmıyor: kaldırmak "her dil" demek ve
+    # derlem tek dilli olduğu sürece bir dil süzgeci yalnızca ELEYEBİLİR.
+    #
+    # ÖLÇÜLDÜ: planlayıcı Türkçe bir soruya `{"languages": ["en"]}` koydu ve
+    # sekiz eşleşmenin tamamını sildi; kullanıcı "MIATK hakkında güncel bir
+    # gelişme kaynağı bulamadım" cevabı aldı, derlemde 23 MIATK belgesi
+    # dururken. `min_similarity` ile aynı gerekçe: bu seçim çağıranın.
+    (args.get("filters") or {}).pop("languages", None)
     # The retriever scans this reversed and folds in the newest user turn it
     # finds, so the count only affects payload size, not what gets resolved.
     args["conversation_context"] = (state.get("conversation_history") or [])[
@@ -654,12 +1185,10 @@ async def market_research_node(state: MoneyFastState) -> dict[str, Any]:
     # second thing, which is what an anonymous turn actually is.
     args["user_id"] = state.get("user_id") or None
 
-    result = await _run_tool(
-        state, "rag_semantic_market_search", args,
-        assumptions=plan.get("assumptions") or [],
-        empty_when=lambda p: not p.get("results"),
+    result = await _narrow_then_widen(
+        state, args, _first_ticker(state), plan.get("assumptions") or []
     )
-    return await _fold_in_own_documents(state, args, result)
+    return _slim_results(await _fold_in_own_documents(state, args, result))
 
 
 #: Kullanıcının kendi belgelerine ayrılan sonuç sayısı.
@@ -747,6 +1276,65 @@ async def _fold_in_own_documents(
     # değil: "kaynak bulunamadı" demek yanlış olurdu.
     payload["status"] = "OK"
     return {**result, "specialist_output": payload}
+
+
+#: Arama sonucunun YAZARA giden alanları. Geri kalanı -- `chunk_id`,
+#: `doc_id`, `author`, `language`, `score` -- alma katmanının kendi
+#: muhasebesi; yazarın cümlesine giremez, çünkü NAMING kuralı iç adları
+#: kullanıcıya yasaklıyor. `sources.build`'in okuduğu dört alan --
+#: `title`, `publisher`, `published_at`, `url` -- burada kalıyor: atıf
+#: özelliği bu fonksiyonun ÇIKTISI üzerinde çalışıyor.
+_WRITER_RESULT_FIELDS = (
+    "title",
+    "snippet",
+    "publisher",
+    "published_at",
+    "url",
+    "tickers",
+    "doc_type",
+    "is_opinion",
+)
+
+
+def _slim_results(result: dict[str, Any]) -> dict[str, Any]:
+    """Kaynakların sentez gövdesine giden hâli: okunacak metin, iç kimlik değil.
+
+    `_slim_posture` ile aynı gerekçe ve aynı ölçülen sebep. Ticker süzgeci
+    olan bir arama arşiv etiketlenene kadar hep boş dönüyordu, dolayısıyla bu
+    gövdenin sekiz tam belgeyle ne kadar büyüdüğü hiç ölçülmemişti.
+    Ölçüldüğünde: "THYAO ile ilgili son haberler neler?" turunda 8.316 token
+    istendi, sınır 8.000 -- ve kullanıcı, ASELS'in cevaplandığı bir oturumda
+    THYAO için "veri tek seferde işleyebileceğimden büyük çıktı" cevabı aldı.
+
+    Düşen beş alanın hiçbirini yazar okumuyor: ikisi UUID, biri her satırda
+    `null`, biri süzgeçle zaten sabit, biri sıralaması bitmiş bir puan.
+    Sonuç başına ölçülen ~155 karakter.
+
+    Araç sözleşmesi DEĞİŞMİYOR: `_normalize_result` on üç alanın hepsini
+    üretmeye devam ediyor ve doğrudan çağıran onu olduğu gibi alıyor.
+    Kırpma yalnızca modele giden kopyada, tekilleştirme (`_fold_in_own_documents`,
+    `_narrow_then_widen`) `chunk_id`'yi kullanıp BİTTİKTEN sonra -- bu
+    fonksiyon ikisinin de sonunda çalışır.
+    """
+    payload = result.get("specialist_output") or {}
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return result
+    rows = data.get("results")
+    if not isinstance(rows, list) or not rows:
+        return result
+    slim = [
+        {
+            key: row[key]
+            for key in _WRITER_RESULT_FIELDS
+            if isinstance(row, dict) and row.get(key) is not None
+        }
+        for row in rows
+    ]
+    return {
+        **result,
+        "specialist_output": {**payload, "data": {**data, "results": slim}},
+    }
 
 
 async def risk_node(state: MoneyFastState) -> dict[str, Any]:
@@ -1475,6 +2063,83 @@ def _fit_payload(payload: dict[str, Any]) -> str:
     )
     return text[:SYNTHESIS_PAYLOAD_CHARS]
 
+
+#: Tek bir arama sonucundan alınacak en fazla metin.
+#:
+#: Sekiz sonuç x 500 karakter, artı sonuç başına ~150 karakterlik künye,
+#: `SYNTHESIS_PAYLOAD_CHARS`'ın (8.000) epey altında kalıyor. Sayı ona göre
+#: seçildi: `_fit_payload`'ın son çare kırpması gövdeyi ORTASINDAN kesiyor
+#: ve `_normalize_result` künyeyi metinden önce yazsa bile, oraya kadar
+#: gitmemek daha iyi. Burada kırpmak metne mal oluyor, atfa değil.
+MAX_SNIPPET_CHARS = 500
+
+
+def _trimmed_for_synthesis(payload: dict) -> dict:
+    """Uzun pasajları kısalt, ama sonuç DÜŞÜRME.
+
+    Bütçe eskiden serileştirilmiş gövdenin tamamına uygulanıyordu ve kesme
+    bir sonucun ortasına düştüğünde o sonucun metni kalıp `url`'i gidiyordu;
+    prompt da bu durumda modele "bağlantı yoksa yayıncının adını yaz"
+    diyor. Görünen sonuç, sonraki kaynakların tıklanabilir atıflarını
+    sessizce kaybetmesiydi. KAP gövdeleri haber özetlerinden uzun olduğu
+    için bu, sınırda değil sürekli olacaktı.
+
+    Sonuç başına kırpmak, kesmenin metne mal olmasını sağlıyor -- atfa değil.
+    """
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return payload
+    results = data.get("results")
+    if not isinstance(results, list):
+        return payload
+
+    trimmed = []
+    for result in results:
+        if isinstance(result, dict) and isinstance(result.get("snippet"), str):
+            snippet = result["snippet"]
+            if len(snippet) > MAX_SNIPPET_CHARS:
+                result = {**result, "snippet": snippet[:MAX_SNIPPET_CHARS] + "…"}
+        trimmed.append(result)
+    return {**payload, "data": {**data, "results": trimmed}}
+
+
+#: Kaynak özeti başlığı ve boş hâli. Metin KODDA kuruluyor: bu düğüm hiç
+#: model çağırmıyor ve çağırmaması asıl mesele -- turu öldüren şey tam da
+#: kota hatasıydı.
+RECAP_HEADER_TR = "Bu cevabı şu kaynaklardan kurdum:"
+RECAP_EMPTY_TR = (
+    "Önceki cevabı belgeye dayandırmamıştım; gösterebileceğim bir kaynak yok. "
+    "İsterseniz bir şirket ya da konu adı verin, derlemede arayayım."
+)
+
+
+async def sources_recap_node(state: MoneyFastState) -> dict[str, Any]:
+    """Önceki turun kaynaklarını yeniden yüzeye çıkar.
+
+    **Hiç model çağırmıyor.** Ölçüldü: kullanıcı "bana kaynakça verir misin"
+    diye sorduğunda cümle arama sorgusu olarak gönderildi, sıfır sonuç döndü,
+    ve ardından Groq kota hatası turu öldürdü -- kullanıcı "yoğunluk
+    sınırına takıldım" cevabı aldı. Elde olan bir listeyi biçimlendirmek
+    için model gerekmiyor, ve gerekmediği için bu tur o hataya bağışık.
+
+    Uygunluk kapısı yine çalışıyor: `draft_response` yazılıyor ve düğüm
+    kapıya devrediyor, yani fail-closed davranış korunuyor.
+    """
+    rows = sources.prior(state)
+    if not rows:
+        return {"draft_response": RECAP_EMPTY_TR, "specialist_output": {}}
+
+    lines = [RECAP_HEADER_TR, ""]
+    for row in rows:
+        label = str(row.get("label") or "").strip()
+        detail = str(row.get("detail") or "").strip()
+        url = row.get("url")
+        # Bağlantı varsa markdown; yoksa düz metin. Model yazmıyor,
+        # dolayısıyla uydurulmuş bir bağlantı buraya giremez.
+        head = f"[{label}]({url})" if url else label
+        lines.append(f"- {head}{f' — {detail}' if detail else ''}")
+    return {"draft_response": "\n".join(lines), "specialist_output": {}}
+
 async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
     """Turn the internal envelope into the Turkish user-facing draft."""
     revision = int(state.get("revision_count") or 0)
@@ -1495,8 +2160,9 @@ async def synthesis_node(state: MoneyFastState) -> dict[str, Any]:
                 conversation_summary=_history_summary(state) or "(none)",
                 primary_intent=state.get("primary_intent") or "UNKNOWN",
                 target_agent=state.get("target_agent") or "EDUCATION_AGENT",
-                specialist_json=_fit_payload(state.get("specialist_output") or {}),
-            )
+                specialist_json=_fit_payload(
+                    _trimmed_for_synthesis(state.get("specialist_output") or {})
+                ),            )
         draft = await _llm_text(ORCHESTRATOR_SYSTEM_PROMPT, task)
     except Exception as exc:  # LLM outage
         log.error("synthesis failed: %s", exc)
@@ -1651,8 +2317,7 @@ async def compliance_gate_node(state: MoneyFastState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 SpecialistRoute = Literal[
     "portfolio", "market_data", "market_research", "risk", "transaction",
-    "handoff", "compound", "synthesis"
-]
+    "handoff", "sources_recap", "compound", "synthesis"]
 
 
 #: Bir turda kaç ayrı istek işlenir.
@@ -1795,6 +2460,14 @@ def route_after_router(state: MoneyFastState) -> SpecialistRoute:
     intent = state.get("primary_intent")
     if intent == "UNSAFE" or "DISTRESS_SIGNAL" in (state.get("safety_flags") or []):
         return "handoff"
+    # Önceki turun kaynağını soran bir tur arama YAPMAZ. Ayrı bir düğüm,
+    # çünkü tek işi elde olanı biçimlendirmek ve bunu hiç model çağırmadan
+    # yapıyor -- turu öldüren kota hatasına bağışık olmasının sebebi bu.
+    #
+    # Bileşik kontrolden ÖNCE: "bana kaynakça verir misin" iki soru değil,
+    # sıfır soru -- aranacak bir şey yok, gösterilecek bir şey var.
+    if state.get("meta_request") == "SOURCES_RECAP":
+        return "sources_recap"
     # Güvenlikten SONRA: bileşik bir tur da olsa, sıkıntı sinyali taşıyan bir
     # mesaj önce insana gider.
     if state.get("sub_requests"):
@@ -1838,6 +2511,43 @@ def _traced(name: str, fn):
     return wrapper
 
 
+def _resilient(name: str, fn):
+    """Bir uzman düğümünün çökmesi turu düşürmesin.
+
+    Uzman düğümlerinin HİÇBİRİNDE try/except yoktu. Bir kota hatası
+    orada grafın dışına çıkıyor, `api.py` 500 veriyor, backend 502'ye
+    çeviriyor ve `record_turn` hiç çalışmıyor -- yani kullanıcının kendi
+    mesajı bile kaydedilmiyordu. Sentez düğümünde bu ele alınmıştı,
+    uzmanlarda alınmamıştı.
+
+    Yakalanan hata `specialist_output`'a ERROR olarak yazılıyor: sentez
+    o durumda elindekiyle -- ve varsa toplanmış kaynaklarla -- devam
+    ediyor, boş bir ekran yerine.
+
+    Uygunluk kapısı BİLEREK sarılmıyor: orada açık başarısızlık, modelin
+    ürettiğini denetleyen kontrolü sessizce devre dışı bırakmak olurdu.
+    """
+
+    async def wrapper(state: MoneyFastState) -> dict[str, Any]:
+        try:
+            return await fn(state)
+        except Exception as exc:  # noqa: BLE001
+            log.error("%s node failed: %s", name, exc)
+            return {
+                "specialist_output": {
+                    "agent": state.get("target_agent") or name.upper(),
+                    "status": "ERROR",
+                    "tool": None,
+                    "data": {},
+                    "error": _failure_message(exc),
+                },
+                "errors": (state.get("errors") or []) + [f"{name}: {exc}"],
+            }
+
+    wrapper.__name__ = getattr(fn, "__name__", name)
+    return wrapper
+
+
 def _register_specialists() -> None:
     """Bileşik düğümünün çağırdığı uzmanlar.
 
@@ -1852,17 +2562,17 @@ def _register_specialists() -> None:
         "transaction": transaction_node,
     })
 
-
 def build_graph():
     _register_specialists()
     g = StateGraph(MoneyFastState)
     g.add_node("router", _traced("router", router_node))
-    g.add_node("portfolio", _traced("portfolio", portfolio_node))
-    g.add_node("market_data", _traced("market_data", market_data_node))
-    g.add_node("market_research", _traced("market_research", market_research_node))
-    g.add_node("risk", _traced("risk", risk_node))
-    g.add_node("transaction", _traced("transaction", transaction_node))
+    g.add_node("portfolio", _traced("portfolio", _resilient("portfolio", portfolio_node)))
+    g.add_node("market_data", _traced("market_data", _resilient("market_data", market_data_node)))
+    g.add_node("market_research", _traced("market_research", _resilient("market_research", market_research_node)))
+    g.add_node("risk", _traced("risk", _resilient("risk", risk_node)))
+    g.add_node("transaction", _traced("transaction", _resilient("transaction", transaction_node)))
     g.add_node("handoff", _traced("handoff", handoff_node))
+    g.add_node("sources_recap", _traced("sources_recap", sources_recap_node))
     g.add_node("compound", _traced("compound", compound_node))
     g.add_node("synthesis", _traced("synthesis", synthesis_node))
     g.add_node("compliance", _traced("compliance", compliance_gate_node))
@@ -1878,13 +2588,17 @@ def build_graph():
             "risk": "risk",
             "transaction": "transaction",
             "handoff": "handoff",
+            "sources_recap": "sources_recap",
             "compound": "compound",
             "synthesis": "synthesis",
         },
     )
+    # Sentezi ATLAYIP doğrudan kapıya gidiyor: özetlenecek metin zaten
+    # hazır ve modelden geçirmek, bu düğümün var olma sebebini -- hiç model
+    # çağırmamasını -- ortadan kaldırırdı.
+    g.add_edge("sources_recap", "compliance")
     for node in ("portfolio", "market_data", "market_research", "risk",
-                 "transaction", "handoff", "compound"):
-        g.add_edge(node, "synthesis")
+                 "transaction", "handoff", "compound"):        g.add_edge(node, "synthesis")
     g.add_edge("synthesis", "compliance")
     g.add_conditional_edges(
         "compliance", route_after_compliance, {"synthesis": "synthesis", END: END}
@@ -1940,6 +2654,12 @@ def _initial_state(
         "crisis_notices": [],
         "blocked_reason": None,
         "entities": {},
+        # Aynı gerekçe: checkpointer thread_id üzerinden birleştiriyor, o
+        # yüzden bu turda yazılmayan bir alan öncekinin değerini taşır.
+        # Taşınan hisse ADI kasten her turda yeniden hesaplanıyor -- konuşma
+        # THYAO'dan ASELS'e döndüğünde eskisinin yapışıp kalmaması için.
+        "carried_ticker": None,
+        "meta_request": None,
         "safety_flags": [],
         "needs_clarification": False,
         "clarifying_question": None,
@@ -1980,6 +2700,9 @@ STAGE_LABELS_TR = {
     "risk": "Risk ölçütleri hesaplanıyor...",
     "transaction": "İşlem önerisi hazırlanıyor...",
     "handoff": "Yanıt hazırlanıyor...",
+    # Etiketi olmayan bir düğüm hiç ilerleme olayı yayınlamıyor (`if label:`),
+    # yani kullanıcı akışta boşluk görürdü.
+    "sources_recap": "Önceki kaynaklar toplanıyor...",
     "synthesis": "Yanıt yazılıyor...",
     "compliance_gate": "Uygunluk kontrolü yapılıyor...",
 }

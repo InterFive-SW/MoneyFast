@@ -771,6 +771,53 @@ def ingest_news(request: NewsIngestRequest, db: Session = Depends(get_db)):
             "news_symbols": symbols}
 
 
+@router.get(
+    "/news/coverage",
+    summary="Kaynak başına haber kapsaması (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def news_coverage(db: Session = Depends(get_db)):
+    """`ingestor`'ın "nereden devam edeyim" sorusu.
+
+    `candles/coverage` ile aynı desen. KAP bildirim numarası monoton
+    olduğu için en yüksek numara, bir tarihten daha kesin bir su seviyesi.
+    """
+    return service.news_coverage(db)
+
+
+@router.get(
+    "/news/archive",
+    summary="Saklanan bildirimleri sayfa sayfa oku (servisler arası)",
+    dependencies=[Depends(require_service_token)],
+)
+def news_archive(
+    source: str = Query(default="KAP", max_length=120),
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """`ingestor`'ın "hangi bildirimin gövdesi hâlâ eksik" taramasını
+    beslediği uç.
+
+    Panoya 28.984 bildirim düştü ama derlemde yalnızca yeni gelenlerin
+    gövdesi var: gövde çekimi bildirim başına bir istek ve tur başına
+    bütçeli. Bu uç, arşivin geri kalanını kapatan işin girdisi.
+    """
+    rows = service.news_archive(db, source, limit, offset)
+    return {
+        "items": [
+            {
+                "content_hash": row.content_hash,
+                "title": row.title,
+                "url": row.url,
+                "related_symbols": list(row.related_symbols or []),
+                "published_at": row.published_at,
+            }
+            for row in rows
+        ]
+    }
+
+
 @router.post(
     "/fundamentals/ingest",
     response_model=IngestResult,

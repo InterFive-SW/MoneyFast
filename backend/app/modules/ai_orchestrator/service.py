@@ -93,6 +93,11 @@ def trim_history(turns: list[dict[str, str]]) -> list[dict[str, str]]:
         {
             "role": str(turn.get("role", "user")),
             "content": _truncate(str(turn.get("content", ""))),
+            #: Metin değil, veri. Bir turun kaynakları o turla birlikte
+            #: taşınıyor: "bana kaynakça verir misin" sorusunun cevabı
+            #: önceki turun kaynakları ve onlar burada düşerse o soru bir
+            #: aramaya dönüşüp boş dönüyor.
+            "sources": list(turn.get("sources") or []),
         }
         for turn in turns[-CONTEXT_MAX_MESSAGES:]
     ]
@@ -103,6 +108,10 @@ def trim_history(turns: list[dict[str, str]]) -> list[dict[str, str]]:
     kept: list[dict[str, str]] = []
     budget = CONTEXT_MAX_CHARS
     for turn in reversed(window):
+        # Bütçe İSTEM uzunluğunu sınırlıyor ve kaynaklar isteme girmiyor --
+        # `_history_summary` yalnızca `role` ve `content` okuyor. Onları
+        # saymak, modele hiç gitmeyen baytlar yüzünden gerçek turları
+        # düşürmek olurdu.
         cost = len(turn["role"]) + len(turn["content"]) + 2
         if kept and cost > budget:
             break
@@ -250,9 +259,15 @@ def load_history(
         .limit(limit)
         .all()
     )
-    return trim_history(
-        [{"role": row.role, "content": row.content} for row in reversed(rows)]
-    )
+    # `sources` trim_history'nin dokunmadığı bir alan: kırpma metin
+    # uzunluğuyla ilgili ve kaynak listesi metin değil. Turun kendisi
+    # kırpılırsa kaynakları da onunla birlikte gider, ki doğru olan bu.
+    turns = [
+        {"role": row.role, "content": row.content,
+         "sources": (row.meta or {}).get("sources") or []}
+        for row in reversed(rows)
+    ]
+    return trim_history(turns)
 
 
 # ---------------------------------------------------------------------------

@@ -31,9 +31,13 @@ DEFAULT_TOP_K = 8
 
 #: The contract's documented default, kept as-is so a direct caller gets the
 #: documented behaviour. The running system never relies on it: the
-#: orchestrator always passes RAG_MIN_SIMILARITY (0.35), calibrated for the
-#: multilingual MiniLM embedder actually in use, where relevant Turkish news
-#: hits score 0.43-0.72 and this E5-era floor would discard most of them.
+#: orchestrator picks the floor per call, because one number cannot serve
+#: both cases. This E5-era value is far too high for the multilingual MiniLM
+#: embedder actually in use, whose scores run lower across the board; and a
+#: search carrying a ticker filter needs lower still, since the tag rather
+#: than the score is what makes the document relevant. See
+#: `orchestrator.market_research_node` / `_narrow_then_widen` for the
+#: measurements behind both.
 DEFAULT_MIN_SIMILARITY = 0.62
 
 
@@ -244,18 +248,24 @@ def _normalize_result(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise ContractViolationError(f"{TOOL}: each result must be an object.")
     backend_client.require(raw, ("chunk_id", "snippet", "publisher", "published_at"), TOOL)
+    # Provenance is emitted BEFORE the passage. Key order is part of no
+    # contract, but the serialised specialist output is truncated before
+    # synthesis, and a cut landing mid-result used to keep that result's text
+    # and drop its `url` -- at which point the prompt tells the model to name
+    # the publisher in plain text instead. The citation disappeared silently.
+    # Ordering it this way makes a truncation cost text, not provenance.
     return {
         "chunk_id": str(raw["chunk_id"]),
         "doc_id": str(raw.get("doc_id", raw["chunk_id"])),
         "title": str(raw.get("title", "")),
+        "publisher": str(raw["publisher"]),
+        "published_at": str(raw["published_at"]),
+        "url": raw.get("url"),
+        "author": raw.get("author"),
         # Returned verbatim. Instruction-like text inside a snippet is data;
         # sanitising it here would hide an injection attempt from the layer
         # that is supposed to detect it.
         "snippet": str(raw["snippet"]),
-        "publisher": str(raw["publisher"]),
-        "author": raw.get("author"),
-        "published_at": str(raw["published_at"]),
-        "url": raw.get("url"),
         "tickers": list(raw.get("tickers") or []),
         "doc_type": str(raw.get("doc_type", "NEWS")),
         "language": str(raw.get("language", "tr")),

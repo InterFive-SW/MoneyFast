@@ -238,9 +238,18 @@ class TestNewsSymbolResolution:
     `related_symbols` 1.540 haberin 1.540'ında boştu.
     """
 
+    # `market`: KOD ile eşleşme yalnızca yerel piyasada geçerli
+    # (`LOCAL_TICKER_MARKETS`) -- alansız bir evren, kod dayanağını hiç
+    # kuramıyordu.
     UNIVERSE = [
-        SimpleNamespace(symbol="THYAO", name="Türk Hava Yolları A.O.", product_type="stock"),
-        SimpleNamespace(symbol="ASELS", name="Aselsan Elektronik", product_type="stock"),
+        SimpleNamespace(
+            symbol="THYAO", name="Türk Hava Yolları A.O.",
+            product_type="stock", market="BIST",
+        ),
+        SimpleNamespace(
+            symbol="ASELS", name="Aselsan Elektronik",
+            product_type="stock", market="BIST",
+        ),
     ]
 
     def _db(self):
@@ -280,6 +289,64 @@ class TestNewsSymbolResolution:
         }])
         assert self._stored(db)["related_symbols_m0"] == ["ASELS"]
 
+    def test_a_short_name_in_a_filings_body_is_not_its_subject(self):
+        """Bildirimin konusu başlıkta; gövdedeki adlar ilgili taraflardır.
+
+        Ölçülen vaka: "EMLAK KATILIM VARLIK KİRALAMA A.Ş. — Şirket Genel
+        Bilgi Formu" THYAO'ya bağlanmıştı, çünkü gövdedeki yönetim kurulu
+        listesinde bir üyenin başka görevi "THY Yönetim Kurulu Üyesi" olarak
+        yazılıydı. Kural arşivde 16 farklı (sembol, konu) çiftini düşürüyor
+        ve elle bakıldığında on altısı da yanlış.
+        """
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "1" * 64,
+            "title": "EMLAK KATILIM VARLIK KİRALAMA A.Ş. — Şirket Genel Bilgi Formu",
+            "summary": "Yönetim Kurulu Üyesi THY Yönetim Kurulu Üyesi Erkek",
+            "source": "KAP", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == []
+
+    def test_an_explicit_code_in_a_filings_body_still_counts(self):
+        """Kısıt YALNIZCA kısa ada; açık kod gövdede de güvenilir.
+
+        BISTECH devre kesici bildirimlerinin başlığı jeneriktir ve konu şirket
+        yalnızca gövdede, kendi koduyla yazılıdır. Metnin tamamını başlığa
+        indirgemek bu bildirimlerin 550'sini birden koparıyordu.
+        """
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "2" * 64,
+            "title": "BORSA İSTANBUL BISTECH DEVRE KESİCİ UYGULAMASI — Pay Bazında",
+            "summary": "Devre kesici uygulanan pay: THYAO",
+            "source": "KAP", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_a_news_story_still_reads_its_body(self):
+        """Kısıt bildirimlere ait. "Borsada bugün" başlıklı bir yazı gerçekten
+        gövdesinde saydığı hisseler hakkındadır ve başlığa indirgemek haber
+        tarafında etiketlemeyi geri götürürdü."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "3" * 64, "title": "Borsada bugün öne çıkanlar",
+            "summary": "THY günü yükselişle kapattı.",
+            "source": "Dünya", "published_at": NOW,
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["THYAO"]
+
+    def test_a_filing_that_declares_its_issuer_is_untouched(self):
+        """Kaynağın kendi verdiği etiket çıkarımdan önce gelir; kural yalnızca
+        çıkarım yolunda."""
+        db = self._db()
+        news_service.upsert_news(db, [{
+            "content_hash": "4" * 64,
+            "title": "OTOKAR OTOMOTİV VE SAVUNMA SANAYİ A.Ş. — Genel Bilgi Formu",
+            "summary": "Yapı Kredi ile kredi sözleşmesi",
+            "source": "KAP", "published_at": NOW, "related_symbols": ["ASELS"],
+        }])
+        assert self._stored(db)["related_symbols_m0"] == ["ASELS"]
+
     def test_a_section_name_offered_as_a_ticker_is_dropped(self):
         """Türkçe finans beslemeleri yazıları `BORSA` ve `FINANS` bölümlerine
         koyuyor; ikisi de "3-6 harf" testini geçer ama enstrüman değildir.
@@ -302,6 +369,55 @@ class TestNewsSymbolResolution:
         }])
         filter_arg = str(db.query.return_value.filter.call_args.args[0])
         assert "product_type" in filter_arg
+
+
+class TestNewsArchive:
+    def test_it_reads_one_source_newest_first(self):
+        """Yeniden eskiye, `topup`/`backfill` ile aynı gerekçeyle: yarıda
+        kesilen bir tur bitişik ve GÜNCEL bir derlem bırakır."""
+        db = MagicMock(spec=Session)
+        chain = db.query.return_value.filter.return_value.order_by.return_value
+        chain.limit.return_value.offset.return_value.all.return_value = ["row"]
+        assert news_service.news_archive(db, "KAP", 200, 0) == ["row"]
+        chain.limit.assert_called_once_with(200)
+        chain.limit.return_value.offset.assert_called_once_with(0)
+
+
+class TestNewsCoverage:
+    def _db(self, rows):
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = rows
+        return db
+
+    def test_the_disclosure_number_is_read_out_of_the_permalink(self):
+        """No column for it, and none needed: the link we store for citation
+        already carries the number."""
+        db = self._db([
+            SimpleNamespace(source="KAP", items=390, last=NOW, last_index=1655982),
+        ])
+        assert news_service.news_coverage(db)["KAP"]["last_index"] == 1655982
+
+    def test_a_source_without_numbered_links_has_no_watermark(self):
+        """RSS URLs must not be cast to bigint; that is what the regex guard
+        in the query prevents."""
+        db = self._db([SimpleNamespace(source="Dünya", items=12, last=NOW, last_index=None)])
+        assert news_service.news_coverage(db)["Dünya"]["last_index"] is None
+
+    def test_a_source_with_no_dated_rows_reports_no_date(self):
+        db = self._db([SimpleNamespace(source="KAP", items=0, last=None, last_index=None)])
+        assert news_service.news_coverage(db)["KAP"]["last"] is None
+
+    def test_an_empty_table_covers_nothing(self):
+        assert news_service.news_coverage(self._db([])) == {}
+
+    def test_the_query_guards_the_cast_with_a_pattern_match(self):
+        """Without it the ::bigint cast meets an RSS link and the endpoint
+        500s for every caller."""
+        db = self._db([])
+        news_service.news_coverage(db)
+        statement = str(db.execute.call_args.args[0])
+        assert "/Bildirim/[0-9]+$" in statement
+        assert "::bigint" in statement
 
 
 class TestProductLookups:

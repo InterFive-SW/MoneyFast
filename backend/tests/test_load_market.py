@@ -156,6 +156,91 @@ class TestCandles:
         assert load_market.load_candles(db, {"THYAO": "p-1"}) == 0
 
 
+class TestNews:
+    HEADER = ("content_hash", "title", "summary", "source", "url", "language",
+              "related_symbols", "published_at")
+
+    def _write(self, seed_dir, rows):
+        write_csv(seed_dir / "news.csv.gz", self.HEADER, rows)
+
+    def _cursor(self, db):
+        cursor = MagicMock()
+        db.connection.return_value.connection.cursor.return_value.__enter__ \
+            .return_value = cursor
+        return cursor
+
+    def _row(self, index=1, symbols="THYAO", url=None):
+        return (
+            str(index) * 64, f"THYAO — bildirim {index}", "Şirket · Form",
+            "KAP", url or f"https://www.kap.org.tr/tr/Bildirim/{index}",
+            "tr", symbols, "2026-08-28T20:15:00+00:00",
+        )
+
+    def test_disclosures_go_through_copy_not_row_by_row(self, seed_dir, db):
+        """~28.900 satır. Tek tek INSERT etmek, backend'in açılmasını
+        bekleten saniyeler demek -- mumlarda ölçülen hatanın aynısı."""
+        cursor = self._cursor(db)
+        self._write(seed_dir, [self._row(i) for i in range(30)])
+
+        assert load_market.load_news(db) == 30
+        assert cursor.copy_expert.called
+        assert cursor.copy_expert.call_args.args[1].getvalue().count("\n") == 30
+
+    def test_the_conflict_clause_survives_the_copy(self, seed_dir, db):
+        """Yeniden çalıştırmak hiçbir şey yazmamalı."""
+        cursor = self._cursor(db)
+        self._write(seed_dir, [self._row()])
+        load_market.load_news(db)
+        statement = cursor.execute.call_args.args[0]
+        assert "ON CONFLICT (content_hash) DO NOTHING" in statement
+
+    def test_symbols_become_a_postgres_array(self, seed_dir, db):
+        cursor = self._cursor(db)
+        self._write(seed_dir, [self._row(symbols="ASELS TUPRS")])
+        load_market.load_news(db)
+        assert "{ASELS,TUPRS}" in cursor.copy_expert.call_args.args[1].getvalue()
+
+    def test_a_disclosure_naming_no_symbol_still_loads(self, seed_dir, db):
+        cursor = self._cursor(db)
+        self._write(seed_dir, [self._row(symbols="")])
+        assert load_market.load_news(db) == 1
+        assert "{}" in cursor.copy_expert.call_args.args[1].getvalue()
+
+    def test_a_symbol_this_clone_does_not_carry_is_still_loaded(self, seed_dir, db):
+        """Mumların aksine: haberler enstrümana foreign key ile bağlı değil,
+        `related_symbols` bir metin dizisi. Evrende olmayan bir sembolü anan
+        bildirim yine okunur ve bağlantısı yine çalışır, o yüzden atılmaz."""
+        cursor = self._cursor(db)
+        self._write(seed_dir, [self._row(symbols="YOKBOYLE")])
+        assert load_market.load_news(db) == 1
+
+    def test_an_empty_file_makes_no_query(self, seed_dir, db):
+        cursor = self._cursor(db)
+        self._write(seed_dir, [])
+        assert load_market.load_news(db) == 0
+        assert cursor.copy_expert.called is False
+
+    def test_a_missing_file_is_not_an_error(self, seed_dir, db):
+        assert load_market.load_news(db) == 0
+
+    def test_a_full_table_skips_the_load(self, seed_dir, db):
+        """Künye kontrolü: onsuz her açılış 27.500 satırı geçici tabloya
+        kopyalayıp hiçbir şey yazmadan atardı."""
+        cursor = self._cursor(db)
+        self._write(seed_dir, [self._row()])
+        db.execute.return_value.scalar.return_value = 27_541
+        assert load_market.load_news(db, expected=27_541) == 0
+        assert cursor.copy_expert.called is False
+
+    def test_the_skip_check_counts_only_kap_rows(self, seed_dir, db):
+        """RSS haberleri aynı tabloda. Onları da saymak, RSS yeterince
+        biriktiğinde bildirim tohumunun hiç yüklenmemesi demekti."""
+        self._write(seed_dir, [self._row()])
+        db.execute.return_value.scalar.return_value = 0
+        load_market.load_news(db, expected=27_541)
+        assert "source = 'KAP'" in str(db.execute.call_args_list[0].args[0])
+
+
 class TestAlreadyLoaded:
     """Künye kontrolü.
 

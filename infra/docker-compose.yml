@@ -196,6 +196,12 @@ services:
       # İki yıllık günlük geçmiş; performans grafiği o kadar geriye gidiyor.
       INGESTOR_HISTORY_DAYS: ${INGESTOR_HISTORY_DAYS:-730}
       INGESTOR_REFRESH_PORT: ${INGESTOR_REFRESH_PORT:-8200}
+      # KAP bildirimleri. Piyasa saatlerine bağlı DEĞİL: fiyata en çok etki
+      # eden açıklamalar 18:00 kapanışından sonra ve açılıştan önce geliyor.
+      INGESTOR_KAP_INTERVAL_MINUTES: ${INGESTOR_KAP_INTERVAL_MINUTES:-20}
+      # Tek sorgunun kapsadığı gün. Ölçüldü: bir hafta 1101 satır, altmış gün
+      # tam 2000 -- yani tavan. Üç gün tavanın çok altında kalıyor.
+      INGESTOR_KAP_WINDOW_DAYS: ${INGESTOR_KAP_WINDOW_DAYS:-3}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       backend:
@@ -218,6 +224,17 @@ services:
     env_file:
       - ../AI-Services/moneyfast-orchestrator/.env
     environment:
+      # LLM sağlayıcısı ve anahtarı. Anahtar TEK ve korumalı:
+      # `:?` compose AYRIŞTIRMA anında çalışıyor, `LLM_PROVIDER` okunmadan
+      # önce -- yani `GROQ_API_KEY` ve `NVIDIA_API_KEY`'in ikisine birden
+      # koruma koymak, ikisini de zorunlu yapardı. Ortak bir ad, dosyadaki
+      # diğer her sırrın sahip olduğu "compose up'ta yüksek sesle çök"
+      # özelliğini geri getiriyor; bugün LLM anahtarı onu taşımayan tek sır.
+      #
+      # `env_file` duruyor: geliştiricinin kendi `.env`'indeki sağlayıcıya
+      # özel ad hâlâ çalışsın diye. Buradaki değer önceliklidir.
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      LLM_API_KEY: ${LLM_API_KEY:?Set LLM_API_KEY in infra/.env}
       MCP_SERVER_URL: http://mcp:8000/sse
       JURISDICTION: ${JURISDICTION:-TR}
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-tr-TR}

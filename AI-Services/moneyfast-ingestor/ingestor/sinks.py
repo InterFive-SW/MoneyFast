@@ -169,6 +169,13 @@ def push_fundamentals(client: httpx.Client, rows: list[dict]) -> Optional[dict]:
         return None
 
 
+#: Tek istekte gönderilecek en fazla haber. RSS turu onlarca satır üretiyor
+#: ve bu sınıra hiç yaklaşmıyor; KAP'ın altı aylık taraması ~15.000 satır
+#: üretiyor. Tek gövdede göndermek, mumlarda bir kez ölçülen hatanın aynısı
+#: olurdu: istek zaman aşımına uğradı, sink None döndü, tur "0 yazıldı" diye
+#: raporladı ve hiçbir yerde hata görünmedi.
+NEWS_PUSH_CHUNK = 500
+
 #: Tek istekte gönderilen çeyreklik satır sayısı. Enstrüman başına 5-8 dönem
 #: geliyor, dolayısıyla evrenin tamamı ~6.000 satır demek ve hepsini tek
 #: gövdede yollamak hem isteği hem tek bir veritabanı işlemini gereksizce
@@ -205,18 +212,39 @@ def push_quarterly(client: httpx.Client, rows: list[dict]) -> Optional[dict]:
 def push_news_to_backend(client: httpx.Client, items: list[dict]) -> Optional[dict]:
     if not items:
         return None
-    try:
-        response = client.post(
-            f"{config.backend_url()}/market/news/ingest",
-            json=_serialise({"items": items}),
-            headers=_headers(),
-            timeout=config.request_timeout() * 3,
-        )
-        response.raise_for_status()
-        return response.json()
-    except Exception as exc:
-        log.error("news ingest failed: %s", exc)
+
+    written = 0
+    delivered = False
+    #: Backend'in çözdüğü sembol haritası. PARÇALAR BOYUNCA BİRİKTİRİLİYOR:
+    #: yalnızca son parçanınkini döndürmek, `run_news`'in RAG'a ilettiği
+    #: haritayı sessizce eksiltirdi -- ve o harita olmayınca korpustaki her
+    #: RSS belgesi tickersız kalıyor. Tam olarak bu ölçülmüştü: "1.970 RSS
+    #: belgesinin SIFIRINDA ticker vardı".
+    symbols: dict[str, list[str]] = {}
+    for start in range(0, len(items), NEWS_PUSH_CHUNK):
+        batch = items[start:start + NEWS_PUSH_CHUNK]
+        try:
+            response = client.post(
+                f"{config.backend_url()}/market/news/ingest",
+                json=_serialise({"items": batch}),
+                headers=_headers(),
+                timeout=config.request_timeout() * 3,
+            )
+            response.raise_for_status()
+            body = response.json() or {}
+            written += body.get("news_written", 0)
+            symbols.update(body.get("news_symbols") or {})
+            delivered = True
+        except Exception as exc:  # noqa: BLE001
+            # Bir parçanın düşmesi kalanını götürmüyor: bir sonraki tur
+            # zaten aynı pencereyi yeniden sunacak ve kayıtlılar elenecek.
+            log.error("news ingest failed for a batch of %d: %s", len(batch), exc)
+    if not delivered:
         return None
+    return {
+        "quotes_written": 0, "candles_written": 0,
+        "news_written": written, "news_symbols": symbols,
+    }
 
 
 def push_news_to_rag(
@@ -303,6 +331,130 @@ def _first_ticker(item: dict, resolved: dict[str, list[str]]) -> Optional[str]:
     """
     candidates = resolved.get(item.get("content_hash") or "") or item.get("related_symbols")
     return (candidates or [None])[0]
+
+#: Bir bildirimin kaç ihraççıya kadar korpusa yazılacağı. Bunun üstü,
+#: endeks geneli ya da idari bir duyurudur: kırk şirkete etiketlenmiş bir
+#: belge hiçbiri hakkında değildir ve hepsinin arama sonuçlarını kirletir.
+MAX_ISSUERS_FOR_CORPUS = 5
+
+
+def fetch_news_coverage(client: httpx.Client) -> dict[str, dict]:
+    """Per source: how much news is held, how recent, and the highest index.
+
+    Never cached, and a failure returns `{}` — which reads as "nothing is
+    covered" and makes the caller do the complete thing. Same shape and same
+    failure direction as `fetch_candle_coverage`.
+    """
+    try:
+        response = client.get(
+            f"{config.backend_url()}/market/news/coverage",
+            headers=_headers(),
+            timeout=config.request_timeout(),
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("news coverage unavailable, assuming none: %s", exc)
+        return {}
+
+
+def fetch_news_archive(
+    client: httpx.Client, source: str, limit: int, offset: int
+) -> list[dict]:
+    """Saklanan bildirimlerin bir sayfası, yeniden eskiye."""
+    try:
+        response = client.get(
+            f"{config.backend_url()}/market/news/archive",
+            params={"source": source, "limit": limit, "offset": offset},
+            headers=_headers(),
+            timeout=config.request_timeout(),
+        )
+        response.raise_for_status()
+        return response.json().get("items") or []
+    except Exception as exc:  # noqa: BLE001
+        log.warning("news archive page unavailable: %s", exc)
+        return []
+
+
+def fetch_embedded_urls(client: httpx.Client, urls: list[str]) -> set[str]:
+    """Bu bildirimlerden hangilerinin GÖVDESİ derlemde zaten var.
+
+    Backend'deki `known-hashes` ile aynı desen ama farklı soru: orada
+    "bu bildirimi biliyor muyuz", burada "metni gömülü mü". Panoya düşmüş
+    olmak, sohbetin onu bulabilmesi demek değil.
+
+    Hata durumunda BOŞ küme dönüyor -- yani "hiçbiri gömülü değil". Burada
+    güvenli yön bu: fazladan indirilen bir gövde `ON CONFLICT` ile eleniyor,
+    atlanan bir gövde ise sessiz bir boşluk bırakırdı.
+    """
+    if not urls:
+        return set()
+    try:
+        response = client.post(
+            f"{config.rag_url()}/documents/known-urls",
+            json={"urls": urls},
+            timeout=config.request_timeout() * 2,
+        )
+        response.raise_for_status()
+        return set(response.json().get("known") or [])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("embedded-url lookup failed, assuming none: %s", exc)
+        return set()
+
+
+def push_disclosures_to_rag(client: httpx.Client, documents: list[dict]) -> int:
+    """Embed KAP disclosure bodies into the corpus.
+
+    `document_type` is **FILING**, a value the MCP contract's `doc_types` enum
+    already carries. Inventing a KAP-specific type would mean reopening a
+    frozen contract to add a value the model could never filter on, because
+    it would not be in the enum the tool documents. `category` and `source`
+    give two more filters for free, both already in `ALLOWED_FILTERS`.
+
+    **Adres `#ekler` ile bitiyor, ve bu taşıyıcı.** Canlı akış (`run_news`)
+    aynı bildirimin GÖVDESİNİ dakikalar içinde `/tr/Bildirim/{index}`
+    adresiyle korpusa yazıyor. Aynı adresi kullansaydık
+    `documents/known-urls` "bende var" derdi ve arşiv işi ekleri bir daha hiç
+    okumazdı -- yani ekli bilançolar, tam da onlar için yazılmış yolun
+    üstünden sessizce silinirdi. Parça hâlâ doğru KAP sayfasına çözülüyor,
+    dolayısıyla atıf bozulmuyor.
+    """
+    written = 0
+    for document in documents:
+        symbols = document.get("related_symbols") or []
+        if len(symbols) > MAX_ISSUERS_FOR_CORPUS:
+            continue
+        text = (document.get("text") or "").strip()
+        if not text:
+            continue
+
+        body = {
+            "title": document["title"],
+            "source": "KAP",
+            "category": "kap-disclosure",
+            "document_type": "FILING",
+            "content": text,
+            "source_url": f"{document['url']}#ekler" if document.get("url") else None,
+            "language": "tr",
+            # The corpus carries ONE ticker column, so the primary filer wins
+            # the filterable slot. Every issuer is named in the first line of
+            # the text instead, which keeps a two-company merger notice
+            # findable for both by semantic search.
+            "ticker": symbols[0] if symbols else None,
+            "published_at": document["published_at"],
+        }
+        try:
+            response = client.post(
+                f"{config.rag_url()}/ingest",
+                json=_serialise(body),
+                timeout=config.request_timeout() * 3,
+            )
+            response.raise_for_status()
+            if response.json().get("status") == "ingested":
+                written += 1
+        except Exception as exc:  # noqa: BLE001
+            log.warning("rag ingest failed for %r: %s", document["title"][:60], exc)
+    return written
 
 def trigger_interest_accrual(client: httpx.Client) -> dict:
     """Vadeli hesap faizlerini işletmesi için backend'i uyarır.

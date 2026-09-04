@@ -4,17 +4,9 @@ RSS is published so that machines can read it. That is the whole reason this
 project uses it instead of scraping rendered pages: there is no bot check to
 get past, because there was never a wall.
 
-Three courtesies are observed anyway, because being technically allowed to
-fetch something is not the same as being a good citizen of someone else's
-server:
-
-* `robots.txt` is checked before the first fetch of a host and honoured.
-* Requests to one host are spaced by a minimum delay.
-* Conditional requests (`If-None-Match` / `If-Modified-Since`) mean an
-  unchanged feed costs the publisher a 304 rather than a full response.
-
-The `User-Agent` names the project and links to it. If an operator wants us
-gone, they can see who we are and say so.
+Courtesies (robots.txt, per-host delay, conditional requests) live in
+`courtesy`, shared with the KAP source: the delay is per HOST, so two modules
+keeping their own timers could each decide they had waited long enough.
 """
 
 from __future__ import annotations
@@ -23,74 +15,20 @@ import hashlib
 import html
 import logging
 import re
-import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
-from urllib.robotparser import RobotFileParser
 
 import httpx
 
 from .. import config
+from . import courtesy
 
 log = logging.getLogger("moneyfast.ingestor.rss")
 
-#: Last fetch time per host, for the courtesy delay.
-_last_request: dict[str, float] = {}
-
-#: ETag / Last-Modified per feed URL, for conditional requests.
-_validators: dict[str, dict[str, str]] = {}
-
-#: robots.txt verdicts, per host. Cached for the process lifetime: re-fetching
-#: it for every poll would itself be impolite.
-_robots: dict[str, Optional[RobotFileParser]] = {}
-
-
-def reset_state() -> None:
-    """Clear the caches. For tests."""
-    _last_request.clear()
-    _validators.clear()
-    _robots.clear()
-
-
-def _may_fetch(url: str, client: httpx.Client) -> bool:
-    if not config.respect_robots():
-        return True
-
-    parsed = urlparse(url)
-    host = f"{parsed.scheme}://{parsed.netloc}"
-    if host not in _robots:
-        parser = RobotFileParser()
-        try:
-            response = client.get(f"{host}/robots.txt", timeout=config.request_timeout())
-            if response.status_code == 200:
-                parser.parse(response.text.splitlines())
-            else:
-                # No robots.txt is permission by convention, not an error.
-                parser = None
-        except Exception as exc:
-            log.warning("could not read robots.txt for %s: %s", host, exc)
-            parser = None
-        _robots[host] = parser
-
-    parser = _robots[host]
-    if parser is None:
-        return True
-    allowed = parser.can_fetch(config.user_agent(), url)
-    if not allowed:
-        log.warning("robots.txt disallows %s, skipping", url)
-    return allowed
-
-
-def _wait_for_host(url: str) -> None:
-    host = urlparse(url).netloc
-    delay = config.per_host_delay()
-    previous = _last_request.get(host)
-    if previous is not None:
-        elapsed = time.monotonic() - previous
-        if elapsed < delay:
-            time.sleep(delay - elapsed)
-    _last_request[host] = time.monotonic()
+#: Kept as an alias so the shared caches can be cleared through either
+#: module; the suite reaches for this one.
+reset_state = courtesy.reset_state
 
 
 #: HTML etiketleri. RSS özetleri işaretlemeyi olduğu gibi taşıyor -- ölçülen
@@ -253,12 +191,12 @@ def fetch_feed(url: str, client: httpx.Client) -> list[dict[str, Any]]:
     """
     import feedparser
 
-    if not _may_fetch(url, client):
+    if not courtesy.may_fetch(url, client):
         return []
 
-    _wait_for_host(url)
+    courtesy.wait_for_host(url)
     headers = {"User-Agent": config.user_agent()}
-    headers.update(_validators.get(url, {}))
+    headers.update(courtesy.validators.get(url, {}))
 
     try:
         response = client.get(url, headers=headers, timeout=config.request_timeout())
@@ -281,7 +219,7 @@ def fetch_feed(url: str, client: httpx.Client) -> list[dict[str, Any]]:
         validators["If-None-Match"] = response.headers["ETag"]
     if response.headers.get("Last-Modified"):
         validators["If-Modified-Since"] = response.headers["Last-Modified"]
-    _validators[url] = validators
+    courtesy.validators[url] = validators
 
     parsed = feedparser.parse(response.text)
     items = []

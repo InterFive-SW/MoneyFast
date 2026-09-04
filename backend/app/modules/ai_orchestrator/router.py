@@ -79,6 +79,11 @@ def _turn_meta(answer: dict) -> dict:
         "compliance_verdict": answer.get("compliance_verdict"),
         "context_topic": answer.get("context_topic"),
         "disclosures": answer.get("disclosures") or [],
+        #: Kaynaklar da saklanıyor, ve widget'lardan ayrılmalarının sebebi
+        #: yukarıdaki ölçüt: bir kaynak eskimez. "Şu belge vardı ve bu cevap
+        #: ona dayanıyordu" yarın da doğru; bir portföy widget'ının fiyatları
+        #: değil.
+        "sources": answer.get("sources") or [],
     }
 
 
@@ -300,6 +305,7 @@ def get_conversation(
                 content=row.content,
                 created_at=row.created_at,
                 disclosures=(row.meta or {}).get("disclosures") or [],
+                sources=(row.meta or {}).get("sources") or [],
             )
             for row in rows
         ],

@@ -8,6 +8,7 @@ from typing import Any, Sequence
 
 import httpx
 
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -140,8 +141,51 @@ def _symbols_for(item: dict[str, Any], universe: list[InvestmentProduct]) -> lis
         # olurdu.
         return sorted(set(declared))
 
-    text = " ".join(filter(None, (item.get("title"), item.get("summary"))))
-    return [row["symbol"] for row in resolve_news_symbols(text, universe)]
+    found = resolve_item_symbols(
+        item.get("source"), item.get("title"), item.get("summary"), universe
+    )
+    return [row["symbol"] for row in found]
+
+
+#: Bildirim kaynakları: gövdesinde ilgili tarafları -- yönetim kurulu
+#: üyesinin başka şirketteki görevini, ana ortaklığı, likidite sağlayıcıyı --
+#: sayan kaynaklar.
+FILING_SOURCES = frozenset({"KAP"})
+
+
+def resolve_item_symbols(
+    source: str | None, title: str | None, summary: str | None, universe: list[Any]
+) -> list[dict[str, str]]:
+    """Bir haber satırının bağlandığı semboller. Bildirimlerde kısa ad dar.
+
+    Kısa ad ("thy", "opet") bir bildirimin GÖVDESİNDE, o bildirimin konusu
+    olmayan bir şirketi işaret ediyor: KAP formları ilgili tarafları tek tek
+    sayıyor. Ölçüldü, kural arşivde 16 farklı (sembol, konu) çiftini
+    düşürüyor ve elle bakıldığında on altısı da yanlış:
+
+      "TÜRKİYE GARANTİ BANKASI A.Ş. — Şirket Genel Bilgi Formu"  -> TKFEN
+      "OTOKAR OTOMOTİV VE SAVUNMA SANAYİ A.Ş. — ..."             -> YKBNK
+      "EMLAK KATILIM VARLIK KİRALAMA A.Ş. — ..."                 -> THYAO
+
+    Kısıt YALNIZCA kısa ada. Açık kod ve resmî ad gövdede de okunmaya devam
+    ediyor, çünkü orada güvenilirler: BISTECH devre kesici bildirimlerinin
+    başlığı jenerik ("BORSA İSTANBUL BISTECH DEVRE KESİCİ UYGULAMASI") ve
+    konu şirket yalnızca gövdede, açık koduyla yazılı. Metnin tamamını
+    başlığa indirgemek bu bildirimlerin 550'sini birden koparıyordu.
+
+    Haber kaynaklarına hiç dokunulmuyor: "Borsada bugün" başlıklı bir yazı
+    gerçekten gövdesinde saydığı hisseler hakkındadır.
+    """
+    text = " ".join(filter(None, (title, summary)))
+    found = resolve_news_symbols(text, universe)
+    if (source or "").strip().upper() not in FILING_SOURCES:
+        return found
+    in_title = {row["symbol"] for row in resolve_news_symbols(title or "", universe)}
+    return [
+        row
+        for row in found
+        if row["basis"] != "ALIAS" or row["symbol"] in in_title
+    ]
 
 
 def resolve_news_symbols(text: str, universe: list[Any]) -> list[dict[str, str]]:
@@ -153,6 +197,66 @@ def resolve_news_symbols(text: str, universe: list[Any]) -> list[dict[str, str]]
     yanlış bağ yazıyordu.
     """
     return symbol_match.resolve_symbols(text, universe, LOCAL_TICKER_MARKETS)
+
+
+def news_coverage(db: Session) -> dict[str, dict]:
+    """Kaynak başına: kaç haber var, en yenisi ne zaman, en yüksek numara.
+
+    `candle_coverage` ile aynı soru, haberler için. Ama bir fark var:
+    KAP bildirim numarası MONOTON artıyor, dolayısıyla "elimizdeki en yüksek
+    numara" bir tarihten hem daha ucuz hem daha kesin bir su seviyesi.
+
+    Numara için ayrı bir sütun YOK ve gerekmiyor: kalıcı bağlantının kendisi
+    numarayı taşıyor (`/tr/Bildirim/1655982`) ve o bağlantı atıf için zaten
+    saklanıyor.
+
+    **Bu bir su seviyesi, tamlık kanıtı değil.** Yarıda kesilmiş bir tur,
+    en yüksek numaranın ALTINDA boşluk bırakır; onu `known-ids` yakalar.
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT source,
+                   count(*)                    AS items,
+                   max(published_at)           AS last,
+                   max(CASE WHEN url ~ '/Bildirim/[0-9]+$'
+                            THEN substring(url from '/Bildirim/([0-9]+)$')::bigint
+                       END)                    AS last_index
+            FROM market.news_items
+            GROUP BY source
+            """
+        )
+    ).all()
+    return {
+        row.source: {
+            "items": row.items,
+            # `~` koruması taşıyıcı: onsuz `::bigint` dönüşümü RSS
+            # bağlantılarını da görür ve uç nokta 500 döner.
+            "last": row.last.date().isoformat() if row.last else None,
+            "last_index": int(row.last_index) if row.last_index is not None else None,
+        }
+        for row in rows
+    }
+
+
+def news_archive(
+    db: Session, source: str, limit: int, offset: int
+) -> list[NewsItem]:
+    """Saklanan bildirimler, yeniden eskiye.
+
+    `latest_news`'ten ayrı: o pano beslemesi (yirmi satır, kaynak farketmez),
+    bu arşivi kapatan iş için sayfalanmış bir tarama. Yeniden eskiye,
+    `topup`/`backfill` ile aynı gerekçeyle: yarıda kesilen bir tur bitişik ve
+    GÜNCEL bir arşiv bırakır, rastgele bir serpinti değil.
+    """
+    return (
+        db.query(NewsItem)
+        .filter(NewsItem.source == source)
+        .order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
 
 
 def latest_news(db: Session, limit: int = 20) -> list[NewsItem]:

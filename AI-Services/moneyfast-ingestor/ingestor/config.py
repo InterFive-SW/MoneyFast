@@ -244,3 +244,63 @@ def fundamentals_workers() -> int:
     sağlayıcıyı zorlamak değil.
     """
     return max(1, min(16, _int("INGESTOR_FUNDAMENTALS_WORKERS", 6)))
+
+
+# ── KAP ──────────────────────────────────────────────────────────────────────
+# Kamuyu Aydınlatma Platformu. Ayrı bir kaynak, ayrı bir tempo: bildirimler
+# haber akışından seyrek gelir ama fiyat etkisi daha yüksektir.
+
+
+def kap_base_url() -> str:
+    return os.getenv("INGESTOR_KAP_BASE_URL", "https://www.kap.org.tr").rstrip("/")
+
+
+def kap_interval_minutes() -> int:
+    """Bildirim yoklama aralığı.
+
+    Piyasa saatlerine BAĞLANMIYOR: fiyata en çok etki eden bildirimler
+    18:00 kapanışından sonra ve açılıştan önce yayımlanıyor. Seansa
+    kısıtlamak, tam da beklenmesi gereken açıklamaları kaçırmak olurdu.
+    """
+    return max(1, _int("INGESTOR_KAP_INTERVAL_MINUTES", 20))
+
+
+def kap_window_days() -> int:
+    """Tek `byCriteria` çağrısının kapsadığı gün sayısı.
+
+    Ölçüldü: bir haftada 1101, altmış günde tam 2000 (yani tavan). Üç gün
+    ~470 satır demek, tavanın çok altında — dolayısıyla olağan durumda
+    pencere hiç ikiye bölünmüyor.
+    """
+    return max(1, _int("INGESTOR_KAP_WINDOW_DAYS", 3))
+
+
+def kap_backfill_days() -> int:
+    """Geçmişe dönük tarama derinliği. 183 = altı ay."""
+    return max(1, _int("INGESTOR_KAP_BACKFILL_DAYS", 183))
+
+
+def kap_pdf_window_days() -> int:
+    """Ekli PDF'lerin okunacağı geriye dönük pencere, gün.
+
+    Ekler gövdeden pahalı: ek başına bir indirme daha, artı ayrıştırma.
+    Altı aylık taramanın tamamında açık bırakmak, sürenin üçte birini
+    kimsenin sormayacağı eski bilanço eklerine harcamak olurdu. Güncel
+    bildirimlerde açık, derin taramada kapalı.
+    """
+    return max(0, _int("INGESTOR_KAP_PDF_WINDOW_DAYS", 30))
+
+
+def kap_corpus_page() -> int:
+    """Arşiv taramasında tek seferde okunan bildirim sayısı."""
+    return max(1, _int("INGESTOR_KAP_CORPUS_PAGE", 300))
+
+
+def kap_corpus_budget() -> int:
+    """Tek turda kaç eksik gövde indirilir.
+
+    Gövde başına bir istek ve host başına iki saniye var. Sınırsız
+    bırakmak, 28.984 bildirimlik arşivde tek bir turun saatlerce sürmesi ve
+    bu arada başka hiçbir işin sıra bulamaması demekti.
+    """
+    return max(0, _int("INGESTOR_KAP_CORPUS_BUDGET", 120))

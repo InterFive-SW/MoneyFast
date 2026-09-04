@@ -128,6 +128,21 @@ class TestHappyPath:
         for result in payload["results"]:
             assert set(result) == rag_result_keys, result["chunk_id"]
 
+    async def test_provenance_is_serialised_before_the_passage(self):
+        """Key order is in no contract, but it is load-bearing downstream.
+
+        The orchestrator truncates the serialised specialist output before
+        synthesis. When `snippet` came first, a cut landing mid-result kept
+        that result's text and dropped its `url`, and the prompt then tells
+        the model to name the publisher in plain text instead -- so the
+        citation vanished with no error anywhere. Emitting provenance first
+        makes a truncation cost text rather than attribution.
+        """
+        payload = await market_research_tools.rag_semantic_market_search("THY")
+        keys = list(payload["results"][0])
+        for field in ("publisher", "published_at", "url"):
+            assert keys.index(field) < keys.index("snippet"), field
+
     async def test_freshness_is_propagated(self):
         payload = await market_research_tools.rag_semantic_market_search("THY")
         assert_iso8601_utc(payload["as_of"])

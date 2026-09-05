@@ -1567,3 +1567,26 @@ describe('funds (TEFAS)', () => {
         expect(calledUrl(fetchMock)).toBe('/api/market/funds/a%2Fb/prices?limit=10')
     })
 })
+
+describe('getFundCandles', () => {
+    beforeEach(() => localStorage.clear())
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('sends the window and defaults to 3A', () => {
+        const fetchMock = mockFetch({ candles: [] })
+        apiClient.getFundCandles('AAL')
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds/AAL/candles?window=3A')
+    })
+
+    it('honours an explicit window', () => {
+        const fetchMock = mockFetch({ candles: [] })
+        apiClient.getFundCandles('AAL', '1Y')
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds/AAL/candles?window=1Y')
+    })
+
+    it('escapes the code rather than pasting it into the path', () => {
+        const fetchMock = mockFetch({})
+        apiClient.getFundCandles('a/b', '5Y')
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds/a%2Fb/candles?window=5Y')
+    })
+})

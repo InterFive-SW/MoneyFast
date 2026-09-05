@@ -68,6 +68,12 @@ export interface ApiFund {
     investorCount?: number | null
     size?: number | null
     asOf?: string | null
+    /** TEFAS'ın kategori içi sırası: "86 fon içinde 71." */
+    categoryRank?: number | null
+    categorySize?: number | null
+    /** Kategorinin ortalama getirisi -- fonun getirisinin ölçüldüğü yer. */
+    categoryReturn?: number | null
+    shares?: number | null
     returns: FundReturns
 }
 
@@ -83,6 +89,14 @@ export interface FundSeries {
     code: string
     currency: string
     points: { date: string; price: number }[]
+}
+
+export interface FundCandles {
+    code: string
+    currency: string
+    /** `week` ya da `month`. */
+    bucket: string
+    candles: { date: string; open: number; high: number; low: number; close: number }[]
 }
 
 // --- Banking: bills, staged payments, saved payees -------------------------
@@ -1288,6 +1302,15 @@ class ApiClient {
         if (params?.limit != null) query.set('limit', String(params.limit))
         const suffix = query.toString() ? `?${query}` : ''
         return this.request<FundList>(`/market/funds${suffix}`)
+    }
+
+    /** Fonun mum serisi. Kova genişliği YANITTA geliyor: fon günde tek
+     *  fiyat yayımlıyor, dolayısıyla günlük mum yok ve kullanıcı baktığı
+     *  çubuğun bir haftayı mı bir ayı mı özetlediğini bilmeli. */
+    getFundCandles(code: string, window = '3A') {
+        return this.request<FundCandles>(
+            `/market/funds/${encodeURIComponent(code)}/candles?window=${encodeURIComponent(window)}`,
+        )
     }
 
     /** Bir fonun NAV serisi — fon grafiğinin okuduğu yer. */

@@ -97,6 +97,14 @@ class Fund(Base):
     #: Fon fiyatı GÜNLÜKTÜR. Zaman damgası taşımak, olmayan bir anlık değeri
     #: varmış gibi gösterirdi.
     as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: TEFAS'ın kendi kategori ölçümleri -- hesaplanmış değil, ölçülmüş.
+    #: "86 para piyasası fonu içinde 71." Bir getirinin iyi mi kötü mü
+    #: olduğunu tek başına getiri söylemiyor; sıra söylüyor.
+    category_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    category_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Kategorinin ortalama getirisi. %38'in iyi olup olmadığı ancak
+    #: kategori %41 yaptıysa cevaplanabiliyor.
+    category_return: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False

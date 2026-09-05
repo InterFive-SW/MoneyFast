@@ -134,3 +134,104 @@ class TestUpsert:
         funds_service.upsert_funds(db, [{"code": "AAL", "title": "AD", "founder": None}])
         written = db.execute.call_args[0][0].compile().params
         assert "founder" not in written or written.get("founder") is not None
+
+
+class TestCandles:
+    """Fon günde TEK fiyat yayımlıyor.
+
+    Günlük bir mumun açılış/yüksek/düşük/kapanışı aynı sayı olurdu -- yani
+    mum değil, yassı bir çizgi. Gerçek bir mum ancak birkaç gün KOVALANARAK
+    çıkıyor.
+    """
+
+    def _db(self, series):
+        db = MagicMock()
+        db.execute.return_value.scalars.return_value = series
+        return db
+
+    def test_a_week_becomes_one_candle_with_real_extremes(self, mocker):
+        series = [
+            price("2026-08-31", 10.0),  # pazartesi
+            price("2026-09-01", 12.0),
+            price("2026-09-02", 9.0),
+            price("2026-09-03", 11.0),
+        ]
+        mocker.patch.object(funds_service, "price_series", return_value=series)
+        out = funds_service.candles(MagicMock(), "AAL", "3A")
+        assert len(out) == 1
+        assert out[0]["open"] == 10.0   # kovanın ilk NAV'ı
+        assert out[0]["high"] == 12.0
+        assert out[0]["low"] == 9.0
+        assert out[0]["close"] == 11.0  # kovanın son NAV'ı
+
+    def test_two_weeks_become_two_candles(self, mocker):
+        series = [price("2026-08-31", 10.0), price("2026-09-07", 20.0)]
+        mocker.patch.object(funds_service, "price_series", return_value=series)
+        assert len(funds_service.candles(MagicMock(), "AAL", "3A")) == 2
+
+    def test_a_long_range_buckets_by_month(self, mocker):
+        """Bir yılı haftalık kovalarla çizmek 52 çubuk demek; aylık kova
+        okunabilir kalıyor."""
+        series = [
+            price("2026-07-01", 10.0), price("2026-07-20", 11.0),
+            price("2026-08-05", 12.0),
+        ]
+        mocker.patch.object(funds_service, "price_series", return_value=series)
+        out = funds_service.candles(MagicMock(), "AAL", "1Y")
+        assert len(out) == 2
+        assert out[0]["high"] == 11.0
+
+    def test_candles_are_ordered_oldest_first(self, mocker):
+        series = [price("2026-07-01", 10.0), price("2026-08-05", 12.0)]
+        mocker.patch.object(funds_service, "price_series", return_value=series)
+        out = funds_service.candles(MagicMock(), "AAL", "1Y")
+        assert [c["date"] for c in out] == sorted(c["date"] for c in out)
+
+    def test_rows_outside_the_window_are_excluded(self, mocker):
+        """Pencere SON gözlemden geriye sayılıyor, bugünden değil: hafta
+        sonu ya da tatil, bir fonun bütün serisini pencere dışına itmemeli."""
+        series = [price("2020-01-01", 1.0), price("2026-09-04", 12.0)]
+        mocker.patch.object(funds_service, "price_series", return_value=series)
+        assert len(funds_service.candles(MagicMock(), "AAL", "1A")) == 1
+
+    def test_an_empty_series_yields_no_candles(self, mocker):
+        mocker.patch.object(funds_service, "price_series", return_value=[])
+        assert funds_service.candles(MagicMock(), "AAL", "3A") == []
+
+    def test_an_unknown_window_falls_back_rather_than_raising(self, mocker):
+        mocker.patch.object(
+            funds_service, "price_series", return_value=[price("2026-09-04", 1.0)],
+        )
+        assert funds_service.candles(MagicMock(), "AAL", "42Y") != []
+
+    def test_no_volume_is_reported(self, mocker):
+        """Bir fonun günlük işlem hacmi TEFAS'ta yayımlanmıyor ve sıfır
+        yazmak "hiç kimse almadı" demek olurdu."""
+        mocker.patch.object(
+            funds_service, "price_series", return_value=[price("2026-09-04", 1.0)],
+        )
+        assert "volume" not in funds_service.candles(MagicMock(), "AAL", "3A")[0]
+
+    def test_the_monday_of_a_week_keys_the_bucket(self):
+        from datetime import date as _date
+
+        assert funds_service._bucket_key(_date(2026, 9, 4), "week") == _date(2026, 8, 31)
+        assert funds_service._bucket_key(_date(2026, 9, 4), "month") == _date(2026, 9, 1)
+
+
+class TestCoverage:
+    def test_a_fund_with_a_series_but_no_rank_is_listed_separately(self, mocker):
+        """Kategori sırası fiyat serisiyle aynı yanıtta geliyor, ama seriyi
+        ölçüler eklenmeden önce çekilmiş fonlarda sıra boş kaldı. Onları
+        ayrıca listelemek, seriyi silip yeniden çekmekten ucuz."""
+        db = MagicMock()
+        db.execute.return_value.scalars.return_value.all.side_effect = [
+            ["AAL", "AAS"],   # aktif fonlar
+            [],               # şemsiyesi eksik
+            ["AAL"],          # fiyatı olan
+            ["AAL", "AAS"],   # sırası eksik
+        ]
+        out = funds_service.coverage(db)
+        assert out["missing_prices"] == ["AAS"]
+        # AAS'ın serisi zaten yok; iki kez istenmemeli.
+        assert out["missing_category"] == ["AAL"]

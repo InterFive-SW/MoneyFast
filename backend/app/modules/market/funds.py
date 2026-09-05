@@ -211,8 +211,71 @@ def coverage(db: Session) -> dict[str, Any]:
         select(Fund.code).where(Fund.active.is_(True), Fund.umbrella.is_(None))
     ).scalars().all()
     priced = db.execute(select(FundPrice.code).distinct()).scalars().all()
+    # Kategori sırası fiyat serisiyle AYNI yanıtta geliyor, ama seriyi
+    # ölçüler eklenmeden önce çekilmiş fonlarda sıra boş kaldı. Onları
+    # ayrıca listelemek, seriyi silip yeniden çekmekten ucuz.
+    missing_category = db.execute(
+        select(Fund.code).where(Fund.active.is_(True), Fund.category_rank.is_(None))
+    ).scalars().all()
+    priced_set = set(priced)
     return {
         "funds": len(total),
         "missing_umbrella": list(missing_umbrella),
-        "missing_prices": [code for code in total if code not in set(priced)],
+        "missing_prices": [code for code in total if code not in priced_set],
+        "missing_category": [code for code in missing_category if code in priced_set],
     }
+
+
+# ── Mumlar ──────────────────────────────────────────────────────────────────
+
+#: Aralık -> (kova, kaç gün geriye).
+#:
+#: Fon günde TEK fiyat yayımlıyor. Günlük bir mumun açılış/yüksek/düşük/
+#: kapanışı aynı sayı olurdu -- yani mum değil, yassı bir çizgi. Gerçek bir
+#: mum ancak birkaç gün KOVALANARAK çıkıyor: açılış = kovanın ilk NAV'ı,
+#: yüksek/düşük = kova uçları, kapanış = son. Her değer ölçülmüş oluyor.
+CANDLE_RANGES: dict[str, tuple[str, int]] = {
+    "1A": ("week", 30),
+    "3A": ("week", 90),
+    "1Y": ("month", 365),
+    "5Y": ("month", 1825),
+}
+
+
+def _bucket_key(day: date, bucket: str) -> date:
+    """Bir günün ait olduğu kovanın başlangıcı."""
+    if bucket == "month":
+        return day.replace(day=1)
+    # Haftanın pazartesisi.
+    return day - timedelta(days=day.weekday())
+
+
+def candles(db: Session, code: str, window: str = "3A") -> list[dict[str, Any]]:
+    """Fonun NAV serisinden kovalanmış OHLC.
+
+    Seri eskiden yeniye geliyor, dolayısıyla her kovanın ilk gördüğü satır
+    açılış, sonuncusu kapanış.
+    """
+    bucket, days = CANDLE_RANGES.get(window) or CANDLE_RANGES["3A"]
+    series = price_series(db, code, limit=2000)
+    if not series:
+        return []
+
+    cutoff = series[-1].as_of - timedelta(days=days)
+    buckets: dict[date, dict[str, Any]] = {}
+    for row in series:
+        if row.as_of < cutoff:
+            continue
+        key = _bucket_key(row.as_of, bucket)
+        price = float(row.price)
+        current = buckets.get(key)
+        if current is None:
+            buckets[key] = {
+                "date": key, "open": price, "high": price,
+                "low": price, "close": price,
+            }
+            continue
+        current["high"] = max(current["high"], price)
+        current["low"] = min(current["low"], price)
+        current["close"] = price
+    return [buckets[key] for key in sorted(buckets)]

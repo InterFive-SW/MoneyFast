@@ -67,6 +67,25 @@ export default function FundDetail() {
     { label: 'Fiyat', value: fund.price == null ? '—' : formatMoney(fund.price) },
     { label: 'Fon Büyüklüğü', value: fund.size == null ? '—' : `${formatCompact(fund.size)} ₺` },
     { label: 'Yatırımcı Sayısı', value: fund.investorCount == null ? '—' : formatCompact(fund.investorCount) },
+    // TEFAS'ın kendi ölçümü, hesaplanmış değil. Bir getirinin iyi mi kötü
+    // mü olduğunu tek başına getiri söylemiyor; sıra söylüyor.
+    {
+      label: 'Kategori Sırası',
+      value:
+        fund.categoryRank == null || fund.categorySize == null
+          ? '—'
+          : `${fund.categoryRank} / ${fund.categorySize}`,
+    },
+    // Fonun kendi getirisinin ölçüldüğü yer: %38 iyi mi, ancak kategori
+    // ne yaptıysa ona göre.
+    {
+      label: 'Kategori Getirisi',
+      value:
+        fund.categoryReturn == null
+          ? '—'
+          : `${fund.categoryReturn > 0 ? '+' : ''}${fund.categoryReturn.toFixed(2)}%`,
+    },
+    { label: 'Tedavüldeki Pay', value: fund.shares == null ? '—' : formatCompact(fund.shares) },
     // Fon fiyatı GÜNLÜKTÜR; saat göstermek olmayan bir anlık değeri varmış
     // gibi gösterirdi.
     { label: 'Fiyat Tarihi', value: fund.asOf ? formatDate(fund.asOf) : '—' },
@@ -91,7 +110,7 @@ export default function FundDetail() {
         {fund.founder && <p className="mt-0.5 text-xs text-slate-400">{fund.founder}</p>}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-7">
         {stats.map((stat) => (
           <div key={stat.label} className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">

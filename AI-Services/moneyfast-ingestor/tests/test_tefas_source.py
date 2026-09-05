@@ -221,7 +221,7 @@ class TestPricesAndProfile:
             {"fonKodu": "AAL", "tarih": "2025-09-04", "fiyat": 2.474397},
             {"fonKodu": "AAL", "tarih": "2025-09-05", "fiyat": 2.476952},
         ])})
-        rows = tefas_source.fetch_prices("AAL", client_for(handler))
+        rows, _ = tefas_source.fetch_prices("AAL", client_for(handler))
         assert [row["as_of"] for row in rows] == ["2025-09-04", "2025-09-05"]
 
     def test_returns_are_not_computed_here(self):
@@ -230,9 +230,8 @@ class TestPricesAndProfile:
         handler = route_handler({"fonFiyatBilgiGetir": ok([
             {"tarih": "2025-09-04", "fiyat": 1.0},
         ])})
-        assert set(tefas_source.fetch_prices("AAL", client_for(handler))[0]) == {
-            "code", "as_of", "price",
-        }
+        rows, _ = tefas_source.fetch_prices("AAL", client_for(handler))
+        assert set(rows[0]) == {"code", "as_of", "price"}
 
     @pytest.mark.parametrize("row", [
         {"tarih": "dün", "fiyat": 1.0}, {"tarih": "2025-09-04", "fiyat": None},
@@ -240,15 +239,33 @@ class TestPricesAndProfile:
     ])
     def test_an_unusable_price_row_is_dropped(self, row):
         handler = route_handler({"fonFiyatBilgiGetir": ok([row])})
-        assert tefas_source.fetch_prices("AAL", client_for(handler)) == []
+        assert tefas_source.fetch_prices("AAL", client_for(handler))[0] == []
 
     def test_the_umbrella_comes_from_the_profile(self):
         handler = route_handler({"fonProfilDtyGetir": ok([
-            {"fonKodu": "AAL", "fonTuru": "Para Piyasası Şemsiye Fonu"},
+            {"fonKodu": "AAL", "fonTuru": "Para Piyasası Şemsiye Fonu",
+             "fonTurGetiri": 0.429986},
         ])})
         assert tefas_source.fetch_profile("AAL", client_for(handler)) == {
             "code": "AAL", "umbrella": "Para Piyasası Şemsiye Fonu",
+            "category_return": 0.429986,
         }
+
+    def test_the_category_rank_rides_the_same_price_response(self):
+        """Ayrıca istemek 2.602 isteği ikinci kez yapmak olurdu."""
+        handler = route_handler({"fonFiyatBilgiGetir": ok([
+            {"tarih": "2025-09-04", "fiyat": 1.0,
+             "kategoriDerece": 71, "kategoriFonSay": 86},
+        ])})
+        _, metrics = tefas_source.fetch_prices("AAL", client_for(handler))
+        assert metrics == {"code": "AAL", "category_rank": 71, "category_size": 86}
+
+    def test_a_missing_rank_is_absent_not_zero(self):
+        """Sıfır "kategorisinde birinci" demek olurdu."""
+        handler = route_handler({"fonFiyatBilgiGetir": ok([
+            {"tarih": "2025-09-04", "fiyat": 1.0},
+        ])})
+        assert tefas_source.fetch_prices("AAL", client_for(handler))[1] is None
 
     def test_a_profile_without_an_umbrella_is_none(self):
         handler = route_handler({"fonProfilDtyGetir": ok([{"fonTuru": ""}])})

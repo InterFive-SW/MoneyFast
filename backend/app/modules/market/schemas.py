@@ -570,6 +570,14 @@ class FundOut(BaseModel):
     size: Optional[float] = None
     #: Fiyatın ait olduğu GÜN. Fon fiyatı günlüktür.
     asOf: Optional[date] = None
+    #: TEFAS'ın kategori içi sırası: "86 fon içinde 71." Sıra, getirinin
+    #: tek başına söyleyemediği şeyi söylüyor.
+    categoryRank: Optional[int] = None
+    categorySize: Optional[int] = None
+    #: Kategorinin ortalama getirisi -- fonun kendi getirisinin ölçüldüğü yer.
+    categoryReturn: Optional[float] = None
+    #: Tedavüldeki pay sayısı.
+    shares: Optional[float] = None
     returns: FundReturnsOut = Field(default_factory=FundReturnsOut)
 
 
@@ -592,6 +600,30 @@ class FundSeriesOut(BaseModel):
     #: fiyat para birimi olmadan taşınmaz, bu deponun kuralı.
     currency: str = "TRY"
     points: List[FundPricePointOut] = Field(default_factory=list)
+
+
+class FundCandleOut(BaseModel):
+    """Kovalanmış bir mum.
+
+    Hacim YOK: bir fonun günlük işlem hacmi TEFAS'ta yayımlanmıyor ve
+    sıfır yazmak "hiç kimse almadı" demek olurdu.
+    """
+
+    date: date
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+class FundCandleSeriesOut(BaseModel):
+    code: str
+    currency: str = "TRY"
+    #: `week` ya da `month` -- arayüz "haftalık mum" diye yazabilsin diye.
+    #: Fon günde tek fiyat yayımlıyor, dolayısıyla günlük mum diye bir şey
+    #: yok ve kullanıcının kovanın genişliğini bilmesi gerekiyor.
+    bucket: str
+    candles: List[FundCandleOut] = Field(default_factory=list)
 
 
 class FundIngestRequest(BaseModel):

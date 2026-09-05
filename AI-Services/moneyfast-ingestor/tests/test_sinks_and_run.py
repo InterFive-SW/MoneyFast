@@ -2024,8 +2024,10 @@ class TestTefasCycle:
                             lambda c: [{"code": "AAL", "price": 3.35}])
         monkeypatch.setattr(run.tefas_source, "fetch_profile",
                             lambda code, c: {"code": code, "umbrella": "Para Piyasası"})
-        monkeypatch.setattr(run.tefas_source, "fetch_prices",
-                            lambda code, c: [{"code": code, "as_of": "2026-09-05", "price": 1.0}])
+        monkeypatch.setattr(
+            run.tefas_source, "fetch_prices",
+            lambda code, c: ([{"code": code, "as_of": "2026-09-05", "price": 1.0}], None),
+        )
         monkeypatch.setattr(run.sinks, "fetch_fund_coverage",
                             lambda c: {"missing_umbrella": ["AAL"], "missing_prices": ["AAL"]})
         monkeypatch.setattr(
@@ -2053,7 +2055,7 @@ class TestTefasCycle:
         )
         monkeypatch.setattr(
             run.tefas_source, "fetch_prices",
-            lambda code, c: asked["prices"].append(code) or [],
+            lambda code, c: (asked["prices"].append(code) or [], None),
         )
         monkeypatch.setattr(run.sinks, "fetch_fund_coverage", lambda c: {
             "missing_umbrella": ["A", "B", "C", "D"], "missing_prices": ["A", "B", "C"],
@@ -2066,6 +2068,29 @@ class TestTefasCycle:
         assert asked["profiles"] == ["A", "B"]
         assert asked["prices"] == ["A"]
 
+    def test_the_category_rank_rides_the_price_fetch(self, monkeypatch):
+        """Sıra AYNI yanıtta geliyor; ayrıca istemek 2.602 isteği ikinci kez
+        yapmak olurdu."""
+        self._enable(monkeypatch)
+        pushed = {}
+        monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_profile", lambda code, c: None)
+        monkeypatch.setattr(
+            run.tefas_source, "fetch_prices",
+            lambda code, c: ([], {"code": code, "category_rank": 7, "category_size": 9}),
+        )
+        monkeypatch.setattr(run.sinks, "fetch_fund_coverage",
+                            lambda c: {"missing_umbrella": [], "missing_prices": ["AAL"]})
+        monkeypatch.setattr(
+            run.sinks, "push_funds_to_backend",
+            lambda c, funds, prices=None: pushed.update(funds=list(funds))
+            or {"funds_written": 0, "prices_written": 0},
+        )
+        run.run_tefas(None)
+        # Seri boş ama ölçüm var: yine de yazılıyor.
+        assert pushed["funds"] == [{"code": "AAL", "category_rank": 7, "category_size": 9}]
+
     def test_nothing_missing_means_no_extra_requests(self, monkeypatch):
         self._enable(monkeypatch)
         asked = []
@@ -2074,7 +2099,7 @@ class TestTefasCycle:
         monkeypatch.setattr(run.tefas_source, "fetch_profile",
                             lambda code, c: asked.append(code))
         monkeypatch.setattr(run.tefas_source, "fetch_prices",
-                            lambda code, c: asked.append(code) or [])
+                            lambda code, c: (asked.append(code) or [], None))
         monkeypatch.setattr(run.sinks, "fetch_fund_coverage", lambda c: {})
         monkeypatch.setattr(
             run.sinks, "push_funds_to_backend",
@@ -2088,7 +2113,7 @@ class TestTefasCycle:
         monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
         monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
         monkeypatch.setattr(run.tefas_source, "fetch_profile", lambda code, c: None)
-        monkeypatch.setattr(run.tefas_source, "fetch_prices", lambda code, c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_prices", lambda code, c: ([], None))
         monkeypatch.setattr(run.sinks, "fetch_fund_coverage",
                             lambda c: {"missing_umbrella": ["A"], "missing_prices": ["A"]})
         monkeypatch.setattr(

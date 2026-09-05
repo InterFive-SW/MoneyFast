@@ -655,11 +655,15 @@ def run_tefas(client: httpx.Client) -> dict:
             : config.tefas_price_budget()
         ]
         prices: list[dict] = []
+        category_metrics: list[dict] = []
         for code in missing_prices:
-            prices.extend(tefas_source.fetch_prices(code, tefas))
-        if prices:
+            series, category = tefas_source.fetch_prices(code, tefas)
+            prices.extend(series)
+            if category is not None:
+                category_metrics.append(category)
+        if prices or category_metrics:
             written["prices_written"] += sinks.push_funds_to_backend(
-                client, [], prices,
+                client, category_metrics, prices,
             )["prices_written"]
 
     log.info(

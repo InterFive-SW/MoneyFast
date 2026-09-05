@@ -256,12 +256,19 @@ def _normalise_daily(row: dict[str, Any], fund_type: str) -> Optional[dict[str, 
     }
 
 
-def fetch_prices(code: str, client: httpx.Client, months: int = 12) -> list[dict[str, Any]]:
-    """Bir fonun NAV serisi. Fon mum grafiğini ve getirileri besleyen şey.
+def fetch_prices(
+    code: str, client: httpx.Client, months: int = 12,
+) -> tuple[list[dict[str, Any]], Optional[dict[str, Any]]]:
+    """Bir fonun NAV serisi VE aynı çağrının taşıdığı kategori ölçüleri.
 
     Getiriler burada HESAPLANMIYOR: seri saklanıyor, yüzdeler backend'de
     ondan türetiliyor. Aynı sayıyı iki yerde hesaplamak, iki farklı cevap
     üretebileceği bir yer açardı.
+
+    Ama `kategoriDerece` / `kategoriFonSay` hesaplanmış bir şey değil,
+    TEFAS'ın kendi ölçümü ("86 para piyasası fonu içinde 71.") ve AYNI
+    yanıtta geliyor. Bir dönem atılıyorlardı; onları ayrıca istemek 2.602
+    isteği ikinci kez yapmak olurdu.
     """
     rows = _rows(_post("funds/fonFiyatBilgiGetir",
                        {"fonKodu": code, "dil": "TR", "periyod": months}, client))
@@ -272,7 +279,20 @@ def fetch_prices(code: str, client: httpx.Client, months: int = 12) -> list[dict
         if day is None or price is None:
             continue
         out.append({"code": code, "as_of": day, "price": price})
-    return out
+
+    # Sıra her satırda tekrar ediyor; en yenisi geçerli olan.
+    metrics: Optional[dict[str, Any]] = None
+    for row in reversed(rows):
+        rank = _number(row.get("kategoriDerece"))
+        size = _number(row.get("kategoriFonSay"))
+        if rank is not None and size is not None:
+            metrics = {
+                "code": code,
+                "category_rank": int(rank),
+                "category_size": int(size),
+            }
+            break
+    return out, metrics
 
 
 def fetch_profile(code: str, client: httpx.Client) -> Optional[dict[str, Any]]:
@@ -282,7 +302,14 @@ def fetch_profile(code: str, client: httpx.Client) -> Optional[dict[str, Any]]:
     for row in rows:
         umbrella = str(row.get("fonTuru") or "").strip()
         if umbrella:
-            return {"code": code, "umbrella": umbrella}
+            return {
+                "code": code,
+                "umbrella": umbrella,
+                # Kategorinin ortalama getirisi. Fonun kendi getirisinin
+                # yanında ANLAMLI bir karşılaştırma: %38 iyi mi kötü mü,
+                # ancak kategorisi %41 yaptıysa cevaplanabiliyor.
+                "category_return": _number(row.get("fonTurGetiri")),
+            }
     return None
 
 

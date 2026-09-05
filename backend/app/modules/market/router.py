@@ -16,6 +16,7 @@ from . import funds as funds_service
 from . import service, stream, technicals
 from .schemas import (
     CandleSeriesOut,
+    FundCandleSeriesOut,
     FundIngestRequest,
     FundListOut,
     FundOut,
@@ -968,6 +969,34 @@ def get_fund_prices(
     }
 
 
+@router.get(
+    "/funds/{code}/candles",
+    response_model=FundCandleSeriesOut,
+    summary="Fonun mum serisi",
+)
+def get_fund_candles(
+    code: str,
+    window: str = Query(default="3A"),
+    db: Session = Depends(get_db),
+):
+    """Kovalanmış OHLC.
+
+    Fon günde TEK fiyat yayımlıyor, dolayısıyla GÜNLÜK mum diye bir şey
+    yok: açılış/yüksek/düşük/kapanış aynı sayı olurdu. Kova genişliği
+    yanıtta taşınıyor ki arayüz "haftalık mum" diye yazabilsin -- kullanıcı
+    baktığı çubuğun bir günü mü bir haftayı mı özetlediğini bilmeli.
+    """
+    if window not in funds_service.CANDLE_RANGES:
+        raise HTTPException(status_code=422, detail=f"Bilinmeyen aralık: {window}")
+    bucket, _ = funds_service.CANDLE_RANGES[window]
+    return {
+        "code": code.strip().upper(),
+        "currency": "TRY",
+        "bucket": bucket,
+        "candles": funds_service.candles(db, code, window),
+    }
+
+
 @router.post("/funds/ingest", summary="Fon verisi yaz (servis işi)")
 def ingest_funds(
     request: FundIngestRequest,
@@ -1007,5 +1036,9 @@ def _fund_row(db: Session, row) -> dict:
         "investorCount": row.investors,
         "size": float(row.size) if row.size is not None else None,
         "asOf": row.as_of,
+        "categoryRank": row.category_rank,
+        "categorySize": row.category_size,
+        "categoryReturn": float(row.category_return) if row.category_return is not None else None,
+        "shares": float(row.shares) if row.shares is not None else None,
         "returns": funds_service.returns_for(series),
     }

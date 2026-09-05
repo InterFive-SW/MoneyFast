@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ingestor import config
 
 
@@ -185,3 +187,42 @@ class TestKap:
         monkeypatch.setenv("INGESTOR_KAP_WINDOW_DAYS", "0")
         assert config.kap_interval_minutes() == 20
         assert config.kap_window_days() == 1
+
+
+class TestTefasConfig:
+    """TEFAS varsayılan olarak KAPALI.
+
+    Bu kaynak sitenin `robots.txt`'inde belirttiği tercihi geçersiz kılıyor;
+    klonlayan bir ekip arkadaşının farkında olmadan devreye sokması doğru
+    olmaz -- açmak bilinçli bir adım olmalı.
+    """
+
+    def test_it_is_off_unless_asked_for(self, monkeypatch):
+        monkeypatch.delenv("INGESTOR_TEFAS_ENABLED", raising=False)
+        assert config.tefas_enabled() is False
+
+    @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", " Yes "])
+    def test_it_turns_on_explicitly(self, monkeypatch, value):
+        monkeypatch.setenv("INGESTOR_TEFAS_ENABLED", value)
+        assert config.tefas_enabled() is True
+
+    @pytest.mark.parametrize("value", ["", "0", "false", "no", "belki"])
+    def test_anything_else_leaves_it_off(self, monkeypatch, value):
+        monkeypatch.setenv("INGESTOR_TEFAS_ENABLED", value)
+        assert config.tefas_enabled() is False
+
+    def test_the_base_url_is_overridable_and_trimmed(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_TEFAS_BASE_URL", "https://x.invalid/")
+        assert config.tefas_base_url() == "https://x.invalid"
+
+    def test_budgets_default_and_never_go_negative(self, monkeypatch):
+        """Bütçe fon BAŞINA bir istek demek; negatif bir bütçe dilimlemeyi
+        tersine çevirirdi."""
+        monkeypatch.delenv("INGESTOR_TEFAS_PROFILE_BUDGET", raising=False)
+        monkeypatch.delenv("INGESTOR_TEFAS_PRICE_BUDGET", raising=False)
+        assert config.tefas_profile_budget() == 150
+        assert config.tefas_price_budget() == 150
+        monkeypatch.setenv("INGESTOR_TEFAS_PROFILE_BUDGET", "-5")
+        monkeypatch.setenv("INGESTOR_TEFAS_PRICE_BUDGET", "-5")
+        assert config.tefas_profile_budget() == 0
+        assert config.tefas_price_budget() == 0

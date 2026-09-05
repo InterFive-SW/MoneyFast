@@ -44,6 +44,47 @@ export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
 export type MarketTicker = GetResponseType<paths['/api/market/tickers']>[0];
 
+/** Bir TEFAS fonu.
+ *
+ *  Yönetim ücreti, stopaj ve risk değeri YOK: TEFAS API'si bu alanları
+ *  döndürmüyor (bkz. docs/TEFAS_INTEGRATION.md) ve döndürmediği bir alanı
+ *  `null` diye taşımak, bir gün dolacakmış gibi duran bir söz olurdu. */
+export interface FundReturns {
+    daily: number | null
+    monthly: number | null
+    threeMonth: number | null
+    yearly: number | null
+    threeYear: number | null
+    fiveYear: number | null
+}
+
+export interface ApiFund {
+    code: string
+    name: string
+    founder?: string | null
+    umbrella?: string | null
+    fundType?: string | null
+    price?: number | null
+    investorCount?: number | null
+    size?: number | null
+    asOf?: string | null
+    returns: FundReturns
+}
+
+export interface FundList {
+    items: ApiFund[]
+    /** Süzgeç açılır listeleri VERİDEN geliyor, elle yazılmış değil. */
+    founders: string[]
+    umbrellas: string[]
+    total: number
+}
+
+export interface FundSeries {
+    code: string
+    currency: string
+    points: { date: string; price: number }[]
+}
+
 // --- Banking: bills, staged payments, saved payees -------------------------
 
 /** Vadesiz, vadeli veya yatırım — tek biçimde. */
@@ -1224,6 +1265,35 @@ class ApiClient {
     closeBankAccount(accountNumber: string) {
         return this.post<BankAccount>(
             `/banking/accounts/${encodeURIComponent(accountNumber)}/close`, {},
+        )
+    }
+
+    /**
+     * Fon listesi. Süzgeçler SUNUCUDA: evren 2.602 fon ve hepsini tarayıcıya
+     * gönderip orada süzmek, her açılışta birkaç yüz kilobayt ve süzgeç
+     * mantığının ikinci bir kopyası demekti.
+     */
+    getFunds(params?: {
+        founder?: string
+        umbrella?: string
+        fundType?: string
+        q?: string
+        limit?: number
+    }) {
+        const query = new URLSearchParams()
+        if (params?.founder) query.set('founder', params.founder)
+        if (params?.umbrella) query.set('umbrella', params.umbrella)
+        if (params?.fundType) query.set('fund_type', params.fundType)
+        if (params?.q) query.set('q', params.q)
+        if (params?.limit != null) query.set('limit', String(params.limit))
+        const suffix = query.toString() ? `?${query}` : ''
+        return this.request<FundList>(`/market/funds${suffix}`)
+    }
+
+    /** Bir fonun NAV serisi — fon grafiğinin okuduğu yer. */
+    getFundPrices(code: string, limit = 400) {
+        return this.request<FundSeries>(
+            `/market/funds/${encodeURIComponent(code)}/prices?limit=${limit}`,
         )
     }
 

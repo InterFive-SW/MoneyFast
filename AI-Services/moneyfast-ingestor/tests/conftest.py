@@ -48,6 +48,8 @@ def clean_env(monkeypatch):
         # Anahtarlı sağlayıcılar. Silinmezse geliştiricinin GERÇEK anahtarı
         # test koşusuna sızar ve suite dış dünyaya istek atmayı dener.
         "FINNHUB_API_KEY", "MARKETAUX_API_KEY",
+        "INGESTOR_TEFAS_BASE_URL", "INGESTOR_TEFAS_ENABLED",
+        "INGESTOR_TEFAS_PROFILE_BUDGET", "INGESTOR_TEFAS_PRICE_BUDGET",
     ):
         monkeypatch.delenv(name, raising=False)
 

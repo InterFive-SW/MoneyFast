@@ -1522,3 +1522,48 @@ describe('sendMarketBriefingNow', () => {
         expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
     })
 })
+
+describe('funds (TEFAS)', () => {
+    beforeEach(() => localStorage.clear())
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('asks for the list with no query when unfiltered', () => {
+        const fetchMock = mockFetch({ items: [] })
+        apiClient.getFunds()
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds')
+    })
+
+    it('sends every filter to the server', () => {
+        // Evren 2.602 fon; hepsini tarayıcıya gönderip orada süzmek her
+        // açılışta birkaç yüz kilobayt demekti.
+        const fetchMock = mockFetch({ items: [] })
+        apiClient.getFunds({
+            founder: 'AK PORTFÖY', umbrella: 'Hisse Senedi', fundType: 'YAT',
+            q: 'endeks', limit: 50,
+        })
+        const url = calledUrl(fetchMock)
+        expect(url).toContain('founder=AK+PORT')
+        expect(url).toContain('umbrella=Hisse+Senedi')
+        expect(url).toContain('fund_type=YAT')
+        expect(url).toContain('q=endeks')
+        expect(url).toContain('limit=50')
+    })
+
+    it('an empty params object still sends no query', () => {
+        const fetchMock = mockFetch({ items: [] })
+        apiClient.getFunds({})
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds')
+    })
+
+    it('reads a NAV series', () => {
+        const fetchMock = mockFetch({ code: 'AAL', currency: 'TRY', points: [] })
+        apiClient.getFundPrices('AAL')
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds/AAL/prices?limit=400')
+    })
+
+    it('escapes the fund code rather than pasting it into the path', () => {
+        const fetchMock = mockFetch({})
+        apiClient.getFundPrices('a/b', 10)
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds/a%2Fb/prices?limit=10')
+    })
+})

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { MOCK_EARNINGS_REPORTS, MOCK_DIVIDEND_ANNOUNCEMENTS, MOCK_FUNDS } from '../../data/mockData'
+import { MOCK_EARNINGS_REPORTS, MOCK_DIVIDEND_ANNOUNCEMENTS } from '../../data/mockData'
 import { useInstrument } from '../../hooks/useInstrument'
 import SampleDataBadge from '../../components/markets/SampleDataBadge'
 import TeknikGorunum from '../../components/markets/TeknikGorunum'
@@ -8,14 +8,15 @@ import InstrumentCandleChart from '../../components/markets/InstrumentCandleChar
 import NewsWidget from '../../components/widgets/NewsWidget'
 import { compact, pct, ratio, useFundamentals } from '../../hooks/useFundamentals'
 
-type DetailTab = 'ozet' | 'finansallar' | 'oran-analizi' | 'temettu' | 'fon-pozisyonlari'
+// `fon-pozisyonlari` KALDIRILDI: TEFAS hisse bazında fon dağılımı
+// döndürmüyor ve o sekme `MOCK_FUNDS` okuyordu.
+type DetailTab = 'ozet' | 'finansallar' | 'oran-analizi' | 'temettu'
 
 const TABS: { key: DetailTab; label: string }[] = [
   { key: 'ozet', label: 'Özet' },
   { key: 'finansallar', label: 'Finansallar' },
   { key: 'oran-analizi', label: 'Oran Analizi' },
   { key: 'temettu', label: 'Temettü' },
-  { key: 'fon-pozisyonlari', label: 'Fon Pozisyonları' },
 ]
 
 function fmt(value: number | undefined, opts: Intl.NumberFormatOptions = {}): string {
@@ -60,13 +61,6 @@ export default function StockDetail() {
   )
   const dividends = useMemo(
     () => MOCK_DIVIDEND_ANNOUNCEMENTS.filter((d) => d.symbol === symbol.toUpperCase()),
-    [symbol]
-  )
-  const holdingFunds = useMemo(
-    () => MOCK_FUNDS
-      .map((fund) => ({ fund, holding: fund.holdings.find((h) => h.symbol === symbol.toUpperCase()) }))
-      .filter((x): x is { fund: typeof MOCK_FUNDS[0]; holding: { symbol: string; weight: number } } => Boolean(x.holding))
-      .sort((a, b) => b.holding.weight - a.holding.weight),
     [symbol]
   )
 
@@ -266,29 +260,6 @@ export default function StockDetail() {
             </table>
           ) : (
             <p className="text-sm text-slate-400">Bu hisse için planlanmış bir temettü bulunmuyor.</p>
-          )
-        )}
-
-        {activeTab === 'fon-pozisyonlari' && (
-          holdingFunds.length > 0 ? (
-            <div className="flex flex-col gap-2">
-            <SampleDataBadge reason="Fon portföy bilgisi (TEFAS) için okunabilir bir kaynak yok." />
-              {holdingFunds.map(({ fund, holding }) => (
-                <Link
-                  key={fund.code}
-                  to={`/investment/fonlar/${fund.code}`}
-                  className="flex items-center justify-between p-3 bg-slate-800/5/60 hover:bg-slate-800/5/60 rounded-xl transition-colors"
-                >
-                  <div>
-                    <div className="text-sm font-semibold text-white">{fund.name}</div>
-                    <div className="text-xs text-slate-400">{fund.founder}</div>
-                  </div>
-                  <span className="text-sm font-bold tabular-nums text-emerald-500">%{fmt(holding.weight)}</span>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-400">Bu hisseyi portföyünde tutan bir mock fon bulunamadı.</p>
           )
         )}
       </div>

@@ -12,26 +12,31 @@ from app.core.database import get_db
 from app.core.deps import get_current_user_id, require_service_token
 from app.modules.investment import ai_service, market_service
 from app.modules.notification import service as notification_service
+from . import funds as funds_service
 from . import service, stream, technicals
 from .schemas import (
-    IngestResult,
-    FundamentalsIngestRequest,
     CandleSeriesOut,
+    FundIngestRequest,
+    FundListOut,
+    FundOut,
+    FundSeriesOut,
+    FundamentalsIngestRequest,
+    FundamentalsOut,
+    IngestResult,
     InstrumentListOut,
     InstrumentSuggestion,
+    MarketCalendarOut,
     MarketHeatmapOut,
     MarketTicker,
     NewsIngestRequest,
-    SessionStateRequest,
     NewsItem,
     PortfolioNewsOut,
     PortfolioTechnicalOut,
     QuarterlyIngestRequest,
     QuarterlyOut,
     QuoteIngestRequest,
+    SessionStateRequest,
     TechnicalSignalsOut,
-    FundamentalsOut,
-    MarketCalendarOut,
 )
 
 log = logging.getLogger("moneyfast.market")
@@ -892,3 +897,115 @@ def record_sessions(request: SessionStateRequest, db: Session = Depends(get_db))
     written = market_service.record_sessions(db, request.open)
     log.info("session state: %d markets, open=%s", written, sorted(request.open))
     return {"markets": written}
+
+
+# ── Fonlar (TEFAS) ──────────────────────────────────────────────────────────
+
+
+@router.get("/funds", response_model=FundListOut, summary="Fon listesi (TEFAS)")
+def list_funds(
+    founder: Optional[str] = Query(default=None, max_length=200),
+    umbrella: Optional[str] = Query(default=None, max_length=120),
+    fund_type: Optional[str] = Query(default=None, max_length=8),
+    q: Optional[str] = Query(default=None, max_length=64),
+    limit: int = Query(default=100, ge=1, le=funds_service.MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """Süzülmüş fon listesi.
+
+    Süzgeçler SUNUCUDA: evren 2.602 fon ve hepsini tarayıcıya gönderip orada
+    süzmek, her açılışta birkaç yüz kilobayt ve süzgeç mantığının ikinci bir
+    kopyası demekti.
+
+    Getiriler NAV serisinden HESAPLANIYOR, saklanmıyor -- aynı sayının iki
+    yerde yaşaması, serinin güncellendiği ama yüzdenin güncellenmediği bir
+    aralık bırakırdı.
+    """
+    rows = funds_service.list_funds(
+        db, founder=founder, umbrella=umbrella, fund_type=fund_type,
+        search=q, limit=limit, offset=offset,
+    )
+    facets = funds_service.facets(db)
+    return {
+        "items": [_fund_row(db, row) for row in rows],
+        "founders": facets["founders"],
+        "umbrellas": facets["umbrellas"],
+        "total": len(rows),
+    }
+
+
+@router.get("/funds/{code}", response_model=FundOut, summary="Tek fon")
+def get_fund(code: str, db: Session = Depends(get_db)):
+    rows = funds_service.list_funds(db, search=code, limit=funds_service.MAX_LIMIT)
+    match = next((row for row in rows if row.code == code.strip().upper()), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Fon bulunamadı.")
+    return _fund_row(db, match)
+
+
+@router.get(
+    "/funds/{code}/prices",
+    response_model=FundSeriesOut,
+    summary="Fonun NAV serisi",
+)
+def get_fund_prices(
+    code: str,
+    limit: int = Query(default=400, ge=2, le=2000),
+    db: Session = Depends(get_db),
+):
+    """Fon mum grafiğinin okuduğu seri.
+
+    Bilinmeyen kod boş seri döndürüyor, hata değil: "bu fonun geçmişi yok"
+    bir cevaptır ve grafik onu boş çizebilir -- `/market/candles` ile aynı
+    duruş.
+    """
+    series = funds_service.price_series(db, code, limit=limit)
+    return {
+        "code": code.strip().upper(),
+        "currency": "TRY",
+        "points": [{"date": row.as_of, "price": float(row.price)} for row in series],
+    }
+
+
+@router.post("/funds/ingest", summary="Fon verisi yaz (servis işi)")
+def ingest_funds(
+    request: FundIngestRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_service_token),
+):
+    """Toplayıcının yazdığı yer. `news/ingest` ile aynı desen."""
+    written = funds_service.upsert_funds(db, request.funds)
+    prices = funds_service.upsert_prices(db, request.prices)
+    db.commit()
+    return {"funds_written": written, "prices_written": prices}
+
+
+@router.get("/funds/meta/coverage", summary="Eksik fon verisi (servis işi)")
+def funds_coverage(
+    db: Session = Depends(get_db),
+    _: None = Depends(require_service_token),
+):
+    """Toplayıcı her turda neyi çekeceğini buradan öğreniyor.
+
+    Şemsiye türü ve NAV serisi fon BAŞINA birer istek; hangilerinin eksik
+    olduğunu bilmeden her tur baştan başlardı.
+    """
+    return funds_service.coverage(db)
+
+
+def _fund_row(db: Session, row) -> dict:
+    """Bir fon satırı + serisinden türetilen getiriler."""
+    series = funds_service.price_series(db, row.code)
+    return {
+        "code": row.code,
+        "name": row.title,
+        "founder": row.founder,
+        "umbrella": row.umbrella,
+        "fundType": row.fund_type,
+        "price": float(row.price) if row.price is not None else None,
+        "investorCount": row.investors,
+        "size": float(row.size) if row.size is not None else None,
+        "asOf": row.as_of,
+        "returns": funds_service.returns_for(series),
+    }

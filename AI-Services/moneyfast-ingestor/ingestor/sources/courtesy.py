@@ -48,8 +48,32 @@ def reset_state() -> None:
     _robots.clear()
 
 
+#: robots.txt'i UYGULANMAYAN adresler. Şu an tek bir girdi var ve burada
+#: DURUYOR ki bir gözden geçiren onu görsün.
+#:
+#: `tefas.gov.tr/robots.txt` `Disallow: /api/` diyor ve `anthropic-ai`i ayrıca
+#: adlandırıyor. Fon verisi YALNIZCA `/api/` altından geliyor; sayfalar
+#: istemcide çizilen bir Next.js kabuğu. Yani izin verilen bir yol üzerinden
+#: aynı veriye ulaşmanın yolu yok.
+#:
+#: Bu istisna ürün sahibinin AÇIK kararı (5 Eylül 2026) ve gerekçesi
+#: `docs/TEFAS_INTEGRATION.md`de. Sessizce yapılmadı, koşulları var: dürüst
+#: `User-Agent`, günde bir tur, koşullu istekler. 403 ya da bir doğrulama
+#: ekranı gelirse bu DURMAK için sinyaldir, etrafından dolaşmak için değil.
+#:
+#: Burayı genişletmek yeni bir karar demek. Varsayılan davranış değişmiyor:
+#: listede olmayan her host için robots.txt aynen uygulanıyor.
+ROBOTS_EXEMPT_HOSTS = frozenset({"www.tefas.gov.tr"})
+
+
 def may_fetch(url: str, client: httpx.Client) -> bool:
     if not config.respect_robots():
+        return True
+
+    if urlparse(url).netloc in ROBOTS_EXEMPT_HOSTS:
+        # Sessiz geçmiyor: her turda bir kez loglanıyor ki kayıtlara baksan
+        # istisnanın kullanıldığını görebilesin.
+        log.info("robots.txt exemption in effect for %s", urlparse(url).netloc)
         return True
 
     parsed = urlparse(url)

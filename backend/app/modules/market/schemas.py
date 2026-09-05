@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
 
 class MarketTicker(BaseModel):
@@ -530,3 +530,72 @@ class SessionStateRequest(BaseModel):
     """
 
     open: List[str] = Field(default_factory=list)
+
+
+# ── Fonlar (TEFAS) ──────────────────────────────────────────────────────────
+
+
+class FundReturnsOut(BaseModel):
+    """Pencere başına yüzde getiri.
+
+    Her alan `Optional` ve bu kasıtlı: `null` "bu fonun o kadar geçmişi yok"
+    demek, sıfır ise "o dönemde hiç kazandırmadı". Arayüz ilkini `NA` diye
+    yazıyor ve ikisini aynı sayıya indirmek, olmayan bir ölçümü ölçüm gibi
+    göstermek olurdu.
+    """
+
+    daily: Optional[float] = None
+    monthly: Optional[float] = None
+    threeMonth: Optional[float] = None
+    yearly: Optional[float] = None
+    threeYear: Optional[float] = None
+    fiveYear: Optional[float] = None
+
+
+class FundOut(BaseModel):
+    """Listede bir fon.
+
+    Yönetim ücreti, stopaj ve risk değeri YOK: TEFAS API'si bu alanları
+    döndürmüyor (HAR kaydındaki 85 alanın hepsi tarandı) ve döndürmediği bir
+    alan için `null` taşımak, bir gün dolacakmış gibi duran bir söz olurdu.
+    """
+
+    code: str
+    name: str
+    founder: Optional[str] = None
+    umbrella: Optional[str] = None
+    fundType: Optional[str] = None
+    price: Optional[float] = None
+    investorCount: Optional[int] = None
+    size: Optional[float] = None
+    #: Fiyatın ait olduğu GÜN. Fon fiyatı günlüktür.
+    asOf: Optional[date] = None
+    returns: FundReturnsOut = Field(default_factory=FundReturnsOut)
+
+
+class FundListOut(BaseModel):
+    items: List[FundOut] = Field(default_factory=list)
+    #: Süzgeç açılır listeleri veriden geliyor, elle yazılmış değil.
+    founders: List[str] = Field(default_factory=list)
+    umbrellas: List[str] = Field(default_factory=list)
+    total: int = 0
+
+
+class FundPricePointOut(BaseModel):
+    date: date
+    price: float
+
+
+class FundSeriesOut(BaseModel):
+    code: str
+    #: TEFAS fonları TL cinsinden. Sabit değil, alan olarak taşınıyor: bir
+    #: fiyat para birimi olmadan taşınmaz, bu deponun kuralı.
+    currency: str = "TRY"
+    points: List[FundPricePointOut] = Field(default_factory=list)
+
+
+class FundIngestRequest(BaseModel):
+    """Toplayıcının yazdığı gövde."""
+
+    funds: List[dict] = Field(default_factory=list)
+    prices: List[dict] = Field(default_factory=list)

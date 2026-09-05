@@ -1061,6 +1061,9 @@ class TestScheduler:
             # dakikalık RSS döngüsüne katmak, Türkçe haberi bir dış servisin
             # temposuna bağlamak olurdu.
             "global-news": "interval",
+            # TEFAS günde bir: NAV günde bir yayımlanıyor ve daha sık
+            # yoklamanın getirisi yok, maliyeti var.
+            "tefas": "cron",
             # Gün içi barlar, toplu turla aynı ritimde.
             "candles_intraday": "interval",
             "candles": "cron", "fundamentals": "cron",
@@ -1990,3 +1993,173 @@ class TestSessionState:
                             lambda c, m: pushed.append(set(m)))
         run.run_quotes(None)
         assert pushed == [set()]
+
+
+class TestTefasCycle:
+    """TEFAS turu — kapalıyken hiçbir şey yapmıyor.
+
+    Varsayılan kapalı, çünkü bu kaynak sitenin `robots.txt`'inde belirttiği
+    tercihi geçersiz kılıyor ve açmak bilinçli bir adım olmalı.
+    """
+
+    def test_it_does_nothing_when_disabled(self, monkeypatch):
+        touched = []
+        monkeypatch.delenv("INGESTOR_TEFAS_ENABLED", raising=False)
+        monkeypatch.setattr(
+            run.tefas_source, "fetch_universe", lambda c: touched.append("u") or [],
+        )
+        assert run.run_tefas(None) == {"skipped": True}
+        assert touched == []
+
+    def _enable(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_TEFAS_ENABLED", "1")
+        monkeypatch.setattr(run.httpx, "Client", lambda **kw: _NullClient())
+
+    def test_a_full_cycle_writes_universe_daily_profiles_and_prices(self, monkeypatch):
+        self._enable(monkeypatch)
+        pushed = []
+        monkeypatch.setattr(run.tefas_source, "fetch_universe",
+                            lambda c: [{"code": "AAL", "title": "ATA"}])
+        monkeypatch.setattr(run.tefas_source, "fetch_daily",
+                            lambda c: [{"code": "AAL", "price": 3.35}])
+        monkeypatch.setattr(run.tefas_source, "fetch_profile",
+                            lambda code, c: {"code": code, "umbrella": "Para Piyasası"})
+        monkeypatch.setattr(run.tefas_source, "fetch_prices",
+                            lambda code, c: [{"code": code, "as_of": "2026-09-05", "price": 1.0}])
+        monkeypatch.setattr(run.sinks, "fetch_fund_coverage",
+                            lambda c: {"missing_umbrella": ["AAL"], "missing_prices": ["AAL"]})
+        monkeypatch.setattr(
+            run.sinks, "push_funds_to_backend",
+            lambda c, funds, prices=None: pushed.append((len(funds), len(prices or [])))
+            or {"funds_written": len(funds), "prices_written": len(prices or [])},
+        )
+        result = run.run_tefas(None)
+        assert result["profiles"] == 1
+        assert result["prices"] == 1
+        assert pushed[0] == (2, 0)
+
+    def test_budgets_bound_the_per_run_work(self, monkeypatch):
+        """Şemsiye türü ve NAV serisi fon BAŞINA birer istek ve evren 2.602
+        fon; sınırsız bırakmak tek bir turun saatlerce sürmesi demekti."""
+        self._enable(monkeypatch)
+        monkeypatch.setenv("INGESTOR_TEFAS_PROFILE_BUDGET", "2")
+        monkeypatch.setenv("INGESTOR_TEFAS_PRICE_BUDGET", "1")
+        asked = {"profiles": [], "prices": []}
+        monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
+        monkeypatch.setattr(
+            run.tefas_source, "fetch_profile",
+            lambda code, c: asked["profiles"].append(code) or {"code": code, "umbrella": "X"},
+        )
+        monkeypatch.setattr(
+            run.tefas_source, "fetch_prices",
+            lambda code, c: asked["prices"].append(code) or [],
+        )
+        monkeypatch.setattr(run.sinks, "fetch_fund_coverage", lambda c: {
+            "missing_umbrella": ["A", "B", "C", "D"], "missing_prices": ["A", "B", "C"],
+        })
+        monkeypatch.setattr(
+            run.sinks, "push_funds_to_backend",
+            lambda c, funds, prices=None: {"funds_written": 0, "prices_written": 0},
+        )
+        run.run_tefas(None)
+        assert asked["profiles"] == ["A", "B"]
+        assert asked["prices"] == ["A"]
+
+    def test_nothing_missing_means_no_extra_requests(self, monkeypatch):
+        self._enable(monkeypatch)
+        asked = []
+        monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_profile",
+                            lambda code, c: asked.append(code))
+        monkeypatch.setattr(run.tefas_source, "fetch_prices",
+                            lambda code, c: asked.append(code) or [])
+        monkeypatch.setattr(run.sinks, "fetch_fund_coverage", lambda c: {})
+        monkeypatch.setattr(
+            run.sinks, "push_funds_to_backend",
+            lambda c, funds, prices=None: {"funds_written": 0, "prices_written": 0},
+        )
+        assert run.run_tefas(None)["profiles"] == 0
+        assert asked == []
+
+    def test_an_unreadable_profile_is_skipped_not_written(self, monkeypatch):
+        self._enable(monkeypatch)
+        monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_profile", lambda code, c: None)
+        monkeypatch.setattr(run.tefas_source, "fetch_prices", lambda code, c: [])
+        monkeypatch.setattr(run.sinks, "fetch_fund_coverage",
+                            lambda c: {"missing_umbrella": ["A"], "missing_prices": ["A"]})
+        monkeypatch.setattr(
+            run.sinks, "push_funds_to_backend",
+            lambda c, funds, prices=None: {"funds_written": 0, "prices_written": 0},
+        )
+        assert run.run_tefas(None)["profiles"] == 0
+
+
+class _NullClient:
+    """`with httpx.Client(...)` bağlamı için yeter; hiçbir istek atılmıyor."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class TestFundSink:
+    """Fonlar backend'e yazılıyor; toplayıcı DB kredensiyeli taşımıyor."""
+
+    def test_funds_and_prices_go_in_separate_requests(self):
+        """Bir fonun yıllık serisi ~250 satır; 500 fonluk bir parçayla
+        birleştiğinde gövde yönetilemez olurdu."""
+        handler = recorder(body={"funds_written": 1, "prices_written": 2})
+        result = sinks.push_funds_to_backend(
+            client_for(handler),
+            [{"code": "AAL"}],
+            [{"code": "AAL", "as_of": "2026-09-05", "price": 1.0},
+             {"code": "AAL", "as_of": "2026-09-04", "price": 0.9}],
+        )
+        bodies = [json.loads(c.content) for c in handler.calls]
+        assert len(bodies) == 2
+        assert bodies[0]["prices"] == [] and len(bodies[0]["funds"]) == 1
+        assert bodies[1]["funds"] == [] and len(bodies[1]["prices"]) == 2
+        assert result == {"funds_written": 1, "prices_written": 2}
+
+    def test_a_large_universe_is_chunked(self):
+        handler = recorder(body={"funds_written": 0, "prices_written": 0})
+        funds = [{"code": f"F{i:04d}"} for i in range(sinks.FUND_PUSH_CHUNK + 1)]
+        sinks.push_funds_to_backend(client_for(handler), funds)
+        assert len(handler.calls) == 2
+
+    def test_nothing_to_write_makes_no_request(self):
+        handler = recorder(body={})
+        assert sinks.push_funds_to_backend(client_for(handler), []) == {
+            "funds_written": 0, "prices_written": 0,
+        }
+        assert handler.calls == []
+
+    def test_a_failed_push_does_not_raise(self):
+        handler = recorder(status=503)
+        assert sinks.push_funds_to_backend(client_for(handler), [{"code": "AAL"}]) == {
+            "funds_written": 0, "prices_written": 0,
+        }
+
+    def test_a_non_object_reply_counts_as_nothing_written(self):
+        handler = recorder(body=["oops"])
+        assert sinks.push_funds_to_backend(
+            client_for(handler), [{"code": "AAL"}])["funds_written"] == 0
+
+    def test_coverage_is_read_from_the_backend(self):
+        """Sormadan çekmek, her turda 2.602 isteği yeniden yapmak olurdu."""
+        handler = recorder(body={"missing_umbrella": ["AAL"], "missing_prices": []})
+        assert sinks.fetch_fund_coverage(client_for(handler))["missing_umbrella"] == ["AAL"]
+
+    def test_an_unavailable_coverage_endpoint_is_empty_not_fatal(self):
+        handler = recorder(status=503)
+        assert sinks.fetch_fund_coverage(client_for(handler)) == {}
+
+    def test_a_non_object_coverage_reply_is_empty(self):
+        handler = recorder(body=["oops"])
+        assert sinks.fetch_fund_coverage(client_for(handler)) == {}

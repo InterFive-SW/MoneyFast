@@ -524,3 +524,71 @@ def push_sessions(client: httpx.Client, markets: set[str]) -> Optional[dict]:
     except Exception as exc:
         log.warning("session state push failed: %s", exc)
         return None
+
+
+# ── TEFAS fonları ───────────────────────────────────────────────────────────
+
+#: Tek istekte gönderilen fon satırı. Evren 2.602 fon ve hepsini tek gövdede
+#: yollamak, `NEWS_PUSH_CHUNK`in var olma sebebinin aynısıyla kötü fikir.
+FUND_PUSH_CHUNK = 500
+
+
+def fetch_fund_coverage(client: httpx.Client) -> dict[str, Any]:
+    """Backend'de neyin eksik olduğunu sorar.
+
+    Şemsiye türü ve NAV serisi fon BAŞINA birer istek; sormadan çekmek her
+    turda 2.602 isteği yeniden yapmak olurdu.
+    """
+    try:
+        response = client.get(
+            f"{config.backend_url()}/market/funds/meta/coverage",
+            headers=_headers(),
+            timeout=config.request_timeout(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        log.warning("fund coverage unavailable: %s", exc)
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def push_funds_to_backend(
+    client: httpx.Client,
+    funds: list[dict[str, Any]],
+    prices: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, int]:
+    """Fonları ve NAV satırlarını backend'e yazar.
+
+    Fiyatlar fon satırlarıyla AYNI istekte gitmiyor: bir fonun bir yıllık
+    serisi ~250 satır ve 500 fonluk bir parçayla birleştiğinde gövde
+    yönetilemez olurdu.
+    """
+    written = {"funds_written": 0, "prices_written": 0}
+    for start in range(0, len(funds), FUND_PUSH_CHUNK):
+        batch = funds[start:start + FUND_PUSH_CHUNK]
+        result = _push_fund_batch(client, {"funds": batch, "prices": []})
+        written["funds_written"] += result.get("funds_written", 0)
+
+    rows = prices or []
+    for start in range(0, len(rows), FUND_PUSH_CHUNK):
+        batch = rows[start:start + FUND_PUSH_CHUNK]
+        result = _push_fund_batch(client, {"funds": [], "prices": batch})
+        written["prices_written"] += result.get("prices_written", 0)
+    return written
+
+
+def _push_fund_batch(client: httpx.Client, body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        response = client.post(
+            f"{config.backend_url()}/market/funds/ingest",
+            json=body,
+            headers=_headers(),
+            timeout=config.request_timeout() * 3,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        log.warning("fund push failed: %s", exc)
+        return {}
+    return payload if isinstance(payload, dict) else {}

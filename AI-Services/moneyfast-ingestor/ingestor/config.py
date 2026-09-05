@@ -384,3 +384,40 @@ def news_api_key(name: str) -> Optional[str]:
     anahtarla istek atıp her turda 401 almak olurdu.
     """
     return os.getenv(name) or None
+
+
+# --------------------------------------------------------------------------
+# TEFAS — Türk yatırım fonları. Günde bir tur: NAV günde bir yayımlanıyor ve
+# daha sık yoklamanın getirisi yok, maliyeti var.
+# --------------------------------------------------------------------------
+
+
+def tefas_base_url() -> str:
+    return os.getenv("INGESTOR_TEFAS_BASE_URL", "https://www.tefas.gov.tr").rstrip("/")
+
+
+def tefas_enabled() -> bool:
+    """TEFAS turu açık mı.
+
+    Varsayılan KAPALI. Bu kaynak sitenin `robots.txt`'inde belirttiği tercihi
+    geçersiz kılıyor (bkz. `courtesy.ROBOTS_EXEMPT_HOSTS` ve
+    `docs/TEFAS_INTEGRATION.md`), dolayısıyla klonlayan bir ekip arkadaşının
+    farkında olmadan devreye sokması doğru olmaz -- açmak bilinçli bir adım
+    olmalı.
+    """
+    return (os.getenv("INGESTOR_TEFAS_ENABLED") or "").strip().lower() in {"1", "true", "yes"}
+
+
+def tefas_profile_budget() -> int:
+    """Tek turda kaç fonun şemsiye türü çekilir.
+
+    Şemsiye türü fon BAŞINA bir istek ve evren 2.602 fon. Sınırsız
+    bırakmak, tek bir turun saatlerce sürmesi demekti -- `kap_corpus_budget`
+    ile aynı gerekçe.
+    """
+    return max(0, _int("INGESTOR_TEFAS_PROFILE_BUDGET", 150))
+
+
+def tefas_price_budget() -> int:
+    """Tek turda kaç fonun NAV serisi çekilir. Aynı gerekçe."""
+    return max(0, _int("INGESTOR_TEFAS_PRICE_BUDGET", 150))

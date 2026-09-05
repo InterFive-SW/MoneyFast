@@ -220,16 +220,23 @@ def _as_frontend_position(row: dict) -> dict:
 
 
 @router.get("/orders", response_model=List[Order])
-def get_orders(db: Session = Depends(get_db)):
+def get_orders(
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
     """
-    Geçmiş ve bekleyen emirler.
+    Geçmiş ve bekleyen emirler -- YALNIZCA çağıranın kendi emirleri.
 
     Kaynak `investment.transaction_proposals`: sohbette gerçekten hazırlanmış
     ve onaylanmış öneriler. Uydurma emir listesi göstermiyoruz — kullanıcının
     vermediği bir emri geçmişinde görmesi, gerçekten verilmiş sanmasına yol
     açar.
+
+    Kimlik doğrulaması ve kullanıcı süzgeci bir dönem YOKTU: token'sız bir
+    istek son 20 emri, herkesin emirlerini, sembol ve adetleriyle
+    döndürüyordu. Canlı doğrulandı.
     """
-    return market_service.recent_orders(db)
+    return market_service.recent_orders(db, user_id)
 
 
 

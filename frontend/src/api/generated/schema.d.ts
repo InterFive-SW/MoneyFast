@@ -1409,12 +1409,16 @@ export interface paths {
         };
         /**
          * Get Orders
-         * @description Geçmiş ve bekleyen emirler.
+         * @description Geçmiş ve bekleyen emirler -- YALNIZCA çağıranın kendi emirleri.
          *
          *     Kaynak `investment.transaction_proposals`: sohbette gerçekten hazırlanmış
          *     ve onaylanmış öneriler. Uydurma emir listesi göstermiyoruz — kullanıcının
          *     vermediği bir emri geçmişinde görmesi, gerçekten verilmiş sanmasına yol
          *     açar.
+         *
+         *     Kimlik doğrulaması ve kullanıcı süzgeci bir dönem YOKTU: token'sız bir
+         *     istek son 20 emri, herkesin emirlerini, sembol ve adetleriyle
+         *     döndürüyordu. Canlı doğrulandı.
          */
         get: operations["get_orders_api_investment_orders_get"];
         put?: never;
@@ -2451,6 +2455,147 @@ export interface paths {
          *     cümle kurmak zorundaydı.
          */
         post: operations["record_sessions_api_market_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fon listesi (TEFAS)
+         * @description Süzülmüş fon listesi.
+         *
+         *     Süzgeçler SUNUCUDA: evren 2.602 fon ve hepsini tarayıcıya gönderip orada
+         *     süzmek, her açılışta birkaç yüz kilobayt ve süzgeç mantığının ikinci bir
+         *     kopyası demekti.
+         *
+         *     Getiriler NAV serisinden HESAPLANIYOR, saklanmıyor -- aynı sayının iki
+         *     yerde yaşaması, serinin güncellendiği ama yüzdenin güncellenmediği bir
+         *     aralık bırakırdı.
+         */
+        get: operations["list_funds_api_market_funds_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tek fon */
+        get: operations["get_fund_api_market_funds__code__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds/{code}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fonun NAV serisi
+         * @description Fon mum grafiğinin okuduğu seri.
+         *
+         *     Bilinmeyen kod boş seri döndürüyor, hata değil: "bu fonun geçmişi yok"
+         *     bir cevaptır ve grafik onu boş çizebilir -- `/market/candles` ile aynı
+         *     duruş.
+         */
+        get: operations["get_fund_prices_api_market_funds__code__prices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fon verisi yaz (servis işi)
+         * @description Toplayıcının yazdığı yer. `news/ingest` ile aynı desen.
+         */
+        post: operations["ingest_funds_api_market_funds_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds/meta/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Eksik fon verisi (servis işi)
+         * @description Toplayıcı her turda neyi çekeceğini buradan öğreniyor.
+         *
+         *     Şemsiye türü ve NAV serisi fon BAŞINA birer istek; hangilerinin eksik
+         *     olduğunu bilmeden her tur baştan başlardı.
+         */
+        get: operations["funds_coverage_api_market_funds_meta_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/news/me/market-briefing/send-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Market Briefing Now
+         * @description Kullanıcının isteği üzerine (On-Demand) piyasa bültenini anında tetikler.
+         *
+         *     MİMARİ KARAR (BackgroundTasks):
+         *     Veritabanı sorguları (watchlist + haberler) ve SMTP üzerinden e-posta gönderimi
+         *     I/O bloklayan (blocking) ağır işlemlerdir. Bu uç nokta (endpoint), kullanıcıyı
+         *     bekletmemek ve "Hızlı Yanıt" (Fast Response) sağlamak adına `BackgroundTasks`
+         *     altyapısını kullanır. İşlem arkaya atılır atılmaz 202 Accepted dönülür.
+         *
+         *     NOT: Bu istek kullanıcı tarafından bilinçli olarak (On-Demand) yapıldığı için
+         *     KVKK/GDPR 'Günlük Bülten' izin ayarı (daily_news.email) pas geçilir.
+         */
+        post: operations["send_market_briefing_now_api_news_me_market_briefing_send_now_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3996,6 +4141,108 @@ export interface components {
             email: string;
         };
         /**
+         * FundIngestRequest
+         * @description Toplayıcının yazdığı gövde.
+         */
+        FundIngestRequest: {
+            /** Funds */
+            funds?: {
+                [key: string]: unknown;
+            }[];
+            /** Prices */
+            prices?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** FundListOut */
+        FundListOut: {
+            /** Items */
+            items?: components["schemas"]["FundOut"][];
+            /** Founders */
+            founders?: string[];
+            /** Umbrellas */
+            umbrellas?: string[];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * FundOut
+         * @description Listede bir fon.
+         *
+         *     Yönetim ücreti, stopaj ve risk değeri YOK: TEFAS API'si bu alanları
+         *     döndürmüyor (HAR kaydındaki 85 alanın hepsi tarandı) ve döndürmediği bir
+         *     alan için `null` taşımak, bir gün dolacakmış gibi duran bir söz olurdu.
+         */
+        FundOut: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Founder */
+            founder?: string | null;
+            /** Umbrella */
+            umbrella?: string | null;
+            /** Fundtype */
+            fundType?: string | null;
+            /** Price */
+            price?: number | null;
+            /** Investorcount */
+            investorCount?: number | null;
+            /** Size */
+            size?: number | null;
+            /** Asof */
+            asOf?: string | null;
+            returns?: components["schemas"]["FundReturnsOut"];
+        };
+        /** FundPricePointOut */
+        FundPricePointOut: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Price */
+            price: number;
+        };
+        /**
+         * FundReturnsOut
+         * @description Pencere başına yüzde getiri.
+         *
+         *     Her alan `Optional` ve bu kasıtlı: `null` "bu fonun o kadar geçmişi yok"
+         *     demek, sıfır ise "o dönemde hiç kazandırmadı". Arayüz ilkini `NA` diye
+         *     yazıyor ve ikisini aynı sayıya indirmek, olmayan bir ölçümü ölçüm gibi
+         *     göstermek olurdu.
+         */
+        FundReturnsOut: {
+            /** Daily */
+            daily?: number | null;
+            /** Monthly */
+            monthly?: number | null;
+            /** Threemonth */
+            threeMonth?: number | null;
+            /** Yearly */
+            yearly?: number | null;
+            /** Threeyear */
+            threeYear?: number | null;
+            /** Fiveyear */
+            fiveYear?: number | null;
+        };
+        /** FundSeriesOut */
+        FundSeriesOut: {
+            /** Code */
+            code: string;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            /** Points */
+            points?: components["schemas"]["FundPricePointOut"][];
+        };
+        /**
          * FundamentalsIn
          * @description One instrument's ratios.
          *
@@ -4699,7 +4946,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "Bekliyor" | "Gerçekleşti" | "İptal";
+            status: "Onay bekliyor" | "Fiyat bekliyor" | "İşleniyor" | "Gerçekleşti" | "İptal edildi" | "Başarısız" | "İptal";
             /**
              * Type
              * @enum {string}
@@ -6308,6 +6555,15 @@ export interface components {
             phone_number: string;
             /** Is Active */
             is_active: boolean;
+            /**
+             * Notification Preferences
+             * @description Bildirim tercihleri matrisi
+             */
+            notification_preferences: {
+                [key: string]: {
+                    [key: string]: boolean;
+                };
+            };
             /**
              * User Preferences
              * @description Kullanıcıya özgü görünüm ve bölgesel tercihler
@@ -9748,6 +10004,192 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_funds_api_market_funds_get: {
+        parameters: {
+            query?: {
+                founder?: string | null;
+                umbrella?: string | null;
+                fund_type?: string | null;
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_api_market_funds__code__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_prices_api_market_funds__code__prices_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundSeriesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_funds_api_market_funds_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    funds_coverage_api_market_funds_meta_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_market_briefing_now_api_news_me_market_briefing_send_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

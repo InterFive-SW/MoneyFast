@@ -1422,26 +1422,45 @@ def sector_by_symbol(db: Session) -> dict[str, str]:
     return {symbol: sector for symbol, sector in db.execute(statement).all()}
 
 
-def recent_orders(db: Session, limit: int = 20) -> list[dict[str, Any]]:
-    """Confirmed and pending proposals, as the dashboard's order list.
+#: Öneri durumlarının Türkçe karşılığı.
+#:
+#: Eksik bir anahtar sessizce "Bekliyor" diye görünüyordu ve `PENDING` ile
+#: `FAILED` haritada YOKTU: başarısız bir işlem kullanıcıya hâlâ sırada
+#: gibi gösteriliyordu.
+ORDER_STATUS_TR = {
+    "PENDING_USER_CONFIRMATION": "Onay bekliyor",
+    "WAITING_PRICE": "Fiyat bekliyor",
+    "PENDING": "İşleniyor",
+    "CONFIRMED": "Gerçekleşti",
+    "CANCELLED": "İptal edildi",
+    "FAILED": "Başarısız",
+    "REJECTED_VALIDATION": "İptal",
+    "REQUIRES_ADDITIONAL_INPUT": "İptal",
+}
 
-    Only real proposals appear. A fabricated order history would let a user
-    believe they had placed something they never did.
+
+def recent_orders(db: Session, user_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Bu KULLANICININ önerileri, emir listesi olarak.
+
+    `user_id` zorunlu ve varsayılanı YOK. Eskiden hiç süzgeç yoktu ve uç
+    nokta kimlik doğrulaması da istemiyordu: token'sız bir istek son 20
+    emri -- HERKESİN emirlerini, sembol, adet ve durumuyla -- döndürüyordu.
+    Canlı doğrulandı. Varsayılan bir değer vermek o hatayı geri getirmenin
+    en kolay yolu olurdu.
+
+    Yalnızca gerçek öneriler görünüyor. Uydurma bir emir geçmişi,
+    kullanıcının vermediği bir emri vermiş sanmasına yol açar.
     """
     from .models import TransactionProposal
 
     rows = (
         db.query(TransactionProposal)
+        .filter(TransactionProposal.user_id == user_id)
         .order_by(TransactionProposal.created_at.desc())
         .limit(limit)
         .all()
     )
-    status_tr = {
-        "PENDING_USER_CONFIRMATION": "Bekliyor",
-        "CONFIRMED": "Gerçekleşti",
-        "REJECTED_VALIDATION": "İptal",
-        "REQUIRES_ADDITIONAL_INPUT": "İptal",
-    }
+    status_tr = ORDER_STATUS_TR
     out = []
     for row in rows:
         estimate = (row.payload or {}).get("estimate") or {}

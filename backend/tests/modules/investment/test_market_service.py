@@ -534,8 +534,8 @@ class TestBreakdownHelpers:
             id="PROP-1", symbol="THYAO", status="CONFIRMED", transaction_type="BUY",
             quantity=10, payload={"estimate": {"reference_price": 304.0}}, created_at=NOW,
         )
-        db.query.return_value.order_by.return_value.limit.return_value.all.return_value = [proposal]
-        rows = market_service.recent_orders(db)
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [proposal]
+        rows = market_service.recent_orders(db, "user-1")
         assert rows[0]["status"] == "Gerçekleşti"
         assert rows[0]["type"] == "Alış"
         assert rows[0]["total"] == pytest.approx(3040.0)
@@ -546,8 +546,8 @@ class TestBreakdownHelpers:
             id="PROP-2", symbol=None, status="REJECTED_VALIDATION", transaction_type="SELL",
             quantity=None, payload={}, created_at=NOW,
         )
-        db.query.return_value.order_by.return_value.limit.return_value.all.return_value = [proposal]
-        rows = market_service.recent_orders(db)
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [proposal]
+        rows = market_service.recent_orders(db, "user-1")
         assert rows[0]["type"] == "Satış"
         assert rows[0]["total"] == 0.0
 
@@ -1189,3 +1189,61 @@ class TestMarketSessions:
         db.query.return_value.all.return_value = []
         market_service.record_sessions(db, ["comex"])
         assert db.merge.call_args.args[0].market == "COMEX"
+
+
+class TestOrderPrivacy:
+    """Emir listesi bir dönem HERKESE açıktı.
+
+    `GET /api/investment/orders` hiçbir kimlik bağımlılığı almıyordu ve
+    `recent_orders` kullanıcı süzgeci taşımıyordu. Canlı doğrulandı: token
+    vermeden yapılan bir istek HTTP 200 ile son 20 emri döndürdü -- başka
+    kullanıcıların sembolleri, adetleri ve durumlarıyla.
+    """
+
+    def _proposal(self, user_id, symbol):
+        return SimpleNamespace(
+            id=f"p-{user_id}-{symbol}", user_id=user_id, symbol=symbol,
+            quantity=1.0, transaction_type="BUY", status="CONFIRMED",
+            payload={"estimate": {"reference_price": 10.0, "currency": "TRY"}},
+            created_at=datetime(2026, 9, 5, tzinfo=timezone.utc),
+        )
+
+    def test_only_the_callers_own_orders_are_returned(self, mocker):
+        db = MagicMock()
+        captured = {}
+
+        def remember(clause):
+            captured["clause"] = clause
+            return db.query.return_value
+
+        db.query.return_value.filter.side_effect = remember
+        db.query.return_value.order_by.return_value.limit.return_value.all.return_value = []
+        market_service.recent_orders(db, "user-1")
+        # Süzgeç UYGULANDI: eskiden hiç `filter` çağrısı yoktu.
+        assert "clause" in captured
+
+    def test_the_user_id_has_no_default(self):
+        """Varsayılan bir değer vermek, açığı geri getirmenin en kolay yolu
+        olurdu -- çağıran unutursa sessizce herkesin emri dönerdi."""
+        import inspect
+
+        signature = inspect.signature(market_service.recent_orders)
+        assert signature.parameters["user_id"].default is inspect.Parameter.empty
+
+    def test_the_schema_accepts_every_label_the_map_produces(self):
+        """İki liste ayrıştığında sonuç 500: şema kendi ürettiğimiz bir
+        değeri reddediyor. Canlı görüldü -- harita genişletilince
+        `Onay bekliyor` şemadan geçemedi."""
+        from typing import get_args
+
+        from app.modules.investment.schemas import Order
+
+        allowed = set(get_args(Order.model_fields["status"].annotation))
+        assert set(market_service.ORDER_STATUS_TR.values()) <= allowed
+
+    def test_every_status_has_a_turkish_label(self):
+        """Eksik anahtar sessizce "Bekliyor" diye görünüyordu: BAŞARISIZ bir
+        işlem kullanıcıya hâlâ sırada gibi gösteriliyordu."""
+        for status in ("PENDING", "FAILED", "WAITING_PRICE", "CANCELLED",
+                       "CONFIRMED", "PENDING_USER_CONFIRMATION"):
+            assert status in market_service.ORDER_STATUS_TR

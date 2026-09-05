@@ -37,7 +37,17 @@ class Position(BaseModel):
 class Order(BaseModel):
     id: str
     symbol: str
-    status: Literal['Bekliyor', 'Gerçekleşti', 'İptal']
+    #: Türkçe durum etiketi. Kaynak: `market_service.ORDER_STATUS_TR`.
+    #:
+    #: Liste bir dönem üç değerdi ve harita ondan GENİŞTİ: `PENDING` ile
+    #: `FAILED` haritada hiç yoktu, sessizce "Bekliyor" diye görünüyorlardı.
+    #: Haritayı düzeltmek burayı da genişletmeyi gerektirdi -- iki liste
+    #: ayrıştığında sonuç 500 oluyor, çünkü şema kendi ürettiğimiz bir
+    #: değeri reddediyor.
+    status: Literal[
+        'Onay bekliyor', 'Fiyat bekliyor', 'İşleniyor',
+        'Gerçekleşti', 'İptal edildi', 'Başarısız', 'İptal',
+    ]
     type: Literal['Alış', 'Satış']
     quantity: float
     price: float

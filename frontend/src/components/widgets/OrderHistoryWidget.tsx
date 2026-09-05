@@ -26,12 +26,25 @@ export default function OrderHistoryWidget() {
     loadData()
   }, [])
 
+  /**
+   * Durum rengi.
+   *
+   * Etiketler backend'de `market_service.ORDER_STATUS_TR` içinde ve
+   * genişlediler: eskiden yalnızca üç değer vardı ve `PENDING` ile `FAILED`
+   * haritada hiç YOKTU -- başarısız bir işlem kullanıcıya "Bekliyor" diye
+   * gösteriliyordu. Başarısız olan bir şeyi sırada gibi göstermek, yanlış
+   * bir renkten daha kötü.
+   */
   const getStatusColor = (status: Order['status']) => {
     switch (status) {
       case 'Gerçekleşti': return 'text-emerald-500 bg-emerald-500/10'
-      case 'Bekliyor':    return 'text-amber-500 bg-amber-500/10'
-      case 'İptal':       return 'text-rose-500 bg-rose-500/10'
-      default:            return 'text-slate-400 bg-white/5/10'
+      case 'Onay bekliyor':
+      case 'Fiyat bekliyor':
+      case 'İşleniyor':   return 'text-amber-500 bg-amber-500/10'
+      case 'Başarısız':   return 'text-rose-500 bg-rose-500/10'
+      case 'İptal edildi':
+      case 'İptal':       return 'text-slate-400 bg-white/5'
+      default:            return 'text-slate-400 bg-white/5'
     }
   }
 

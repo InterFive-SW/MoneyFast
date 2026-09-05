@@ -13,6 +13,7 @@ import logging
 from datetime import datetime
 from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 from pydantic import EmailStr
+from app.core.timezone import format_local
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +218,8 @@ async def send_transaction_request_email(
     bilgisini vermek finansal şeffaflık açısından kritik öneme sahiptir.
     Bu e-posta, kullanıcının emir iletiminin başarılı olduğunu doğrular.
     """
-    formatted_date = transaction_date.strftime("%d.%m.%Y %H:%M")
+    # Istanbul saati: 10:00'daki bir emir e-postada 07:00 yazıyordu.
+    formatted_date = format_local(transaction_date)
     transaction_type_tr = "Alım" if transaction_type.upper() == "BUY" else ("Satım" if transaction_type.upper() == "SELL" else transaction_type)
     
     html_content = f"""
@@ -326,7 +328,8 @@ async def send_transaction_email(
     yürütülmektedir. Hata fırlatılmaz; oluşan SMTP veya ağ hataları sadece 
     loglanarak (logger.error) sessizce tolere edilir, böylece ana finansal akış bozulmaz.
     """
-    formatted_date = transaction_date.strftime("%d.%m.%Y %H:%M")
+    # Istanbul saati: 10:00'daki bir emir e-postada 07:00 yazıyordu.
+    formatted_date = format_local(transaction_date)
     
     # Translate transaction_type for the email display
     transaction_type_tr = "Alım" if transaction_type.upper() == "BUY" else ("Satım" if transaction_type.upper() == "SELL" else transaction_type)
@@ -538,7 +541,7 @@ async def send_daily_news_email(
             time_str = ""
             if hasattr(item, "published_at") and item.published_at:
                 try:
-                    time_str = item.published_at.strftime("%d %b %H:%M")
+                    time_str = format_local(item.published_at, "%d %b %H:%M")
                 except:
                     pass
 

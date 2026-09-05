@@ -1,4 +1,5 @@
 import type { Loan } from '../../data/mockBankingData'
+import { formatDate } from '../../lib/datetime'
 
 interface Props {
   loans: Loan[]
@@ -63,7 +64,7 @@ export default function LoansWidget({ loans, onApplyLoan }: Props) {
                 <div>
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider">Sıradaki Taksit</p>
                   <p className="text-xs font-semibold text-white mt-0.5">
-                    {new Date(loan.nextInstallmentDate).toLocaleDateString('tr-TR')}
+                    {formatDate(loan.nextInstallmentDate)}
                   </p>
                 </div>
                 <div className="text-right">

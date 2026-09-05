@@ -28,6 +28,7 @@ import { useWatchlist } from '../hooks/useWatchlist'
 import MarketBand from '../components/markets/MarketBand'
 import { BASE_CURRENCY, convert, formatCompact, formatMoney } from '../lib/money'
 import { paddedDomain } from '../lib/chartFormat'
+import { usePortfolioWeekSeries } from '../hooks/usePortfolioWeekSeries'
 import { formatDate, formatTime } from '../lib/datetime'
 
 /** Hesap türü etiketleri; ekranda görünen ad sunumun işi, kaydın değil. */
@@ -57,6 +58,11 @@ const ACTIONS = [
  * `Gün` gün içi seriyi okur: 15 dakikalık GERÇEK barlar (`15m`), sağlayıcıdan
  * OHLC olarak geliyorlar. Anlık fiyattan bar üretmek açılış, yüksek ve düşük
  * değerlerini uydurmak olurdu.
+ *
+ * `Hafta` ayrı bir uçtan geliyor: `/investment/portfolio/chart?range=hafta`,
+ * 15 dakikalık kovalar. Günlük bardan çizildiğinde hafta yalnızca BEŞ nokta
+ * oluyordu (işlem günü sayısı kadar) ve çizgi şekilsiz kalıyordu; aynı hafta
+ * bu uçtan 266 nokta veriyor.
  *
  * Diğerleri günlük barlardan; pencere iki yıla kadar açık.
  */
@@ -231,7 +237,18 @@ export default function Home() {
     }
   }, [active.intraday, intradayAnalysis])
 
+  // Hafta 15 dakikalık kovalardan; yalnızca o aralık açıkken çekiliyor.
+  const weekSeries = usePortfolioWeekSeries(active.key === 'week')
+
   const trend = useMemo(() => {
+    if (active.key === 'week') {
+      // Gün ve saat birlikte: bir haftaya yayılan gün içi noktaları yalnızca
+      // saatle etiketlemek, yedi ayrı günün 14:00'ünü aynı ada verirdi.
+      return weekSeries.points.map((point) => ({
+        label: `${formatDate(point.at, { day: '2-digit', month: 'short' })} ${formatTime(point.at)}`,
+        value: point.value,
+      }))
+    }
     const source = active.intraday ? intradayAnalysis : analysis
     const cutoff = Date.now() - active.days * 24 * 60 * 60 * 1000
     return (source?.trend ?? [])
@@ -246,7 +263,7 @@ export default function Home() {
           : formatDate(point.at, { day: '2-digit', month: 'short' }),
         value: point.value,
       }))
-  }, [analysis, intradayAnalysis, active])
+  }, [analysis, intradayAnalysis, active, weekSeries.points])
 
   /**
    * Y ekseni aralığı. Recharts'ın varsayılanı `[0, 'auto']` ve portföy değeri
@@ -258,6 +275,19 @@ export default function Home() {
     () => paddedDomain(trend.map((point) => point.value)),
     [trend],
   )
+
+  /**
+   * Eksen etiketi biçimleyicisi, ARALIĞA bağlı.
+   *
+   * `formatCompact` hassasiyeti tek bir sayının büyüklüğünden alıyordu ve
+   * haftalık bant dar: ölçüldü, 1.091.137 - 1.117.318 aralığında beş Y
+   * etiketinin beşi de "1,1 Mn" yazıyordu. Beş kez aynı sayıyı yazan bir
+   * eksen eksen değildir.
+   */
+  const trendTick = useMemo(() => {
+    const span = trendDomain[1] - trendDomain[0]
+    return (value: number) => formatCompact(value, span)
+  }, [trendDomain])
 
   // ── Risk bileşenleri ─────────────────────────────────────────────────────
   // Ölçülemeyen bileşen çubuğa dönüşmez: sıfır ceza ile "ölçülemedi" aynı şey
@@ -436,7 +466,7 @@ export default function Home() {
                     domain={trendDomain}
                     /* Tam biçim eksende taşıyor: altı tane ₺1.412.905,33
                        ya üst üste biniyor ya paneli itiyor. */
-                    tickFormatter={formatCompact}
+                    tickFormatter={trendTick}
                   />
                   <Tooltip
                     formatter={(value: unknown) => formatMoney(Number(value))}

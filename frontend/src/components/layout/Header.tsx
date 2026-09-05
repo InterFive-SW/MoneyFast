@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, Notification } from '../../api/client'
 import { useUser }             from '../../contexts/UserContext'
-import { formatLongDate, msUntilLocalMidnight } from '../../lib/datetime'
+import { formatLongDate, formatTime, msUntilLocalMidnight } from '../../lib/datetime'
 
 interface HeaderProps {
   /**
@@ -189,7 +189,7 @@ function NotificationButton() {
                       {n.title}
                     </h4>
                     <span className="text-[10px] text-slate-500 shrink-0 ml-2">
-                      {new Date(n.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                      {formatTime(n.created_at)}
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 leading-relaxed pr-2">{n.description}</p>

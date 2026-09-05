@@ -1,4 +1,5 @@
 import { usePortfolioNews } from '../../hooks/usePortfolioNews'
+import { formatDate } from '../../lib/datetime'
 
 /**
  * Analiz > Genel Bakış — "Portföyünüze dokunan haberler".
@@ -15,9 +16,7 @@ import { usePortfolioNews } from '../../hooks/usePortfolioNews'
  */
 function timeLabel(item: { time: string; publishedAt: string }): string {
     const stamp = new Date(item.publishedAt)
-    return `${item.time} · ${stamp.toLocaleDateString('tr-TR', {
-        day: 'numeric', month: 'long',
-    })}`
+    return `${item.time} · ${formatDate(stamp, { day: 'numeric', month: 'long' })}`
 }
 
 export default function PortfoyHaberleri() {

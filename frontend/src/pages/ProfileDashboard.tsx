@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import { api } from '../api/client';
+import { formatDate } from '../lib/datetime'
 
 export default function ProfileDashboard() {
   const { profile, refetch } = useUser();
@@ -10,7 +11,7 @@ export default function ProfileDashboard() {
   const [uploadError, setUploadError] = useState('');
 
   // Fallback as date format
-  const joinDate = profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' }) : '2026';
+  const joinDate = profile?.createdAt ? formatDate(profile.createdAt, { month: 'long', year: 'numeric' }) : '2026';
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

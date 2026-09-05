@@ -26,6 +26,7 @@ import httpx
 from . import config, refresh_server, sinks
 from .sources import (
     gdelt_source,
+    news_api_source,
     kap_archive,
     kap_source,
     rss_source,
@@ -571,7 +572,18 @@ def run_global_news(client: httpx.Client) -> dict:
     Sembol çözümü yine backend'de: `symbol_match` küresel bir haberde de
     BIST adı arıyor ("Turkish Airlines" gibi), ve enstrüman evreni orada.
     """
+    # Üç kaynak, tek lavabo: GDELT makro tarafı, Finnhub ve Marketaux şirket
+    # seviyesini karşılıyor. Anahtarı olmayan sağlayıcı sessizce atlanıyor,
+    # dolayısıyla hiçbir anahtar kurulmamışsa tur yalnızca GDELT ile döner.
     items = gdelt_source.fetch_all()
+    seen = {item["content_hash"] for item in items}
+    for item in news_api_source.fetch_all():
+        # Aynı haber hem GDELT'ten hem bir sağlayıcıdan gelebiliyor.
+        if item["content_hash"] in seen:
+            continue
+        seen.add(item["content_hash"])
+        items.append(item)
+
     if not items:
         log.info("global news cycle: nothing fetched")
         return {"fetched": 0, "embedded": 0, "tagged": 0}

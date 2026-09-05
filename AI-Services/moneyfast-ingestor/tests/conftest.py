@@ -45,6 +45,9 @@ def clean_env(monkeypatch):
         "INGESTOR_GDELT_BASE_URL", "INGESTOR_GDELT_QUERIES",
         "INGESTOR_GDELT_TIMESPAN_DAYS", "INGESTOR_GDELT_MAX_RECORDS",
         "INGESTOR_GDELT_INTERVAL_MINUTES",
+        # Anahtarlı sağlayıcılar. Silinmezse geliştiricinin GERÇEK anahtarı
+        # test koşusuna sızar ve suite dış dünyaya istek atmayı dener.
+        "FINNHUB_API_KEY", "MARKETAUX_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
 

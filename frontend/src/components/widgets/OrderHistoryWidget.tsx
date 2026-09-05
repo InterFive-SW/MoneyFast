@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
 import type { Order } from '../../api/client'
 import { formatMoney } from '../../lib/money'
+import { formatShortDateTime } from '../../lib/datetime'
 
 /**
  * Emir Geçmişi Bileşeni
@@ -84,7 +85,7 @@ export default function OrderHistoryWidget() {
                   {formatMoney(order.total, order.currency)}
                 </td>
                 <td className="py-3 text-right tabular-nums text-[12px] text-slate-400">
-                  {new Date(order.date).toLocaleString('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  {formatShortDateTime(order.date)}
                 </td>
               </tr>
             ))}

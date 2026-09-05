@@ -5,7 +5,7 @@ import type {
   BankingData, BankAccount, BankTransaction, CreditCardUpdate,
 } from '../data/mockBankingData'
 import { apiClient } from '../api/client'
-import { formatDate } from '../lib/datetime'
+import { formatDate, istanbulDayDiff } from '../lib/datetime'
 import { BASE_CURRENCY, convert } from '../lib/money'
 import { useMarketStream } from '../hooks/useMarketStream'
 import type { Movement, PortfolioAccount } from '../api/client'
@@ -101,11 +101,11 @@ function formatMovementDate(isoDate: string): string {
   const date = new Date(isoDate)
   if (Number.isNaN(date.getTime())) return ''
 
-  const startOfDay = (value: Date) =>
-    new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()
-  const dayDiff = Math.round(
-    (startOfDay(new Date()) - startOfDay(date)) / 86_400_000,
-  )
+  // Gün farkı ANKARA'nın takvimine göre. Eskiden `getFullYear()/getMonth()/
+  // getDate()` ile tarayıcının günü okunuyordu: aynı fonksiyonun son satırı
+  // Istanbul yardımcısını kullanırken ilk yarısı tarayıcıyı kullanıyor,
+  // yani "Bugün" ile altındaki tarih üç saatlik bir pencerede çelişiyordu.
+  const dayDiff = istanbulDayDiff(date)
 
   if (dayDiff === 0) return 'Bugün'
   if (dayDiff === 1) return 'Dün'

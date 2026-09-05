@@ -29,6 +29,14 @@ class Notification(Base):
     # Kullanıcının bildirimi okuyup okumadığını takip eden bayrak (flag)
     is_read = Column(Boolean, nullable=False, default=False)
     
-    # Kaydın veritabanına eklendiği UTC zaman damgası
-    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    # Kaydın veritabanına eklendiği UTC zaman damgası.
+    #
+    # `timezone=True` ŞART ve bir dönem yoktu: şemadaki tek naive sütun
+    # buydu. Değer UTC olarak yazılıyordu ama sütun offset'i düşürdüğü için
+    # `created_at` `Z`siz seri hâle geliyor, JS de offset'siz bir damgayı
+    # YEREL saat sayıyor. Bildirim saatleri bu yüzden üç saat kaymış
+    # görünüyordu -- ön yüzü düzeltmek tek başına yetmezdi.
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
+import { formatDate } from '../../lib/datetime'
 
 /**
  * "Kayıtlı Alıcılar" sekmesi BOŞ ve bilerek öyle.
@@ -46,7 +47,7 @@ export default function MoneyTransferWizard() {
   // Step 4: Details State
   const [description, setDescription] = useState<string>('')
   const [transferType, setTransferType] = useState<string>('Bireysel Ödeme')
-  const date = new Date().toLocaleDateString('tr-TR')
+  const date = formatDate(new Date(), { day: '2-digit', month: '2-digit', year: 'numeric' })
 
   // Step 4 -> 5: Gönderim durumu
   const [submitting, setSubmitting] = useState(false)

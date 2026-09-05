@@ -176,3 +176,57 @@ describe('formatCompact', () => {
     expect(formatCompact(null as unknown as number)).toBe('—')
   })
 })
+
+describe('formatCompact — aralığa göre hassasiyet', () => {
+  it('dar bantta etiketler birbirinden ayrılıyor', () => {
+    /* ÖLÇÜLDÜ: haftalık portföy bandı 1.091.137 - 1.117.318 ve beş Y
+       etiketinin BEŞİ de "1,1 Mn" yazıyordu. Beş kez aynı sayıyı yazan bir
+       eksen eksen değildir. */
+    const span = 1_117_318 - 1_091_137
+    const labels = [1_091_137, 1_097_682, 1_104_227, 1_110_772, 1_117_318]
+      .map((v) => formatCompact(v, span))
+    expect(new Set(labels).size).toBe(labels.length)
+  })
+
+  it('her değer kendi birimini seçiyor', () => {
+    /* Aynı eksende "786 B" ile "1,11 Mn" yan yana gelebiliyor: büyüklük
+       farkını gizlemek yerine gösteriyor. */
+    const span = 1_110_666 - 786_369
+    expect(formatCompact(786_369, span)).toBe('786 B')
+    expect(formatCompact(1_110_666, span)).toContain('Mn')
+  })
+
+  it('basamak sayısı adımın büyüklüğüne göre açılıp kapanıyor', () => {
+    /* Asıl iddia bu: kural "küçük sayıya bir hane" değil, "komşu iki
+       etiket birbirinden ayrılsın". Bant daraldıkça hane açılıyor. */
+    const wide = formatCompact(1_110_666, 324_297)   // adım ~65 B
+    const narrow = formatCompact(1_110_666, 26_181)  // adım ~5 B
+    const decimals = (text: string) =>
+      (text.split(',')[1] ?? '').replace(/\D/g, '').length
+    expect(decimals(narrow)).toBeGreaterThan(decimals(wide))
+  })
+
+  it('aralık verilmezse eski davranış aynen duruyor', () => {
+    /* Tek bir sayıyı biçimlendiren onlarca çağrı yeri var ve onlar için
+       büyüklüğe dayalı kural doğruydu. */
+    expect(formatCompact(1_412_905)).toBe('1,4 Mn')
+    expect(formatCompact(412_900)).toBe('413 B')
+    expect(formatCompact(47)).toBe('47')
+  })
+
+  it('anlamsız bir aralık eski davranışa düşüyor', () => {
+    expect(formatCompact(1_412_905, 0)).toBe('1,4 Mn')
+    expect(formatCompact(1_412_905, -5)).toBe('1,4 Mn')
+    expect(formatCompact(1_412_905, Number.NaN)).toBe('1,4 Mn')
+  })
+
+  it('basamak sayısı üçte duruyor', () => {
+    /* `1,0912 Mn` bir eksen etiketi değil. */
+    expect(formatCompact(1_091_137, 1).split(',')[1]?.replace(' Mn', '').length ?? 0)
+      .toBeLessThanOrEqual(3)
+  })
+
+  it('adım bir birimden büyükse ondalık yok', () => {
+    expect(formatCompact(47, 200)).toBe('47')
+  })
+})

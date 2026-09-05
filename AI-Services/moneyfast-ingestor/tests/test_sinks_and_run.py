@@ -620,8 +620,10 @@ class TestCycles:
         olurdu. Öğeler `rss_source`in ürettiği sözlük biçiminde çıkıyor."""
         pushed = {}
         monkeypatch.setattr(
-            run.gdelt_source, "fetch_all", lambda: [{"title": "oil up"}]
+            run.gdelt_source, "fetch_all",
+            lambda: [{"title": "oil up", "content_hash": "h1"}],
         )
+        monkeypatch.setattr(run.news_api_source, "fetch_all", lambda: [])
         monkeypatch.setattr(
             run.sinks, "push_news_to_backend",
             lambda c, i: pushed.update(backend=list(i))
@@ -638,12 +640,53 @@ class TestCycles:
         assert pushed["symbols"] == {"h": ["THYAO"]}
         assert pushed["rag"] == pushed["backend"]
 
+    def test_the_keyed_providers_join_the_same_cycle(self, monkeypatch):
+        """Üç kaynak, tek lavabo. Ayrı bir yazma yolu, iki farklı
+        tekilleştirme davranışı demek olurdu."""
+        pushed = {}
+        monkeypatch.setattr(
+            run.gdelt_source, "fetch_all",
+            lambda: [{"title": "gdelt", "content_hash": "h1"}],
+        )
+        monkeypatch.setattr(
+            run.news_api_source, "fetch_all",
+            lambda: [{"title": "finnhub", "content_hash": "h2"}],
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: pushed.update(items=list(i)) or {"news_written": 2},
+        )
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 2)
+        assert run.run_global_news(None)["fetched"] == 2
+        assert [x["title"] for x in pushed["items"]] == ["gdelt", "finnhub"]
+
+    def test_a_story_from_two_sources_is_written_once(self, monkeypatch):
+        """Aynı haber hem GDELT'ten hem bir sağlayıcıdan gelebiliyor ve
+        `content_hash` öneksiz olduğu için ikisi AYNI satır."""
+        pushed = {}
+        monkeypatch.setattr(
+            run.gdelt_source, "fetch_all",
+            lambda: [{"title": "aynı haber", "content_hash": "h1"}],
+        )
+        monkeypatch.setattr(
+            run.news_api_source, "fetch_all",
+            lambda: [{"title": "aynı haber", "content_hash": "h1"}],
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: pushed.update(items=list(i)) or {"news_written": 1},
+        )
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 1)
+        assert run.run_global_news(None)["fetched"] == 1
+        assert len(pushed["items"]) == 1
+
     def test_global_news_with_nothing_fetched_writes_nothing(self, monkeypatch):
         """GDELT ulaşılamazsa ya da hiçbir sorgu eşleşmezse backend'e boş bir
         yazma isteği gitmiyor -- yazacak bir şey yokken yazmak, her saat
         başı anlamsız bir tur demekti."""
         wrote = []
         monkeypatch.setattr(run.gdelt_source, "fetch_all", lambda: [])
+        monkeypatch.setattr(run.news_api_source, "fetch_all", lambda: [])
         monkeypatch.setattr(
             run.sinks, "push_news_to_backend", lambda c, i: wrote.append(i) or {}
         )

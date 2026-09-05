@@ -367,3 +367,20 @@ def gdelt_interval_minutes() -> int:
     haberleri yeniden indirip aynı `content_hash`lerde elenmeleri olurdu.
     """
     return max(1, _int("INGESTOR_GDELT_INTERVAL_MINUTES", 60))
+
+
+# --------------------------------------------------------------------------
+# Anahtarlı haber sağlayıcıları. GDELT makro tarafı karşılıyor; bunlar şirket
+# seviyesini. Her ikisi de OPSİYONEL: anahtarı olmayan sağlayıcı atlanıyor.
+# --------------------------------------------------------------------------
+
+
+def news_api_key(name: str) -> Optional[str]:
+    """Bir sağlayıcının anahtarı, yoksa `None`.
+
+    `or None` ŞART: Compose `${FINNHUB_API_KEY:-}` boş dize üretiyor ve
+    `getenv` için boş dize "set" demek. `feeds()` aynı tuzağı belgeliyor --
+    orada sonuç haber toplamanın tamamen susmasıydı; burada sonuç, boş bir
+    anahtarla istek atıp her turda 401 almak olurdu.
+    """
+    return os.getenv(name) or None

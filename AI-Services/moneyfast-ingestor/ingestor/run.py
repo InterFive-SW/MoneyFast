@@ -24,7 +24,15 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from . import config, refresh_server, sinks
-from .sources import kap_archive, kap_source, rss_source, yfinance_source
+from .sources import (
+    gdelt_source,
+    news_api_source,
+    tefas_source,
+    kap_archive,
+    kap_source,
+    rss_source,
+    yfinance_source,
+)
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -548,6 +556,127 @@ def run_news(client: httpx.Client) -> dict:
     }
 
 
+def run_global_news(client: httpx.Client) -> dict:
+    """Küresel haber turu. `run_news`ten AYRI, üç sebeple.
+
+    Tempo: sekiz sorgu var ve GDELT istek başına beş saniye istiyor, yani tur
+    ~40 saniye sürüyor. Bunu on beş dakikalık RSS döngüsüne katmak, Türkçe
+    haberi bir dış servisin temposuna bağlamak olurdu.
+
+    Yalıtım: GDELT ulaşılamazsa Türkçe haber akışı etkilenmemeli. Ayrı iş,
+    ayrı hata.
+
+    Aynılık: lavabo AYNI. Öğeler `rss_source`in ürettiği sözlük biçiminde
+    çıkıyor, dolayısıyla backend'e ve korpusa giden yol tek -- ikinci bir
+    yazma yolu, iki farklı tekilleştirme davranışı demek olurdu.
+
+    Sembol çözümü yine backend'de: `symbol_match` küresel bir haberde de
+    BIST adı arıyor ("Turkish Airlines" gibi), ve enstrüman evreni orada.
+    """
+    # Üç kaynak, tek lavabo: GDELT makro tarafı, Finnhub ve Marketaux şirket
+    # seviyesini karşılıyor. Anahtarı olmayan sağlayıcı sessizce atlanıyor,
+    # dolayısıyla hiçbir anahtar kurulmamışsa tur yalnızca GDELT ile döner.
+    items = gdelt_source.fetch_all()
+    seen = {item["content_hash"] for item in items}
+    for item in news_api_source.fetch_all():
+        # Aynı haber hem GDELT'ten hem bir sağlayıcıdan gelebiliyor.
+        if item["content_hash"] in seen:
+            continue
+        seen.add(item["content_hash"])
+        items.append(item)
+
+    if not items:
+        log.info("global news cycle: nothing fetched")
+        return {"fetched": 0, "embedded": 0, "tagged": 0}
+
+    backend_result = sinks.push_news_to_backend(client, items) or {}
+    symbols = backend_result.pop("news_symbols", None) or {}
+    embedded = sinks.push_news_to_rag(client, items, symbols)
+    log.info(
+        "global news cycle: %d fetched, %s stored, %d embedded, %d symbol-tagged",
+        len(items), backend_result.get("news_written", 0), embedded, len(symbols),
+    )
+    return {
+        "fetched": len(items),
+        "embedded": embedded,
+        "tagged": len(symbols),
+        **backend_result,
+    }
+
+
+def run_tefas(client: httpx.Client) -> dict:
+    """TEFAS turu — günde bir.
+
+    Kapalıysa hiçbir şey yapmıyor. Varsayılan KAPALI, çünkü bu kaynak sitenin
+    `robots.txt`'inde belirttiği tercihi geçersiz kılıyor (bkz.
+    `courtesy.ROBOTS_EXEMPT_HOSTS` ve `docs/TEFAS_INTEGRATION.md`) ve
+    klonlayan bir ekip arkadaşının farkında olmadan devreye sokması doğru
+    olmaz.
+
+    Üç adım, üçü de bütçeli:
+
+    1. Evren + günlük anlık görüntü. Toplamda ~10 istek: iki tanesi evren,
+       gerisi sayfalama.
+    2. Şemsiye türü — fon başına bir istek, bu yüzden yalnızca EKSİK
+       olanlar ve tur başına bir bütçe kadar.
+    3. NAV serisi — aynı gerekçe, aynı desen. `kap_corpus_budget`in
+       yaptığının aynısı.
+    """
+    if not config.tefas_enabled():
+        log.info("tefas: disabled (INGESTOR_TEFAS_ENABLED not set)")
+        return {"skipped": True}
+
+    with httpx.Client(
+        follow_redirects=True, headers={"User-Agent": config.user_agent()}
+    ) as tefas:
+        universe = tefas_source.fetch_universe(tefas)
+        daily = tefas_source.fetch_daily(tefas)
+
+        # Günlük satır fon adını da taşıyor ama evren turu kurucuyu taşıyor;
+        # ikisi AYRI alanlar dolduruyor ve backend kısmi güncelleme yapıyor,
+        # dolayısıyla biri diğerini ezmiyor.
+        written = sinks.push_funds_to_backend(client, universe + daily)
+
+        coverage = sinks.fetch_fund_coverage(client)
+        # Şemsiye türü artık FON BAŞINA değil, ŞEMSİYE BAŞINA bir istek:
+        # şemsiye listesi alınıp günlük uç `sfonTurKod` ile süzülüyor.
+        # Bütçeye ihtiyaç kalmadı -- tur başına on iki şemsiye, 1.054 fon
+        # değil -- ama eksik yoksa hiç yapılmıyor.
+        profiles: list[dict] = []
+        if coverage.get("missing_umbrella"):
+            profiles = tefas_source.fetch_umbrellas(tefas)
+        if profiles:
+            written["funds_written"] += sinks.push_funds_to_backend(
+                client, profiles,
+            )["funds_written"]
+
+        missing_prices = (coverage.get("missing_prices") or [])[
+            : config.tefas_price_budget()
+        ]
+        prices: list[dict] = []
+        category_metrics: list[dict] = []
+        for code in missing_prices:
+            series, category = tefas_source.fetch_prices(code, tefas)
+            prices.extend(series)
+            if category is not None:
+                category_metrics.append(category)
+        if prices or category_metrics:
+            written["prices_written"] += sinks.push_funds_to_backend(
+                client, category_metrics, prices,
+            )["prices_written"]
+
+    log.info(
+        "tefas cycle: %d funds, %d price rows, %d profiles, %d series",
+        written["funds_written"], written["prices_written"],
+        len(profiles), len(missing_prices),
+    )
+    return {
+        "funds": written["funds_written"],
+        "prices": written["prices_written"],
+        "profiles": len(profiles),
+    }
+
+
 def _disclosure_index(url: Optional[str]) -> Optional[int]:
     """Kalıcı bağlantının sonundaki bildirim numarası.
 
@@ -873,6 +1002,24 @@ def start_scheduler() -> None:
         id="news",
         max_instances=1,
         coalesce=True,
+    )
+    scheduler.add_job(
+        _job("global-news", run_global_news),
+        "interval",
+        minutes=config.gdelt_interval_minutes(),
+        id="global-news",
+        max_instances=1,
+        coalesce=True,
+    )
+    # TEFAS günde bir: NAV günde bir yayımlanıyor ve daha sık yoklamanın
+    # getirisi yok, maliyeti var. Kapalıysa iş çalışıyor ve hemen dönüyor.
+    scheduler.add_job(
+        _job("tefas", run_tefas),
+        "cron",
+        hour=20,
+        minute=30,
+        id="tefas",
+        max_instances=1,
     )
     # Canlı KAP akışı `run_news`'in içinde: `kap_source` her haber turunda
     # listeyi çekiyor. Buraya ikinci bir aralıklı iş koymak, iki fetcher'ın

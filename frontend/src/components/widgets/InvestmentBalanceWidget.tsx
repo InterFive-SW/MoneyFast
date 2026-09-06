@@ -97,6 +97,23 @@ export default function InvestmentBalanceWidget() {
           </span>
         </div>
       </div>
+
+      {/* Bekleyen emirlerin tuttuğu para.
+          Yalnızca bir şey tutulurken görünüyor: sıfır bir satır, hiç emri
+          olmayan kullanıcıya cevaplamadığı bir soru sormak olurdu.
+
+          Toplama DAHİL DEĞİL -- bakiyeden zaten düşüldü. Ayrı yazılıyor
+          çünkü sorulan soru "toplamım ne" değil, nakit neden eksildi:
+          nedeni yazılmayan bir eksilme bir hataya benziyor. */}
+      {data.blockedTRY > 0 && (
+        <p className="mt-3 border-t border-white/10 pt-3 text-[11px] text-slate-400">
+          Bekleyen emirler için{' '}
+          <span className="font-semibold tabular-nums text-amber-400">
+            ₺{data.blockedTRY.toLocaleString('tr-TR', { minimumFractionDigits: 0 })}
+          </span>{' '}
+          bloke edildi.
+        </p>
+      )}
     </div>
   )
 }

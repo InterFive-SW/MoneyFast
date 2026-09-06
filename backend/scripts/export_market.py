@@ -104,6 +104,53 @@ def export_candles(db) -> int:
     )
 
 
+#: Fon sütunları. `market.funds` şemasıyla aynı sırada; yükleyici bu başlığı
+#: okuyor.
+FUND_COLUMNS = (
+    "code", "title", "founder", "operator", "umbrella", "fund_type",
+    "price", "shares", "investors", "size", "as_of",
+    "category_rank", "category_size", "active",
+)
+
+#: Kaç yıllık NAV serisi dışa aktarılır. Bir yıl: arayüzdeki en uzun fon
+#: getiri sütunu "5 Yıl" ama beş yılın tamamı ~3,2 milyon satır ve bu, bir
+#: klonun açılışta ihtiyaç duyduğu ZEMİN değil -- toplayıcı üstüne çıkıyor.
+FUND_HISTORY_YEARS = 1
+
+
+def export_funds(db) -> int:
+    """Fon EVRENİ. Fiyat serisinden ayrı dosya, çünkü ayrı ölçekte: 2.602
+    satıra karşı yüz binlerce."""
+    rows = db.execute(text(f"""
+        SELECT {", ".join(FUND_COLUMNS)}
+        FROM market.funds
+        ORDER BY code
+    """)).all()
+    return _write(OUT_DIR / "funds.csv.gz", FUND_COLUMNS, rows)
+
+
+def export_fund_prices(db) -> int:
+    """NAV serisi.
+
+    Fon getirileri seriden HESAPLANIYOR, saklanmıyor (bkz.
+    `market/funds.py`). Yani serisi olmayan bir fonun her getiri sütunu
+    `NA` görünüyor -- ve seri fon BAŞINA bir TEFAS isteği, tam tur ~3,6
+    saat. Bir klonun bunu kendi başına doldurmasını beklemek, Fonlar
+    ekranının ilk yarım günü boş kalması demekti.
+
+    Doğal anahtar (`code`) taşındığı için mumlardaki `_symbol_ids`
+    çözümlemesi burada GEREKMİYOR.
+    """
+    since = datetime.now(timezone.utc).date() - timedelta(days=365 * FUND_HISTORY_YEARS)
+    rows = db.execute(text("""
+        SELECT code, as_of, price
+        FROM market.fund_prices
+        WHERE as_of >= :since
+        ORDER BY code, as_of
+    """), {"since": since}).all()
+    return _write(OUT_DIR / "fund_prices.csv.gz", ("code", "as_of", "price"), rows)
+
+
 #: Kaç aylık KAP bildirimi dışa aktarılır.
 NEWS_MONTHS = int(os.getenv("SEED_NEWS_MONTHS", "6"))
 
@@ -151,6 +198,8 @@ def main() -> int:
         funds = export_fundamentals(db)
         candles = export_candles(db)
         news = export_news(db)
+        tefas = export_funds(db)
+        navs = export_fund_prices(db)
     finally:
         db.close()
 
@@ -161,14 +210,22 @@ def main() -> int:
     # tamamen boşuna. Beklenen satır sayısını dışa aktaran biliyor.
     (OUT_DIR / "manifest.json").write_text(
         json.dumps(
-            {"fundamentals": funds, "candles": candles, "news": news}, indent=2
+            {
+                "fundamentals": funds, "candles": candles, "news": news,
+                "funds": tefas, "fund_prices": navs,
+            },
+            indent=2
         ) + "\n",
         encoding="utf-8",
     )
-    for name in ("fundamentals.csv.gz", "candles.csv.gz", "news.csv.gz"):
+    for name in ("fundamentals.csv.gz", "candles.csv.gz", "news.csv.gz",
+                 "funds.csv.gz", "fund_prices.csv.gz"):
         size = (OUT_DIR / name).stat().st_size
         print(f"  {name:22s} {size / 1024 / 1024:6.2f} MB")
-    print(f"  temel veri {funds} satır, mum {candles} satır, bildirim {news} satır")
+    print(
+        f"  temel veri {funds} satır, mum {candles} satır, bildirim {news} satır, "
+        f"fon {tefas} satır, NAV {navs} satır"
+    )
     return 0
 
 

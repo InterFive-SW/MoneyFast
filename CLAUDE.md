@@ -84,6 +84,8 @@ Bu uç noktaları değiştirirken `AI-Services/.../mcp-server/*_tools.py` içind
 | `validate_compliance_rules` | `POST /api/compliance/validate` |
 | `rag_semantic_market_search` | `POST /search` — **backend'de değil, `rag` servisinde** |
 | `get_market_data` | `GET /api/market/instruments` — v2.2 ile eklendi |
+| `get_open_orders` | `GET /api/investment/agent/{user_id}/orders` — v2.20 |
+| `cancel_order` | `POST /api/investment/agent/{user_id}/orders/{id}/cancel` — v2.20 |
 
 v2.3 ile `get_portfolio_positions` yanıtına `totals.cash_balance` ve
 `totals.total_value` eklendi. Öncesinde sözleşmede nakit yoktu, dolayısıyla
@@ -241,7 +243,9 @@ Frontend'in kullandığı `/api/investment/positions`, `/api/investment/watchlis
 gibi uç noktalar bunlardan ayrı ve camelCase şemalarını koruyor; ikisi farklı
 tüketicilere hizmet ediyor ve farklı sebeplerle değişiyor. Emir verme yolu ise
 ortak: panel de sohbet de `transactions/stage` → `transactions/{id}/confirm`
-kullanıyor (eski `/orders/propose` ve `/orders/confirm` taslakları kaldırıldı,
+kullanıyor, ve bekleyen bir emrin geri çekilmesi de öyle
+(`transactions/{id}/cancel`; sohbetin yolu `agent/{user_id}/orders/...` ama
+ikisi de `_cancel_order` üzerinden geçiyor) (eski `/orders/propose` ve `/orders/confirm` taslakları kaldırıldı,
 bkz. CONTRACT_WORKFLOW.md).
 
 ### Canlı fiyat akışı
@@ -415,6 +419,87 @@ delta'lanmadığı için bu, her yeniden dışa aktarmada kalıcı geçmiş deme
 - Frontend: React + Vite + TypeScript + TailwindCSS
 - Servisler arası tek network sınırı: backend ↔ ai-service (HTTP). Sözleşme yönetimi
   için bkz. `CONTRACT_WORKFLOW.md`.
+
+### Emir: onaylamak almak değil
+
+Bir alım onaylandığı anda gerçekleşiyordu ve limit fiyat yalnızca bir
+FİYATLAMA girdisiydi: `ai_service._estimate` limit fiyatı gördüğünde onu
+referans fiyatın yerine koyuyordu, yani "290'a düşünce al" diyen bir emir,
+piyasa 305'ken bile 290'dan doluyordu.
+
+Artık onay emri **yerleştiriyor**:
+
+```
+PENDING_USER_CONFIRMATION --onay--> WAITING_PRICE --eşleşme--> CONFIRMED
+                                          |
+                                          +--iptal--> CANCELLED (iade)
+```
+
+Piyasa emrinin bekleyecek bir şeyi yok; fiyat zaten oluşmuş, blokajın hemen
+ardından gerçekleşiyor. Limit emri (`order_type` `LIMIT`/`STOP_LIMIT` ve
+migration 0040'ta indekslenmiş bir `limit_price`) `WAITING_PRICE`ta bekliyor
+ve `matching.py` her dakika tarıyor: ALIŞ için `piyasa <= limit`, SATIŞ için
+`piyasa >= limit`. **Dolum limit fiyattan değil, eşleşmeyi sağlayan piyasa
+fiyatından** — öneri limitten maliyetlendirildiği için alışta aradaki fark
+iade ediliyor; kur ise öneride DONMUŞ olanla kalıyor.
+
+Hisse `market_quotes`tan fiyatlanıyor ve bayat kotasyon ya da kapalı borsa
+eşleşmeyi reddediyor: kapalı bir piyasada "fiyat geldi" demek, olmamış bir
+işlemi uydurmak olurdu. Fon `market.funds` NAV'ından ve tabiatı gereği
+günde bir ilerliyor.
+
+Durum **veritabanında**, bir arka plan görevinin belleğinde değil. Eskiden
+onaydan sonra `asyncio.sleep(15)` bekleyen bir görev vardı (docstring'i "3
+dakika" diyordu); süreç o aralıkta ölürse satır `PENDING`, para bloke ve onu
+bitirecek ya da geri alacak hiçbir şey kalmıyordu. `sweep_stale_pending` o
+yoldan kalmış satırların blokajını çözüyor.
+
+`GET /api/investment/orders` bir dönem **kimlik doğrulaması istemiyordu ve
+kullanıcıya göre süzülmüyordu**: token'sız bir istek son yirmi emri —
+herkesinkini, sembol, adet ve durumuyla — döndürüyordu. Canlı doğrulandı ve
+kapatıldı; `recent_orders`ın `user_id` parametresinin varsayılanı yok.
+
+**Bir uç, adının söylediği şeyi döndürmeyebilir.** `fonProfilDtyGetir`
+fonun profilini değil, karşılaştırma grafiğinin gösterge listesini
+döndürüyor ve yanıt HER FON İÇİN AYNI. İlk satırın `fonTuru` alanı şemsiye
+türü sanıldı: 1.054 aktif fonun 1.021'i "ALTIN" şemsiyesine yazıldı ve
+hepsine aynı kategori getirisi kondu. Şemsiye eşlemesi artık `fonTurGetir` +
+`sfonTurKod` ile süzülmüş anlık görüntüden geliyor (fon başına değil,
+şemsiye başına bir istek) ve `category_return` sütunu düştü — doğru kaynağı
+yok (migration 0041, `docs/TEFAS_INTEGRATION.md`).
+
+**Emir yolu baktığın yerde.** Alım-satım tek bir yerde — Portföy
+ekranındaki hızlı emir kutusunda — duruyordu; bir hisseyi ya da fonu
+inceleyen kullanıcının onu alması için önce başka bir ekrana gitmesi
+gerekiyordu. Hisse ve fon detay sayfalarının ikisinde de "Al / Sat" düğmesi
+var ve aynı `TradeModal`'ı açıyor: emir yolu tek.
+
+`MarketInstrument` artık ISO para birimini de taşıyor. Yalnızca gösterim
+işareti (`unit`: ₺/$/€) taşınıyordu ve `TradeModal` varsayılanına düşüyordu,
+yani bir dolar hissesi liraya fiyatlanıyordu — "bir fiyat, para birimi
+olmadan taşınmaz" kuralının aynısı.
+
+**Bloke tutar GÖRÜNÜR.** GTC bir emir parayı süresiz tutabiliyor; bakiyede
+eksilen ama nedeni hiçbir yerde yazmayan bir tutar kullanıcıya bir hata gibi
+görünüyor. `/portfolio/summary` `blockedTRY` döndürüyor ve bakiye
+bileşeninde yazıyor. Toplama EKLENMİYOR: o para bakiyeden zaten düşüldü,
+eklemek iki kez saymak olurdu.
+
+**Sembol, günlük dildeki kelimeyi yener.** `resolve_candidates` bir dönem
+takma ad tablosuna (`altın` → XAUUSD) ÖNCE bakıyordu. Fon evreni
+köprülenmeye başlayınca bu ölçülebilir bir hataya dönüştü: `ons` tabloda
+XAUUSD'ye bağlıydı ama ONS gerçek bir TEFAS fon kodu, dolayısıyla "ONS al"
+diyen biri **altın alıyordu**. Artık tam sembol eşleşmesi önce bakılıyor —
+sembol kayıtlı bir gerçek, takma ad ise niyet tahmini — ve yalın `ons`
+tablodan çıkarıldı; altını isteyen "altın", "ons altın", "gold" ya da "xau"
+yazıyor.
+
+**Fonlar ilk emirde köprüleniyor.** `market.funds` ile
+`investment.investment_products` iki ayrı evren ve emir/pozisyon/risk
+yollarının hepsi ikincisinden geçiyor. 2.602 fonu toptan yazmak Piyasalar
+ekranını doldururdu, bu yüzden `funds.ensure_tradable` yalnızca işlem gören
+fonu yazıyor: `product_type='fund'`, `data_symbol=NULL` (yfinance onu
+fiyatlamasın), fiyat `sync_quotes` ile `market_quotes`a yansıtılıyor.
 
 ### Nakit, takas ve hesaplar
 

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ScenarioFactor } from '../../api/client'
 import { FACTOR_LABELS, useScenario } from '../../hooks/useScenario'
 import { formatMoney } from '../../lib/money'
+import { formatDate } from '../../lib/datetime'
 
 /**
  * Analiz > Senaryo — "bir faktör oynasaydı" ve "gerçekte ne oldu".
@@ -169,7 +170,7 @@ export default function SenaryoPaneli({ lookback }: { lookback: string }) {
                                     {worstDays.map((row) => (
                                         <li key={row.date} className="flex justify-between py-2 text-sm">
                                             <span className="text-slate-300">
-                                                {new Date(row.date).toLocaleDateString('tr-TR', {
+                                                {formatDate(row.date, {
                                                     day: 'numeric', month: 'long', year: 'numeric',
                                                 })}
                                             </span>
@@ -202,8 +203,8 @@ export default function SenaryoPaneli({ lookback }: { lookback: string }) {
                                             </div>
                                             <div className="mt-0.5 flex justify-between text-xs">
                                                 <span className="text-slate-500">
-                                                    {new Date(row.start).toLocaleDateString('tr-TR')} –{' '}
-                                                    {new Date(row.end).toLocaleDateString('tr-TR')}
+                                                    {formatDate(row.start)} –{' '}
+                                                    {formatDate(row.end)}
                                                 </span>
                                                 <span className="tabular-nums">
                                                     <span className="text-slate-400">faktör </span>

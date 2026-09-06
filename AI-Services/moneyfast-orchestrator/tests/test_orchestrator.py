@@ -377,6 +377,159 @@ class TestResearchNodeResolvesNames:
         ]
 
 
+class TestDocTypeFilter:
+    """`languages` ile aynı arıza sınıfı, aynı sessizlik.
+
+    ÖLÇÜLDÜ: planlayıcı `doc_types: ["news", "analysis"]` gönderdi. Depoda tür
+    `NEWS` diye yazılı, dolayısıyla küçük harfli değer hiçbir satırla
+    eşleşmiyor ve `analysis` zaten şemada yok. İki geçiş de sıfır döndü ve
+    kullanıcı "verilere ulaşamadım" cevabı aldı -- derlemde 0,63 puanla
+    eşleşen üç haber dururken.
+    """
+
+    def test_case_is_a_formatting_error_not_a_choice(self):
+        filters = {"doc_types": ["news", "filing"]}
+        orchestrator._normalise_doc_types(filters)
+        assert filters["doc_types"] == ["NEWS", "FILING"]
+
+    def test_a_type_that_is_not_in_the_schema_is_dropped(self):
+        filters = {"doc_types": ["news", "analysis"]}
+        orchestrator._normalise_doc_types(filters)
+        assert filters["doc_types"] == ["NEWS"]
+
+    def test_dropping_every_type_removes_the_filter_rather_than_emptying_it(self):
+        """Boş liste bırakmak "hiçbir türü kabul etme" demek olurdu, yani
+        sessizliğin daha da kesini."""
+        filters = {"doc_types": ["analysis", "opinion"]}
+        orchestrator._normalise_doc_types(filters)
+        assert "doc_types" not in filters
+
+    def test_no_filter_is_left_alone(self):
+        filters = {"published_after": "2026-01-01"}
+        orchestrator._normalise_doc_types(filters)
+        assert filters == {"published_after": "2026-01-01"}
+
+    def test_an_empty_list_is_left_alone(self):
+        filters = {"doc_types": []}
+        orchestrator._normalise_doc_types(filters)
+        assert filters == {"doc_types": []}
+
+    @pytest.mark.asyncio
+    async def test_the_node_applies_it(self, mocker, patched_llm):
+        import json as _json
+        patched_llm.set_response(_json.dumps({
+            "arguments": {"filters": {"doc_types": ["news", "analysis"]}},
+        }))
+        seen = {}
+
+        async def widen(state, args, ticker, assumptions, aliases=()):
+            seen["filters"] = args.get("filters")
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT",
+                                          "status": "OK",
+                                          "data": {"results": [{"chunk_id": "c"}]}}}
+
+        mocker.patch.object(orchestrator, "_narrow_then_widen", side_effect=widen)
+        mocker.patch.object(orchestrator, "_fold_in_own_documents",
+                            side_effect=lambda s, a, r: r)
+        mocker.patch.object(orchestrator, "_resolve_named_company",
+                            side_effect=lambda state: None)
+        await orchestrator.market_research_node({"user_message": "petrol haberleri"})
+        assert seen["filters"]["doc_types"] == ["NEWS"]
+
+
+class TestPlannerQueryRetry:
+    """Uzun bir cümle gömme vektörünü SEYRELTİYOR.
+
+    Ölçüldü, aynı derlem ve aynı eşik (0,45):
+
+        "petrol fiyatları ve jeopolitik gelişmeler hakkında ne var? bu THYAO
+         gibi havayollarını nasıl etkiler?"        -> 0 sonuç
+        "petrol fiyatları ve jeopolitik gelişmeler" -> 0,749 / 0,719 / 0,692
+        "petrol fiyatları havayolu maliyeti"        -> 0,640 / 0,628 / 0,602
+
+    O 0,602'lik satır "96 dolarlık petrole THY ve Pegasus'tan hedge kalkanı"
+    -- sorunun tam cevabı derlemde duruyordu.
+    """
+
+    def _rows(self, n):
+        return [{"chunk_id": f"c{i}", "title": "t", "publisher": "p",
+                 "snippet": "s", "published_at": "2026-09-01"} for i in range(n)]
+
+    def _node(self, mocker, patched_llm, planner_query, results):
+        import json as _json
+        patched_llm.set_response(
+            _json.dumps({"arguments": {}, "fallback_query": planner_query})
+        )
+        asked = []
+
+        async def widen(state, args, ticker, assumptions, aliases=()):
+            asked.append(args["query"])
+            rows = results.pop(0) if results else []
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT",
+                                          "status": "OK", "data": {"results": rows}}}
+
+        mocker.patch.object(orchestrator, "_narrow_then_widen", side_effect=widen)
+        mocker.patch.object(orchestrator, "_fold_in_own_documents",
+                            side_effect=lambda s, a, r: r)
+        mocker.patch.object(orchestrator, "_resolve_named_company",
+                            side_effect=lambda state: None)
+        return asked
+
+    @pytest.mark.asyncio
+    async def test_an_empty_result_retries_with_the_planner_query(
+        self, mocker, patched_llm,
+    ):
+        asked = self._node(
+            mocker, patched_llm, "petrol fiyatları havayolu maliyeti",
+            [[], self._rows(3)],
+        )
+        out = await orchestrator.market_research_node({
+            "user_message": "petrol fiyatları ve jeopolitik gelişmeler hakkında ne "
+                            "var? bu THYAO gibi havayollarını nasıl etkiler?",
+        })
+        assert asked == [
+            "petrol fiyatları ve jeopolitik gelişmeler hakkında ne var? bu THYAO "
+            "gibi havayollarını nasıl etkiler?",
+            "petrol fiyatları havayolu maliyeti",
+        ]
+        assert len(out["specialist_output"]["data"]["results"]) == 3
+
+    @pytest.mark.asyncio
+    async def test_a_productive_first_pass_is_not_retried(self, mocker, patched_llm):
+        """Her turda iki arama yapmak, işe yarayan yolu da iki katına
+        çıkarırdı."""
+        asked = self._node(mocker, patched_llm, "damıtılmış sorgu", [self._rows(2)])
+        await orchestrator.market_research_node({"user_message": "petrol nasıl"})
+        assert asked == ["petrol nasıl"]
+
+    @pytest.mark.asyncio
+    async def test_an_identical_planner_query_is_not_retried(self, mocker, patched_llm):
+        """Kısa bir istekte damıtma yapacak bir şey yok ve istem "aynen
+        tekrarla" diyor. Aynı metni ikinci kez aramak, aynı sıfır sonucu
+        ikinci kez almak."""
+        asked = self._node(mocker, patched_llm, "petrol fiyatları nasıl", [[], []])
+        await orchestrator.market_research_node({"user_message": "Petrol Fiyatları Nasıl"})
+        assert len(asked) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_too_short_planner_query_is_not_retried(self, mocker, patched_llm):
+        """Bir iki karakterlik "sorgu" damıtma değil, kayıp."""
+        asked = self._node(mocker, patched_llm, "petrol", [[], self._rows(3)])
+        await orchestrator.market_research_node({"user_message": "uzun bir soru cümlesi"})
+        assert len(asked) == 1
+
+    @pytest.mark.asyncio
+    async def test_an_empty_retry_does_not_overwrite_the_first_answer(
+        self, mocker, patched_llm,
+    ):
+        """İkinci deneme de boşsa cevap yine boş, ama zarf İLK aramanınki
+        kalıyor -- tazelik alanları oradan geliyor."""
+        asked = self._node(mocker, patched_llm, "damıtılmış sorgu", [[], []])
+        out = await orchestrator.market_research_node({"user_message": "uzun bir soru"})
+        assert len(asked) == 2
+        assert out["specialist_output"]["data"]["results"] == []
+
+
 class TestNameAliases:
     """Kayıtlı şirket adından metinde aranacak biçim.
 
@@ -521,13 +674,19 @@ class TestNarrowThenWiden:
     %37'si ikinci koddan geliyor -- sert bir süzgeç tam da onu kapatırdı.
     """
 
-    def _rows(self, n, prefix="c", mentions=True):
+    def _rows(self, n, prefix="c", mentions=True, score=0.46, tickers=None):
         """Geniş geçişin var olma sebebi, hissenin `ticker` sütununda DEĞİL
         METİNDE geçtiği belgeler -- iki şirketli bir bildirimde ikinci şirket
-        gibi. Bu yüzden varsayılan satırlar hisseyi metninde anıyor."""
+        gibi. Bu yüzden varsayılan satırlar hisseyi metninde anıyor.
+
+        `score` varsayılanı alma eşiğinin hemen üstünde ve bağlam eşiğinin
+        ALTINDA: etiketsiz bir dolgu satırı böyle görünüyor (ölçülen örnek
+        0,463 ile "Asya'nın en zengin ülkesinde nüfus alarmı")."""
         body = "İlgili şirketler: ASELS, THYAO" if mentions else "başka bir konu"
         return [{"chunk_id": f"{prefix}{i}", "title": f"Bildirim {i}",
-                 "publisher": "KAP", "snippet": body, "published_at": "2026-08-28"}
+                 "publisher": "KAP", "snippet": body, "score": score,
+                 "tickers": list(tickers or []),
+                 "published_at": "2026-08-28"}
                 for i in range(n)]
 
     def _payload(self, rows):
@@ -642,6 +801,39 @@ class TestNarrowThenWiden:
             {}, {"query": "q"}, "THYAO", [], ("TÜRK HAVA YOLLARI",),
         )
         assert [r["chunk_id"] for r in out["specialist_output"]["data"]["results"]] == ["w0"]
+
+    @pytest.mark.asyncio
+    async def test_another_companys_filing_is_never_context(self, mocker):
+        """Ölçülen hatanın kendisi: THYAO sorusuna 0,669 puanlı bir EKGYO
+        bildirimi kaynak gösterildi. Başka bir şirketin bildirimi bu şirket
+        hakkında kanıt değil -- puanı ne olursa olsun."""
+        results = [[], self._rows(3, "w", mentions=False, score=0.90,
+                                  tickers=["EKGYO"])]
+
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(results.pop(0))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        out = await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
+        assert out["specialist_output"]["data"]["results"] == []
+
+    @pytest.mark.asyncio
+    async def test_untagged_macro_context_survives_at_a_higher_bar(self, mocker):
+        """Petrol, faiz ve jeopolitik haberleri havayolu maliyetini gerçekten
+        açıklıyor. Hepsini elemek, kullanıcının istediği zinciri
+        ("ABD saldırısı -> petrol -> THYAO") kurulamaz yapardı.
+
+        Ölçüldü: makro satırlar 0,633/0,623/0,622, dolgu satırı 0,463."""
+        results = [[], self._rows(2, "w", mentions=False, score=0.63)]
+
+        async def fake(state, tool, args, **kw):
+            return {"specialist_output": {"agent": "MARKET_RESEARCH_AGENT", "status": "OK",
+                                          "data": self._payload(results.pop(0))}}
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        out = await orchestrator._narrow_then_widen({}, {"query": "q"}, "THYAO", [])
+        assert len(out["specialist_output"]["data"]["results"]) == 2
 
     @pytest.mark.asyncio
     async def test_a_planner_ticker_filter_does_not_survive_the_widening(self, mocker):
@@ -5928,3 +6120,161 @@ class TestCompoundRouting:
         assert orchestrator.route_after_router(
             {**base_state, "sub_requests": [], "target_agent": "MARKET_DATA_AGENT"}
         ) == "market_data"
+
+
+class TestCancelOrderNode:
+    """«Emrimi iptal et» — önce OKU, sonra iptal et.
+
+    Model emir numarasını bilemez ve uydurmasına da izin verilmiyor
+    (`cancel_order` sözleşmesi bunu açıkça yasaklıyor), dolayısıyla iptal her
+    zaman iki adım. Belirsizlik SORULUYOR: iki bekleyen emri olan birinin
+    "emrimi iptal et" demesi, ikisinden birini seçmek için yeterli değil.
+    """
+
+    def _order(self, order_id="PROP-1", symbol="THYAO", cancellable=True):
+        return {
+            "id": order_id, "symbol": symbol, "status": "Fiyat bekliyor",
+            "type": "Alış", "quantity": 10.0, "price": 290.0, "total": 2900.0,
+            "currency": "TRY", "limit_price": 290.0, "cancellable": cancellable,
+            "date": "2026-09-05T18:00:00+00:00",
+        }
+
+    def _listing(self, orders, status="OK"):
+        return {
+            "specialist_output": {
+                "agent": "TRANSACTION_AGENT", "status": status,
+                "tool": "get_open_orders",
+                "data": {"orders": orders, "open_count": len(orders)},
+            },
+            "tools_used": ["get_open_orders"],
+        }
+
+    def _fake(self, mocker, *outcomes):
+        calls = []
+
+        async def fake(state, tool, args, **kw):
+            calls.append((tool, args))
+            return outcomes[len(calls) - 1]
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_the_only_open_order_is_cancelled(self, mocker):
+        calls = self._fake(
+            mocker,
+            self._listing([self._order()]),
+            {"specialist_output": {"agent": "TRANSACTION_AGENT", "status": "OK",
+                                   "tool": "cancel_order",
+                                   "data": {"order_id": "PROP-1", "cancelled": True}}},
+        )
+        out = await orchestrator._cancel_order_node(
+            {"user_id": "user-1"}, {"tool": "cancel_order", "arguments": {}}
+        )
+        assert [tool for tool, _ in calls] == ["get_open_orders", "cancel_order"]
+        assert calls[1][1] == {"user_id": "user-1", "order_id": "PROP-1"}
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_no_open_order_is_reported_as_empty_not_cancelled(self, mocker):
+        """Olmayan bir emri "iptal ettim" diye bildirmek, kullanıcının hiç
+        vermediği bir emri geri aldığını sanmasına yol açar."""
+        calls = self._fake(mocker, self._listing([]))
+        out = await orchestrator._cancel_order_node({"user_id": "user-1"}, {})
+        assert [tool for tool, _ in calls] == ["get_open_orders"]
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_a_filled_order_is_not_cancellable(self, mocker):
+        """Gerçekleşmiş bir emri geri almak, ters yönde ikinci bir emirdir."""
+        calls = self._fake(mocker, self._listing([self._order(cancellable=False)]))
+        out = await orchestrator._cancel_order_node({"user_id": "user-1"}, {})
+        assert [tool for tool, _ in calls] == ["get_open_orders"]
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_several_open_orders_are_asked_about_not_guessed(self, mocker):
+        self._fake(
+            mocker,
+            self._listing([self._order("PROP-1"), self._order("PROP-2", "ASELS")]),
+        )
+        out = await orchestrator._cancel_order_node({"user_id": "user-1"}, {})
+        output = out["specialist_output"]
+        assert output["status"] == "NEEDS_INPUT"
+        assert "THYAO" in output["clarification_request"]
+        assert "ASELS" in output["clarification_request"]
+
+    @pytest.mark.asyncio
+    async def test_a_named_symbol_settles_the_ambiguity(self, mocker):
+        calls = self._fake(
+            mocker,
+            self._listing([self._order("PROP-1"), self._order("PROP-2", "ASELS")]),
+            {"specialist_output": {"agent": "TRANSACTION_AGENT", "status": "OK",
+                                   "tool": "cancel_order", "data": {}}},
+        )
+        await orchestrator._cancel_order_node(
+            {"user_id": "user-1", "entities": {"tickers": ["ASELS"]}}, {}
+        )
+        assert calls[1][1]["order_id"] == "PROP-2"
+
+    @pytest.mark.asyncio
+    async def test_a_named_symbol_with_no_order_still_asks(self, mocker):
+        """Sembol hiçbir emirle eşleşmiyorsa aday kümesi daralmıyor: elde
+        olanı sormak, olmayanı iptal etmekten iyi."""
+        self._fake(
+            mocker,
+            self._listing([self._order("PROP-1"), self._order("PROP-2", "ASELS")]),
+        )
+        out = await orchestrator._cancel_order_node(
+            {"user_id": "user-1", "entities": {"tickers": ["GARAN"]}}, {}
+        )
+        assert out["specialist_output"]["status"] == "NEEDS_INPUT"
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_list_is_surfaced_rather_than_cancelled_blind(
+        self, mocker
+    ):
+        calls = self._fake(mocker, self._listing([], status="ERROR"))
+        out = await orchestrator._cancel_order_node({"user_id": "user-1"}, {})
+        assert [tool for tool, _ in calls] == ["get_open_orders"]
+        assert out["specialist_output"]["status"] == "ERROR"
+
+    @pytest.mark.asyncio
+    async def test_the_transaction_node_routes_a_cancellation_before_staging(
+        self, mocker
+    ):
+        """İptal, yön/adet/sembol denetimlerinden ÖNCE ayrılıyor: geri alma
+        bir emir vermek değil ve o denetimlerin hiçbiri ona uymuyor."""
+        mocker.patch.object(
+            orchestrator, "_llm_json",
+            return_value={"status": "READY", "tool": "cancel_order", "arguments": {}},
+        )
+        node = mocker.patch.object(
+            orchestrator, "_cancel_order_node", return_value={"specialist_output": {}}
+        )
+        await orchestrator.transaction_node(
+            {"user_id": "user-1", "user_message": "emrimi iptal et"}
+        )
+        node.assert_awaited_once()
+
+
+class TestOpenOrdersInPortfolioNode:
+    @pytest.mark.asyncio
+    async def test_the_portfolio_node_can_read_open_orders(self, mocker):
+        """Bekleyen bir alım emri bir POZİSYON değil ama parayı bloke ediyor;
+        "bakiyem neden azaldı" sorusunun cevabı orada."""
+        calls = []
+
+        async def fake(state, tool, args, **kw):
+            calls.append((tool, args))
+            return {"specialist_output": {"agent": "PORTFOLIO_AGENT", "status": "OK"}}
+
+        mocker.patch.object(
+            orchestrator, "_llm_json",
+            return_value={"tool": "get_open_orders", "arguments": {}},
+        )
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        await orchestrator.portfolio_node(
+            {"user_id": "user-1", "user_message": "bekleyen emirlerim"}
+        )
+        assert calls == [("get_open_orders", {"user_id": "user-1"})]

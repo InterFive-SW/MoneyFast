@@ -5,16 +5,9 @@
 import { useEffect, useState } from 'react'
 import { apiClient, type Movement } from '../../api/client'
 import { formatMoney } from '../../lib/money'
-
-function formatDate(isoString: string): string {
-  const date = new Date(isoString)
-  return new Intl.DateTimeFormat('tr-TR', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
-}
+// Yerel bir `formatDate` vardı ve paylaşılan adı gölgeliyordu; saat dilimi
+// vermediği için ekranda UTC yazıyordu.
+import { formatShortDateTime } from '../../lib/datetime'
 
 export default function RecentTransactionsWidget() {
   // Real movements from the banking ledger. This widget was mounted with
@@ -69,7 +62,7 @@ export default function RecentTransactionsWidget() {
                       <span className="text-[12px] font-semibold text-white line-clamp-1">
                         {tx.description || tx.counterparty_iban || tx.reference_number}
                       </span>
-                      <span className="text-[10px] text-slate-400 font-medium tabular-nums uppercase tracking-wider">{formatDate(tx.created_at)}</span>
+                      <span className="text-[10px] text-slate-400 font-medium tabular-nums uppercase tracking-wider">{formatShortDateTime(tx.created_at)}</span>
                     </div>
                   </td>
                   <td className="py-2.5 text-right align-middle">

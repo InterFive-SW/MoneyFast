@@ -202,6 +202,13 @@ services:
       # Tek sorgunun kapsadığı gün. Ölçüldü: bir hafta 1101 satır, altmış gün
       # tam 2000 -- yani tavan. Üç gün tavanın çok altında kalıyor.
       INGESTOR_KAP_WINDOW_DAYS: ${INGESTOR_KAP_WINDOW_DAYS:-3}
+      # Küresel haber. GDELT anahtar istemiyor; diğer ikisi istiyor ve ikisi
+      # de OPSİYONEL -- `:?` kullanılsaydı anahtarı olmayan herkesin
+      # `compose up`'ı kırılırdı. Boş dize "yok" sayılıyor (config.news_api_key).
+      INGESTOR_GDELT_QUERIES: ${INGESTOR_GDELT_QUERIES:-}
+      INGESTOR_GDELT_INTERVAL_MINUTES: ${INGESTOR_GDELT_INTERVAL_MINUTES:-60}
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+      MARKETAUX_API_KEY: ${MARKETAUX_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       backend:

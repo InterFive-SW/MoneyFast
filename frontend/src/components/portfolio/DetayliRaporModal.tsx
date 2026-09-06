@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { apiClient } from '../../api/client'
+import { formatDate, formatTime, istanbulDayKey } from '../../lib/datetime'
 
 /**
  * "Detaylı Rapor Oluştur" — tek tıkla, sistemin ölçtüğü her şey.
@@ -67,7 +68,7 @@ function formatMoment(iso: string): string {
     const at = new Date(iso)
     return Number.isNaN(at.getTime())
         ? iso
-        : at.toLocaleString('tr-TR', { dateStyle: 'long', timeStyle: 'short' })
+        : `${formatDate(at, { day: 'numeric', month: 'long', year: 'numeric' })} ${formatTime(at)}`
 }
 
 export default function DetayliRaporModal({ onClose }: { onClose: () => void }) {
@@ -84,7 +85,9 @@ export default function DetayliRaporModal({ onClose }: { onClose: () => void }) 
             const url = URL.createObjectURL(blob)
             const link = document.createElement('a')
             link.href = url
-            link.download = `moneyfast-rapor-${new Date().toISOString().slice(0, 10)}.pdf`
+            // Dosya adı Istanbul gününden. `toISOString()` UTC veriyor, yani
+            // gece 01:00'de indirilen rapor dünün tarihini taşıyordu.
+            link.download = `moneyfast-rapor-${istanbulDayKey(new Date())}.pdf`
             link.click()
             URL.revokeObjectURL(url)
         } catch {

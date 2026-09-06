@@ -64,6 +64,55 @@ export function formatDateTime(value: Date | string | number | null | undefined)
 }
 
 /**
+ * `5 Eyl 14:32` — yıl olmadan.
+ *
+ * Son işlemler ve emir geçmişi gibi listeler için: satırların hepsi son
+ * birkaç güne ait ve her satırda "2026" yazmak, ayırt etmeyen bir bilgiyi
+ * dört karakterle tekrarlamak olurdu.
+ */
+export function formatShortDateTime(
+    value: Date | string | number | null | undefined,
+): string {
+    const date = parse(value)
+    if (!date) return '—'
+    return `${formatDate(date, { day: 'numeric', month: 'short' })} ${formatTime(date)}`
+}
+
+/**
+ * Istanbul takvim günü, `YYYY-MM-DD`.
+ *
+ * "Bugün mü?" sorusunun cevabı ANKARA'nın gününe göre verilmeli.
+ * `value.getFullYear()/getMonth()/getDate()` tarayıcının gününü okuyor ve
+ * saat farkı üç saat olduğu için gece yarısına yakın saatlerde yanlış gün
+ * çıkıyor -- `Banking.tsx`'te "Bugün"/"Dün" sınırı buradan kayıyordu.
+ *
+ * `en-CA` yerel ayarı `YYYY-MM-DD` üretiyor, yani parça parça okuyup
+ * birleştirmeye ve her parça için ulaşılamayan bir "yoksa" dalı açmaya gerek
+ * kalmıyor.
+ */
+export function istanbulDayKey(value: Date | string | number | null | undefined): string {
+    const date = parse(value)
+    if (!date) return ''
+    return date.toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE })
+}
+
+/**
+ * İki an arasındaki TAKVİM GÜNÜ farkı, Istanbul'a göre.
+ *
+ * Süre farkı değil gün farkı: 23:59'dan 00:01'e geçen iki dakika bir gündür,
+ * ve saat aritmetiği bunu sıfır sayardı.
+ */
+export function istanbulDayDiff(
+    from: Date | string | number | null | undefined,
+    to: Date | string | number | null | undefined = new Date(),
+): number | null {
+    const a = istanbulDayKey(from)
+    const b = istanbulDayKey(to)
+    if (!a || !b) return null
+    return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000)
+}
+
+/**
  * Türkiye saatiyle "şimdi"nin gün başlangıcına kalan süre, milisaniye.
  *
  * Başlıktaki tarih gece yarısı kendini tazeliyor ve o gece yarısı ANKARA'nın

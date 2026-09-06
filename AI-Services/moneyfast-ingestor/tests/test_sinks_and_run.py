@@ -615,6 +615,84 @@ class TestCycles:
         assert result == {"fetched": 1, "kap": 0, "embedded": 1, "tagged": 0,
                           "news_written": 1}
 
+    def test_global_news_uses_the_same_sink(self, monkeypatch):
+        """İkinci bir yazma yolu, iki farklı tekilleştirme davranışı demek
+        olurdu. Öğeler `rss_source`in ürettiği sözlük biçiminde çıkıyor."""
+        pushed = {}
+        monkeypatch.setattr(
+            run.gdelt_source, "fetch_all",
+            lambda: [{"title": "oil up", "content_hash": "h1"}],
+        )
+        monkeypatch.setattr(run.news_api_source, "fetch_all", lambda: [])
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: pushed.update(backend=list(i))
+            or {"news_written": 1, "news_symbols": {"h": ["THYAO"]}},
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_rag",
+            lambda c, i, s=None: pushed.update(rag=list(i), symbols=s) or 1,
+        )
+        result = run.run_global_news(None)
+        assert result == {"fetched": 1, "embedded": 1, "tagged": 1, "news_written": 1}
+        # Sembol haritası backend'den korpusa taşınıyor: ters sırada korpus
+        # etiketsiz kalırdı.
+        assert pushed["symbols"] == {"h": ["THYAO"]}
+        assert pushed["rag"] == pushed["backend"]
+
+    def test_the_keyed_providers_join_the_same_cycle(self, monkeypatch):
+        """Üç kaynak, tek lavabo. Ayrı bir yazma yolu, iki farklı
+        tekilleştirme davranışı demek olurdu."""
+        pushed = {}
+        monkeypatch.setattr(
+            run.gdelt_source, "fetch_all",
+            lambda: [{"title": "gdelt", "content_hash": "h1"}],
+        )
+        monkeypatch.setattr(
+            run.news_api_source, "fetch_all",
+            lambda: [{"title": "finnhub", "content_hash": "h2"}],
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: pushed.update(items=list(i)) or {"news_written": 2},
+        )
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 2)
+        assert run.run_global_news(None)["fetched"] == 2
+        assert [x["title"] for x in pushed["items"]] == ["gdelt", "finnhub"]
+
+    def test_a_story_from_two_sources_is_written_once(self, monkeypatch):
+        """Aynı haber hem GDELT'ten hem bir sağlayıcıdan gelebiliyor ve
+        `content_hash` öneksiz olduğu için ikisi AYNI satır."""
+        pushed = {}
+        monkeypatch.setattr(
+            run.gdelt_source, "fetch_all",
+            lambda: [{"title": "aynı haber", "content_hash": "h1"}],
+        )
+        monkeypatch.setattr(
+            run.news_api_source, "fetch_all",
+            lambda: [{"title": "aynı haber", "content_hash": "h1"}],
+        )
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend",
+            lambda c, i: pushed.update(items=list(i)) or {"news_written": 1},
+        )
+        monkeypatch.setattr(run.sinks, "push_news_to_rag", lambda c, i, s=None: 1)
+        assert run.run_global_news(None)["fetched"] == 1
+        assert len(pushed["items"]) == 1
+
+    def test_global_news_with_nothing_fetched_writes_nothing(self, monkeypatch):
+        """GDELT ulaşılamazsa ya da hiçbir sorgu eşleşmezse backend'e boş bir
+        yazma isteği gitmiyor -- yazacak bir şey yokken yazmak, her saat
+        başı anlamsız bir tur demekti."""
+        wrote = []
+        monkeypatch.setattr(run.gdelt_source, "fetch_all", lambda: [])
+        monkeypatch.setattr(run.news_api_source, "fetch_all", lambda: [])
+        monkeypatch.setattr(
+            run.sinks, "push_news_to_backend", lambda c, i: wrote.append(i) or {}
+        )
+        assert run.run_global_news(None) == {"fetched": 0, "embedded": 0, "tagged": 0}
+        assert wrote == []
+
     def test_disclosures_ride_the_same_pipeline_as_news(self, monkeypatch):
         """KAP için ikinci bir yol açılmadı: bildirimler de haber öğesi
         biçiminde çıkıyor ve aynı lavaboya akıyor. Ayrı bir yol, backend'in
@@ -978,6 +1056,14 @@ class TestScheduler:
             # `quotes` işi vardı ve bütün evreni 30 saniyede bir çekiyordu.
             "quotes_band": "interval", "quotes_bulk": "interval",
             "news": "interval",
+            # Küresel haber AYRI bir iş: sekiz sorgu var ve GDELT istek
+            # başına beş saniye istiyor, yani tur ~40 saniye. Bunu on beş
+            # dakikalık RSS döngüsüne katmak, Türkçe haberi bir dış servisin
+            # temposuna bağlamak olurdu.
+            "global-news": "interval",
+            # TEFAS günde bir: NAV günde bir yayımlanıyor ve daha sık
+            # yoklamanın getirisi yok, maliyeti var.
+            "tefas": "cron",
             # Gün içi barlar, toplu turla aynı ritimde.
             "candles_intraday": "interval",
             "candles": "cron", "fundamentals": "cron",
@@ -1907,3 +1993,196 @@ class TestSessionState:
                             lambda c, m: pushed.append(set(m)))
         run.run_quotes(None)
         assert pushed == [set()]
+
+
+class TestTefasCycle:
+    """TEFAS turu — kapalıyken hiçbir şey yapmıyor.
+
+    Varsayılan kapalı, çünkü bu kaynak sitenin `robots.txt`'inde belirttiği
+    tercihi geçersiz kılıyor ve açmak bilinçli bir adım olmalı.
+    """
+
+    def test_it_does_nothing_when_disabled(self, monkeypatch):
+        touched = []
+        monkeypatch.delenv("INGESTOR_TEFAS_ENABLED", raising=False)
+        monkeypatch.setattr(
+            run.tefas_source, "fetch_universe", lambda c: touched.append("u") or [],
+        )
+        assert run.run_tefas(None) == {"skipped": True}
+        assert touched == []
+
+    def _enable(self, monkeypatch):
+        monkeypatch.setenv("INGESTOR_TEFAS_ENABLED", "1")
+        monkeypatch.setattr(run.httpx, "Client", lambda **kw: _NullClient())
+
+    def test_a_full_cycle_writes_universe_daily_profiles_and_prices(self, monkeypatch):
+        self._enable(monkeypatch)
+        pushed = []
+        monkeypatch.setattr(run.tefas_source, "fetch_universe",
+                            lambda c: [{"code": "AAL", "title": "ATA"}])
+        monkeypatch.setattr(run.tefas_source, "fetch_daily",
+                            lambda c: [{"code": "AAL", "price": 3.35}])
+        monkeypatch.setattr(run.tefas_source, "fetch_umbrellas",
+                            lambda c: [{"code": "AAL", "umbrella": "Para Piyasası"}])
+        monkeypatch.setattr(
+            run.tefas_source, "fetch_prices",
+            lambda code, c: ([{"code": code, "as_of": "2026-09-05", "price": 1.0}], None),
+        )
+        monkeypatch.setattr(run.sinks, "fetch_fund_coverage",
+                            lambda c: {"missing_umbrella": ["AAL"], "missing_prices": ["AAL"]})
+        monkeypatch.setattr(
+            run.sinks, "push_funds_to_backend",
+            lambda c, funds, prices=None: pushed.append((len(funds), len(prices or [])))
+            or {"funds_written": len(funds), "prices_written": len(prices or [])},
+        )
+        result = run.run_tefas(None)
+        assert result["profiles"] == 1
+        assert result["prices"] == 1
+        assert pushed[0] == (2, 0)
+
+    def test_the_price_budget_bounds_the_per_run_work(self, monkeypatch):
+        """NAV serisi fon BAŞINA bir istek ve evren 2.602 fon; sınırsız
+        bırakmak tek bir turun saatlerce sürmesi demekti.
+
+        Şemsiye bütçesi YOK: o eşleme artık fon başına değil, şemsiye
+        başına bir istek."""
+        self._enable(monkeypatch)
+        monkeypatch.setenv("INGESTOR_TEFAS_PRICE_BUDGET", "1")
+        asked = {"prices": []}
+        monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_umbrellas", lambda c: [])
+        monkeypatch.setattr(
+            run.tefas_source, "fetch_prices",
+            lambda code, c: (asked["prices"].append(code) or [], None),
+        )
+        monkeypatch.setattr(run.sinks, "fetch_fund_coverage", lambda c: {
+            "missing_umbrella": ["A", "B", "C", "D"], "missing_prices": ["A", "B", "C"],
+        })
+        monkeypatch.setattr(
+            run.sinks, "push_funds_to_backend",
+            lambda c, funds, prices=None: {"funds_written": 0, "prices_written": 0},
+        )
+        run.run_tefas(None)
+        assert asked["prices"] == ["A"]
+
+    def test_the_category_rank_rides_the_price_fetch(self, monkeypatch):
+        """Sıra AYNI yanıtta geliyor; ayrıca istemek 2.602 isteği ikinci kez
+        yapmak olurdu."""
+        self._enable(monkeypatch)
+        pushed = {}
+        monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_umbrellas", lambda c: [])
+        monkeypatch.setattr(
+            run.tefas_source, "fetch_prices",
+            lambda code, c: ([], {"code": code, "category_rank": 7, "category_size": 9}),
+        )
+        monkeypatch.setattr(run.sinks, "fetch_fund_coverage",
+                            lambda c: {"missing_umbrella": [], "missing_prices": ["AAL"]})
+        monkeypatch.setattr(
+            run.sinks, "push_funds_to_backend",
+            lambda c, funds, prices=None: pushed.update(funds=list(funds))
+            or {"funds_written": 0, "prices_written": 0},
+        )
+        run.run_tefas(None)
+        # Seri boş ama ölçüm var: yine de yazılıyor.
+        assert pushed["funds"] == [{"code": "AAL", "category_rank": 7, "category_size": 9}]
+
+    def test_nothing_missing_means_no_extra_requests(self, monkeypatch):
+        self._enable(monkeypatch)
+        asked = []
+        monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_umbrellas",
+                            lambda c: asked.append("umbrellas") or [])
+        monkeypatch.setattr(run.tefas_source, "fetch_prices",
+                            lambda code, c: (asked.append(code) or [], None))
+        monkeypatch.setattr(run.sinks, "fetch_fund_coverage", lambda c: {})
+        monkeypatch.setattr(
+            run.sinks, "push_funds_to_backend",
+            lambda c, funds, prices=None: {"funds_written": 0, "prices_written": 0},
+        )
+        assert run.run_tefas(None)["profiles"] == 0
+        assert asked == []
+
+    def test_an_unreadable_umbrella_pass_is_skipped_not_written(self, monkeypatch):
+        self._enable(monkeypatch)
+        monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_umbrellas", lambda c: [])
+        monkeypatch.setattr(run.tefas_source, "fetch_prices", lambda code, c: ([], None))
+        monkeypatch.setattr(run.sinks, "fetch_fund_coverage",
+                            lambda c: {"missing_umbrella": ["A"], "missing_prices": ["A"]})
+        monkeypatch.setattr(
+            run.sinks, "push_funds_to_backend",
+            lambda c, funds, prices=None: {"funds_written": 0, "prices_written": 0},
+        )
+        assert run.run_tefas(None)["profiles"] == 0
+
+
+class _NullClient:
+    """`with httpx.Client(...)` bağlamı için yeter; hiçbir istek atılmıyor."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class TestFundSink:
+    """Fonlar backend'e yazılıyor; toplayıcı DB kredensiyeli taşımıyor."""
+
+    def test_funds_and_prices_go_in_separate_requests(self):
+        """Bir fonun yıllık serisi ~250 satır; 500 fonluk bir parçayla
+        birleştiğinde gövde yönetilemez olurdu."""
+        handler = recorder(body={"funds_written": 1, "prices_written": 2})
+        result = sinks.push_funds_to_backend(
+            client_for(handler),
+            [{"code": "AAL"}],
+            [{"code": "AAL", "as_of": "2026-09-05", "price": 1.0},
+             {"code": "AAL", "as_of": "2026-09-04", "price": 0.9}],
+        )
+        bodies = [json.loads(c.content) for c in handler.calls]
+        assert len(bodies) == 2
+        assert bodies[0]["prices"] == [] and len(bodies[0]["funds"]) == 1
+        assert bodies[1]["funds"] == [] and len(bodies[1]["prices"]) == 2
+        assert result == {"funds_written": 1, "prices_written": 2}
+
+    def test_a_large_universe_is_chunked(self):
+        handler = recorder(body={"funds_written": 0, "prices_written": 0})
+        funds = [{"code": f"F{i:04d}"} for i in range(sinks.FUND_PUSH_CHUNK + 1)]
+        sinks.push_funds_to_backend(client_for(handler), funds)
+        assert len(handler.calls) == 2
+
+    def test_nothing_to_write_makes_no_request(self):
+        handler = recorder(body={})
+        assert sinks.push_funds_to_backend(client_for(handler), []) == {
+            "funds_written": 0, "prices_written": 0,
+        }
+        assert handler.calls == []
+
+    def test_a_failed_push_does_not_raise(self):
+        handler = recorder(status=503)
+        assert sinks.push_funds_to_backend(client_for(handler), [{"code": "AAL"}]) == {
+            "funds_written": 0, "prices_written": 0,
+        }
+
+    def test_a_non_object_reply_counts_as_nothing_written(self):
+        handler = recorder(body=["oops"])
+        assert sinks.push_funds_to_backend(
+            client_for(handler), [{"code": "AAL"}])["funds_written"] == 0
+
+    def test_coverage_is_read_from_the_backend(self):
+        """Sormadan çekmek, her turda 2.602 isteği yeniden yapmak olurdu."""
+        handler = recorder(body={"missing_umbrella": ["AAL"], "missing_prices": []})
+        assert sinks.fetch_fund_coverage(client_for(handler))["missing_umbrella"] == ["AAL"]
+
+    def test_an_unavailable_coverage_endpoint_is_empty_not_fatal(self):
+        handler = recorder(status=503)
+        assert sinks.fetch_fund_coverage(client_for(handler)) == {}
+
+    def test_a_non_object_coverage_reply_is_empty(self):
+        handler = recorder(body=["oops"])
+        assert sinks.fetch_fund_coverage(client_for(handler)) == {}

@@ -42,6 +42,14 @@ def clean_env(monkeypatch):
         "INGESTOR_USER_AGENT", "INGESTOR_TIMEOUT_SECONDS", "INGESTOR_HOST_DELAY_SECONDS",
         "INGESTOR_QUOTE_INTERVAL_MINUTES", "INGESTOR_NEWS_INTERVAL_MINUTES",
         "INGESTOR_HISTORY_DAYS", "INGESTOR_RESPECT_ROBOTS",
+        "INGESTOR_GDELT_BASE_URL", "INGESTOR_GDELT_QUERIES",
+        "INGESTOR_GDELT_TIMESPAN_DAYS", "INGESTOR_GDELT_MAX_RECORDS",
+        "INGESTOR_GDELT_INTERVAL_MINUTES",
+        # Anahtarlı sağlayıcılar. Silinmezse geliştiricinin GERÇEK anahtarı
+        # test koşusuna sızar ve suite dış dünyaya istek atmayı dener.
+        "FINNHUB_API_KEY", "MARKETAUX_API_KEY",
+        "INGESTOR_TEFAS_BASE_URL", "INGESTOR_TEFAS_ENABLED",
+        "INGESTOR_TEFAS_PRICE_BUDGET",
     ):
         monkeypatch.delenv(name, raising=False)
 

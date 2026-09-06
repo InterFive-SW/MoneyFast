@@ -261,6 +261,109 @@ def load_news(db, expected: int = 0) -> int:
     return count
 
 
+def load_funds(db, expected: int = 0) -> int:
+    """Fon EVRENİ.
+
+    Sembol çözümlemesi YOK: fonun doğal anahtarı kendi kodu ve o kod her
+    makinede aynı -- mumlardaki `_symbol_ids` adımı burada gereksiz.
+
+    `DO NOTHING`: yerel bir toplayıcı turu tohumdan daha güncel olabilir ve
+    tohumun onu geri sarması, klonu bugünkü fiyattan dünküne döndürürdü.
+    """
+    path = SEED_DIR / "funds.csv.gz"
+    if not path.exists():
+        return 0
+    if _already_loaded(db, "market.funds", expected):
+        return 0
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    count = 0
+    for row in _rows(path):
+        writer.writerow([
+            row["code"], row["title"], row["founder"], row["operator"],
+            row["umbrella"], row["fund_type"], row["price"], row["shares"],
+            row["investors"], row["size"], row["as_of"],
+            row["category_rank"], row["category_size"], row["active"],
+        ])
+        count += 1
+    if not count:
+        return 0
+
+    buffer.seek(0)
+    raw = db.connection().connection
+    with raw.cursor() as cursor:
+        cursor.execute("""
+            CREATE TEMP TABLE _seed_funds (
+                code TEXT, title TEXT, founder TEXT, operator TEXT,
+                umbrella TEXT, fund_type TEXT, price NUMERIC, shares NUMERIC,
+                investors INTEGER, size NUMERIC, as_of DATE,
+                category_rank INTEGER, category_size INTEGER, active BOOLEAN
+            ) ON COMMIT DROP
+        """)
+        cursor.copy_expert("COPY _seed_funds FROM STDIN WITH (FORMAT csv)", buffer)
+        cursor.execute("""
+            INSERT INTO market.funds
+                (code, title, founder, operator, umbrella, fund_type, price,
+                 shares, investors, size, as_of, category_rank, category_size,
+                 active, updated_at)
+            SELECT code, title, founder, operator, umbrella, fund_type, price,
+                   shares, investors, size, as_of, category_rank, category_size,
+                   coalesce(active, true), now()
+            FROM _seed_funds
+            ON CONFLICT (code) DO NOTHING
+        """)
+    db.commit()
+    return count
+
+
+def load_fund_prices(db, expected: int = 0) -> int:
+    """NAV serisi.
+
+    Fon getirileri seriden HESAPLANIYOR, saklanmıyor. Serisi olmayan fonun
+    her getiri sütunu `NA` görünüyor ve seri fon BAŞINA bir TEFAS isteği:
+    tam tur ölçülen ~3,6 saat. Klonun bunu kendi başına doldurmasını
+    beklemek, Fonlar ekranının ilk yarım günü boş kalması demekti.
+
+    Mumlarla aynı yol -- geçici tabloya COPY, sonra tek ifadeyle aktarım --
+    ve aynı gerekçeyle: yüz binlerce satırı tek tek INSERT etmek, backend'in
+    açılmasını bekleten dakikalar demek.
+    """
+    path = SEED_DIR / "fund_prices.csv.gz"
+    if not path.exists():
+        return 0
+    if _already_loaded(db, "market.fund_prices", expected):
+        return 0
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    count = 0
+    for row in _rows(path):
+        writer.writerow([row["code"], row["as_of"], row["price"]])
+        count += 1
+    if not count:
+        return 0
+
+    buffer.seek(0)
+    raw = db.connection().connection
+    with raw.cursor() as cursor:
+        cursor.execute("""
+            CREATE TEMP TABLE _seed_fund_prices (
+                code TEXT, as_of DATE, price NUMERIC
+            ) ON COMMIT DROP
+        """)
+        cursor.copy_expert(
+            "COPY _seed_fund_prices FROM STDIN WITH (FORMAT csv)", buffer
+        )
+        cursor.execute("""
+            INSERT INTO market.fund_prices (code, as_of, price)
+            SELECT code, as_of, price FROM _seed_fund_prices
+            ON CONFLICT (code, as_of) DO NOTHING
+        """)
+    db.commit()
+    return count
+
+
 def main() -> int:
     if not SEED_DIR.exists():
         log.info("market seed directory not found at %s; nothing to load", SEED_DIR)
@@ -276,12 +379,15 @@ def main() -> int:
         funds = load_fundamentals(db, ids, expected.get("fundamentals", 0))
         candles = load_candles(db, ids, expected.get("candles", 0))
         news = load_news(db, expected.get("news", 0))
+        tefas = load_funds(db, expected.get("funds", 0))
+        navs = load_fund_prices(db, expected.get("fund_prices", 0))
     finally:
         db.close()
 
     log.info(
-        "market seed offered: %d fundamentals, %d candles, %d disclosures",
-        funds, candles, news,
+        "market seed offered: %d fundamentals, %d candles, %d disclosures, "
+        "%d funds, %d fund prices",
+        funds, candles, news, tefas, navs,
     )
     return 0
 

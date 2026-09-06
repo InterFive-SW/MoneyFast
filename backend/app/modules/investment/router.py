@@ -1,18 +1,17 @@
 from datetime import datetime, timezone
-import asyncio
-import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 
-from app.core.database import get_db, SessionLocal
+from app.core.database import get_db
 from app.core.deps import get_current_user_id, get_optional_user_id
 from app.modules.auth.models import User
-from app.core.email import send_transaction_email, send_transaction_request_email
+from app.core.email import send_transaction_request_email
 from app.modules.notification.models import Notification
-from . import ai_service, allocation, market_service, service
+from . import ai_service, allocation, matching, market_service, service
 from app.modules.analytics import service as analytics_service
+from app.modules.market import funds as funds_service
 from app.core.deps import require_service_token
 from .models import AllocationTarget, TransactionProposal
 from .ai_schemas import (
@@ -26,6 +25,10 @@ from .schemas import (
     WatchlistItem, TopMoverItem, SectorAllocationItem, HeatmapItem,
     OrderProposeRequest, OrderConfirmRequest, CashStatementOut
 )
+
+#: Bir tetikleyici fiyatı olan emir türleri. Bunlar onaylandığında
+#: gerçekleşmez, `WAITING_PRICE` durumunda beklerler.
+LIMIT_ORDER_TYPES = frozenset({"LIMIT", "STOP_LIMIT"})
 
 router = APIRouter(tags=["investment"])
 
@@ -74,6 +77,10 @@ def get_portfolio_summary(
             "stocksBIST": round(bist, 2),
             "stocksUS": round(foreign_try, 2),
         },
+        # Toplama EKLENMİYOR: bu para bakiyeden zaten düşüldü. Eklemek onu
+        # iki kez saymak olurdu. Ayrı bir alan, çünkü sorulan soru "toplamım
+        # ne" değil, "eksilen para nerede".
+        "blockedTRY": market_service.blocked_cash(db, user_id),
     }
 
 @router.get("/portfolio/chart", response_model=Dict[str, List[CandlestickDataPoint]])
@@ -220,16 +227,23 @@ def _as_frontend_position(row: dict) -> dict:
 
 
 @router.get("/orders", response_model=List[Order])
-def get_orders(db: Session = Depends(get_db)):
+def get_orders(
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
     """
-    Geçmiş ve bekleyen emirler.
+    Geçmiş ve bekleyen emirler -- YALNIZCA çağıranın kendi emirleri.
 
     Kaynak `investment.transaction_proposals`: sohbette gerçekten hazırlanmış
     ve onaylanmış öneriler. Uydurma emir listesi göstermiyoruz — kullanıcının
     vermediği bir emri geçmişinde görmesi, gerçekten verilmiş sanmasına yol
     açar.
+
+    Kimlik doğrulaması ve kullanıcı süzgeci bir dönem YOKTU: token'sız bir
+    istek son 20 emri, herkesin emirlerini, sembol ve adetleriyle
+    döndürüyordu. Canlı doğrulandı.
     """
-    return market_service.recent_orders(db)
+    return market_service.recent_orders(db, user_id)
 
 
 
@@ -596,6 +610,12 @@ def stage_transaction(
     # what turned an ordinary buy order into REJECTED_VALIDATION.
     body = request.model_dump()
     raw_symbol = (body.get("instrument") or {}).get("symbol")
+    # Fon kodları enstrüman evreninde DURMUYOR (2.602 fonu oraya yazmak
+    # Piyasalar ekranını doldururdu); işlem gören fon, ilk emirde
+    # köprüleniyor. Çözümlemeden ÖNCE, yoksa `resolve_symbol` kodu
+    # tanımayıp emri reddederdi.
+    if raw_symbol:
+        funds_service.ensure_tradable(db, raw_symbol)
     # strict: no fuzzy neighbour on the money path. Resolution accepts
     # abbreviations and unaccented names everywhere ("thy", "turk hava
     # yollari"), but a typo like "aselsn" must not quietly become an ASELS
@@ -735,6 +755,10 @@ def _persist_proposal(
             source_account_id=source_account_id or request.source_account_id,
             destination_account_id=request.destination_account_id,
             order_type=summary.get("order_type") or request.order_type,
+            # Ayrı sütun: bekleyen emirleri tarayan iş JSONB'ye göre süzemez
+            # ve `estimate.reference_price` bir limit fiyatı bir piyasa
+            # emrinin referansından ayırt etmiyor.
+            limit_price=request.limit_price,
             payload=proposal,
             expires_at=datetime.fromisoformat(proposal["expires_at"].replace("Z", "+00:00")),
             audit_id=proposal["audit_id"],
@@ -743,76 +767,37 @@ def _persist_proposal(
     db.commit()
 
 
-async def process_pending_transaction(proposal_id: str, email_to: str):
+def _settle_now(db: Session, proposal: TransactionProposal) -> None:
+    """Piyasa emrini, blokajın hemen ardından gerçekleştirir.
+
+    Eskiden bu iş `asyncio.sleep(15)` bekleyen bir arka plan görevindeydi
+    (docstring'i "3 dakika" diyordu). Kalıcılığı yoktu: süreç o aralıkta
+    ölürse satır `PENDING`, para bloke ve onu bitirecek hiçbir şey yoktu.
+    Piyasa emrinin bekleyecek bir şeyi de yok -- fiyat zaten oluşmuş; bekleme
+    yalnızca bir gecikme animasyonuydu.
+
+    Bekleyen emir artık `WAITING_PRICE` durumunda ve eşleştirici işi
+    devralıyor (bkz. `matching.py`), yani yeniden başlatma bir emri
+    öldürmüyor.
     """
-    3 dakika bekleyip, işlemi finalize eden background task.
-    """
-    await asyncio.sleep(15)  # 15 seconds delay
-    
-    with SessionLocal() as db:
-        proposal = db.get(TransactionProposal, proposal_id)
-        if not proposal or proposal.status != "PENDING":
-            return
-            
-        owner = market_service.account(db, user_id=proposal.user_id)
-        if owner is None:
-            return
-            
-        try:
-            service.finalize_settlement(db, proposal, owner)
-            proposal.status = "CONFIRMED"
-            proposal.confirmed_at = datetime.now(timezone.utc)
-            
-            # --- In-App Notification Entegrasyonu ---
-            # Kullanıcıya işlemin başarıyla gerçekleştiğine dair gerçek zamanlı bildirim ekliyoruz.
-            quantity = float(proposal.quantity or 0)
-            db.add(Notification(
-                user_id=proposal.user_id,
-                title="İşlem Gerçekleşti",
-                description=f"{quantity} lot {proposal.symbol} {proposal.transaction_type.lower()} işleminiz başarıyla tamamlandı.",
-                type="SUCCESS",
-                link_url="/portfolio"
-            ))
-            # ----------------------------------------
-            
-            db.commit()
-            
-            if email_to:
-                quantity = float(proposal.quantity or 0)
-                estimate = (proposal.payload or {}).get("estimate") or {}
-                total_amount = abs(float(estimate.get("net_amount", 0)))
-                price = (total_amount / quantity) if quantity > 0 else 0.0
-                await send_transaction_email(
-                    email_to=email_to,
-                    transaction_type=proposal.transaction_type,
-                    asset_symbol=proposal.symbol,
-                    quantity=quantity,
-                    price=price,
-                    total_amount=total_amount,
-                    transaction_date=proposal.confirmed_at
-                )
-        except Exception as e:
-            db.rollback()
-            logging.getLogger(__name__).error("Failed to finalize transaction %s: %s", proposal_id, e)
-            try:
-                service.rollback_funds(db, proposal, owner)
-                proposal.status = "FAILED"
-                
-                # --- In-App Notification Entegrasyonu ---
-                # Hata durumunda (fiyat değişimi vb.) para iadesi sonrası hata bildirimi oluşturuyoruz.
-                db.add(Notification(
-                    user_id=proposal.user_id,
-                    title="İşlem Başarısız",
-                    description=f"{proposal.symbol} {proposal.transaction_type.lower()} işleminiz teknik bir nedenden ötürü gerçekleştirilemedi. Bakiyeniz iade edildi.",
-                    type="ERROR",
-                    link_url="/portfolio"
-                ))
-                # ----------------------------------------
-                
-                db.commit()
-            except Exception as rb_e:
-                db.rollback()
-                logging.getLogger(__name__).error("Failed to rollback transaction %s: %s", proposal_id, rb_e)
+    owner = market_service.account(db, user_id=proposal.user_id, allow_demo_fallback=False)
+    if owner is None:
+        raise service.SettlementError("Bu işlemi uygulayacak bir yatırım hesabı bulunamadı.")
+    service.finalize_settlement(db, proposal, owner)
+    proposal.status = "CONFIRMED"
+    proposal.confirmed_at = datetime.now(timezone.utc)
+    quantity = float(proposal.quantity or 0)
+    db.add(Notification(
+        user_id=proposal.user_id,
+        title="İşlem Gerçekleşti",
+        description=(
+            f"{proposal.symbol} "
+            f"{market_service.direction_tr(proposal.transaction_type).lower()} "
+            f"işleminiz {quantity:g} adet olarak tamamlandı."
+        ),
+        type="SUCCESS",
+        link_url="/portfolio",
+    ))
 
 
 @router.post(
@@ -839,7 +824,10 @@ def confirm_transaction_proposal(
     if proposal.cancelled_at is not None:
         raise HTTPException(status_code=409, detail="Bu öneri iptal edilmiş.")
 
-    if proposal.confirmed_at is not None or proposal.status == "PENDING":
+    # Zaten işlenmiş bir öneriyi yeniden onaylamak, blokajı İKİNCİ kez
+    # uygulardı. `WAITING_PRICE` de buraya dahil: bekleyen bir emir onay
+    # almış bir emirdir.
+    if proposal.confirmed_at is not None or proposal.status in ("PENDING", matching.WAITING_PRICE):
         return {
             "proposal_id": proposal.id,
             "status": proposal.status.lower(),
@@ -872,62 +860,202 @@ def confirm_transaction_proposal(
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    proposal.status = "PENDING"
-    
-    # --- In-App Notification Entegrasyonu ---
-    # Alım/Satım talebi alındığında kullanıcıya hemen beklemede olduğunu bildiren bir bildirim atıyoruz.
+    order_type = (proposal.order_type or "MARKET").upper()
+    is_limit = order_type in LIMIT_ORDER_TYPES and proposal.limit_price is not None
+
     quantity = float(proposal.quantity or 0)
-    db.add(Notification(
-        user_id=proposal.user_id or user_id,
-        title="Talebiniz Alındı",
-        description=f"{quantity} lot {proposal.symbol} {proposal.transaction_type.lower()} talebiniz sıraya alındı.",
-        type="INFO",
-        link_url="/portfolio"
-    ))
-    # ----------------------------------------
-    
+    trade_owner_id = proposal.user_id or user_id
+
+    if is_limit:
+        # Emir YERLEŞTİ, gerçekleşmedi. Para bloke edildi ve satır
+        # `WAITING_PRICE`ta bekliyor; eşleştirici (matching.py) her turda
+        # piyasa fiyatını okuyup limite geldiğinde dolduruyor.
+        #
+        # Durum veritabanında, bir arka plan görevinin belleğinde değil:
+        # bir emir günlerce bekleyebilir ve yeniden başlatma onu
+        # öldürmemeli.
+        proposal.status = matching.WAITING_PRICE
+        db.add(Notification(
+            user_id=trade_owner_id,
+            title="Emriniz İletildi",
+            description=(
+                f"{proposal.symbol} "
+                f"{market_service.direction_tr(proposal.transaction_type).lower()} "
+                f"emriniz {quantity:g} adet, "
+                f"{float(proposal.limit_price):,.2f} fiyat seviyesinde bekliyor. "
+                "İsterseniz iptal edebilirsiniz."
+            ),
+            type="INFO",
+            link_url="/portfolio",
+        ))
+        db.commit()
+        _queue_request_email(db, background_tasks, proposal, applied, trade_owner_id, now)
+        return {
+            "proposal_id": proposal.id,
+            "status": "waiting_price",
+            "message": (
+                f"Emir iletildi (Emir No: {proposal.id}). "
+                f"{float(proposal.limit_price):,.2f} seviyesine gelince gerçekleşecek. "
+                f"Kalan bakiye: {applied['cash_after']:,.2f} TL."
+            ),
+        }
+
+    try:
+        _settle_now(db, proposal)
+    except service.SettlementError as exc:
+        db.rollback()
+        # Blokaj commit EDİLMEDİ, dolayısıyla geri alınacak para da yok:
+        # `block_funds` ile `finalize_settlement` aynı transaction'da.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     db.commit()
 
-    trade_owner_id = proposal.user_id or user_id
-    user_obj = db.get(User, trade_owner_id)
-    
-    email_to = ""
-    if user_obj and user_obj.email:
-        prefs = getattr(user_obj, "notification_preferences", {}) or {}
-        should_send_email = prefs.get("transactions", {}).get("email", True)
-        if should_send_email:
-            email_to = user_obj.email
-            total_amount = abs(applied.get("cash_delta", 0.0))
-            quantity = float(proposal.quantity or 0)
-            price = (total_amount / quantity) if quantity > 0 else 0.0
-            
-            # Request received (PENDING) email
-            background_tasks.add_task(
-                send_transaction_request_email,
-                email_to=email_to,
-                transaction_type=proposal.transaction_type,
-                asset_symbol=proposal.symbol,
-                quantity=quantity,
-                price=price, 
-                total_amount=total_amount,
-                transaction_date=now
-            )
-
-    # Add background task for settlement after 3 minutes
-    background_tasks.add_task(
-        process_pending_transaction,
-        proposal_id=proposal.id,
-        email_to=email_to
-    )
+    _queue_request_email(db, background_tasks, proposal, applied, trade_owner_id, now)
 
     return {
         "proposal_id": proposal.id,
-        "status": "pending",
+        "status": "confirmed",
         "message": (
-            f"İşlem sıraya alındı (Öneri No: {proposal.id}). "
+            f"İşlem gerçekleşti (İşlem No: {proposal.id}). "
             f"Kalan bakiye: {applied['cash_after']:,.2f} TL."
         ),
     }
+
+
+def _queue_request_email(
+    db: Session,
+    background_tasks: BackgroundTasks,
+    proposal: TransactionProposal,
+    applied: dict,
+    trade_owner_id: Optional[str],
+    now: datetime,
+) -> None:
+    """İşlem e-postasını kullanıcının tercihine göre kuyruğa alır."""
+    user_obj = db.get(User, trade_owner_id) if trade_owner_id else None
+    if user_obj is None or not user_obj.email:
+        return
+    prefs = getattr(user_obj, "notification_preferences", {}) or {}
+    if not prefs.get("transactions", {}).get("email", True):
+        return
+
+    total_amount = abs(applied.get("cash_delta", 0.0))
+    quantity = float(proposal.quantity or 0)
+    background_tasks.add_task(
+        send_transaction_request_email,
+        email_to=user_obj.email,
+        transaction_type=proposal.transaction_type,
+        asset_symbol=proposal.symbol,
+        quantity=quantity,
+        price=(total_amount / quantity) if quantity > 0 else 0.0,
+        total_amount=total_amount,
+        transaction_date=now,
+    )
+
+
+@router.post(
+    "/transactions/{proposal_id}/cancel",
+    status_code=204,
+    summary="Bekleyen emri iptal et",
+)
+def cancel_transaction_proposal(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    """Bekleyen bir emri geri çeker ve bloke edilen varlığı iade eder.
+
+    Onay kapısının arkasında DEĞİL: iptal bir para hareketi değil, bir geri
+    alma. Bir kullanıcının kendi emrini geri çekmek için ikinci bir onay
+    ekranından geçmesi, bloke parasını daha uzun tutmaktan başka bir işe
+    yaramazdı.
+    """
+    _cancel_order(db, user_id, proposal_id)
+    return None
+
+
+@router.get(
+    "/agent/{user_id}/orders",
+    response_model=List[Order],
+    summary="Kullanıcının emirleri (MCP sözleşmesi)",
+    dependencies=[Depends(require_service_token)],
+)
+def get_orders_for_ai(user_id: str, db: Session = Depends(get_db)):
+    """`GET /orders` ile AYNI veriyi döner, servis kimliğiyle.
+
+    Sohbetin "bekleyen emirlerim ne durumda" sorusuna cevap verebilmesi için.
+    İkinci bir kaynak değil, aynı `recent_orders`: panel ile sohbetin emir
+    listesi konusunda çelişmesi mümkün olmamalı.
+    """
+    return market_service.recent_orders(db, user_id)
+
+
+@router.post(
+    "/agent/{user_id}/orders/{proposal_id}/cancel",
+    response_model=Dict[str, object],
+    summary="Bekleyen emri iptal et (MCP sözleşmesi)",
+    dependencies=[Depends(require_service_token)],
+)
+def cancel_order_for_ai(user_id: str, proposal_id: str, db: Session = Depends(get_db)):
+    """Sohbetten iptal. Sahiplik denetimi kullanıcı yolundakiyle AYNI:
+    `user_id` yolda geliyor ama emrin sahibi olmadığı sürece hiçbir şeye
+    dokunamıyor.
+
+    Tarayıcı yolu 204 dönüyor; bu yol bir GÖVDE dönüyor, çünkü MCP istemcisi
+    her yanıtı JSON nesnesi olarak çözüyor ve boş gövde orada "backend
+    JSON döndürmedi" hatasına dönüşürdü.
+    """
+    _cancel_order(db, user_id, proposal_id)
+    return {"order_id": proposal_id, "cancelled": True}
+
+
+def _cancel_order(db: Session, user_id: str, proposal_id: str) -> None:
+    """İptalin tek uygulaması. Panel ve sohbet aynı yoldan geçiyor.
+
+    Zaten iptal edilmiş bir emirde idempotent (`banking/payments.py::cancel`
+    ile aynı şekil): aynı niyeti iki kez ifade etmek kullanıcının okuması
+    gereken bir hata değil.
+    """
+    proposal = db.get(TransactionProposal, proposal_id)
+    # Başkasının emri için 404: 403 dönmek, o id'de bir emir OLDUĞUNU
+    # doğrulardı.
+    if proposal is None or proposal.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Böyle bir emir bulunamadı.")
+
+    if proposal.status == "CANCELLED":
+        return
+
+    if proposal.status == "PENDING_USER_CONFIRMATION":
+        # Henüz onaylanmadı, dolayısıyla bloke edilmiş bir şey de yok.
+        proposal.status = "CANCELLED"
+        proposal.cancelled_at = datetime.now(timezone.utc)
+        db.commit()
+        return
+
+    if proposal.status != matching.WAITING_PRICE:
+        raise HTTPException(status_code=409, detail="Bu emir artık iptal edilemez.")
+
+    owner = market_service.account(db, user_id=user_id, allow_demo_fallback=False)
+    if owner is None:
+        raise HTTPException(status_code=409, detail="Yatırım hesabı bulunamadı.")
+
+    try:
+        service.rollback_funds(db, proposal, owner)
+    except service.SettlementError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    proposal.status = "CANCELLED"
+    proposal.cancelled_at = datetime.now(timezone.utc)
+    db.add(Notification(
+        user_id=user_id,
+        title="Emir İptal Edildi",
+        description=(
+            f"{proposal.symbol} emriniz ({float(proposal.quantity or 0):g} adet) "
+            "iptal edildi; bloke edilen tutar iade edildi."
+        ),
+        type="INFO",
+        link_url="/portfolio",
+    ))
+    db.commit()
 
 
 def _resolve_source_account(

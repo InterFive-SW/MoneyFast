@@ -4,6 +4,8 @@
  * aynı sembol/kod her zaman aynı seriyi üretir, apiClient'a bağımlılık yok.
  */
 
+import { formatDate } from '../lib/datetime'
+
 /** Basit, deterministik string -> sayı seed */
 function hashSeed(text: string): number {
   let hash = 0
@@ -48,7 +50,7 @@ export function buildComparisonChartData(keys: string[], days: number): Record<s
     const date = new Date(today)
     date.setDate(date.getDate() - (days - 1 - dayIndex))
     const point: Record<string, number | string> = {
-      date: date.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' }),
+      date: formatDate(date, { day: '2-digit', month: '2-digit' }),
     }
     seriesByKey.forEach(({ key, values }) => {
       point[key] = Number(values[dayIndex].toFixed(2))

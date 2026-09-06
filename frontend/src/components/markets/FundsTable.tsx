@@ -1,26 +1,33 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { Fund } from '../../data/mockData'
+import type { ApiFund } from '../../api/client'
+import { formatCompact, formatMoney } from '../../lib/money'
 
 type ReturnTab = 'getiri' | 'buyukluk'
 
 interface Props {
-  funds: Fund[]
+  funds: ApiFund[]
 }
 
-function fmtCompact(value: number): string {
-  return new Intl.NumberFormat('tr-TR', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+/** Getiri sütununun rengi.
+ *
+ *  Hepsi yeşildi ve bu bir hataydı: negatif bir getiri de yeşil yazılıyordu.
+ *  Ölçülemeyen pencere (`null`) gri -- "kaybettirdi" ile "o kadar geçmişi
+ *  yok" karşıt iddialar. */
+function returnClass(value: number | null): string {
+  const base = 'py-3 pl-4 text-right tabular-nums text-sm font-semibold '
+  if (value === null) return base + 'text-slate-400'
+  return base + (value < 0 ? 'text-rose-500' : 'text-emerald-500')
+}
+
+/** Sayı yoksa tire. Sıfır DEĞİL: boş bir alan ölçüm değildir. */
+function fmtCompact(value: number | null | undefined): string {
+  return value == null ? '—' : formatCompact(value)
 }
 
 function fmtReturn(value: number | null): string {
   if (value === null) return 'NA'
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`
-}
-
-function riskBadgeColor(risk: number): string {
-  if (risk <= 2) return 'bg-emerald-500/10 text-emerald-400'
-  if (risk <= 4) return 'bg-amber-50 text-amber-700'
-  return 'bg-rose-500/10 text-rose-400'
 }
 
 /** Fon listesi tablosu — Getiri (1A/3A/1Y/3Y/5Y, NA desteği) / Büyüklük (AUM, yatırımcı, nakit akışı) sekmeleri */
@@ -43,8 +50,11 @@ export default function FundsTable({ funds }: Props) {
           <thead>
             <tr className="border-b border-white/10/50">
               <th className="py-2 text-[10px] uppercase tracking-wider font-semibold text-slate-400">Fon</th>
-              <th className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Risk</th>
-              <th className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Yön. Ücreti</th>
+              {/* Risk değeri ve yönetim ücreti sütunları KALDIRILDI: TEFAS
+                  API'si ikisini de döndürmüyor (bkz. docs/TEFAS_INTEGRATION.md)
+                  ve döndürmediği bir alan için sütun yazmak, "veri yok"u bir
+                  ölçüm gibi göstermek olurdu. Yerine gerçekten dönen şey. */}
+              <th className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Fiyat</th>
               {tab === 'getiri' ? (
                 <>
                   <th className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">1A</th>
@@ -57,7 +67,6 @@ export default function FundsTable({ funds }: Props) {
                 <>
                   <th className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Büyüklük</th>
                   <th className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Yatırımcı</th>
-                  <th className="py-2 pl-4 text-[10px] uppercase tracking-wider font-semibold text-slate-400 text-right">Net Giriş/Çıkış (1A)</th>
                 </>
               )}
             </tr>
@@ -76,32 +85,28 @@ export default function FundsTable({ funds }: Props) {
                     <span className="text-[10px] font-medium text-slate-400 bg-slate-800/5 px-1.5 py-0.5 rounded">{fund.umbrella}</span>
                   </div>
                 </td>
-                <td className="py-3 pl-4 text-right">
-                  <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-bold tabular-nums ${riskBadgeColor(fund.riskValue)}`}>{fund.riskValue}</span>
+                <td className="py-3 pl-4 text-right tabular-nums text-sm text-slate-300">
+                  {fund.price == null ? '—' : formatMoney(fund.price)}
                 </td>
-                <td className="py-3 pl-4 text-right tabular-nums text-sm text-slate-300">%{fund.managementFee.toFixed(1)}</td>
                 {tab === 'getiri' ? (
                   <>
-                    <td className="py-3 pl-4 text-right tabular-nums text-sm font-semibold text-emerald-500">{fmtReturn(fund.returns.monthly)}</td>
-                    <td className="py-3 pl-4 text-right tabular-nums text-sm font-semibold text-emerald-500">{fmtReturn(fund.returns.threeMonth)}</td>
-                    <td className="py-3 pl-4 text-right tabular-nums text-sm font-semibold text-emerald-500">{fmtReturn(fund.returns.yearly)}</td>
-                    <td className={`py-3 pl-4 text-right tabular-nums text-sm font-semibold ${fund.returns.threeYear === null ? 'text-slate-400' : 'text-emerald-500'}`}>{fmtReturn(fund.returns.threeYear)}</td>
-                    <td className={`py-3 pl-4 text-right tabular-nums text-sm font-semibold ${fund.returns.fiveYear === null ? 'text-slate-400' : 'text-emerald-500'}`}>{fmtReturn(fund.returns.fiveYear)}</td>
+                    <td className={returnClass(fund.returns.monthly)}>{fmtReturn(fund.returns.monthly)}</td>
+                    <td className={returnClass(fund.returns.threeMonth)}>{fmtReturn(fund.returns.threeMonth)}</td>
+                    <td className={returnClass(fund.returns.yearly)}>{fmtReturn(fund.returns.yearly)}</td>
+                    <td className={returnClass(fund.returns.threeYear)}>{fmtReturn(fund.returns.threeYear)}</td>
+                    <td className={returnClass(fund.returns.fiveYear)}>{fmtReturn(fund.returns.fiveYear)}</td>
                   </>
                 ) : (
                   <>
                     <td className="py-3 pl-4 text-right tabular-nums text-sm text-slate-300">{fmtCompact(fund.size)} ₺</td>
                     <td className="py-3 pl-4 text-right tabular-nums text-sm text-slate-300">{fmtCompact(fund.investorCount)}</td>
-                    <td className={`py-3 pl-4 text-right tabular-nums text-sm font-semibold ${fund.netCashFlow < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                      {fund.netCashFlow > 0 ? '+' : ''}{fmtCompact(fund.netCashFlow)} ₺
-                    </td>
                   </>
                 )}
               </tr>
             ))}
             {funds.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-sm text-slate-400">Filtrenizle eşleşen fon bulunamadı.</td>
+                <td colSpan={7} className="py-8 text-center text-sm text-slate-400">Filtrenizle eşleşen fon bulunamadı.</td>
               </tr>
             )}
           </tbody>

@@ -812,7 +812,40 @@ export interface paths {
          */
         get: operations["list_accounts_api_banking_accounts_get"];
         put?: never;
-        post?: never;
+        /**
+         * Yeni hesap aç
+         * @description Kullanıcının isteğiyle ikinci (üçüncü, ...) bir hesap açar.
+         *
+         *     Bu uç nokta YOKTU. Arayüzde beş adımlık bir "Yeni Hesap Aç" sihirbazı
+         *     duruyordu ve sonunda rastgele bir IBAN üretip hesabı yalnızca bileşenin
+         *     state'ine yazıyordu: bir sonraki veri tazelemesinde hesap kayboluyordu.
+         *     Sihirbaz bu yüzden bilerek route'suz bırakılmıştı.
+         */
+        post: operations["open_account_api_banking_accounts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/banking/accounts/{account_number}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hesabı kapat
+         * @description Hesabı kapatır -- silmez.
+         *
+         *     Geçmiş hareketler `account_transactions` içinde duruyor ve satırı silmek
+         *     dökümü okunamaz hâle getirirdi. Bakiyesi olan hesap kapanmaz: kapatmak
+         *     parayı yok etmek değil.
+         */
+        post: operations["close_account_api_banking_accounts__account_number__close_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1376,12 +1409,16 @@ export interface paths {
         };
         /**
          * Get Orders
-         * @description Geçmiş ve bekleyen emirler.
+         * @description Geçmiş ve bekleyen emirler -- YALNIZCA çağıranın kendi emirleri.
          *
          *     Kaynak `investment.transaction_proposals`: sohbette gerçekten hazırlanmış
          *     ve onaylanmış öneriler. Uydurma emir listesi göstermiyoruz — kullanıcının
          *     vermediği bir emri geçmişinde görmesi, gerçekten verilmiş sanmasına yol
          *     açar.
+         *
+         *     Kimlik doğrulaması ve kullanıcı süzgeci bir dönem YOKTU: token'sız bir
+         *     istek son 20 emri, herkesin emirlerini, sembol ve adetleriyle
+         *     döndürüyordu. Canlı doğrulandı.
          */
         get: operations["get_orders_api_investment_orders_get"];
         put?: never;
@@ -1632,6 +1669,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/investment/transactions/{proposal_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bekleyen emri iptal et
+         * @description Bekleyen bir emri geri çeker ve bloke edilen varlığı iade eder.
+         *
+         *     Onay kapısının arkasında DEĞİL: iptal bir para hareketi değil, bir geri
+         *     alma. Bir kullanıcının kendi emrini geri çekmek için ikinci bir onay
+         *     ekranından geçmesi, bloke parasını daha uzun tutmaktan başka bir işe
+         *     yaramazdı.
+         */
+        post: operations["cancel_transaction_proposal_api_investment_transactions__proposal_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/investment/agent/{user_id}/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kullanıcının emirleri (MCP sözleşmesi)
+         * @description `GET /orders` ile AYNI veriyi döner, servis kimliğiyle.
+         *
+         *     Sohbetin "bekleyen emirlerim ne durumda" sorusuna cevap verebilmesi için.
+         *     İkinci bir kaynak değil, aynı `recent_orders`: panel ile sohbetin emir
+         *     listesi konusunda çelişmesi mümkün olmamalı.
+         */
+        get: operations["get_orders_for_ai_api_investment_agent__user_id__orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/investment/agent/{user_id}/orders/{proposal_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bekleyen emri iptal et (MCP sözleşmesi)
+         * @description Sohbetten iptal. Sahiplik denetimi kullanıcı yolundakiyle AYNI:
+         *     `user_id` yolda geliyor ama emrin sahibi olmadığı sürece hiçbir şeye
+         *     dokunamıyor.
+         *
+         *     Tarayıcı yolu 204 dönüyor; bu yol bir GÖVDE dönüyor, çünkü MCP istemcisi
+         *     her yanıtı JSON nesnesi olarak çözüyor ve boş gövde orada "backend
+         *     JSON döndürmedi" hatasına dönüşürdü.
+         */
+        post: operations["cancel_order_for_ai_api_investment_agent__user_id__orders__proposal_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/investment/products": {
         parameters: {
             query?: never;
@@ -1774,6 +1886,11 @@ export interface paths {
          *     Aynı haberler `rag` servisine de gönderiliyor; oradaki kopya semantik
          *     aramaya, buradaki kopya "en yeni 20 haber" listesine hizmet ediyor. İki
          *     farklı erişim deseni, iki farklı depo.
+         *
+         *     `symbols` verilirse süzgeç SORGUDA uygulanır, dönen sayfada değil. Fark
+         *     şurada: hisse detay sayfası "en yeni 20"yi çekip içinden AAPL'i ayıklarsa,
+         *     o yirmide AAPL yoksa ekranda "haber yok" yazıyor -- oysa soru hiç
+         *     sorulmamış oluyor.
          *
          *     Veri yoksa boş liste döner; uydurma haber başlığı göstermek, boş bir akış
          *     göstermekten çok daha kötü.
@@ -2300,6 +2417,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market/news/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kaynak başına haber kapsaması (servisler arası)
+         * @description `ingestor`'ın "nereden devam edeyim" sorusu.
+         *
+         *     `candles/coverage` ile aynı desen. KAP bildirim numarası monoton
+         *     olduğu için en yüksek numara, bir tarihten daha kesin bir su seviyesi.
+         */
+        get: operations["news_coverage_api_market_news_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/news/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Saklanan bildirimleri sayfa sayfa oku (servisler arası)
+         * @description `ingestor`'ın "hangi bildirimin gövdesi hâlâ eksik" taramasını
+         *     beslediği uç.
+         *
+         *     Panoya 28.984 bildirim düştü ama derlemde yalnızca yeni gelenlerin
+         *     gövdesi var: gövde çekimi bildirim başına bir istek ve tur başına
+         *     bütçeli. Bu uç, arşivin geri kalanını kapatan işin girdisi.
+         */
+        get: operations["news_archive_api_market_news_archive_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/market/fundamentals/ingest": {
         parameters: {
             query?: never;
@@ -2365,6 +2530,172 @@ export interface paths {
          *     cümle kurmak zorundaydı.
          */
         post: operations["record_sessions_api_market_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fon listesi (TEFAS)
+         * @description Süzülmüş fon listesi.
+         *
+         *     Süzgeçler SUNUCUDA: evren 2.602 fon ve hepsini tarayıcıya gönderip orada
+         *     süzmek, her açılışta birkaç yüz kilobayt ve süzgeç mantığının ikinci bir
+         *     kopyası demekti.
+         *
+         *     Getiriler NAV serisinden HESAPLANIYOR, saklanmıyor -- aynı sayının iki
+         *     yerde yaşaması, serinin güncellendiği ama yüzdenin güncellenmediği bir
+         *     aralık bırakırdı.
+         */
+        get: operations["list_funds_api_market_funds_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Tek fon */
+        get: operations["get_fund_api_market_funds__code__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds/{code}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fonun NAV serisi
+         * @description Fon mum grafiğinin okuduğu seri.
+         *
+         *     Bilinmeyen kod boş seri döndürüyor, hata değil: "bu fonun geçmişi yok"
+         *     bir cevaptır ve grafik onu boş çizebilir -- `/market/candles` ile aynı
+         *     duruş.
+         */
+        get: operations["get_fund_prices_api_market_funds__code__prices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds/{code}/candles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fonun mum serisi
+         * @description Kovalanmış OHLC.
+         *
+         *     Fon günde TEK fiyat yayımlıyor, dolayısıyla GÜNLÜK mum diye bir şey
+         *     yok: açılış/yüksek/düşük/kapanış aynı sayı olurdu. Kova genişliği
+         *     yanıtta taşınıyor ki arayüz "haftalık mum" diye yazabilsin -- kullanıcı
+         *     baktığı çubuğun bir günü mü bir haftayı mı özetlediğini bilmeli.
+         */
+        get: operations["get_fund_candles_api_market_funds__code__candles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fon verisi yaz (servis işi)
+         * @description Toplayıcının yazdığı yer. `news/ingest` ile aynı desen.
+         */
+        post: operations["ingest_funds_api_market_funds_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds/meta/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Eksik fon verisi (servis işi)
+         * @description Toplayıcı her turda neyi çekeceğini buradan öğreniyor.
+         *
+         *     Şemsiye türü ve NAV serisi fon BAŞINA birer istek; hangilerinin eksik
+         *     olduğunu bilmeden her tur baştan başlardı.
+         */
+        get: operations["funds_coverage_api_market_funds_meta_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/news/me/market-briefing/send-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Market Briefing Now
+         * @description Kullanıcının isteği üzerine (On-Demand) piyasa bültenini anında tetikler.
+         *
+         *     MİMARİ KARAR (BackgroundTasks):
+         *     Veritabanı sorguları (watchlist + haberler) ve SMTP üzerinden e-posta gönderimi
+         *     I/O bloklayan (blocking) ağır işlemlerdir. Bu uç nokta (endpoint), kullanıcıyı
+         *     bekletmemek ve "Hızlı Yanıt" (Fast Response) sağlamak adına `BackgroundTasks`
+         *     altyapısını kullanır. İşlem arkaya atılır atılmaz 202 Accepted dönülür.
+         *
+         *     NOT: Bu istek kullanıcı tarafından bilinçli olarak (On-Demand) yapıldığı için
+         *     KVKK/GDPR 'Günlük Bülten' izin ayarı (daily_news.email) pas geçilir.
+         */
+        post: operations["send_market_briefing_now_api_news_me_market_briefing_send_now_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3126,6 +3457,8 @@ export interface components {
             balance: number;
             /** Status */
             status: string;
+            /** Nickname */
+            nickname?: string | null;
         };
         /**
          * BenchmarkSeries
@@ -3604,6 +3937,10 @@ export interface components {
             } | null;
             /** Context Topic */
             context_topic?: string | null;
+            /** Sources */
+            sources?: {
+                [key: string]: unknown;
+            }[];
             /** Conversation Id */
             conversation_id?: string | null;
             /**
@@ -3636,6 +3973,10 @@ export interface components {
             role: "user" | "assistant";
             /** Content */
             content: string;
+            /** Sources */
+            sources?: {
+                [key: string]: unknown;
+            }[];
         };
         /** ComplianceRequest */
         ComplianceRequest: {
@@ -3898,6 +4239,150 @@ export interface components {
              * Format: email
              */
             email: string;
+        };
+        /**
+         * FundCandleOut
+         * @description Kovalanmış bir mum.
+         *
+         *     Hacim YOK: bir fonun günlük işlem hacmi TEFAS'ta yayımlanmıyor ve
+         *     sıfır yazmak "hiç kimse almadı" demek olurdu.
+         */
+        FundCandleOut: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Open */
+            open: number;
+            /** High */
+            high: number;
+            /** Low */
+            low: number;
+            /** Close */
+            close: number;
+        };
+        /** FundCandleSeriesOut */
+        FundCandleSeriesOut: {
+            /** Code */
+            code: string;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            /** Bucket */
+            bucket: string;
+            /** Candles */
+            candles?: components["schemas"]["FundCandleOut"][];
+        };
+        /**
+         * FundIngestRequest
+         * @description Toplayıcının yazdığı gövde.
+         */
+        FundIngestRequest: {
+            /** Funds */
+            funds?: {
+                [key: string]: unknown;
+            }[];
+            /** Prices */
+            prices?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** FundListOut */
+        FundListOut: {
+            /** Items */
+            items?: components["schemas"]["FundOut"][];
+            /** Founders */
+            founders?: string[];
+            /** Umbrellas */
+            umbrellas?: string[];
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+        };
+        /**
+         * FundOut
+         * @description Listede bir fon.
+         *
+         *     Yönetim ücreti, stopaj ve risk değeri YOK: TEFAS API'si bu alanları
+         *     döndürmüyor (HAR kaydındaki 85 alanın hepsi tarandı) ve döndürmediği bir
+         *     alan için `null` taşımak, bir gün dolacakmış gibi duran bir söz olurdu.
+         */
+        FundOut: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Founder */
+            founder?: string | null;
+            /** Umbrella */
+            umbrella?: string | null;
+            /** Fundtype */
+            fundType?: string | null;
+            /** Price */
+            price?: number | null;
+            /** Investorcount */
+            investorCount?: number | null;
+            /** Size */
+            size?: number | null;
+            /** Asof */
+            asOf?: string | null;
+            /** Categoryrank */
+            categoryRank?: number | null;
+            /** Categorysize */
+            categorySize?: number | null;
+            /** Shares */
+            shares?: number | null;
+            returns?: components["schemas"]["FundReturnsOut"];
+        };
+        /** FundPricePointOut */
+        FundPricePointOut: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Price */
+            price: number;
+        };
+        /**
+         * FundReturnsOut
+         * @description Pencere başına yüzde getiri.
+         *
+         *     Her alan `Optional` ve bu kasıtlı: `null` "bu fonun o kadar geçmişi yok"
+         *     demek, sıfır ise "o dönemde hiç kazandırmadı". Arayüz ilkini `NA` diye
+         *     yazıyor ve ikisini aynı sayıya indirmek, olmayan bir ölçümü ölçüm gibi
+         *     göstermek olurdu.
+         */
+        FundReturnsOut: {
+            /** Daily */
+            daily?: number | null;
+            /** Monthly */
+            monthly?: number | null;
+            /** Threemonth */
+            threeMonth?: number | null;
+            /** Yearly */
+            yearly?: number | null;
+            /** Threeyear */
+            threeYear?: number | null;
+            /** Fiveyear */
+            fiveYear?: number | null;
+        };
+        /** FundSeriesOut */
+        FundSeriesOut: {
+            /** Code */
+            code: string;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            /** Points */
+            points?: components["schemas"]["FundPricePointOut"][];
         };
         /**
          * FundamentalsIn
@@ -4292,6 +4777,11 @@ export interface components {
             /** Totalusd */
             totalUSD: number;
             breakdown: components["schemas"]["InvestmentBreakdown"];
+            /**
+             * Blockedtry
+             * @default 0
+             */
+            blockedTRY: number;
         };
         /** InvestmentBreakdown */
         InvestmentBreakdown: {
@@ -4452,6 +4942,10 @@ export interface components {
             created_at: string;
             /** Disclosures */
             disclosures?: string[];
+            /** Sources */
+            sources?: {
+                [key: string]: unknown;
+            }[];
         };
         /**
          * MovementOut
@@ -4577,6 +5071,18 @@ export interface components {
              */
             currency: string;
         };
+        /** OpenAccountRequest */
+        OpenAccountRequest: {
+            /** Account Type */
+            account_type: string;
+            /**
+             * Currency Code
+             * @default TRY
+             */
+            currency_code: string;
+            /** Nickname */
+            nickname?: string | null;
+        };
         /** Order */
         Order: {
             /** Id */
@@ -4587,7 +5093,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "Bekliyor" | "Gerçekleşti" | "İptal";
+            status: "Onay bekliyor" | "Fiyat bekliyor" | "İşleniyor" | "Gerçekleşti" | "İptal edildi" | "Başarısız" | "İptal";
             /**
              * Type
              * @enum {string}
@@ -4606,6 +5112,13 @@ export interface components {
              * @default TRY
              */
             currency: string;
+            /** Limitprice */
+            limitPrice?: number | null;
+            /**
+             * Cancellable
+             * @default false
+             */
+            cancellable: boolean;
         };
         /** PaymentConfirmOut */
         PaymentConfirmOut: {
@@ -4695,6 +5208,8 @@ export interface components {
             interest_rate?: number | null;
             /** Term Days */
             term_days?: number | null;
+            /** Nickname */
+            nickname?: string | null;
             /**
              * Is Investment
              * @default false
@@ -6195,6 +6710,15 @@ export interface components {
             /** Is Active */
             is_active: boolean;
             /**
+             * Notification Preferences
+             * @description Bildirim tercihleri matrisi
+             */
+            notification_preferences: {
+                [key: string]: {
+                    [key: string]: boolean;
+                };
+            };
+            /**
              * User Preferences
              * @description Kullanıcıya özgü görünüm ve bölgesel tercihler
              */
@@ -7554,6 +8078,70 @@ export interface operations {
             };
         };
     };
+    open_account_api_banking_accounts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankAccountOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    close_account_api_banking_accounts__account_number__close_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_number: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BankAccountOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     accrue_interest_api_banking_interest_accrue_post: {
         parameters: {
             query?: never;
@@ -8619,6 +9207,104 @@ export interface operations {
             };
         };
     };
+    cancel_transaction_proposal_api_investment_transactions__proposal_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_orders_for_ai_api_investment_agent__user_id__orders_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Order"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_order_for_ai_api_investment_agent__user_id__orders__proposal_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_products_api_investment_products_get: {
         parameters: {
             query?: never;
@@ -8758,6 +9444,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                /** @description Yalnızca bu hisselere bağlı haberler. Tekrarlanan anahtar. */
+                symbols?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -9416,6 +10104,72 @@ export interface operations {
             };
         };
     };
+    news_coverage_api_market_news_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    news_archive_api_market_news_archive_get: {
+        parameters: {
+            query?: {
+                source?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ingest_fundamentals_api_market_fundamentals_ingest_post: {
         parameters: {
             query?: never;
@@ -9502,6 +10256,225 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_funds_api_market_funds_get: {
+        parameters: {
+            query?: {
+                founder?: string | null;
+                umbrella?: string | null;
+                fund_type?: string | null;
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundListOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_api_market_funds__code__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_prices_api_market_funds__code__prices_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundSeriesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_candles_api_market_funds__code__candles_get: {
+        parameters: {
+            query?: {
+                window?: string;
+            };
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundCandleSeriesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_funds_api_market_funds_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    funds_coverage_api_market_funds_meta_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_market_briefing_now_api_news_me_market_briefing_send_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

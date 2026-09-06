@@ -385,6 +385,40 @@ def _estimate(
     }
 
 
+def reprice_estimate(
+    estimate: Dict[str, Any],
+    transaction_type: str,
+    quantity: Optional[float],
+    fill_price: float,
+) -> Optional[Dict[str, Any]]:
+    """Bir limit emrini, eşleşmeyi sağlayan PİYASA fiyatından yeniden fiyatlar.
+
+    Emir limit fiyattan hazırlanır ama limit fiyattan dolmaz: alışta piyasa
+    limitin altına indiği için eşleşir, dolayısıyla kullanıcı limitini değil
+    gördüğü fiyatı öder. Limitten doldurmak, aradaki farkı kullanıcıdan
+    sebepsiz almak olurdu.
+
+    **Kur yeniden çekilmez.** `rates=None` ile çağrılıyor, yani `_estimate`
+    hiçbir kur bloğu üretmiyor; ardından öneride DONMUŞ olan blok aynen
+    taşınıyor. Kullanıcı o kurla hesaplanmış bir maliyeti onayladı ve
+    aradan geçen günlerde oynayan bir kur, onayladığı tutarı sessizce
+    değiştirirdi.
+    """
+    fresh = _estimate(
+        transaction_type=transaction_type,
+        quantity=quantity,
+        notional_amount=None,
+        reference_price=fill_price,
+        limit_price=None,
+        currency=estimate.get("currency") or "TRY",
+        rates=None,
+    )
+    if fresh is None:
+        return None
+    fresh["fx"] = estimate.get("fx")
+    return fresh
+
+
 def _fx_block(
     from_currency: str,
     to_currency: str,

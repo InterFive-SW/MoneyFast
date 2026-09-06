@@ -51,25 +51,56 @@ export function formatAmount(amount: number, maximumFractionDigits = 2): string 
  * the series is. `formatMoney` stays the only thing that labels a value with
  * its unit.
  */
-export function formatCompact(value: number): string {
+export function formatCompact(value: number, span?: number): string {
   if (value == null || Number.isNaN(value)) return '—';
   const sign = value < 0 ? '-' : '';
   const size = Math.abs(value);
-  const [scaled, suffix] =
+  const [scaled, suffix, unit] =
     size >= 1_000_000_000
-      ? [size / 1_000_000_000, ' Mr']
+      ? [size / 1_000_000_000, ' Mr', 1_000_000_000]
       : size >= 1_000_000
-        ? [size / 1_000_000, ' Mn']
+        ? [size / 1_000_000, ' Mn', 1_000_000]
         : size >= 1_000
-          ? [size / 1_000, ' B']
-          : [size, ''];
-  // One decimal below ten, none above: `1,4 Mn` reads, `1,412 Mn` does not,
-  // and `412,9 B` adds a digit nobody reads off an axis.
-  const digits = scaled < 10 && suffix !== '' ? 1 : 0;
+          ? [size / 1_000, ' B', 1_000]
+          : [size, '', 1];
   return `${sign}${scaled.toLocaleString('tr-TR', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
+    minimumFractionDigits: compactDigits(scaled, suffix, span, unit),
+    maximumFractionDigits: compactDigits(scaled, suffix, span, unit),
   })}${suffix}`;
+}
+
+/**
+ * Kaç ondalık basamak yazılacağı.
+ *
+ * Hassasiyet BÜYÜKLÜKTEN değil ARALIKTAN türüyor. Sabit bir kural
+ * (`ondan küçükse bir basamak`) tek bir sayı için doğru ama bir EKSEN için
+ * değil: ölçüldü, haftalık portföy bandı 1.091.137 - 1.117.318, yani beş Y
+ * etiketinin BEŞİ de "1,1 Mn" yazıyordu. Beş kez aynı sayıyı yazan bir eksen
+ * eksen değildir.
+ *
+ * `span` verildiğinde basamak sayısı, komşu iki etiketi ayırt etmeye yetecek
+ * kadar açılıyor: ~5 aralık için bant/5 kadarlık bir adımı görünür kılan en
+ * küçük basamak. Verilmediğinde eski davranış aynen duruyor -- tek bir
+ * sayıyı biçimlendiren onlarca çağrı yeri var ve onlar için doğruydu.
+ */
+function compactDigits(
+  scaled: number,
+  suffix: string,
+  span: number | undefined,
+  unit: number,
+): number {
+  if (span == null || !Number.isFinite(span) || span <= 0) {
+    // One decimal below ten, none above: `1,4 Mn` reads, `1,412 Mn` does not,
+    // and `412,9 B` adds a digit nobody reads off an axis.
+    return scaled < 10 && suffix !== '' ? 1 : 0;
+  }
+  // Beş etiketlik bir eksende bir adım. Ölçek biriminde ifade ediliyor,
+  // çünkü basamak sayısı ölçeklenmiş sayıya uygulanıyor.
+  const step = span / 5 / unit;
+  if (step >= 1) return 0;
+  // `-log10(step)` yukarı yuvarlanınca adımı görünür kılan basamak çıkıyor;
+  // üç basamakla sınırlı, çünkü `1,0912 Mn` bir eksen etiketi değil.
+  return Math.min(3, Math.ceil(-Math.log10(step)));
 }
 
 /**
@@ -127,7 +158,7 @@ export function formatWithBase(
   }
   const converted = convert(amount, currency, BASE_CURRENCY, rates);
   if (converted == null) return native;
-  return `${native} (${formatMoney(converted, BASE_CURRENCY)})`;
+  return `${native} · ≈${formatMoney(converted, BASE_CURRENCY)}`;
 }
 
 /**
@@ -141,5 +172,5 @@ export function baseEquivalent(
 ): string {
   if (amount == null || (currency ?? BASE_CURRENCY).toUpperCase() === BASE_CURRENCY) return '';
   const converted = convert(amount, currency, BASE_CURRENCY, rates);
-  return converted == null ? '' : `(${formatMoney(converted, BASE_CURRENCY)})`;
+  return converted == null ? '' : `≈${formatMoney(converted, BASE_CURRENCY)}`;
 }

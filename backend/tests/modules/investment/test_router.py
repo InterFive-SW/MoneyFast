@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.deps import get_current_user_id
 from app.main import app
 from app.modules.investment import market_service
 from app.modules.analytics import service as analytics_service
@@ -136,6 +137,17 @@ class TestPositions:
 
 
 class TestPortfolioSummary:
+    def test_blocked_cash_is_reported_beside_the_balance(self, dash, mocker):
+        """Bekleyen bir emir parayı tutuyor. Nedeni yazılmayan bir eksilme
+        bir hataya benziyor -- ve TOPLAMA eklenmiyor, çünkü bu para
+        bakiyeden zaten düşüldü."""
+        mocker.patch.object(market_service, "blocked_cash", return_value=1500.0)
+        body = dash.get("/api/investment/portfolio/summary").json()
+        assert body["blockedTRY"] == pytest.approx(1500.0)
+        assert body["totalTRY"] == pytest.approx(
+            25000 + (120 * 304.0) + (15 * 215.3 * 41.0), abs=1
+        )
+
     def test_total_is_cash_plus_bist_plus_converted_foreign(self, dash):
         body = dash.get("/api/investment/portfolio/summary").json()
         expected = 25000 + (120 * 304.0) + (15 * 215.3 * 41.0)
@@ -357,12 +369,34 @@ class TestAllocations:
 
 
 class TestOrders:
-    def test_orders_come_from_real_proposals(self, dash):
+    @pytest.fixture
+    def signed_in(self, dash):
+        """Emir listesi artık oturum ZORUNLU. Oturum yalnızca BURADA
+        açılıyor: `dash` genel fikstür ve orada oturum açmak, kimlik
+        doğrulamasını sınayan komşu testleri sessizce geçirirdi."""
+        app.dependency_overrides[get_current_user_id] = lambda: "user-1"
+        try:
+            yield dash
+        finally:
+            app.dependency_overrides.pop(get_current_user_id, None)
+
+    def test_orders_come_from_real_proposals(self, signed_in):
         """A fabricated order history would let a user believe they placed
         something they never did."""
-        body = dash.get("/api/investment/orders").json()
+        body = signed_in.get("/api/investment/orders").json()
         assert body[0]["id"] == "PROP-1"
         assert body[0]["status"] in {"Bekliyor", "Gerçekleşti", "İptal"}
+
+    def test_the_list_is_only_the_callers_own(self, signed_in):
+        """Süzgeç `recent_orders`ta ve `user_id`nin varsayılanı YOK: token'sız
+        bir istek bir dönem HERKESİN emirlerini döndürüyordu."""
+        signed_in.get("/api/investment/orders")
+        assert market_service.recent_orders.call_args[0][1] == "user-1"
+
+    def test_without_a_session_there_is_no_order_list(self, dash):
+        """Kimlik doğrulaması olmadan 200 dönmek, canlı ölçülmüş bir açıktı:
+        token'sız bir istek son yirmi emri -- HERKESİNKİNİ -- döndürüyordu."""
+        assert dash.get("/api/investment/orders").status_code == 401
 
 class TestTopMovers:
     @pytest.mark.parametrize(

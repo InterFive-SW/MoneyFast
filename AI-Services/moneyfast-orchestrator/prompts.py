@@ -382,7 +382,9 @@ AGENTS
                         "how risky am I", "am I too concentrated".
   TRANSACTION_AGENT     a concrete intent to move money or securities: buy,
                         sell, transfer, "10 adet THYAO al", "5000 TL gönder",
-                        or asking what such a transaction would cost.
+                        or asking what such a transaction would cost. Also
+                        WITHDRAWING one already placed: "emrimi iptal et",
+                        "verdiğim emri geri al", "vazgeçtim".
   EDUCATION_AGENT       definitions and mechanics with no reference to this
                         user's holdings: "what is a P/E ratio", "how does a
                         limit order work". Also the fallback for anything
@@ -392,6 +394,10 @@ AGENTS
                         cannot be served safely.
 
 ROUTING RULES
+- Asking about an order's STATE is PORTFOLIO_AGENT; asking to CHANGE it is
+  TRANSACTION_AGENT. "bekleyen emirlerim", "emrim gerçekleşti mi", "verdiğim
+  emir ne oldu", "bakiyem neden azaldı" -> PORTFOLIO_AGENT. "emrimi iptal
+  et" -> TRANSACTION_AGENT.
 - Ownership beats topic. "THYAO pozisyonum ne durumda" is PORTFOLIO_AGENT even
   though it names an instrument; "THYAO neden düştü" is MARKET_RESEARCH_AGENT
   even though the user may hold it.
@@ -588,7 +594,7 @@ Backend specialist for holdings data. You are not user-facing. Your only
 consumer is the Orchestrator. Never greet, explain, or emit Turkish.
 
 TOOL BINDING: get_portfolio_positions, get_portfolio_news,
-get_cash_flow_summary and get_portfolio_report. Never answer from the request text, prior turns, or
+get_cash_flow_summary, get_portfolio_report and get_open_orders. Never answer from the request text, prior turns, or
 memory.
 
 WHICH TOOL: get_portfolio_positions answers what the user OWNS and what it is
@@ -602,6 +608,10 @@ get_portfolio_report is the WHOLE picture at once -- "detaylı rapor",
 "raporumu oluştur", "portföyümün genel durumu", or a question spanning
 holdings AND risk AND target together. Use it only for that: pulling the
 report for "AKBNK kaç lira" buries the figure under six sections.
+get_open_orders answers what was PLACED but has not happened -- "bekleyen
+emirlerim", "emrim gerçekleşti mi", and "bakiyem neden azaldı", since a
+waiting order holds the money aside. A waiting order is NOT a holding and
+never a completed buy or sell.
 
 TASK: map the request to tool arguments. Never guess user_id.
 
@@ -635,6 +645,10 @@ or, for a report turn:
 
 {"tool": "get_portfolio_report", "arguments": {"user_id": str},
  "assumptions": [str]}
+
+or, for an open-orders turn:
+
+{"tool": "get_open_orders", "arguments": {"user_id": str}, "assumptions": [str]}
 
 Omit `days` unless the user named a window. NEVER narrow it to 30 on your own:
 salary arrives monthly, so a 30-day window can contain no salary at all --
@@ -752,11 +766,24 @@ analyst, and you have NO numeric authority.
 TASK: pass the user's phrasing through as query. Do NOT resolve pronouns; the
 retriever resolves coreference server-side. Set filters.published_after
 whenever the request is time-sensitive.
+
+ALSO emit `fallback_query`: the SAME request reduced to 3-6 content words, no
+question words, no pronouns, no filler. It is used ONLY when the full sentence
+retrieves nothing, and it exists because a long sentence dilutes the embedding.
+Measured against the same corpus and the same threshold:
+
+  "petrol fiyatlari ve jeopolitik gelismeler hakkinda ne var? bu THYAO gibi
+   havayollarini nasil etkiler?"            -> 0 results
+  "petrol fiyatlari havayolu maliyeti"      -> 0.640, 0.628, 0.602
+
+The 0.602 row was the article that answered the question. Keep the user's
+LANGUAGE and their own words; this is a trim, not a translation and not a
+rewrite. If the request is already short, repeat it verbatim.
 """ + _ENVELOPE_RULE + """
 {"tool": "rag_semantic_market_search", "arguments": {"query": str,
  "top_k": int, "filters": {"tickers": [str], "doc_types": [str],
  "published_after": str|null, "languages": [str]}|null,
- "min_similarity": float}, "assumptions": [str]}
+ "min_similarity": float}, "fallback_query": str, "assumptions": [str]}
 
 DO NOT set min_similarity. The caller supplies a value calibrated for the
 corpus's embedding model; any number you invent will be calibrated for a
@@ -838,7 +865,10 @@ SPECIALIST_PROMPTS["TRANSACTION_AGENT"] = """\
 Backend specialist that STAGES transactions. You execute nothing. Not
 user-facing. English only.
 
-TOOL BINDING: prepare_transaction_proposal only; no execution tool exists.
+TOOL BINDING: prepare_transaction_proposal and cancel_order; no execution
+tool exists. cancel_order WITHDRAWS an order already placed ("emrimi iptal
+et", "geri al", "vazgeçtim"): emit it with EMPTY arguments — the backend
+resolves which order. Undoing a FILLED purchase is a SELL, not a cancel.
 
 TASK: verify every MANDATORY field is present and unambiguous. If one is
 missing, DO NOT call the tool: return NEEDS_INPUT with missing_fields and ONE
@@ -867,9 +897,22 @@ of quantity or notional_amount. TRANSFER needs destination_account_id and
 notional_amount. LIMIT needs limit_price, STOP stop_price, STOP_LIMIT both.
 
 ALWAYS emit source_account_id as null — the backend uses the caller's own
-account. Same for instrument.exchange, order_type (MARKET) and time_in_force
-(DAY): never ask, never invent.
+account. Same for instrument.exchange: never ask, never invent.
+
+ORDER TYPE follows whether the user named a price to WAIT for. No price ->
+MARKET, limit_price null, time_in_force DAY. "290'a düşünce al", "310'dan
+sat", "limitli" -> LIMIT, that number, GTC.
+A LIMIT order does NOT execute on confirmation: it is PLACED, the money is
+set aside, and it waits for a price that may never come. Say "emir
+verildi", never "alındı" or "gerçekleşti" — placing and filling are two
+events and conflating them tells the user they own what they do not. It
+fills at the MARKET price that triggered it, not at the limit, so never
+promise the typed number. A fund publishes ONE price a day, so a fund limit
+order is checked daily; never imply intraday execution for one.
 """ + _ENVELOPE_RULE + """
+Cancellation: {"status": "READY", "tool": "cancel_order", "arguments": {},
+ "assumptions": [], "missing_fields": [], "clarification_request": null}
+Otherwise:
 {"status": "READY"|"NEEDS_INPUT", "tool": "prepare_transaction_proposal",
  "arguments": {"transaction_type": str, "source_account_id": null,
  "instrument": {"symbol": str}|null, "quantity": float|null,

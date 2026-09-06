@@ -44,6 +44,60 @@ export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
 export type MarketTicker = GetResponseType<paths['/api/market/tickers']>[0];
 
+/** Bir TEFAS fonu.
+ *
+ *  Yönetim ücreti, stopaj ve risk değeri YOK: TEFAS API'si bu alanları
+ *  döndürmüyor (bkz. docs/TEFAS_INTEGRATION.md) ve döndürmediği bir alanı
+ *  `null` diye taşımak, bir gün dolacakmış gibi duran bir söz olurdu. */
+export interface FundReturns {
+    daily: number | null
+    monthly: number | null
+    threeMonth: number | null
+    yearly: number | null
+    threeYear: number | null
+    fiveYear: number | null
+}
+
+export interface ApiFund {
+    code: string
+    name: string
+    founder?: string | null
+    umbrella?: string | null
+    fundType?: string | null
+    price?: number | null
+    investorCount?: number | null
+    size?: number | null
+    asOf?: string | null
+    /** TEFAS'ın kategori içi sırası: "86 fon içinde 71." */
+    categoryRank?: number | null
+    categorySize?: number | null
+    /** Kategorinin ortalama getirisi -- fonun getirisinin ölçüldüğü yer. */
+    shares?: number | null
+    returns: FundReturns
+}
+
+export interface FundList {
+    items: ApiFund[]
+    /** Süzgeç açılır listeleri VERİDEN geliyor, elle yazılmış değil. */
+    founders: string[]
+    umbrellas: string[]
+    total: number
+}
+
+export interface FundSeries {
+    code: string
+    currency: string
+    points: { date: string; price: number }[]
+}
+
+export interface FundCandles {
+    code: string
+    currency: string
+    /** `week` ya da `month`. */
+    bucket: string
+    candles: { date: string; open: number; high: number; low: number; close: number }[]
+}
+
 // --- Banking: bills, staged payments, saved payees -------------------------
 
 /** Vadesiz, vadeli veya yatırım — tek biçimde. */
@@ -81,6 +135,8 @@ export interface PortfolioAccount {
     /** Vadeli hesabın saklanan yıllık oranı ve vadesi; vadesizde null. */
     interest_rate?: number | null
     term_days?: number | null
+    /** Kullanıcının hesabına verdiği ad; yoksa arayüz türden türetir. */
+    nickname?: string | null
     is_investment: boolean
 }
 
@@ -773,6 +829,28 @@ class ApiClient {
         return this.request<Order[]>('/investment/orders');
     }
 
+    /**
+     * Bekleyen bir emri geri çeker; bloke edilen tutar iade edilir.
+     *
+     * Onay kapısının ARKASINDA değil: iptal bir para hareketi değil, bir geri
+     * alma. Kullanıcının kendi emrini geri çekmek için ikinci bir onay
+     * ekranından geçmesi, bloke parasını daha uzun tutmaktan başka bir işe
+     * yaramazdı.
+     *
+     * 204 dönüyor, gövde yok -- `request` gövde beklediği için `authedFetch`
+     * doğrudan kullanılıyor.
+     */
+    async cancelOrder(orderId: string): Promise<void> {
+        const response = await this.authedFetch(
+            `${this.baseUrl}/investment/transactions/${encodeURIComponent(orderId)}/cancel`,
+            { method: 'POST' },
+        );
+        if (!response.ok) throw new Error(await describeError(response));
+        // Bloke tutar geri geldi ve emir listesi değişti; bildirim şeridi
+        // bunu bir sonraki yoklamaya kadar göstermezdi.
+        window.dispatchEvent(new Event('refreshNotifications'));
+    }
+
     getAssetAllocation() {
         return this.request<AssetAllocationItem[]>('/investment/asset-allocation');
     }
@@ -971,10 +1049,15 @@ class ApiClient {
             `/investment/transactions/${encodeURIComponent(proposalId)}/confirm`,
             {}
         );
-        // Trigger a notification refresh immediately so the user sees the PENDING transaction notification
-        if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event("refreshNotifications"));
-        }
+        // Onaydan hemen sonra bildirimleri tazele, yoksa kullanıcı bekleyen
+        // işlemi bir sonraki yoklamaya kadar göremiyor.
+        //
+        // `typeof window !== 'undefined'` koruması vardı: bu istemci yalnızca
+        // tarayıcıda çalışıyor (aynı dosya `localStorage`'ı korumasız
+        // okuyor), dolayısıyla koruma hiçbir zaman yanlış olamayan bir dal
+        // ekliyordu -- test edilemeyen ve bu yüzden kapsama kapısını kıran
+        // bir dal.
+        window.dispatchEvent(new Event('refreshNotifications'));
         return response;
     }
 
@@ -1198,12 +1281,84 @@ class ApiClient {
         }>('/auth/me');
     }
 
+    /**
+     * Yeni bir mevduat hesabı açar.
+     *
+     * Bu uç nokta yoktu ve arayüzdeki beş adımlık sihirbaz rastgele bir IBAN
+     * üretip hesabı yalnızca bileşenin state'ine yazıyordu -- bir sonraki
+     * veri tazelemesinde hesap kayboluyordu.
+     */
+    openBankAccount(request: {
+        account_type: 'vadesiz' | 'vadeli'
+        currency_code?: string
+        nickname?: string | null
+    }) {
+        return this.post<BankAccount>('/banking/accounts', request)
+    }
+
+    /** Hesabı kapatır. Bakiyesi varsa backend reddeder. */
+    closeBankAccount(accountNumber: string) {
+        return this.post<BankAccount>(
+            `/banking/accounts/${encodeURIComponent(accountNumber)}/close`, {},
+        )
+    }
+
+    /**
+     * Fon listesi. Süzgeçler SUNUCUDA: evren 2.602 fon ve hepsini tarayıcıya
+     * gönderip orada süzmek, her açılışta birkaç yüz kilobayt ve süzgeç
+     * mantığının ikinci bir kopyası demekti.
+     */
+    getFunds(params?: {
+        founder?: string
+        umbrella?: string
+        fundType?: string
+        q?: string
+        limit?: number
+    }) {
+        const query = new URLSearchParams()
+        if (params?.founder) query.set('founder', params.founder)
+        if (params?.umbrella) query.set('umbrella', params.umbrella)
+        if (params?.fundType) query.set('fund_type', params.fundType)
+        if (params?.q) query.set('q', params.q)
+        if (params?.limit != null) query.set('limit', String(params.limit))
+        const suffix = query.toString() ? `?${query}` : ''
+        return this.request<FundList>(`/market/funds${suffix}`)
+    }
+
+    /** Fonun mum serisi. Kova genişliği YANITTA geliyor: fon günde tek
+     *  fiyat yayımlıyor, dolayısıyla günlük mum yok ve kullanıcı baktığı
+     *  çubuğun bir haftayı mı bir ayı mı özetlediğini bilmeli. */
+    getFundCandles(code: string, window = '3A') {
+        return this.request<FundCandles>(
+            `/market/funds/${encodeURIComponent(code)}/candles?window=${encodeURIComponent(window)}`,
+        )
+    }
+
+    /** Bir fonun NAV serisi — fon grafiğinin okuduğu yer. */
+    getFundPrices(code: string, limit = 400) {
+        return this.request<FundSeries>(
+            `/market/funds/${encodeURIComponent(code)}/prices?limit=${limit}`,
+        )
+    }
+
     getMarketTickers() {
         return this.request<MarketTicker[]>('/market/tickers');
     }
 
-    getMarketNews() {
-        return this.request<NewsItem[]>('/market/news');
+    /**
+     * Piyasa haber akışı. `symbols` verilirse süzgeç SUNUCUDA uygulanır.
+     *
+     * Dönen sayfayı istemcide süzmek yalnızca çekilen satırları daraltıyor:
+     * "en yeni 20"de AAPL yoksa ekranda "haber yok" yazıyor, oysa soru hiç
+     * sorulmamış oluyor.
+     */
+    getMarketNews(params?: { limit?: number; symbols?: string[] }) {
+        const query = new URLSearchParams();
+        if (params?.limit != null) query.set('limit', String(params.limit));
+        // Repeated key, not a comma list: FastAPI reads List[str] that way.
+        params?.symbols?.forEach((symbol) => query.append('symbols', symbol));
+        const suffix = query.toString() ? `?${query}` : '';
+        return this.request<NewsItem[]>(`/market/news${suffix}`);
     }
 
     /**
@@ -1481,6 +1636,14 @@ class ApiClient {
      */
     async markAllNotificationsAsRead(): Promise<{ message: string }> {
         return this.post<{ message: string }>('/notification/me/notifications/mark-all-read');
+    }
+
+    /**
+     * Kullanıcının isteği üzerine (On-Demand) piyasa bültenini anında tetikler.
+     * Bu istek BackgroundTasks ile çalıştığı için anında 202 Accepted döner.
+     */
+    async sendMarketBriefingNow(): Promise<{ message: string }> {
+        return this.post<{ message: string }>('/news/me/market-briefing/send-now');
     }
 }
 

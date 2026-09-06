@@ -50,6 +50,9 @@ export function adaptInstrument(row: ApiInstrument): MarketInstrument {
     market: MARKET_LABELS[row.market ?? ''] ?? 'Diğer',
     price: row.price,
     unit: CURRENCY_UNITS[row.currency] ?? row.currency,
+    // Gösterim işaretinin YANINDA ISO kodu. İşlem yolu bunu istiyor ve
+    // "₺"den geri çıkarmak, gösterimden veri türetmek olurdu.
+    currency: row.currency,
     changePercent: row.change_percent ?? 0,
     // Now carried on the quote itself. It was always stored and never
     // projected, so this read 0 for every row -- which renders as "nobody

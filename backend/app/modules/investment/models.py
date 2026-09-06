@@ -160,6 +160,13 @@ class TransactionProposal(Base):
     source_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     destination_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     order_type: Mapped[str] = mapped_column(String(20), nullable=False, default="MARKET")
+    #: Kullanıcının beklediği fiyat. Yalnızca `LIMIT` emirlerde dolu.
+    #:
+    #: Ayrı bir sütun, çünkü bir dönem yalnızca
+    #: `payload["estimate"]["reference_price"]` içindeydi ve orada bir
+    #: piyasa emrinin referans fiyatından ayırt edilemiyordu -- bekleyen
+    #: emirleri tarayan bir iş JSONB'ye göre süzemez.
+    limit_price: Mapped[float | None] = mapped_column(Numeric(19, 6), nullable=True)
     #: Full staged payload, so the confirm step presents exactly what was
     #: staged rather than re-deriving it from live prices that have moved.
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)

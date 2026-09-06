@@ -82,8 +82,15 @@ def get_product(db: Session, symbol: str) -> Optional[InvestmentProduct]:
 #: Keys are folded (see `_fold`): case, Turkish dotless-i and accents are
 #: normalised in Python rather than left to Postgres `upper()`, because the two
 #: disagree on ı/İ and the answer would then depend on the database collation.
+#: Günlük dilde kullanılan adlar. Bir şirket adından TÜRETİLEMEZ: "altın"
+#: "Altın (Ons/USD)"in sembolünde geçmiyor ve "dolar" USDTRY'de hiç yok.
+#:
+#: Yalın "ons" BİLEREK YOK: ONS gerçek bir TEFAS fon kodu (İŞ PORTFÖY
+#: ONİKİNCİ SERBEST) ve takma ad olarak durduğu sürece "ONS al" diyen biri
+#: altın alıyordu. Ölçüldü. Altını isteyen "altın", "gram altın", "ons
+#: altın", "gold" ya da "xau" yazıyor; yalın "ons" ise bir kod.
 _ALIASES = {
-    "xau": "XAUUSD", "altin": "XAUUSD", "gold": "XAUUSD", "ons": "XAUUSD",
+    "xau": "XAUUSD", "altin": "XAUUSD", "gold": "XAUUSD",
     "gram altin": "XAUUSD", "ons altin": "XAUUSD",
     "dolar": "USDTRY", "usd": "USDTRY", "amerikan dolari": "USDTRY",
     "dolar kuru": "USDTRY", "usdtry": "USDTRY",
@@ -222,22 +229,26 @@ def resolve_candidates(
 
     folded = _fold(candidate)
     products = db.query(InvestmentProduct).all()
+    trimmed = _fold(_trim_symbol(candidate))
 
-    # 1. Everyday names a company name cannot yield: "altın" is not a word in
+    # 1. Exact, on either the canonical or the provider symbol.
+    #
+    # Takma adlardan ÖNCE. Bir sembol KAYITLI BİR GERÇEK; takma ad ise
+    # kullanıcının ne demek istediğine dair bir tahmin, ve tahmin gerçeği
+    # geçmemeli. Sıra terstiyken ölçüldü: fon evreni köprülendikçe günlük
+    # dildeki bir kelime gerçek bir kodun önüne geçiyordu.
+    exact = [p for p in products
+             if _fold(p.symbol) == trimmed or _fold(p.data_symbol or "") == folded]
+    if exact:
+        return exact[:1]
+
+    # 2. Everyday names a company name cannot yield: "altın" is not a word in
     #    "Altın (Ons/USD)"'s ticker, and "dolar" is nowhere in USDTRY.
     aliased = _ALIASES.get(folded)
     if aliased is not None:
         hit = [p for p in products if p.symbol.upper() == aliased]
         if hit:
             return hit[:1]
-
-    trimmed = _fold(_trim_symbol(candidate))
-
-    # 2. Exact, on either the canonical or the provider symbol.
-    exact = [p for p in products
-             if _fold(p.symbol) == trimmed or _fold(p.data_symbol or "") == folded]
-    if exact:
-        return exact[:1]
 
     # 3. Symbol prefix. "thy" -> THYAO. Measured across the live universe:
     #    only 5 of 185 three-letter prefixes are ambiguous, so this settles
@@ -1419,56 +1430,111 @@ def sector_by_symbol(db: Session) -> dict[str, str]:
               InstrumentFundamentals.product_id == InvestmentProduct.id)
         .where(InstrumentFundamentals.sector.isnot(None))
     )
-    sectors = {symbol: sector for symbol, sector in db.execute(statement).all()}
-    
-    # -- EKLENEN MOCK VERİ KISMI --
-    mock_sectors = {
-        "THYAO": "Ulaştırma", "PGSUS": "Ulaştırma",
-        "GARAN": "Bankacılık", "AKBNK": "Bankacılık", "ISCTR": "Bankacılık", "YKBNK": "Bankacılık",
-        "TUPRS": "Enerji", "TCELL": "İletişim", "TTKOM": "İletişim",
-        "KCHOL": "Holding", "SAHOL": "Holding",
-        "SISE": "Sanayi", "EREGL": "Metal", "KRDMD": "Metal",
-        "ASELS": "Savunma", "BIMAS": "Perakende", "MGROS": "Perakende",
-        "AAPL": "Teknoloji (ABD)", "MSFT": "Teknoloji (ABD)", 
-        "TSLA": "Otomotiv (ABD)", "AMZN": "Perakende (ABD)", "NVDA": "Teknoloji (ABD)"
-    }
-    for symbol, mock_sector in mock_sectors.items():
-        if symbol not in sectors:
-            sectors[symbol] = mock_sector
-            
-    return sectors
-
-# def sector_by_symbol(db: Session) -> dict[str, str]:
-#     """Sector per symbol, for allocation and heatmap breakdowns."""
-#     statement = (
-#         select(InvestmentProduct.symbol, InstrumentFundamentals.sector)
-#         .join(InstrumentFundamentals,
-#               InstrumentFundamentals.product_id == InvestmentProduct.id)
-#         .where(InstrumentFundamentals.sector.isnot(None))
-#     )
-#     return {symbol: sector for symbol, sector in db.execute(statement).all()}
+    # Elle yazılmış sektör YOK. Bir dönem yirmi iki sembol için sabit bir
+    # sözlük buraya eklenmişti ("AAPL: Teknoloji (ABD)" gibi): ekranda
+    # ölçülmüş sektörle uydurulmuş sektör ayırt edilemez hâle geliyordu ve
+    # mevcut test düşüyordu. Sektörü olmayan enstrüman `Bilinmiyor`
+    # görünür -- ölçülmüş bir boşluk, uydurulmuş bir değer değil.
+    return {symbol: sector for symbol, sector in db.execute(statement).all()}
 
 
-def recent_orders(db: Session, limit: int = 20) -> list[dict[str, Any]]:
-    """Confirmed and pending proposals, as the dashboard's order list.
+#: Öneri durumlarının Türkçe karşılığı.
+#:
+#: Eksik bir anahtar sessizce "Bekliyor" diye görünüyordu ve `PENDING` ile
+#: `FAILED` haritada YOKTU: başarısız bir işlem kullanıcıya hâlâ sırada
+#: gibi gösteriliyordu.
+ORDER_STATUS_TR = {
+    "PENDING_USER_CONFIRMATION": "Onay bekliyor",
+    "WAITING_PRICE": "Fiyat bekliyor",
+    "PENDING": "İşleniyor",
+    "CONFIRMED": "Gerçekleşti",
+    "CANCELLED": "İptal edildi",
+    "FAILED": "Başarısız",
+    "REJECTED_VALIDATION": "İptal",
+    "REQUIRES_ADDITIONAL_INPUT": "İptal",
+}
 
-    Only real proposals appear. A fabricated order history would let a user
-    believe they had placed something they never did.
+
+def blocked_cash(db: Session, user_id: Optional[str]) -> float:
+    """Bekleyen ALIŞ emirlerinin tuttuğu nakit, hesabın para biriminde.
+
+    Emir yerleştirilirken para BLOKE ediliyor (`service.block_funds`) ve GTC
+    bir emir bunu süresiz tutabiliyor. Bakiyede eksilen ama nedeni hiçbir
+    yerde yazmayan bir tutar, kullanıcıya bir HATA gibi görünüyor -- "param
+    nerede" sorusunun cevabı burada.
+
+    Yalnızca alış: satışta bloke edilen şey nakit değil, pozisyonun kendisi
+    ve o zaten pozisyon satırından düşmüş görünüyor.
+    """
+    from .models import TransactionProposal
+
+    if not user_id:
+        return 0.0
+    rows = (
+        db.query(TransactionProposal)
+        .filter(TransactionProposal.user_id == user_id)
+        .filter(TransactionProposal.status == "WAITING_PRICE")
+        .all()
+    )
+    total = 0.0
+    for row in rows:
+        if (row.transaction_type or "").upper() not in BUY_WORDS:
+            continue
+        estimate = (row.payload or {}).get("estimate") or {}
+        amount = estimate.get("net_amount")
+        if amount is None:
+            continue
+        fx = estimate.get("fx") or {}
+        rate = fx.get("rate")
+        # Kuru olmayan yabancı emir toplama KATILMIYOR: 1.0 varsaymak,
+        # 15.098 TL'lik bir blokajı 315 TL göstermek olurdu.
+        if fx and rate is None:
+            continue
+        total += float(amount) * (float(rate) if rate else 1.0)
+    return round(total, 2)
+
+
+#: İşlem yönünün Türkçesi. Bildirim metinleri bir dönem
+#: `transaction_type.lower()` yazıyordu ve kullanıcıya "1 lot GRO **buy**
+#: emriniz" diye görünüyordu -- iç bir enum değeri, olduğu gibi ekranda
+#: (bkz. "İç isimler kullanıcıya sızmaz").
+BUY_WORDS = frozenset({"BUY", "ALIS", "ALIŞ"})
+
+
+def direction_tr(transaction_type: Optional[str]) -> str:
+    """"Alış" ya da "Satış". Emir listesi ve bildirimler AYNI kelimeyi
+    kullanmalı; ikisi ayrışırsa aynı emir iki farklı yönde okunur."""
+    return "Alış" if (transaction_type or "").upper() in BUY_WORDS else "Satış"
+
+
+#: İptal edilebilir durumlar. Gerçekleşmiş bir emir geri alınamaz --
+#: iptal, olmamış bir işlemi geri çekmektir; olmuş bir işlemi geri almak
+#: ters yönde ikinci bir emirdir.
+CANCELLABLE_STATUSES = frozenset({"PENDING_USER_CONFIRMATION", "WAITING_PRICE"})
+
+
+def recent_orders(db: Session, user_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Bu KULLANICININ önerileri, emir listesi olarak.
+
+    `user_id` zorunlu ve varsayılanı YOK. Eskiden hiç süzgeç yoktu ve uç
+    nokta kimlik doğrulaması da istemiyordu: token'sız bir istek son 20
+    emri -- HERKESİN emirlerini, sembol, adet ve durumuyla -- döndürüyordu.
+    Canlı doğrulandı. Varsayılan bir değer vermek o hatayı geri getirmenin
+    en kolay yolu olurdu.
+
+    Yalnızca gerçek öneriler görünüyor. Uydurma bir emir geçmişi,
+    kullanıcının vermediği bir emri vermiş sanmasına yol açar.
     """
     from .models import TransactionProposal
 
     rows = (
         db.query(TransactionProposal)
+        .filter(TransactionProposal.user_id == user_id)
         .order_by(TransactionProposal.created_at.desc())
         .limit(limit)
         .all()
     )
-    status_tr = {
-        "PENDING_USER_CONFIRMATION": "Bekliyor",
-        "CONFIRMED": "Gerçekleşti",
-        "REJECTED_VALIDATION": "İptal",
-        "REQUIRES_ADDITIONAL_INPUT": "İptal",
-    }
+    status_tr = ORDER_STATUS_TR
     out = []
     for row in rows:
         estimate = (row.payload or {}).get("estimate") or {}
@@ -1483,11 +1549,25 @@ def recent_orders(db: Session, limit: int = 20) -> list[dict[str, Any]]:
                 # must not be re-read from today's product row.
                 "currency": estimate.get("currency") or "TRY",
                 "status": status_tr.get(row.status, "Bekliyor"),
-                "type": "Alış" if row.transaction_type.upper() in {"BUY", "ALIS", "ALIŞ"} else "Satış",
+                "type": direction_tr(row.transaction_type),
                 "quantity": quantity,
                 "price": round(float(price), 4),
                 "total": round(float(price) * quantity, 2),
                 "date": row.created_at.isoformat(),
+                #: Emrin tetikleyici fiyatı. Bekleyen bir emirde `price` ile
+                #: aynı (öneri limit fiyattan maliyetlendirildi); dolduktan
+                #: sonra `price` GERÇEKLEŞEN fiyata döner ve ikisi ayrışır --
+                #: kullanıcının hangi seviyeyi verdiği ile hangi seviyeden
+                #: aldığı ayrı sorular.
+                "limitPrice": (
+                    round(float(row.limit_price), 4)
+                    if row.limit_price is not None
+                    else None
+                ),
+                #: İptal düğmesinin görünüp görünmeyeceği. Arayüz durumu
+                #: Türkçe etikete bakarak tahmin etmemeli: etiket bir
+                #: gösterim, bu bir yetki.
+                "cancellable": row.status in CANCELLABLE_STATUSES,
             }
         )
     return out

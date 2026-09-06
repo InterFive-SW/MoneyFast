@@ -1,23 +1,37 @@
-import type { Fund } from '../../data/mockData'
+/**
+ * Fonlar süzgeç paneli.
+ *
+ * "Azami Yönetim Ücreti" ve "Risk Değeri" KALDIRILDI. Mock'ta vardılar ama
+ * TEFAS API'si bu iki alanı döndürmüyor -- HAR kaydındaki 85 alanın hepsi
+ * tarandı, bkz. `docs/TEFAS_INTEGRATION.md`. Hiçbir şeyi süzemeyen bir
+ * süzgeç, kullanıcıya sistemin bilmediği bir şeyi biliyormuş gibi
+ * gösteriyor; boş bırakmaktansa kaldırmak dürüst.
+ *
+ * Yerlerine TEFAS'ın gerçekten verdiği iki eksen geldi: fon tipi ve serbest
+ * metin araması.
+ *
+ * Süzme SUNUCUDA: evren 2.602 fon. `applyFundFilters` diye bir istemci
+ * fonksiyonu vardı ve o mock listeyi süzüyordu; artık süzgeçler sorguya
+ * gidiyor.
+ */
 
 export interface FundFilters {
-  feeMax:    string
-  riskValue: string // '' = tümü, '1'-'7'
-  founder:   string
-  umbrella:  string
+  fundType: string
+  founder:  string
+  umbrella: string
+  q:        string
 }
 
-export const EMPTY_FUND_FILTERS: FundFilters = { feeMax: '', riskValue: '', founder: '', umbrella: '' }
-
-export function applyFundFilters(funds: Fund[], filters: FundFilters): Fund[] {
-  return funds.filter((f) => {
-    if (filters.feeMax && f.managementFee > Number(filters.feeMax)) return false
-    if (filters.riskValue && f.riskValue !== Number(filters.riskValue)) return false
-    if (filters.founder && f.founder !== filters.founder) return false
-    if (filters.umbrella && f.umbrella !== filters.umbrella) return false
-    return true
-  })
+export const EMPTY_FUND_FILTERS: FundFilters = {
+  fundType: '', founder: '', umbrella: '', q: '',
 }
+
+/** TEFAS'ın fon tipi kodları. */
+const FUND_TYPES: { value: string; label: string }[] = [
+  { value: 'YAT', label: 'Menkul Kıymet' },
+  { value: 'EMK', label: 'Emeklilik' },
+  { value: 'BYF', label: 'Borsa Yatırım' },
+]
 
 interface Props {
   filters:   FundFilters
@@ -26,7 +40,6 @@ interface Props {
   umbrellas: string[]
 }
 
-/** Fonlar filtre paneli — yönetim ücreti, risk değeri, kurucu/PYŞ, şemsiye türü */
 export default function FundFilterPanel({ filters, onChange, founders, umbrellas }: Props) {
   const inputClass = 'w-full rounded-lg border border-white/10 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400'
 
@@ -45,14 +58,20 @@ export default function FundFilterPanel({ filters, onChange, founders, umbrellas
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div>
-          <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Azami Yönetim Ücreti %</label>
-          <input type="number" value={filters.feeMax} onChange={(e) => updateField('feeMax', e.target.value)} placeholder="Örn. 2.0" className={inputClass} />
+          <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Fon Ara</label>
+          <input
+            type="search"
+            value={filters.q}
+            onChange={(e) => updateField('q', e.target.value)}
+            placeholder="Kod ya da ad"
+            className={inputClass}
+          />
         </div>
         <div>
-          <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Risk Değeri</label>
-          <select value={filters.riskValue} onChange={(e) => updateField('riskValue', e.target.value)} className={inputClass}>
+          <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Fon Tipi</label>
+          <select value={filters.fundType} onChange={(e) => updateField('fundType', e.target.value)} className={inputClass}>
             <option value="">Tümü</option>
-            {[1, 2, 3, 4, 5, 6, 7].map((r) => <option key={r} value={r}>{r}</option>)}
+            {FUND_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </div>
         <div>

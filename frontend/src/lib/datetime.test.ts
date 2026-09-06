@@ -10,8 +10,15 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  APP_TIME_ZONE, formatDate, formatDateTime, formatLongDate, formatTime,
-  msUntilLocalMidnight,
+    APP_TIME_ZONE,
+    formatDate,
+    formatDateTime,
+    formatLongDate,
+    formatShortDateTime,
+    istanbulDayDiff,
+    istanbulDayKey,
+    formatTime,
+    msUntilLocalMidnight,
 } from './datetime'
 
 /* Test ortamının dilimi `vitest.config.ts`'te UTC'ye sabitli: kendi makinesi
@@ -103,4 +110,64 @@ describe('msUntilLocalMidnight', () => {
   it('dilim sabit', () => {
     expect(APP_TIME_ZONE).toBe('Europe/Istanbul')
   })
+})
+
+describe('formatShortDateTime', () => {
+    it('yılı yazmıyor', () => {
+        /* Satırların hepsi son birkaç güne ait; her satırda "2026" yazmak
+           ayırt etmeyen bir bilgiyi tekrarlamak olurdu. */
+        expect(formatShortDateTime(MID_UTC)).toBe('31 Ağu 12:15')
+    })
+
+    it('gün dönümünü Istanbul saatiyle geçiyor', () => {
+        /* 21:32 UTC = 1 Eylül 00:32 Istanbul. Dilimi vermeyen bir
+           biçimlendirici burada "31 Ağu 21:32" yazardı. */
+        expect(formatShortDateTime(LATE_UTC)).toBe('1 Eyl 00:32')
+    })
+
+    it('değer yoksa tire', () => {
+        expect(formatShortDateTime(null)).toBe('—')
+        expect(formatShortDateTime('bozuk')).toBe('—')
+    })
+})
+
+describe('istanbulDayKey', () => {
+    it('takvim gününü Istanbul\'a göre veriyor', () => {
+        /* 21:32 UTC hâlâ 31 Ağustos, ama Istanbul'da 1 Eylül. */
+        expect(istanbulDayKey(LATE_UTC)).toBe('2026-09-01')
+        expect(istanbulDayKey(MID_UTC)).toBe('2026-08-31')
+    })
+
+    it('değer yoksa boş dize', () => {
+        expect(istanbulDayKey(null)).toBe('')
+        expect(istanbulDayKey('bozuk')).toBe('')
+    })
+})
+
+describe('istanbulDayDiff', () => {
+    it('gece yarısını geçen iki dakika BİR gündür', () => {
+        /* Süre farkı değil takvim günü farkı. Saat aritmetiği bunu sıfır
+           sayardı ve liste iki ayrı günü "Bugün" diye etiketlerdi. */
+        expect(istanbulDayDiff('2026-08-31T20:59:00Z', '2026-08-31T21:01:00Z')).toBe(1)
+    })
+
+    it('aynı Istanbul günü sıfır', () => {
+        expect(istanbulDayDiff('2026-08-31T06:00:00Z', '2026-08-31T18:00:00Z')).toBe(0)
+    })
+
+    it('geçmiş gün pozitif, gelecek gün negatif', () => {
+        expect(istanbulDayDiff('2026-08-29T12:00:00Z', '2026-08-31T12:00:00Z')).toBe(2)
+        expect(istanbulDayDiff('2026-09-02T12:00:00Z', '2026-08-31T12:00:00Z')).toBe(-2)
+    })
+
+    it('varsayılan karşılaştırma anı şimdi', () => {
+        expect(istanbulDayDiff(new Date())).toBe(0)
+    })
+
+    it('çözülemeyen değerde null — sıfır DEĞİL', () => {
+        /* Sıfır "bugün" demek; okunamayan bir tarihi bugün saymak, listede
+           yanlış bir gün adı yazmak olurdu. */
+        expect(istanbulDayDiff('bozuk')).toBeNull()
+        expect(istanbulDayDiff('2026-08-31T12:00:00Z', 'bozuk')).toBeNull()
+    })
 })

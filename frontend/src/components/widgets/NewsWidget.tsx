@@ -110,6 +110,27 @@ export default function NewsWidget({ symbols }: { symbols?: string[] } = {}) {
             </div>
           </div>
         ))}
+        {/* GDELT atfı. Nezaket değil, KULLANIM ŞARTI: veri "unlimited and
+            unrestricted use ... without fee" ile geliyor ve karşılığında
+            "a citation to the GDELT Project and a link" isteniyor. Kaldırmak,
+            veriyi kullanma iznini kaldırmak demek -- bkz. docs/GLOBAL_NEWS.md.
+
+            Koşulsuz gösteriliyor: akış Türkçe RSS, KAP ve GDELT'i tek listede
+            birleştiriyor ve hangi satırın hangi kaynaktan geldiğini ayırt
+            eden bir alan yok. Şarta yalnızca bazen uymak, uymamak. */}
+        {visible.length > 0 && (
+          <p className="pt-2 text-[10px] text-slate-500">
+            Küresel haber dizini:{' '}
+            <a
+              href="https://www.gdeltproject.org"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-slate-300"
+            >
+              The GDELT Project
+            </a>
+          </p>
+        )}
         {visible.length === 0 && (
           <div className="text-sm text-slate-400 py-4 text-center">
             {focused

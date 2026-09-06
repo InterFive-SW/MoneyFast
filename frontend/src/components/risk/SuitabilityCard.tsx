@@ -1,4 +1,5 @@
 import Term from '../common/Term'
+import { formatDate } from '../../lib/datetime'
 
 /**
  * Ölçüm ile kullanıcının kendi beyanının yan yana durduğu kart.
@@ -125,7 +126,7 @@ export default function SuitabilityCard({
 
             <p className="mt-3 border-t border-white/10 pt-3 text-xs leading-relaxed text-slate-500">
                 Yatırım vadeniz: {declared.investment_horizon}. Anketi{' '}
-                {new Date(declared.assessed_at).toLocaleDateString('tr-TR')} tarihinde
+                {formatDate(declared.assessed_at)} tarihinde
                 doldurdunuz.
             </p>
         </div>

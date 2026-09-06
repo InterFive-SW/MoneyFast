@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, Notification } from '../../api/client'
 import { useUser }             from '../../contexts/UserContext'
-import { formatLongDate, msUntilLocalMidnight } from '../../lib/datetime'
+import { formatLongDate, formatTime, msUntilLocalMidnight } from '../../lib/datetime'
 
 interface HeaderProps {
   /**
@@ -28,11 +28,11 @@ interface HeaderProps {
  * Örnek: "Perşembe, 14 Ağustos 2026"
  */
 function getFormattedDate(): string {
-  const d = new Date()
-  const day = d.getDate()
-  const month = d.toLocaleString('tr-TR', { month: 'long' })
-  const weekday = d.toLocaleString('tr-TR', { weekday: 'long' })
-  return `${day} ${month}, ${weekday}`
+  // `lib/datetime.ts` üzerinden: uygulamanın saati Europe/Istanbul ve
+  // tarayıcının yerel dilimi başka bir ülkedeyse burada başka bir gün
+  // yazardı. Aynı sebeple gece yarısı zamanlayıcısı da
+  // `msUntilLocalMidnight()` kullanıyor.
+  return formatLongDate(new Date())
 }
 
 // ─── Bildirim Butonu Alt Bileşeni ─────────────────────────────────────────────
@@ -193,7 +193,7 @@ function NotificationButton() {
                       {n.title}
                     </h4>
                     <span className="text-[10px] text-slate-500 shrink-0 ml-2">
-                      {new Date(n.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                      {formatTime(n.created_at)}
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 leading-relaxed pr-2">{n.description}</p>
@@ -245,9 +245,13 @@ export default function Header({ pageTitle }: HeaderProps) {
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/10 bg-black/40 px-6 backdrop-blur-xl sm:px-8">
 
-      {/* ── Sol: Tarih ve Saat ──────────────────────────────── */}
+      {/* ── Sol: Sayfa başlığı, tarih ve saat ───────────────── */}
       <div className="flex items-center gap-4">
-        <div className="flex items-center gap-3">
+        {/* Sayfanın tek `<h1>`i. Bir dönem kaldırılmıştı: ekran
+            okuyucu için sayfanın adı, gören kullanıcı için nerede
+            olduğu kayboluyordu. */}
+        <h1 className="text-sm font-semibold text-white">{pageTitle}</h1>
+        <div className="hidden items-center gap-3 sm:flex">
           <span className="text-sm font-medium text-slate-300">{dateStr}</span>
           <span className="text-sm font-medium tabular-nums text-slate-300">{timeStr}</span>
           <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />

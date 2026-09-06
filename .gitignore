@@ -30,6 +30,8 @@ dumps/
 .coverage.*
 coverage.xml
 junit.xml
+# Elle çalıştırılan bir `pytest -q > ...` çıktısı; rapor değil, kâğıt parçası.
+.pytest-out.txt
 htmlcov/
 # Yola sabitli DEĞİL. `frontend/coverage/` idi ve `vitest --coverage` çıktıyı
 # çalıştırıldığı dizine yazıyor: komut bir kez `frontend/src` içinden
@@ -49,7 +51,14 @@ frontend/dist/
 # One-time diagnostics, 1,7 MB, and most of that is a base64 banner payload.
 # What they taught us is written down in docs/KAP_ENDPOINTS.md; the archives
 # themselves are not worth carrying in git history.
+# Tarayıcıdan kaydedilen HAR dosyaları. Tam istek/yanıt gövdesi taşıyorlar --
+# çerezler, oturum başlıkları ve bazen kişisel veri. Klasör bir dönem
+# `docs/kap-har/` adındaydı; ad değişince buradaki desen güncellenmezse
+# dosyalar sessizce izlenebilir hâle geliyor (ölçüldü: `git check-ignore`
+# "NOT IGNORED" dedi).
+docs/har/
 docs/kap-har/
+docs/tefas-har/
 
 # WSL, Windows'tan kopyalanan her dosyanın yanına bunu bırakıyor.
 *:Zone.Identifier

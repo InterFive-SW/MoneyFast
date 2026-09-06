@@ -1,6 +1,8 @@
 import logging
 from fpdf import FPDF
 from datetime import datetime
+
+from app.core.timezone import format_local, now_local
 from typing import Dict, Any
 import os
 
@@ -56,7 +58,10 @@ class MoneyFastPDF(FPDF):
         self.line(10, self.get_y() - 2, 200, self.get_y() - 2)
         
         page_info = f"Sayfa {self.page_no()}/{{nb}}"
-        date_info = f"Olusturulma Tarihi: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        # Istanbul saati. `datetime.now()` konteynerin dilimini okuyor ve
+        # konteyner UTC'de duruyor, yani altbilgi her raporda üç saat geri
+        # bir "oluşturulma tarihi" yazıyordu.
+        date_info = f"Olusturulma Tarihi: {format_local(now_local(), '%Y-%m-%d %H:%M')}"
         
         self.cell(0, 10, f"{date_info} | {page_info}", align='C')
 

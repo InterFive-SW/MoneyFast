@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useOutletContext, useLocation } from 'react-router-dom'
 import { BankingContextType } from '../../pages/Banking'
+import { formatDate } from '../../lib/datetime'
 
-const DUMMY_RECIPIENTS = [
-  { id: '1', name: 'Yağmur Nur Özkan', bank: 'T.GARANTİ BANKASI A.Ş.', iban: 'TR72 0006 2001 0450 0006 6677 03', isFrequent: true },
-  { id: '2', name: 'Ahmet Yılmaz', bank: 'T.C. ZİRAAT BANKASI A.Ş.', iban: 'TR35 0006 2001 0450 0006 6677 04', isFrequent: true },
-  { id: '3', name: 'Mehmet Demir', bank: 'AKBANK T.A.Ş.', iban: 'TR41 0006 2001 0450 0006 6677 05', isFrequent: false }
-]
+/**
+ * "Kayıtlı Alıcılar" sekmesi BOŞ ve bilerek öyle.
+ *
+ * Burada üç tane elle yazılmış IBAN duruyordu ('TR72 0006 2001 0450 0006 6677
+ * 03' ve iki kardeşi) ve sihirbaz varsayılan olarak bu sekmede AÇILIYORDU. O
+ * IBAN'lar hiçbir tabloda yok, dolayısıyla ilk kez transfer yapan herkesin
+ * ilk denemesi "Alıcı hesap bulunamadı" ile 422 dönüyordu -- ekranın en
+ * kolay yolu, çalışması imkânsız olan yoldu.
+ *
+ * Transfer alıcısı saklayan bir tablo YOK. (`banking.saved_payees` fatura
+ * kurumları için: `institution` + `subscriber_no` taşıyor, IBAN değil.)
+ * Sahte satır göstermektense sekme boş duruyor ve sihirbaz "Kendi
+ * Hesaplarım"da açılıyor -- gerçekten çalışan yol.
+ */
 
 export default function MoneyTransferWizard() {
   const navigate = useNavigate()
@@ -21,14 +31,12 @@ export default function MoneyTransferWizard() {
   // Step 1: Receiver State
   // 'own' is how money reaches the investment account: its cash lives in a
   // different table and has no IBAN, so it can only be chosen from a list.
-  const [receiverTab, setReceiverTab] = useState<'saved' | 'new' | 'own'>('saved')
+  const [receiverTab, setReceiverTab] = useState<'saved' | 'new' | 'own'>('own')
   const [ownDestinationId, setOwnDestinationId] = useState<string | null>(null)
   const [newReceiverType, setNewReceiverType] = useState<'iban' | 'accountNo' | 'easyAddress'>('iban')
   
-  const [selectedRecipientId, setSelectedRecipientId] = useState<string | null>(null)
   const [receiverIban, setReceiverIban] = useState('TR')
   const [receiverName, setReceiverName] = useState('')
-  const [saveAsRecipient, setSaveAsRecipient] = useState(false)
 
   // Step 2: Sender State
   const [senderAccountId, setSenderAccountId] = useState<string | null>(defaultSenderAccountId || (accounts.length > 0 ? accounts[0].id : null))
@@ -39,7 +47,7 @@ export default function MoneyTransferWizard() {
   // Step 4: Details State
   const [description, setDescription] = useState<string>('')
   const [transferType, setTransferType] = useState<string>('Bireysel Ödeme')
-  const date = new Date().toLocaleDateString('tr-TR')
+  const date = formatDate(new Date(), { day: '2-digit', month: '2-digit', year: 'numeric' })
 
   // Step 4 -> 5: Gönderim durumu
   const [submitting, setSubmitting] = useState(false)
@@ -60,7 +68,7 @@ export default function MoneyTransferWizard() {
     // become tradable.
     ? (ownDestination?.accountNumber ?? '')
     : receiverTab === 'saved'
-      ? (DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.iban || '')
+      ? ''
       : receiverIban
 
   /**
@@ -126,7 +134,7 @@ export default function MoneyTransferWizard() {
     receiverTab === 'own'
       ? !!ownDestinationId
       : receiverTab === 'saved'
-        ? !!selectedRecipientId
+        ? false
         : (receiverIban.length > 10 && receiverName.length > 2)
   const isStep2Valid = !!senderAccountId
   // Ücret de bakiyeden çıkacağı için eşiğe dahil; backend aynı kontrolü
@@ -256,29 +264,13 @@ export default function MoneyTransferWizard() {
                   ))}
               </div>
             ) : receiverTab === 'saved' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {DUMMY_RECIPIENTS.map(rec => (
-                  <div 
-                    key={rec.id}
-                    onClick={() => setSelectedRecipientId(rec.id)}
-                    className={`p-5 rounded-2xl border cursor-pointer transition-all ${
-                      selectedRecipientId === rec.id 
-                        ? 'bg-blue-600/10 border-blue-500' 
-                        : 'bg-white/5 border-white/5 hover:bg-white/10'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="font-bold text-white text-lg">{rec.name}</div>
-                      {rec.isFrequent && (
-                        <span className="text-[10px] font-bold px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded-md">
-                          SIK KULLANILAN
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-sm text-slate-400">{rec.bank}</div>
-                    <div className="text-sm font-mono text-slate-300 mt-2">{rec.iban}</div>
-                  </div>
-                ))}
+              <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-8 text-center">
+                <p className="text-slate-300 font-medium">Henüz kayıtlı alıcınız yok.</p>
+                <p className="mt-2 text-sm text-slate-400">
+                  Alıcı kaydetme henüz yok. Şimdilik “Yeni Alıcı” sekmesinden
+                  IBAN girerek ya da “Kendi Hesaplarım”dan seçerek
+                  gönderebilirsiniz.
+                </p>
               </div>
             ) : (
               <div className="space-y-6">
@@ -338,15 +330,10 @@ export default function MoneyTransferWizard() {
                   </div>
                 )}
                 
-                <div className="flex items-center justify-end gap-3 pt-4">
-                  <span className="text-sm font-medium text-slate-300">Kayıtlı alıcı olarak ekle</span>
-                  <button 
-                    onClick={() => setSaveAsRecipient(!saveAsRecipient)}
-                    className={`w-12 h-6 rounded-full transition-colors flex items-center px-1 ${saveAsRecipient ? 'bg-blue-500' : 'bg-slate-600'}`}
-                  >
-                    <div className={`w-4 h-4 bg-white rounded-full transition-transform ${saveAsRecipient ? 'transform translate-x-6' : ''}`} />
-                  </button>
-                </div>
+                {/* "Kayıtlı alıcı olarak ekle" anahtarı buradaydı ve hiçbir
+                    yerde OKUNMUYORDU: kullanıcı açıyor, transfer gidiyor ve
+                    hiçbir şey kaydedilmiyordu. Alıcı saklayan bir tablo
+                    olmadan bu anahtar bir söz veriyor ve tutmuyordu. */}
               </div>
             )}
             
@@ -444,19 +431,13 @@ export default function MoneyTransferWizard() {
               <div className="p-4 bg-slate-900/50 rounded-xl border border-white/5 relative group">
                 <div className="text-blue-500 font-bold mb-2">Alıcı Hesap</div>
                 <div className="font-bold text-white text-lg">
-                  {receiverTab === 'saved' 
-                    ? DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.name 
-                    : receiverName}
+                  {receiverName}
                 </div>
                 <div className="text-sm text-slate-400 mt-1">
-                  {receiverTab === 'saved' 
-                    ? DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.bank 
-                    : 'Banka Adı (Otomatik)'}
+                  Banka Adı (Otomatik)
                 </div>
                 <div className="text-sm font-mono text-slate-300 mt-1">
-                  {receiverTab === 'saved' 
-                    ? DUMMY_RECIPIENTS.find(r => r.id === selectedRecipientId)?.iban 
-                    : receiverIban}
+                  {receiverIban}
                 </div>
                 <button onClick={() => setStep(1)} className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <svg className="w-5 h-5 text-slate-400 hover:text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">

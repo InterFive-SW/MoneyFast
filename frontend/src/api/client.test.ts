@@ -1408,3 +1408,215 @@ describe('bildirimler', () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST')
   })
 })
+
+describe('postForm', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('sends the FormData untouched and sets no Content-Type', () => {
+    /* multipart sınırını (`boundary=...`) tarayıcı üretiyor. Elle yazılan bir
+       Content-Type onu ezer ve gövde sunucuda ayrıştırılamaz hâle gelir --
+       istemcinin sessizce bozabileceği türden bir hata. */
+    const fetchMock = mockFetch({ url: '/media/a.png' })
+    const body = new FormData()
+    body.append('file', new Blob(['x']), 'a.png')
+    apiClient.postForm('/auth/profile-picture', body)
+
+    expect(calledUrl(fetchMock)).toBe('/api/auth/profile-picture')
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(init.method).toBe('POST')
+    expect(init.body).toBe(body)
+    expect(JSON.stringify(init.headers ?? {})).not.toContain('Content-Type')
+  })
+
+  it('strips a leading /api rather than doubling it', () => {
+    const fetchMock = mockFetch({})
+    apiClient.postForm('/api/auth/profile-picture', new FormData())
+    expect(calledUrl(fetchMock)).toBe('/api/auth/profile-picture')
+  })
+
+  it('leaves an absolute URL alone', () => {
+    const fetchMock = mockFetch({})
+    apiClient.postForm('https://cdn.example/upload', new FormData())
+    expect(calledUrl(fetchMock)).toBe('https://cdn.example/upload')
+  })
+
+  it('throws on a non-2xx instead of returning an empty body', async () => {
+    mockFetch({ detail: 'Dosya çok büyük' }, 413)
+    await expect(
+      apiClient.postForm('/auth/profile-picture', new FormData()),
+    ).rejects.toThrow()
+  })
+
+  it('rethrows a network failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    await expect(
+      apiClient.postForm('/auth/profile-picture', new FormData()),
+    ).rejects.toThrow('offline')
+  })
+})
+
+describe('getMarketNews', () => {
+    beforeEach(() => localStorage.clear())
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('sends no query when nothing is asked for', () => {
+        const fetchMock = mockFetch([])
+        apiClient.getMarketNews()
+        expect(calledUrl(fetchMock)).toBe('/api/market/news')
+    })
+
+    it('sends symbols as a repeated key, not a comma list', () => {
+        // FastAPI reads List[str] from repeated keys; a comma list arrives as
+        // one symbol named "THYAO,AAPL" and matches nothing.
+        const fetchMock = mockFetch([])
+        apiClient.getMarketNews({ symbols: ['THYAO', 'AAPL'] })
+        expect(calledUrl(fetchMock)).toBe('/api/market/news?symbols=THYAO&symbols=AAPL')
+    })
+
+    it('sends the limit', () => {
+        const fetchMock = mockFetch([])
+        apiClient.getMarketNews({ limit: 50 })
+        expect(calledUrl(fetchMock)).toBe('/api/market/news?limit=50')
+    })
+
+    it('an empty params object still sends no query', () => {
+        const fetchMock = mockFetch([])
+        apiClient.getMarketNews({})
+        expect(calledUrl(fetchMock)).toBe('/api/market/news')
+    })
+})
+
+describe('bank account lifecycle', () => {
+    beforeEach(() => localStorage.clear())
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('opens an account', () => {
+        const fetchMock = mockFetch({ id: 'a-2' })
+        apiClient.openBankAccount({ account_type: 'vadeli', currency_code: 'USD' })
+        expect(calledUrl(fetchMock)).toBe('/api/banking/accounts')
+        expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+    })
+
+    it('closes an account by number', () => {
+        const fetchMock = mockFetch({ id: 'a-2' })
+        apiClient.closeBankAccount('1000000000002')
+        expect(calledUrl(fetchMock)).toBe('/api/banking/accounts/1000000000002/close')
+    })
+
+    it('escapes the account number rather than pasting it into the path', () => {
+        const fetchMock = mockFetch({})
+        apiClient.closeBankAccount('a/b')
+        expect(calledUrl(fetchMock)).toBe('/api/banking/accounts/a%2Fb/close')
+    })
+})
+
+describe('sendMarketBriefingNow', () => {
+    beforeEach(() => localStorage.clear())
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('posts to the on-demand briefing endpoint', () => {
+        const fetchMock = mockFetch({ message: 'kuyruğa alındı' })
+        apiClient.sendMarketBriefingNow()
+        expect(calledUrl(fetchMock)).toBe('/api/news/me/market-briefing/send-now')
+        expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+    })
+})
+
+describe('funds (TEFAS)', () => {
+    beforeEach(() => localStorage.clear())
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('asks for the list with no query when unfiltered', () => {
+        const fetchMock = mockFetch({ items: [] })
+        apiClient.getFunds()
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds')
+    })
+
+    it('sends every filter to the server', () => {
+        // Evren 2.602 fon; hepsini tarayıcıya gönderip orada süzmek her
+        // açılışta birkaç yüz kilobayt demekti.
+        const fetchMock = mockFetch({ items: [] })
+        apiClient.getFunds({
+            founder: 'AK PORTFÖY', umbrella: 'Hisse Senedi', fundType: 'YAT',
+            q: 'endeks', limit: 50,
+        })
+        const url = calledUrl(fetchMock)
+        expect(url).toContain('founder=AK+PORT')
+        expect(url).toContain('umbrella=Hisse+Senedi')
+        expect(url).toContain('fund_type=YAT')
+        expect(url).toContain('q=endeks')
+        expect(url).toContain('limit=50')
+    })
+
+    it('an empty params object still sends no query', () => {
+        const fetchMock = mockFetch({ items: [] })
+        apiClient.getFunds({})
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds')
+    })
+
+    it('reads a NAV series', () => {
+        const fetchMock = mockFetch({ code: 'AAL', currency: 'TRY', points: [] })
+        apiClient.getFundPrices('AAL')
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds/AAL/prices?limit=400')
+    })
+
+    it('escapes the fund code rather than pasting it into the path', () => {
+        const fetchMock = mockFetch({})
+        apiClient.getFundPrices('a/b', 10)
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds/a%2Fb/prices?limit=10')
+    })
+})
+
+describe('getFundCandles', () => {
+    beforeEach(() => localStorage.clear())
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('sends the window and defaults to 3A', () => {
+        const fetchMock = mockFetch({ candles: [] })
+        apiClient.getFundCandles('AAL')
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds/AAL/candles?window=3A')
+    })
+
+    it('honours an explicit window', () => {
+        const fetchMock = mockFetch({ candles: [] })
+        apiClient.getFundCandles('AAL', '1Y')
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds/AAL/candles?window=1Y')
+    })
+
+    it('escapes the code rather than pasting it into the path', () => {
+        const fetchMock = mockFetch({})
+        apiClient.getFundCandles('a/b', '5Y')
+        expect(calledUrl(fetchMock)).toBe('/api/market/funds/a%2Fb/candles?window=5Y')
+    })
+})
+
+describe('emir iptali', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('emir numarasını adreste kodlar', async () => {
+    const fetchMock = mockFetch({}, 204)
+    await apiClient.cancelOrder('PROP/1')
+
+    expect(calledUrl(fetchMock)).toContain('transactions/PROP%2F1/cancel')
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST')
+  })
+
+  it('bloke tutar iade edildiği için bildirimleri tazeler', async () => {
+    mockFetch({}, 204)
+    const listener = vi.fn()
+    window.addEventListener('refreshNotifications', listener)
+    await apiClient.cancelOrder('PROP-1')
+    window.removeEventListener('refreshNotifications', listener)
+
+    expect(listener).toHaveBeenCalled()
+  })
+
+  it('iptal edilemeyen emir hata fırlatır', async () => {
+    /* Sessizce başarılı saymak, kullanıcıya emrinin geri çekildiğini söyleyip
+       parasını bloke bırakmak olurdu. */
+    mockFetch({ detail: 'Bu emir artık iptal edilemez.' }, 409)
+    await expect(apiClient.cancelOrder('PROP-1')).rejects.toThrow()
+  })
+})

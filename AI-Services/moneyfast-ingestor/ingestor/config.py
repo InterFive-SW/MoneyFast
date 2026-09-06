@@ -304,3 +304,110 @@ def kap_corpus_budget() -> int:
     bu arada başka hiçbir işin sıra bulamaması demekti.
     """
     return max(0, _int("INGESTOR_KAP_CORPUS_BUDGET", 120))
+
+
+# --------------------------------------------------------------------------
+# GDELT — küresel haber. Türkçe tarafı RSS ve KAP karşılıyor; bu uç İNGİLİZCE
+# bir tam metin indeksi ve dünyanın geri kalanını getiriyor.
+# --------------------------------------------------------------------------
+
+#: Varsayılan sorgular.
+#:
+#: Şirket adı DEĞİL, MEKANİZMA seçildi. Bir Türk yatırımcının portföyünü
+#: yurt dışından etkileyen şey tek tek yabancı şirketler değil, fiyat
+#: kanalları: petrol (havayolu ve ulaştırma maliyeti), faiz ve enflasyon
+#: (değerleme ve kur), jeopolitik ve tedarik zinciri (girdi maliyeti),
+#: çip ve savunma (BIST'te doğrudan karşılığı olan iki sektör).
+#:
+#: Sorgu başına bir istek ve istek başına beş saniye var, dolayısıyla bu
+#: liste bir bütçe: sekiz sorgu ~40 saniye demek.
+DEFAULT_GDELT_QUERIES = ",".join([
+    '"oil prices"',
+    '"crude oil" (OPEC OR sanctions OR strike)',
+    '"Federal Reserve" (rates OR inflation)',
+    '"supply chain" (disruption OR shortage)',
+    '"semiconductor" (export OR restriction OR shortage)',
+    '"natural gas" (price OR pipeline)',
+    '"Turkish lira"',
+    '"Borsa Istanbul" OR "Turkish stocks"',
+])
+
+
+def gdelt_base_url() -> str:
+    return os.getenv("INGESTOR_GDELT_BASE_URL", "https://api.gdeltproject.org").rstrip("/")
+
+
+def gdelt_queries() -> list[str]:
+    # `or`, not a getenv default: Compose renders an unset variable as an
+    # empty string, which IS set as far as getenv is concerned -- the same
+    # trap `feeds()` documents.
+    raw = os.getenv("INGESTOR_GDELT_QUERIES") or DEFAULT_GDELT_QUERIES
+    return [query.strip() for query in raw.split(",") if query.strip()]
+
+
+def gdelt_timespan_days() -> int:
+    """Geriye dönük pencere, gün.
+
+    Ölçüldü: `7d` "The TIMESPAN is too large" ile reddediliyor, `3d`
+    çalışıyor. Kaynak modülü tavanı ayrıca uyguluyor.
+    """
+    return max(1, _int("INGESTOR_GDELT_TIMESPAN_DAYS", 1))
+
+
+def gdelt_max_records() -> int:
+    """Sorgu başına satır. Ölçüldü: 250 reddediliyor, tavan 200."""
+    return max(1, _int("INGESTOR_GDELT_MAX_RECORDS", 60))
+
+
+def gdelt_interval_minutes() -> int:
+    """Küresel haber yoklama aralığı.
+
+    RSS'ten (15 dk) seyrek: sekiz sorgu, sorgu başına beş saniye zorunlu
+    gecikme demek ve pencere zaten bir gün. Daha sık yoklamak aynı
+    haberleri yeniden indirip aynı `content_hash`lerde elenmeleri olurdu.
+    """
+    return max(1, _int("INGESTOR_GDELT_INTERVAL_MINUTES", 60))
+
+
+# --------------------------------------------------------------------------
+# Anahtarlı haber sağlayıcıları. GDELT makro tarafı karşılıyor; bunlar şirket
+# seviyesini. Her ikisi de OPSİYONEL: anahtarı olmayan sağlayıcı atlanıyor.
+# --------------------------------------------------------------------------
+
+
+def news_api_key(name: str) -> Optional[str]:
+    """Bir sağlayıcının anahtarı, yoksa `None`.
+
+    `or None` ŞART: Compose `${FINNHUB_API_KEY:-}` boş dize üretiyor ve
+    `getenv` için boş dize "set" demek. `feeds()` aynı tuzağı belgeliyor --
+    orada sonuç haber toplamanın tamamen susmasıydı; burada sonuç, boş bir
+    anahtarla istek atıp her turda 401 almak olurdu.
+    """
+    return os.getenv(name) or None
+
+
+# --------------------------------------------------------------------------
+# TEFAS — Türk yatırım fonları. Günde bir tur: NAV günde bir yayımlanıyor ve
+# daha sık yoklamanın getirisi yok, maliyeti var.
+# --------------------------------------------------------------------------
+
+
+def tefas_base_url() -> str:
+    return os.getenv("INGESTOR_TEFAS_BASE_URL", "https://www.tefas.gov.tr").rstrip("/")
+
+
+def tefas_enabled() -> bool:
+    """TEFAS turu açık mı.
+
+    Varsayılan KAPALI. Bu kaynak sitenin `robots.txt`'inde belirttiği tercihi
+    geçersiz kılıyor (bkz. `courtesy.ROBOTS_EXEMPT_HOSTS` ve
+    `docs/TEFAS_INTEGRATION.md`), dolayısıyla klonlayan bir ekip arkadaşının
+    farkında olmadan devreye sokması doğru olmaz -- açmak bilinçli bir adım
+    olmalı.
+    """
+    return (os.getenv("INGESTOR_TEFAS_ENABLED") or "").strip().lower() in {"1", "true", "yes"}
+
+
+def tefas_price_budget() -> int:
+    """Tek turda kaç fonun NAV serisi çekilir. Aynı gerekçe."""
+    return max(0, _int("INGESTOR_TEFAS_PRICE_BUDGET", 150))

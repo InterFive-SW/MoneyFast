@@ -53,6 +53,17 @@ describe('useInstruments', () => {
     expect(result.current.instruments[0].market).toBe(expected)
   })
 
+  it('keeps the ISO code beside the display unit', async () => {
+    /* İkisi AYRI: gösterim işareti ekrana, ISO kodu işlem yoluna gidiyor.
+       Yalnızca "$" taşındığında `TradeModal` kendi varsayılanına düşüyor ve
+       bir dolar hissesi liraya fiyatlanıyordu. */
+    mockApi([apiRow({ currency: 'USD' })])
+    const { result } = renderHook(() => useInstruments())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.instruments[0].unit).toBe('$')
+    expect(result.current.instruments[0].currency).toBe('USD')
+  })
+
   it('maps the currency onto a display unit', async () => {
     mockApi([apiRow({ currency: 'USD' })])
     const { result } = renderHook(() => useInstruments())
@@ -173,6 +184,18 @@ describe('adapter fallbacks', () => {
     const { result } = renderHook(() => useInstruments())
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.instruments[0].market).toBe('Diğer')
+  })
+
+  it('a sectorless row on an unknown venue is still "Bilinmiyor"', async () => {
+    /* `row.sector ?? (...)` kısa devre yaptığı için sektörü DOLU olan bir
+       satır, içerideki `row.market ?? ''` dalını hiç çalıştırmıyordu. Sektör
+       de piyasa da boş olan satır tek geçiş: boşluk gerçek bir boşluk,
+       dolayısıyla etiket 'Bilinmiyor' -- FX/COMEX'teki gibi boş dize değil,
+       çünkü orada sektör bir gün öğrenilecek bir şey değil, hiç yok. */
+    mockApi([apiRow({ market: null, sector: null })])
+    const { result } = renderHook(() => useInstruments())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.instruments[0].sector).toBe('Bilinmiyor')
   })
 
   it.each([

@@ -39,6 +39,11 @@ def make_proposal(**overrides):
         quantity=10,
         source_account_id="TR-TEST-0001",
         destination_account_id=None,
+        # Emir türü artık onay yolunu ayırıyor: piyasa emri hemen
+        # gerçekleşiyor, limit emri `WAITING_PRICE`ta bekliyor.
+        order_type="MARKET",
+        limit_price=None,
+        created_at=datetime.now(timezone.utc),
         payload={"estimate": {"net_amount": 3022.26, "reference_price": 301.75}},
     )
     for key, value in overrides.items():
@@ -57,8 +62,16 @@ def confirm_client(proposal_or_none, caller_id, mocker):
     from fastapi.testclient import TestClient
     from app.modules.investment import market_service, service
 
+    from app.modules.auth.models import User
+
     db = MagicMock(spec=Session)
-    db.get.return_value = proposal_or_none
+    # `db.get` MODELE göre cevap veriyor: onay yolu önce öneriyi, sonra
+    # e-posta tercihi için kullanıcıyı okuyor ve ikisine aynı nesneyi
+    # döndürmek öneriyi kullanıcı sanan bir hata üretiyordu.
+    db.get.side_effect = lambda model, _key: (
+        SimpleNamespace(id="user-1", email="", notification_preferences={})
+        if model is User else proposal_or_none
+    )
     mocker.patch.object(
         market_service, "account", return_value=SimpleNamespace(id="acct-1", cash_balance=25000.0, currency_code="TRY", account_number="TR-TEST-0001")
     )
@@ -67,6 +80,14 @@ def confirm_client(proposal_or_none, caller_id, mocker):
         return_value={"direction": "BUY", "symbol": "THYAO", "quantity": 10,
                       "cash_delta": -3022.26, "cash_after": 21977.74},
     )
+    # Onay iki adımdan geçiyor: blokaj, sonra takas. İkisi de burada
+    # sahte -- bu dosya KİMİN ve NE ZAMAN onaylayabileceğini sabitliyor.
+    mocker.patch.object(
+        service, "block_funds",
+        return_value={"cash_after": 21977.74, "cash_delta": -3022.26},
+    )
+    mocker.patch.object(service, "finalize_settlement")
+    mocker.patch("app.modules.investment.router.send_transaction_request_email")
 
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_optional_user_id] = lambda: caller_id
@@ -94,7 +115,8 @@ class TestHappyPath:
         assert proposal_or_none.status == "CONFIRMED"
 
     @pytest.mark.parametrize(
-        "proposal_or_none", [make_proposal(confirmed_at=datetime.now(timezone.utc))]
+        "proposal_or_none",
+        [make_proposal(status="CONFIRMED", confirmed_at=datetime.now(timezone.utc))]
     )
     def test_confirming_twice_is_idempotent(self, confirm_client):
         """The user cannot tell whether their first press registered, so a

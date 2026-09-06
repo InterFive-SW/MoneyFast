@@ -157,18 +157,15 @@ function SectionBadge({ num, label }: { num: string; label: string }) {
 
 function CoinVideo() {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [isPlaying, setIsPlaying] = useState(false)
 
+  // `isPlaying` durumu KALDIRILDI: yazılıyor ama hiçbir yerde okunmuyordu
+  // -- kaplamayı `group-hover` yapıyor. Okunmayan bir durum `noUnusedLocals`
+  // altında derlemeyi kırıyordu.
   const handleMouseEnter = () => {
     if (videoRef.current) {
       videoRef.current.currentTime = 0
       videoRef.current.play()
-      setIsPlaying(true)
     }
-  }
-
-  const handleEnded = () => {
-    setIsPlaying(false)
   }
 
   return (
@@ -180,7 +177,6 @@ function CoinVideo() {
         ref={videoRef}
         muted
         playsInline
-        onEnded={handleEnded}
         className="w-full h-full object-cover transition-transform duration-700 rounded-3xl "
         src="/coin.mp4" 
       />

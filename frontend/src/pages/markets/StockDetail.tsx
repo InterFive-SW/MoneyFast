@@ -1,19 +1,23 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { MOCK_EARNINGS_REPORTS, MOCK_DIVIDEND_ANNOUNCEMENTS, MOCK_FUNDS } from '../../data/mockData'
+import { MOCK_EARNINGS_REPORTS, MOCK_DIVIDEND_ANNOUNCEMENTS } from '../../data/mockData'
 import { useInstrument } from '../../hooks/useInstrument'
 import SampleDataBadge from '../../components/markets/SampleDataBadge'
 import TeknikGorunum from '../../components/markets/TeknikGorunum'
+import InstrumentCandleChart from '../../components/markets/InstrumentCandleChart'
+import NewsWidget from '../../components/widgets/NewsWidget'
+import TradeModal from '../../components/portfolio/TradeModal'
 import { compact, pct, ratio, useFundamentals } from '../../hooks/useFundamentals'
 
-type DetailTab = 'ozet' | 'finansallar' | 'oran-analizi' | 'temettu' | 'fon-pozisyonlari'
+// `fon-pozisyonlari` KALDIRILDI: TEFAS hisse bazında fon dağılımı
+// döndürmüyor ve o sekme `MOCK_FUNDS` okuyordu.
+type DetailTab = 'ozet' | 'finansallar' | 'oran-analizi' | 'temettu'
 
 const TABS: { key: DetailTab; label: string }[] = [
   { key: 'ozet', label: 'Özet' },
   { key: 'finansallar', label: 'Finansallar' },
   { key: 'oran-analizi', label: 'Oran Analizi' },
   { key: 'temettu', label: 'Temettü' },
-  { key: 'fon-pozisyonlari', label: 'Fon Pozisyonları' },
 ]
 
 function fmt(value: number | undefined, opts: Intl.NumberFormatOptions = {}): string {
@@ -44,6 +48,7 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: numb
 export default function StockDetail() {
   const { symbol = '' } = useParams()
   const [activeTab, setActiveTab] = useState<DetailTab>('ozet')
+  const [trading, setTrading] = useState(false)
 
   // Live, from /api/market/instruments. Resolving against MOCK_MARKET_INSTRUMENTS
   // meant this page showed a frozen price for the row the user just clicked.
@@ -58,13 +63,6 @@ export default function StockDetail() {
   )
   const dividends = useMemo(
     () => MOCK_DIVIDEND_ANNOUNCEMENTS.filter((d) => d.symbol === symbol.toUpperCase()),
-    [symbol]
-  )
-  const holdingFunds = useMemo(
-    () => MOCK_FUNDS
-      .map((fund) => ({ fund, holding: fund.holdings.find((h) => h.symbol === symbol.toUpperCase()) }))
-      .filter((x): x is { fund: typeof MOCK_FUNDS[0]; holding: { symbol: string; weight: number } } => Boolean(x.holding))
-      .sort((a, b) => b.holding.weight - a.holding.weight),
     [symbol]
   )
 
@@ -108,14 +106,40 @@ export default function StockDetail() {
             </div>
             <p className="text-sm text-slate-400 mt-0.5">{instrument.name}</p>
           </div>
-          <div className="text-right">
-            <div className="text-2xl font-bold tabular-nums text-white">{fmt(instrument.price, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {instrument.unit}</div>
-            <div className={`text-sm font-semibold tabular-nums ${instrument.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-              {instrument.changePercent > 0 ? '+' : ''}{instrument.changePercent.toFixed(2)}%
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <div className="text-2xl font-bold tabular-nums text-white">{fmt(instrument.price, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {instrument.unit}</div>
+              <div className={`text-sm font-semibold tabular-nums ${instrument.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                {instrument.changePercent > 0 ? '+' : ''}{instrument.changePercent.toFixed(2)}%
+              </div>
             </div>
+            {/* Emir yolu baktığın yerde. Alım-satım tek bir yerde -- Portföy
+                ekranındaki hızlı emir kutusunda -- duruyordu, yani bir
+                hisseyi inceleyen kullanıcının onu alması için önce başka bir
+                ekrana gitmesi gerekiyordu.
+
+                Fiyatı bilinmeyen enstrümanda düğme YOK: neyi kaça aldığını
+                söyleyemeyeceğimiz bir emir hazırlatmak olurdu. */}
+            {Number.isFinite(instrument.price) && instrument.price > 0 && (
+              <button
+                onClick={() => setTrading(true)}
+                className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-emerald-500/30 transition-colors hover:bg-emerald-600"
+              >
+                Al / Sat
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {trading && (
+        <TradeModal
+          symbol={instrument.symbol}
+          price={instrument.price}
+          currency={instrument.currency}
+          onClose={() => setTrading(false)}
+        />
+      )}
 
       <div className="flex flex-wrap bg-slate-800/5 p-1 rounded-lg w-fit mb-6">
         {TABS.map((tab) => (
@@ -152,10 +176,22 @@ export default function StockDetail() {
             ))}
           </div>
 
+          {/* Fiyatın kendisi, istatistiklerden hemen sonra: sayfanın cevap
+              verdiği ilk soru "bu hisse nasıl davrandı" ve buna tek bir
+              günlük yüzdeyle cevap verilemiyordu. */}
+          <InstrumentCandleChart symbol={symbol.toUpperCase()} />
+
           {/* Hesaplanmış eğilim. Sohbetin okuduğu uç noktanın AYNISI: ikisi
               ayrı hesaplasaydı aynı hisse için farklı bir eğilim
               söyleyebilirlerdi. */}
           <TeknikGorunum symbol={symbol.toUpperCase()} />
+
+          {/* Bu hisseye bağlı haberler. Süzgeç sunucuda: en yeni yirmiyi
+              çekip içinden bu hisseyi ayıklamak, o yirmide o hisse yoksa
+              "haber yok" cevabı üretirdi -- oysa soru hiç sorulmamış olur. */}
+          <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
+            <NewsWidget symbols={[symbol.toUpperCase()]} />
+          </div>
           </div>
         )}
 
@@ -252,29 +288,6 @@ export default function StockDetail() {
             </table>
           ) : (
             <p className="text-sm text-slate-400">Bu hisse için planlanmış bir temettü bulunmuyor.</p>
-          )
-        )}
-
-        {activeTab === 'fon-pozisyonlari' && (
-          holdingFunds.length > 0 ? (
-            <div className="flex flex-col gap-2">
-            <SampleDataBadge reason="Fon portföy bilgisi (TEFAS) için okunabilir bir kaynak yok." />
-              {holdingFunds.map(({ fund, holding }) => (
-                <Link
-                  key={fund.code}
-                  to={`/investment/fonlar/${fund.code}`}
-                  className="flex items-center justify-between p-3 bg-slate-800/5/60 hover:bg-slate-800/5/60 rounded-xl transition-colors"
-                >
-                  <div>
-                    <div className="text-sm font-semibold text-white">{fund.name}</div>
-                    <div className="text-xs text-slate-400">{fund.founder}</div>
-                  </div>
-                  <span className="text-sm font-bold tabular-nums text-emerald-500">%{fmt(holding.weight)}</span>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-slate-400">Bu hisseyi portföyünde tutan bir mock fon bulunamadı.</p>
           )
         )}
       </div>

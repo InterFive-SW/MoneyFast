@@ -153,7 +153,11 @@ class TestFreshness:
     def test_the_threshold_is_the_named_constant(self, minutes, stale):
         from datetime import timedelta
 
-        quotes = {"A": {"received_at": NOW - timedelta(minutes=minutes)}}
+        # `NOW` import anında donuyor ve bu eşik testi 60 dakikaya bir
+        # dakika mesafede duruyor: paket bir dakikadan uzun sürdüğünde 59
+        # dakikalık kotasyon da bayat çıkıyordu. Ölçüm anı burada alınmalı.
+        now = datetime.now(timezone.utc)
+        quotes = {"A": {"received_at": now - timedelta(minutes=minutes)}}
         assert market_service.freshness(quotes)[3] is stale
         assert market_service.STALE_AFTER_MINUTES == 60
 

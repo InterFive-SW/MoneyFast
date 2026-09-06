@@ -19,6 +19,7 @@ export default function RegisterPassword() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [acceptedTerms, setAcceptedTerms] = useState(false)
 
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -55,6 +56,15 @@ export default function RegisterPassword() {
 
     if (password !== confirmPassword) {
       setError('Şifreler birbiriyle eşleşmiyor.')
+      return
+    }
+
+
+    // Sözleşme onayı bir SUNUM ayrıntısı değil, bir kapı. Kutu ve bu
+    // kontrol bir dönem silinmişti ve kullanıcı sözleşmeyi onaylamadan
+    // kayıt olabiliyordu.
+    if (!acceptedTerms) {
+      setError('Devam etmek için kullanıcı sözleşmesini onaylamalısınız.')
       return
     }
 
@@ -166,15 +176,16 @@ export default function RegisterPassword() {
                     onClick={() =>
                       setShowPassword((current) => !current)
                     }
+                    aria-label={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-white"
                   >
                     {showPassword ? (
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
                         <line x1="1" y1="1" x2="23" y2="23"></line>
                       </svg>
                     ) : (
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                         <circle cx="12" cy="12" r="3"></circle>
                       </svg>
@@ -211,15 +222,16 @@ export default function RegisterPassword() {
                   <button
                     type="button"
                     onClick={() => setShowConfirmPassword((curr) => !curr)}
+                    aria-label={showConfirmPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-white"
                   >
                     {showConfirmPassword ? (
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
                         <line x1="1" y1="1" x2="23" y2="23"></line>
                       </svg>
                     ) : (
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                         <circle cx="12" cy="12" r="3"></circle>
                       </svg>
@@ -227,6 +239,25 @@ export default function RegisterPassword() {
                   </button>
                 </div>
               </div>
+
+              {/* Sözleşme */}
+              <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <input
+                  type="checkbox"
+                  checked={acceptedTerms}
+                  onChange={(event) => setAcceptedTerms(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-brandBlue"
+                />
+                <span className="text-sm leading-5 text-slate-400">
+                  <button
+                    type="button"
+                    className="font-semibold text-slate-300 transition hover:text-brandBlue"
+                  >
+                    Kullanıcı sözleşmesini
+                  </button>{' '}
+                  okudum ve kabul ediyorum
+                </span>
+              </label>
 
               {/* Hata */}
               {error && (

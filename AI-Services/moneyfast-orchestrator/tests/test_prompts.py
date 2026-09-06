@@ -366,11 +366,35 @@ def test_every_specialist_is_english_only(agent):
     [
         ("MARKET_RESEARCH_AGENT", "rag_semantic_market_search"),
         ("RISK_STRATEGY_AGENT", "calculate_portfolio_risk_metrics"),
-        ("TRANSACTION_AGENT", "prepare_transaction_proposal"),
     ],
 )
 def test_tool_binding_names_exactly_one_tool(agent, tool):
     assert f"TOOL BINDING: {tool} only" in prompts.SPECIALIST_PROMPTS[agent]
+
+
+def test_the_transaction_agent_binds_staging_and_cancelling_and_nothing_else():
+    """v2.20: iki araç. `cancel_order` bir emir VERMİYOR, verilmiş olanı geri
+    alıyor -- ve hâlâ hiçbir çalıştırma aracı yok."""
+    text = prompts.SPECIALIST_PROMPTS["TRANSACTION_AGENT"]
+    assert "TOOL BINDING: prepare_transaction_proposal and cancel_order" in text
+    assert "no execution\ntool exists" in text
+
+
+def test_the_transaction_agent_says_a_limit_order_does_not_execute():
+    """Modelin "aldınız" demesi yasak: emir vermek başka, gerçekleşmek
+    başka."""
+    text = prompts.SPECIALIST_PROMPTS["TRANSACTION_AGENT"]
+    assert "does NOT execute on confirmation" in text
+    assert "emir\nverildi" in text
+    assert "not at the limit" in text
+
+
+def test_the_portfolio_agent_can_see_orders_that_have_not_happened():
+    """Bekleyen bir emir parayı bloke ediyor; "bakiyem neden azaldı"
+    sorusunun cevabı orada ve pozisyon aracı onu göremiyor."""
+    text = prompts.SPECIALIST_PROMPTS["PORTFOLIO_AGENT"]
+    assert "get_open_orders" in text
+    assert "NOT a holding" in text
 
 
 @pytest.mark.parametrize(
@@ -482,8 +506,16 @@ PROMPT_BUDGETS = {
     #: durum". Bütçeyi aşan kısım kısaltılınca kaybolan kural: bölüm
     #: cümlelerinin YENİDEN YAZILMAMASI. O cümleler backend'de bir kez
     #: kuruluyor çünkü ekran, PDF ve sohbet aynı metni okumalı.
-    "PORTFOLIO_AGENT": 4400,
-    "TRANSACTION_AGENT": 3200,
+    #: v2.20 ile beşinci araç: `get_open_orders`. Bekleyen bir emir bir
+    #: pozisyon DEĞİL ama parayı bloke ediyor, dolayısıyla "bakiyem neden
+    #: azaldı" sorusunun cevabı orada ve bu ajandan başkası göremiyor.
+    "PORTFOLIO_AGENT": 4700,
+    #: v2.20: limit emri artık ONAYLANDIĞINDA GERÇEKLEŞMİYOR. Bütçeyi aşan
+    #: kısım kısaltılınca kaybolan kural, modelin "aldınız" demesinin
+    #: YASAK olması: emir vermek başka, gerçekleşmek başka ve ikisini
+    #: karıştırmak kullanıcıya sahip olmadığı bir şeyi söylemek demek.
+    #: `cancel_order` da burada: iptal bir emir vermek değil, geri almak.
+    "TRANSACTION_AGENT": 4200,
     "MARKET_DATA_AGENT": 4100,
     #: v2.17 ile iki karşılaştırma daha yanında geliyor: ürün grubu beyanı ve
     #: kullanıcının kendi hedefinden sapma. Bütçeyi aşan kısım kısaltılınca

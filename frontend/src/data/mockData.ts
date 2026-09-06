@@ -90,7 +90,12 @@ export interface MarketInstrument {
   name:              string
   market:            'BIST' | 'ABD' | 'Kripto' | 'Döviz' | 'Altın' | 'Diğer'
   price:             number
+  /** Gösterim işareti: ₺, $, €. */
   unit:              string
+  /** ISO kodu -- `unit`ten AYRI ve gerekli. İşlem yolu para birimini
+   *  gösterim işaretinden çıkaramaz ve varsayamaz: bu alan düşürüldüğünde
+   *  AAPL'in 314,88 dolarlık fiyatı ekranda "₺314,88" oluyordu. */
+  currency:          string
   changePercent:     number
   volume:            number
   marketCap:         number
@@ -112,45 +117,45 @@ export interface MarketInstrument {
 
 export const MOCK_MARKET_INSTRUMENTS: MarketInstrument[] = [
   // ─ BIST ─
-  { symbol: 'THYAO', name: 'Türk Hava Yolları',  market: 'BIST', price: 295.50, unit: '₺', changePercent: 1.20,  volume: 48_250_000,  marketCap: 407_800_000_000, sector: 'Ulaştırma',    week52Low: 210.00, week52High: 340.00,
+  { symbol: 'THYAO', name: 'Türk Hava Yolları',  market: 'BIST', price: 295.50, unit: '₺', currency: 'TRY', changePercent: 1.20,  volume: 48_250_000,  marketCap: 407_800_000_000, sector: 'Ulaştırma',    week52Low: 210.00, week52High: 340.00,
     pe: 8.2,  pb: 1.4, evEbitda: 5.1,  netMargin: 9.8,  roe: 18.5, debtToEquity: 1.35, revenueGrowth: 22.4, totalAssets: 850_000_000_000,   operatingCashFlow: 62_000_000_000, indexWeight: 9.8 },
-  { symbol: 'GARAN', name: 'Garanti BBVA',       market: 'BIST', price: 128.90, unit: '₺', changePercent: 0.65,  volume: 62_140_000,  marketCap: 451_200_000_000, sector: 'Bankacılık',   week52Low: 92.00,  week52High: 145.00,
+  { symbol: 'GARAN', name: 'Garanti BBVA',       market: 'BIST', price: 128.90, unit: '₺', currency: 'TRY', changePercent: 0.65,  volume: 62_140_000,  marketCap: 451_200_000_000, sector: 'Bankacılık',   week52Low: 92.00,  week52High: 145.00,
     pe: 5.4,  pb: 1.1, evEbitda: 6.2,  netMargin: 38.2, roe: 24.6, debtToEquity: 8.9,  revenueGrowth: 45.1, totalAssets: 2_450_000_000_000, operatingCashFlow: 180_000_000_000, indexWeight: 8.5 },
-  { symbol: 'ASELS', name: 'Aselsan',             market: 'BIST', price: 82.35,  unit: '₺', changePercent: -0.85, volume: 35_670_000,  marketCap: 288_900_000_000, sector: 'Savunma',      week52Low: 58.00,  week52High: 98.00,
+  { symbol: 'ASELS', name: 'Aselsan',             market: 'BIST', price: 82.35,  unit: '₺', currency: 'TRY', changePercent: -0.85, volume: 35_670_000,  marketCap: 288_900_000_000, sector: 'Savunma',      week52Low: 58.00,  week52High: 98.00,
     pe: 14.6, pb: 3.2, evEbitda: 9.8,  netMargin: 15.4, roe: 21.3, debtToEquity: 0.62, revenueGrowth: 38.7, totalAssets: 210_000_000_000,   operatingCashFlow: 18_000_000_000, indexWeight: 4.2 },
-  { symbol: 'SISE',  name: 'Şişecam',             market: 'BIST', price: 54.20,  unit: '₺', changePercent: -0.91, volume: 21_980_000,  marketCap: 94_600_000_000,  sector: 'Sanayi',       week52Low: 44.00,  week52High: 68.00,
+  { symbol: 'SISE',  name: 'Şişecam',             market: 'BIST', price: 54.20,  unit: '₺', currency: 'TRY', changePercent: -0.91, volume: 21_980_000,  marketCap: 94_600_000_000,  sector: 'Sanayi',       week52Low: 44.00,  week52High: 68.00,
     pe: 11.3, pb: 1.0, evEbitda: 6.7,  netMargin: 6.8,  roe: 8.9,  debtToEquity: 0.95, revenueGrowth: 12.1, totalAssets: 320_000_000_000,   operatingCashFlow: 14_000_000_000, indexWeight: 2.1 },
-  { symbol: 'TUPRS', name: 'Tüpraş',              market: 'BIST', price: 174.50, unit: '₺', changePercent: 1.21,  volume: 18_340_000,  marketCap: 340_100_000_000, sector: 'Enerji',       week52Low: 135.00, week52High: 210.00,
+  { symbol: 'TUPRS', name: 'Tüpraş',              market: 'BIST', price: 174.50, unit: '₺', currency: 'TRY', changePercent: 1.21,  volume: 18_340_000,  marketCap: 340_100_000_000, sector: 'Enerji',       week52Low: 135.00, week52High: 210.00,
     pe: 6.9,  pb: 1.9, evEbitda: 4.3,  netMargin: 4.2,  roe: 27.8, debtToEquity: 1.12, revenueGrowth: 8.5,  totalAssets: 410_000_000_000,   operatingCashFlow: 32_000_000_000, indexWeight: 5.6 },
-  { symbol: 'EREGL', name: 'Ereğli Demir Çelik',  market: 'BIST', price: 42.80,  unit: '₺', changePercent: -0.92, volume: 44_710_000,  marketCap: 149_800_000_000, sector: 'Sanayi',       week52Low: 34.00,  week52High: 52.00,
+  { symbol: 'EREGL', name: 'Ereğli Demir Çelik',  market: 'BIST', price: 42.80,  unit: '₺', currency: 'TRY', changePercent: -0.92, volume: 44_710_000,  marketCap: 149_800_000_000, sector: 'Sanayi',       week52Low: 34.00,  week52High: 52.00,
     pe: 15.8, pb: 0.9, evEbitda: 8.1,  netMargin: 3.1,  roe: 5.6,  debtToEquity: 0.48, revenueGrowth: -4.2, totalAssets: 280_000_000_000,   operatingCashFlow: 9_000_000_000, indexWeight: 1.8 },
-  { symbol: 'KCHOL', name: 'Koç Holding',         market: 'BIST', price: 212.00, unit: '₺', changePercent: 0.65,  volume: 15_620_000,  marketCap: 478_300_000_000, sector: 'Holding',      week52Low: 165.00, week52High: 245.00,
+  { symbol: 'KCHOL', name: 'Koç Holding',         market: 'BIST', price: 212.00, unit: '₺', currency: 'TRY', changePercent: 0.65,  volume: 15_620_000,  marketCap: 478_300_000_000, sector: 'Holding',      week52Low: 165.00, week52High: 245.00,
     pe: 9.1,  pb: 1.3, evEbitda: 6.9,  netMargin: 11.2, roe: 14.8, debtToEquity: 1.05, revenueGrowth: 19.6, totalAssets: 1_100_000_000_000, operatingCashFlow: 55_000_000_000, indexWeight: 7.9 },
-  { symbol: 'BIMAS', name: 'BİM Mağazalar',       market: 'BIST', price: 412.50, unit: '₺', changePercent: 0.52,  volume: 9_840_000,   marketCap: 250_600_000_000, sector: 'Perakende',    week52Low: 340.00, week52High: 460.00,
+  { symbol: 'BIMAS', name: 'BİM Mağazalar',       market: 'BIST', price: 412.50, unit: '₺', currency: 'TRY', changePercent: 0.52,  volume: 9_840_000,   marketCap: 250_600_000_000, sector: 'Perakende',    week52Low: 340.00, week52High: 460.00,
     pe: 21.4, pb: 8.6, evEbitda: 12.3, netMargin: 3.5,  roe: 42.1, debtToEquity: 0.35, revenueGrowth: 28.3, totalAssets: 95_000_000_000,    operatingCashFlow: 21_000_000_000, indexWeight: 3.4 },
-  { symbol: 'AKBNK', name: 'Akbank',              market: 'BIST', price: 68.20,  unit: '₺', changePercent: -2.23, volume: 71_450_000,  marketCap: 358_400_000_000, sector: 'Bankacılık',   week52Low: 52.00,  week52High: 82.00,
+  { symbol: 'AKBNK', name: 'Akbank',              market: 'BIST', price: 68.20,  unit: '₺', currency: 'TRY', changePercent: -2.23, volume: 71_450_000,  marketCap: 358_400_000_000, sector: 'Bankacılık',   week52Low: 52.00,  week52High: 82.00,
     pe: 4.8,  pb: 0.95, evEbitda: 5.9, netMargin: 35.6, roe: 22.1, debtToEquity: 9.4,  revenueGrowth: 41.2, totalAssets: 2_100_000_000_000, operatingCashFlow: 145_000_000_000, indexWeight: 6.7 },
-  { symbol: 'SASA',  name: 'Sasa Polyester',      market: 'BIST', price: 4.86,   unit: '₺', changePercent: 3.40,  volume: 128_900_000, marketCap: 121_500_000_000, sector: 'Kimya',        week52Low: 3.10,   week52High: 6.20,
+  { symbol: 'SASA',  name: 'Sasa Polyester',      market: 'BIST', price: 4.86,   unit: '₺', currency: 'TRY', changePercent: 3.40,  volume: 128_900_000, marketCap: 121_500_000_000, sector: 'Kimya',        week52Low: 3.10,   week52High: 6.20,
     pe: 32.5, pb: 4.1, evEbitda: 18.9, netMargin: 2.1,  roe: 12.6, debtToEquity: 1.8,  revenueGrowth: 65.4, totalAssets: 78_000_000_000,    operatingCashFlow: 3_200_000_000, indexWeight: 2.9 },
   // ─ ABD ─
-  { symbol: 'AAPL',  name: 'Apple Inc.',          market: 'ABD',  price: 215.30, unit: '$', changePercent: 0.25,  volume: 52_300_000,   marketCap: 3_310_000_000_000, sector: 'Teknoloji',    week52Low: 164.00, week52High: 237.00,
+  { symbol: 'AAPL',  name: 'Apple Inc.',          market: 'ABD',  price: 215.30, unit: '$', currency: 'USD', changePercent: 0.25,  volume: 52_300_000,   marketCap: 3_310_000_000_000, sector: 'Teknoloji',    week52Low: 164.00, week52High: 237.00,
     pe: 33.2, pb: 48.5, evEbitda: 24.1, netMargin: 25.3, roe: 147.2, debtToEquity: 1.45, revenueGrowth: 6.1 },
-  { symbol: 'MSFT',  name: 'Microsoft Corp.',     market: 'ABD',  price: 435.20, unit: '$', changePercent: 0.50,  volume: 19_800_000,   marketCap: 3_230_000_000_000, sector: 'Teknoloji',    week52Low: 340.00, week52High: 468.00,
+  { symbol: 'MSFT',  name: 'Microsoft Corp.',     market: 'ABD',  price: 435.20, unit: '$', currency: 'USD', changePercent: 0.50,  volume: 19_800_000,   marketCap: 3_230_000_000_000, sector: 'Teknoloji',    week52Low: 340.00, week52High: 468.00,
     pe: 35.8, pb: 12.1, evEbitda: 22.6, netMargin: 35.9, roe: 33.4, debtToEquity: 0.42, revenueGrowth: 14.2 },
-  { symbol: 'NVDA',  name: 'NVIDIA Corp.',        market: 'ABD',  price: 128.50, unit: '$', changePercent: 1.70,  volume: 210_400_000,  marketCap: 3_150_000_000_000, sector: 'Yarı İletken', week52Low: 60.00,  week52High: 152.00,
+  { symbol: 'NVDA',  name: 'NVIDIA Corp.',        market: 'ABD',  price: 128.50, unit: '$', currency: 'USD', changePercent: 1.70,  volume: 210_400_000,  marketCap: 3_150_000_000_000, sector: 'Yarı İletken', week52Low: 60.00,  week52High: 152.00,
     pe: 45.2, pb: 38.7, evEbitda: 32.5, netMargin: 48.9, roe: 91.5, debtToEquity: 0.18, revenueGrowth: 78.3 },
-  { symbol: 'TSLA',  name: 'Tesla Inc.',          market: 'ABD',  price: 248.90, unit: '$', changePercent: -1.85, volume: 88_650_000,   marketCap: 792_000_000_000,   sector: 'Otomotiv',     week52Low: 138.00, week52High: 300.00,
+  { symbol: 'TSLA',  name: 'Tesla Inc.',          market: 'ABD',  price: 248.90, unit: '$', currency: 'USD', changePercent: -1.85, volume: 88_650_000,   marketCap: 792_000_000_000,   sector: 'Otomotiv',     week52Low: 138.00, week52High: 300.00,
     pe: 68.4, pb: 12.8, evEbitda: 41.2, netMargin: 7.2,  roe: 18.9, debtToEquity: 0.16, revenueGrowth: 3.5 },
-  { symbol: 'GOOGL', name: 'Alphabet Inc.',       market: 'ABD',  price: 178.40, unit: '$', changePercent: 0.95,  volume: 24_100_000,   marketCap: 2_180_000_000_000, sector: 'Teknoloji',    week52Low: 130.00, week52High: 202.00,
+  { symbol: 'GOOGL', name: 'Alphabet Inc.',       market: 'ABD',  price: 178.40, unit: '$', currency: 'USD', changePercent: 0.95,  volume: 24_100_000,   marketCap: 2_180_000_000_000, sector: 'Teknoloji',    week52Low: 130.00, week52High: 202.00,
     pe: 24.6, pb: 6.9, evEbitda: 15.8, netMargin: 26.1, roe: 28.7, debtToEquity: 0.08, revenueGrowth: 11.4 },
-  { symbol: 'AMZN',  name: 'Amazon.com Inc.',     market: 'ABD',  price: 195.60, unit: '$', changePercent: 0.40,  volume: 31_700_000,   marketCap: 2_040_000_000_000, sector: 'Perakende',    week52Low: 145.00, week52High: 218.00,
+  { symbol: 'AMZN',  name: 'Amazon.com Inc.',     market: 'ABD',  price: 195.60, unit: '$', currency: 'USD', changePercent: 0.40,  volume: 31_700_000,   marketCap: 2_040_000_000_000, sector: 'Perakende',    week52Low: 145.00, week52High: 218.00,
     pe: 38.9, pb: 7.4, evEbitda: 18.3, netMargin: 8.1,  roe: 19.6, debtToEquity: 0.55, revenueGrowth: 10.2 },
-  { symbol: 'META',  name: 'Meta Platforms Inc.', market: 'ABD',  price: 612.80, unit: '$', changePercent: -0.55, volume: 14_200_000,   marketCap: 1_560_000_000_000, sector: 'Teknoloji',    week52Low: 410.00, week52High: 660.00,
+  { symbol: 'META',  name: 'Meta Platforms Inc.', market: 'ABD',  price: 612.80, unit: '$', currency: 'USD', changePercent: -0.55, volume: 14_200_000,   marketCap: 1_560_000_000_000, sector: 'Teknoloji',    week52Low: 410.00, week52High: 660.00,
     pe: 26.3, pb: 8.2, evEbitda: 16.9, netMargin: 34.5, roe: 31.2, debtToEquity: 0.35, revenueGrowth: 16.8 },
   // ─ Kripto (finansal rasyolar uygulanmaz) ─
-  { symbol: 'BTC', name: 'Bitcoin',  market: 'Kripto', price: 96_450.00, unit: '$', changePercent: 2.15,  volume: 38_900_000_000, marketCap: 1_910_000_000_000, sector: 'Kripto Para', week52Low: 52_000.00, week52High: 108_000.00 },
-  { symbol: 'ETH', name: 'Ethereum', market: 'Kripto', price: 3_680.20,  unit: '$', changePercent: -1.40, volume: 18_200_000_000, marketCap: 442_500_000_000,   sector: 'Kripto Para', week52Low: 2_100.00,  week52High: 4_100.00 },
-  { symbol: 'SOL', name: 'Solana',   market: 'Kripto', price: 198.75,    unit: '$', changePercent: 4.60,  volume: 5_400_000_000,  marketCap: 94_300_000_000,    sector: 'Kripto Para', week52Low: 95.00,     week52High: 260.00 },
+  { symbol: 'BTC', name: 'Bitcoin',  market: 'Kripto', price: 96_450.00, unit: '$', currency: 'USD', changePercent: 2.15,  volume: 38_900_000_000, marketCap: 1_910_000_000_000, sector: 'Kripto Para', week52Low: 52_000.00, week52High: 108_000.00 },
+  { symbol: 'ETH', name: 'Ethereum', market: 'Kripto', price: 3_680.20,  unit: '$', currency: 'USD', changePercent: -1.40, volume: 18_200_000_000, marketCap: 442_500_000_000,   sector: 'Kripto Para', week52Low: 2_100.00,  week52High: 4_100.00 },
+  { symbol: 'SOL', name: 'Solana',   market: 'Kripto', price: 198.75,    unit: '$', currency: 'USD', changePercent: 4.60,  volume: 5_400_000_000,  marketCap: 94_300_000_000,    sector: 'Kripto Para', week52Low: 95.00,     week52High: 260.00 },
 ]
 
 /** Sembolden enstrümanı bulur — detay sayfaları ve çapraz-referans (Fon Pozisyonları vb.) için ortak yardımcı */
@@ -159,75 +164,6 @@ export function findInstrument(symbol: string): MarketInstrument | undefined {
 }
 
 // ─── Piyasalar Ekranı — Fonlar ────────────────────────────────────────────────
-export interface FundReturns {
-  daily:      number
-  monthly:    number
-  threeMonth: number
-  yearly:     number | null // null = henüz 1 yıllık geçmişi yok ("NA")
-  threeYear:  number | null // null = henüz 3 yıllık geçmişi yok ("NA")
-  fiveYear:   number | null
-}
-
-export interface Fund {
-  code:           string
-  name:           string
-  founder:        string
-  umbrella:       string
-  managementFee:  number // yıllık %
-  withholdingTax: number // stopaj %
-  riskValue:      number // 1 (düşük) - 7 (yüksek)
-  investorCount:  number
-  size:           number // ₺
-  netCashFlow:    number // son 1 ay, ₺ (+ giriş, - çıkış)
-  returns:        FundReturns
-  holdings:       { symbol: string; weight: number }[] // portföy dağılımı — borçlanma/para piyasası fonlarında boş
-}
-
-export const MOCK_FUNDS: Fund[] = [
-  { code: 'AFT', name: 'İş Portföy Hisse Senedi Fonu',        founder: 'İş Portföy',       umbrella: 'Hisse Senedi Şemsiye Fonu',      managementFee: 2.5, withholdingTax: 0,  riskValue: 6, investorCount: 45_000, size: 3_200_000_000, netCashFlow: 85_000_000,
-    returns: { daily: 0.40, monthly: 3.2, threeMonth: 9.8,  yearly: 38.5, threeYear: 145.2, fiveYear: 310.6 },
-    holdings: [{ symbol: 'THYAO', weight: 18 }, { symbol: 'GARAN', weight: 12 }, { symbol: 'KCHOL', weight: 10 }, { symbol: 'TUPRS', weight: 8 }, { symbol: 'AKBNK', weight: 7 }] },
-  { code: 'APT', name: 'Ak Portföy BIST Endeks Fonu',         founder: 'Ak Portföy',       umbrella: 'Hisse Senedi Şemsiye Fonu',      managementFee: 1.1, withholdingTax: 0,  riskValue: 5, investorCount: 62_000, size: 5_800_000_000, netCashFlow: 210_000_000,
-    returns: { daily: 0.35, monthly: 2.9, threeMonth: 8.1,  yearly: 34.2, threeYear: 128.4, fiveYear: 265.9 },
-    holdings: [{ symbol: 'GARAN', weight: 9 }, { symbol: 'THYAO', weight: 8.5 }, { symbol: 'AKBNK', weight: 7 }, { symbol: 'KCHOL', weight: 6.5 }, { symbol: 'BIMAS', weight: 5 }] },
-  { code: 'GPB', name: 'Garanti Portföy Borçlanma Araçları Fonu', founder: 'Garanti Portföy', umbrella: 'Borçlanma Araçları Şemsiye Fonu', managementFee: 1.5, withholdingTax: 10, riskValue: 2, investorCount: 28_000, size: 1_900_000_000, netCashFlow: -45_000_000,
-    returns: { daily: 0.12, monthly: 1.8, threeMonth: 5.4,  yearly: 24.6, threeYear: 82.1,  fiveYear: 165.3 },
-    holdings: [] },
-  { code: 'YKT', name: 'Yapı Kredi Portföy Değişken Fon',     founder: 'Yapı Kredi Portföy', umbrella: 'Değişken Şemsiye Fonu',         managementFee: 2.2, withholdingTax: 0,  riskValue: 5, investorCount: 19_500, size: 980_000_000,   netCashFlow: 32_000_000,
-    returns: { daily: 0.28, monthly: 2.4, threeMonth: 7.2,  yearly: 29.8, threeYear: null,  fiveYear: null },
-    holdings: [{ symbol: 'ASELS', weight: 15 }, { symbol: 'THYAO', weight: 12 }, { symbol: 'SISE', weight: 9 }, { symbol: 'TUPRS', weight: 8 }] },
-  { code: 'QPP', name: 'QNB Portföy Para Piyasası Fonu',      founder: 'QNB Portföy',      umbrella: 'Para Piyasası Şemsiye Fonu',     managementFee: 0.8, withholdingTax: 10, riskValue: 1, investorCount: 51_000, size: 4_100_000_000, netCashFlow: 560_000_000,
-    returns: { daily: 0.13, monthly: 1.6, threeMonth: 4.9,  yearly: 21.3, threeYear: 71.5,  fiveYear: 148.2 },
-    holdings: [] },
-  { code: 'FPK', name: 'Fiba Portföy Katılım Hisse Fonu',     founder: 'Fiba Portföy',     umbrella: 'Katılım Şemsiye Fonu',           managementFee: 2.0, withholdingTax: 0,  riskValue: 6, investorCount: 8_600,  size: 410_000_000,   netCashFlow: 18_000_000,
-    returns: { daily: 0.42, monthly: 3.6, threeMonth: 10.5, yearly: 41.2, threeYear: null,  fiveYear: null },
-    holdings: [{ symbol: 'ASELS', weight: 20 }, { symbol: 'TUPRS', weight: 14 }, { symbol: 'KCHOL', weight: 11 }] },
-  { code: 'APG', name: 'Ak Portföy Global Teknoloji Fonu',    founder: 'Ak Portföy',       umbrella: 'Değişken Şemsiye Fonu',          managementFee: 2.8, withholdingTax: 0,  riskValue: 7, investorCount: 15_200, size: 720_000_000,   netCashFlow: 95_000_000,
-    returns: { daily: 0.55, monthly: 4.8, threeMonth: 14.2, yearly: 52.6, threeYear: 198.4, fiveYear: null },
-    holdings: [{ symbol: 'AAPL', weight: 15 }, { symbol: 'MSFT', weight: 14 }, { symbol: 'NVDA', weight: 13 }, { symbol: 'GOOGL', weight: 10 }] },
-  { code: 'IPB', name: 'İş Portföy Borçlanma Araçları Fonu',  founder: 'İş Portföy',       umbrella: 'Borçlanma Araçları Şemsiye Fonu', managementFee: 1.3, withholdingTax: 10, riskValue: 2, investorCount: 33_400, size: 2_600_000_000, netCashFlow: -12_000_000,
-    returns: { daily: 0.11, monthly: 1.7, threeMonth: 5.1,  yearly: 23.8, threeYear: 79.6,  fiveYear: 159.7 },
-    holdings: [] },
-  { code: 'GPH', name: 'Garanti Portföy Hisse Senedi Fonu',   founder: 'Garanti Portföy',  umbrella: 'Hisse Senedi Şemsiye Fonu',      managementFee: 2.4, withholdingTax: 0,  riskValue: 6, investorCount: 38_700, size: 2_950_000_000, netCashFlow: 67_000_000,
-    returns: { daily: 0.38, monthly: 3.1, threeMonth: 9.4,  yearly: 36.9, threeYear: 139.8, fiveYear: 298.1 },
-    holdings: [{ symbol: 'KCHOL', weight: 13 }, { symbol: 'THYAO', weight: 11 }, { symbol: 'GARAN', weight: 10 }, { symbol: 'AKBNK', weight: 8 }, { symbol: 'SISE', weight: 6 }] },
-  { code: 'YKD', name: 'Yapı Kredi Portföy Dengeli Fon',      founder: 'Yapı Kredi Portföy', umbrella: 'Değişken Şemsiye Fonu',        managementFee: 1.9, withholdingTax: 0,  riskValue: 4, investorCount: 22_100, size: 1_450_000_000, netCashFlow: 9_000_000,
-    returns: { daily: 0.21, monthly: 2.1, threeMonth: 6.5,  yearly: 27.4, threeYear: 94.6,  fiveYear: 187.3 },
-    holdings: [{ symbol: 'GARAN', weight: 8 }, { symbol: 'THYAO', weight: 7 }, { symbol: 'TUPRS', weight: 6 }] },
-  { code: 'QPK', name: 'QNB Portföy Kripto Varlık Fonu',      founder: 'QNB Portföy',      umbrella: 'Değişken Şemsiye Fonu',          managementFee: 3.2, withholdingTax: 0,  riskValue: 7, investorCount: 6_100,  size: 195_000_000,   netCashFlow: 42_000_000,
-    returns: { daily: 1.20, monthly: 8.9, threeMonth: 22.4, yearly: null, threeYear: null,  fiveYear: null },
-    holdings: [{ symbol: 'BTC', weight: 45 }, { symbol: 'ETH', weight: 30 }, { symbol: 'SOL', weight: 15 }] },
-  { code: 'FPD', name: 'Fiba Portföy Döviz Fonu',             founder: 'Fiba Portföy',     umbrella: 'Para Piyasası Şemsiye Fonu',     managementFee: 1.0, withholdingTax: 0,  riskValue: 3, investorCount: 12_300, size: 680_000_000,   netCashFlow: 21_000_000,
-    returns: { daily: 0.18, monthly: 1.9, threeMonth: 5.8,  yearly: 26.1, threeYear: 88.4,  fiveYear: null },
-    holdings: [] },
-  { code: 'APB', name: 'Ak Portföy BIST 30 Endeks Fonu',      founder: 'Ak Portföy',       umbrella: 'Hisse Senedi Şemsiye Fonu',      managementFee: 1.0, withholdingTax: 0,  riskValue: 5, investorCount: 41_200, size: 3_650_000_000, netCashFlow: 156_000_000,
-    returns: { daily: 0.36, monthly: 3.0, threeMonth: 8.4,  yearly: 35.1, threeYear: 132.7, fiveYear: 271.4 },
-    holdings: [{ symbol: 'GARAN', weight: 10 }, { symbol: 'AKBNK', weight: 9 }, { symbol: 'THYAO', weight: 8.5 }, { symbol: 'KCHOL', weight: 7 }] },
-]
-
-export function findFund(code: string): Fund | undefined {
-  return MOCK_FUNDS.find((f) => f.code === code)
-}
 
 // ─── Piyasalar Ekranı — Endeksler ─────────────────────────────────────────────
 export interface MarketIndex {

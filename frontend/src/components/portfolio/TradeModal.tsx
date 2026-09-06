@@ -16,6 +16,9 @@ interface TradeModalProps {
   availableCash?: number
   /** Satış için elde bulunan adet. */
   heldQuantity?: number
+  /** Fon mu hisse mi. Limit emrinin ne sıklıkla kontrol edildiği buna bağlı:
+   *  fonun gün içi fiyatı YOK, NAV günde bir yayımlanıyor. */
+  assetKind?: 'stock' | 'fund' 
   onClose: () => void
 }
 
@@ -26,7 +29,8 @@ const DEFAULT_ACCOUNT_ID = 'TR-DEMO-0001'
 const SHORTCUTS = [25, 50, 100] as const
 
 export default function TradeModal({
-  symbol, price, currency = 'TRY', availableCash, heldQuantity, onClose,
+  symbol, price, currency = 'TRY', availableCash, heldQuantity,
+  assetKind = 'stock', onClose,
 }: TradeModalProps) {
   // The live quote, so the confirm screen and the ticker cannot disagree about
   // what you are about to pay. The price prop is only the opening value.
@@ -63,7 +67,11 @@ export default function TradeModal({
       quantity,
       order_type: limitEnabled ? 'LIMIT' : 'MARKET',
       limit_price: limitEnabled ? limitPrice : null,
-      time_in_force: 'DAY',
+      // Limit emri iptal edilene kadar geçerli (GTC). `DAY` olsaydı emir
+      // seans sonunda sessizce düşerdi ve kullanıcı bunu hiçbir yerde
+      // görmezdi -- bekleyen bir emrin kaybolması, verilmemiş sayılması
+      // demek.
+      time_in_force: limitEnabled ? 'GTC' : 'DAY',
       assumptions: [],
     })
 
@@ -197,13 +205,26 @@ export default function TradeModal({
                   Limitli emir
                 </label>
                 {limitEnabled && (
-                  <input
-                    type="number"
-                    step={0.01}
-                    value={limitPrice}
-                    onChange={(e) => setLimitPrice(Number(e.target.value))}
-                    className="mb-4 w-full rounded-xl border border-white/10 bg-slate-800/60 px-3 py-2.5 text-sm tabular-nums text-white focus:border-brandBlue focus:outline-none"
-                  />
+                  <>
+                    <input
+                      type="number"
+                      step={0.01}
+                      value={limitPrice}
+                      onChange={(e) => setLimitPrice(Number(e.target.value))}
+                      className="mb-2 w-full rounded-xl border border-white/10 bg-slate-800/60 px-3 py-2.5 text-sm tabular-nums text-white focus:border-brandBlue focus:outline-none"
+                    />
+                    {/* Limit bir TETİKLEYİCİ, bir fiyatlama girdisi değil.
+                        Bunu yazmamak, emrin dondugu sanılmasına yol açar --
+                        özellikle fonda, fiyat günde bir kez oluştuğu için. */}
+                    <p className="mb-4 text-[11px] leading-relaxed text-slate-400">
+                      Emir hemen gerçekleşmez: fiyat bu seviyeye gelene kadar bekler
+                      ve tutar bloke edilir.{' '}
+                      {assetKind === 'fund'
+                        ? 'Fon fiyatı günde bir kez açıklanır, emir günde bir kez kontrol edilir.'
+                        : 'Piyasa açıkken dakikada bir kontrol edilir.'}{' '}
+                      Dilediğiniz zaman Emir Geçmişi’nden iptal edebilirsiniz.
+                    </p>
+                  </>
                 )}
 
                 <button

@@ -6,7 +6,7 @@ Each module exposes a `register(mcp)` function; the tool callables stay at
 module level so they can be imported and unit-tested without a running
 server.
 
-Contracts follow "MCP Tools Interface Definitions v2.19" (see
+Contracts follow "MCP Tools Interface Definitions v2.20" (see
 CONTRACT_VERSION below -- that constant is the authority; this paragraph
 described v2.9 long after the constant had moved on). It is the union of two
 lineages that developed in parallel: v2.4 on main added
@@ -55,6 +55,7 @@ import market_data_tools
 import market_research_tools
 import news_tools
 import orchestrator_tools
+import order_tools
 import portfolio_tools
 import risk_strategy_tools
 import scenario_tools
@@ -105,10 +106,15 @@ SERVER_NAME = "moneyfast"
 #: çeviren hiçbir şey yoktu ve arama süzgeçsiz çalıştı.
 #: `rag_semantic_market_search` genişletilmedi: "türk hava yolları" ile THYAO
 #: arasındaki bağ ölçülen bir benzerlik değil, kayıtlı bir gerçek.
-CONTRACT_VERSION = "v2.19"
+#: v2.20: `get_open_orders` + `cancel_order`. Emir akışının karşılığı: bir
+#: alım artık onaylandığı anda gerçekleşmiyor, kullanıcının verdiği fiyata
+#: gelene kadar bekliyor ve parası bloke duruyor. Bekleyen emri sohbette
+#: görememek, "aldım mı almadım mı" ve "bakiyem neden azaldı" sorularının
+#: ikisini de cevapsız bırakıyordu.
+CONTRACT_VERSION = "v2.20"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Twenty-one tools across fifteen domains.
+MoneyFast tool server. Twenty-three tools across sixteen domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -177,6 +183,7 @@ DOMAIN_MODULES = (
     ("cash_flow", cash_flow_tools),
     ("report", report_tools),
     ("instrument", instrument_tools),
+    ("order", order_tools),
 )
 
 

@@ -4,6 +4,7 @@ import { apiClient, type ApiFund } from '../../api/client'
 import { formatCompact, formatMoney } from '../../lib/money'
 import { formatDate } from '../../lib/datetime'
 import FundPriceChart from '../../components/markets/FundPriceChart'
+import TradeModal from '../../components/portfolio/TradeModal'
 
 /**
  * Tek fon sayfası — TEFAS.
@@ -21,6 +22,7 @@ export default function FundDetail() {
   const [fund, setFund] = useState<ApiFund | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [trading, setTrading] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -69,21 +71,17 @@ export default function FundDetail() {
     { label: 'Yatırımcı Sayısı', value: fund.investorCount == null ? '—' : formatCompact(fund.investorCount) },
     // TEFAS'ın kendi ölçümü, hesaplanmış değil. Bir getirinin iyi mi kötü
     // mü olduğunu tek başına getiri söylemiyor; sıra söylüyor.
+    //
+    // "Kategori Getirisi" kartı KALKTI: `fonProfilDtyGetir` fonun
+    // kategorisinin ortalamasını değil, karşılaştırma grafiğinin gösterge
+    // listesini döndürüyor ve yanıt her fon için AYNI -- ekrandaki sayı
+    // 1.021 fonda aynı %46,6'ydı (bkz. migration 0041).
     {
       label: 'Kategori Sırası',
       value:
         fund.categoryRank == null || fund.categorySize == null
           ? '—'
           : `${fund.categoryRank} / ${fund.categorySize}`,
-    },
-    // Fonun kendi getirisinin ölçüldüğü yer: %38 iyi mi, ancak kategori
-    // ne yaptıysa ona göre.
-    {
-      label: 'Kategori Getirisi',
-      value:
-        fund.categoryReturn == null
-          ? '—'
-          : `${fund.categoryReturn > 0 ? '+' : ''}${fund.categoryReturn.toFixed(2)}%`,
     },
     { label: 'Tedavüldeki Pay', value: fund.shares == null ? '—' : formatCompact(fund.shares) },
     // Fon fiyatı GÜNLÜKTÜR; saat göstermek olmayan bir anlık değeri varmış
@@ -108,7 +106,33 @@ export default function FundDetail() {
         </div>
         <p className="mt-1 text-sm text-slate-300">{fund.name}</p>
         {fund.founder && <p className="mt-0.5 text-xs text-slate-400">{fund.founder}</p>}
+
+        {/* Fon alım yolu. Emir verilene kadar fon enstrüman evreninde
+            YOK: 2.602 fonu oraya yazmak Piyasalar ekranını doldururdu, o
+            yüzden köprü ilk emirde kuruluyor (bkz.
+            `market/funds.py::ensure_tradable`).
+
+            Fiyatı olmayan fon için düğme YOK: neyi kaça aldığını
+            söyleyemeyeceğimiz bir emir hazırlatmak olurdu. */}
+        {fund.price != null && (
+          <button
+            onClick={() => setTrading(true)}
+            className="mt-4 rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-emerald-500/30 transition-colors hover:bg-emerald-600"
+          >
+            Al / Sat
+          </button>
+        )}
       </div>
+
+      {trading && fund.price != null && (
+        <TradeModal
+          symbol={fund.code}
+          price={fund.price}
+          currency="TRY"
+          assetKind="fund"
+          onClose={() => setTrading(false)}
+        />
+      )}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-7">
         {stats.map((stat) => (

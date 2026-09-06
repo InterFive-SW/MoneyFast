@@ -29,7 +29,9 @@ export default function QuickTradeLauncher({ positions }: QuickTradeLauncherProp
   const [remote, setRemote] = useState<InstrumentSuggestion[]>([])
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(0)
-  const [selected, setSelected] = useState<{ symbol: string; price: number } | null>(null)
+  const [selected, setSelected] = useState<
+    { symbol: string; price: number; currency?: string } | null
+  >(null)
   const [modalOpen, setModalOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -42,13 +44,20 @@ export default function QuickTradeLauncher({ positions }: QuickTradeLauncherProp
 
   /** Kutu boşken gösterilen liste: kullanıcının kendi enstrümanları. */
   const mine = useMemo(() => {
-    const bySymbol = new Map<string, { symbol: string; price: number }>()
+    const bySymbol = new Map<
+      string, { symbol: string; price: number; currency?: string }
+    >()
     for (const position of positions) {
-      bySymbol.set(position.symbol, { symbol: position.symbol, price: position.price })
+      bySymbol.set(position.symbol, {
+        symbol: position.symbol, price: position.price,
+        currency: position.currency,
+      })
     }
     for (const item of Object.values(watchlist).flat()) {
       if (!bySymbol.has(item.symbol)) {
-        bySymbol.set(item.symbol, { symbol: item.symbol, price: item.price })
+        bySymbol.set(item.symbol, {
+          symbol: item.symbol, price: item.price, currency: item.currency,
+        })
       }
     }
     return [...bySymbol.values()]
@@ -101,7 +110,10 @@ export default function QuickTradeLauncher({ positions }: QuickTradeLauncherProp
       // 0 geçilmez -- TradeModal fiyatı kendisi çeker ve sıfır, gerçek bir
       // fiyat gibi okunurdu.
       const known = mine.find((row) => row.symbol === symbol)
-      setSelected({ symbol, price: known?.price ?? NaN })
+      // Para birimi de kendi satırından: bilinmiyorsa GEÇİLMİYOR ve
+      // `TradeModal` kendi varsayılanına düşüyor. Buradan "TRY" uydurmak,
+      // bir dolar hissesini liraya fiyatlamak olurdu.
+      setSelected({ symbol, price: known?.price ?? NaN, currency: known?.currency })
       setQuery(symbol)
       setOpen(false)
       setModalOpen(true)
@@ -193,6 +205,10 @@ export default function QuickTradeLauncher({ positions }: QuickTradeLauncherProp
         <TradeModal
           symbol={selected.symbol}
           price={selected.price}
+          // Para birimi TAŞINMIYORDU: `TradeModal` varsayılan olarak TRY
+          // kullanıyor ve bir ABD hissesinin dolar fiyatı liraya
+          // fiyatlanmış görünüyordu.
+          currency={selected.currency}
           onClose={() => setModalOpen(false)}
         />
       )}

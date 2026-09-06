@@ -241,15 +241,203 @@ class TestPricesAndProfile:
         handler = route_handler({"fonFiyatBilgiGetir": ok([row])})
         assert tefas_source.fetch_prices("AAL", client_for(handler))[0] == []
 
-    def test_the_umbrella_comes_from_the_profile(self):
-        handler = route_handler({"fonProfilDtyGetir": ok([
-            {"fonKodu": "AAL", "fonTuru": "Para Piyasası Şemsiye Fonu",
-             "fonTurGetiri": 0.429986},
-        ])})
-        assert tefas_source.fetch_profile("AAL", client_for(handler)) == {
-            "code": "AAL", "umbrella": "Para Piyasası Şemsiye Fonu",
-            "category_return": 0.429986,
-        }
+    def test_the_umbrella_comes_from_the_filtered_snapshot(self):
+        """`fonProfilDtyGetir` fonun şemsiyesini DÖNDÜRMÜYOR: karşılaştırma
+        grafiğinin gösterge listesini döndürüyor (ALTIN, BIST100, BIST30
+        ...) ve yanıt HER FON İÇİN AYNI. İlk satırın `fonTuru` alanı
+        okunduğunda 1.054 aktif fonun 1.021'i "ALTIN" şemsiyesine
+        yazılmıştı -- ölçüldü.
+
+        Doğrusu: şemsiye listesi alınıp günlük anlık görüntü `sfonTurKod`
+        ile süzülüyor; dönen her fon o şemsiyeye ait."""
+        handler = route_handler({
+            "fonTurGetir": ok([
+                {"sfonTuru": 107, "sfonTurAciklama": "Para Piyasası Şemsiye Fonu"},
+            ]),
+            "fonGnlBlgSiraliGetir": ok([
+                {"fonKodu": "AAL", "fonUnvan": "ATA", "tarih": "2026-09-04",
+                 "fiyat": 1.0},
+            ]),
+        })
+        pairs = tefas_source.fetch_umbrellas(client_for(handler))
+        assert pairs == [{"code": "AAL", "umbrella": "Para Piyasası Şemsiye Fonu"}]
+
+    def test_an_unnamed_umbrella_is_skipped(self):
+        handler = route_handler({
+            "fonTurGetir": ok([{"sfonTuru": 107, "sfonTurAciklama": ""},
+                               {"sfonTuru": "", "sfonTurAciklama": "X"}]),
+            "fonGnlBlgSiraliGetir": ok([
+                {"fonKodu": "AAL", "fonUnvan": "ATA", "tarih": "2026-09-04",
+                 "fiyat": 1.0},
+            ]),
+        })
+        assert tefas_source.fetch_umbrellas(client_for(handler)) == []
+
+    def test_a_full_page_is_followed_by_the_next_one(self):
+        """Sayfa dolduğunda bir sonraki isteniyor. `toplamSayi`ya
+        güvenilmiyor: tek günlük sorguda o alan `null` gelebiliyor."""
+        pages = []
+
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(200, text="User-agent: *\nDisallow: /api/")
+            name = request.url.path.rstrip("/").split("/")[-1]
+            if name == "fonTurGetir":
+                return httpx.Response(200, text=json.dumps(ok([
+                    {"sfonTuru": 107, "sfonTurAciklama": "Para Piyasası Şemsiye Fonu"},
+                ])))
+            body = json.loads(request.content)
+            pages.append(body["basSira"])
+            # İlk sayfa DOLU, ikincisi boş: ikinci istek yapılmazsa dolu
+            # sayfanın ardındaki fonlar hiç görülmez.
+            rows = (
+                [{"fonKodu": f"F{i:04d}", "fonUnvan": "X", "tarih": "2026-09-04",
+                  "fiyat": 1.0}
+                 for i in range(tefas_source.PAGE_SIZE)]
+                if body["basSira"] == 1 else []
+            )
+            return httpx.Response(200, text=json.dumps(ok(rows)))
+
+        pairs = tefas_source.fetch_umbrellas(client_for(handler))
+        # Fon başına TEK satır: aynı kod üç fon tipinde de görünüyor ve
+        # eşleme fon başına tutuluyor.
+        assert len(pairs) == tefas_source.PAGE_SIZE
+        # Asıl iddia: dolu sayfanın ardından bir sonraki İSTENDİ.
+        assert 1 + tefas_source.PAGE_SIZE in pages
+
+    def test_overlapping_umbrellas_drop_the_whole_fund_type(self, caplog):
+        """Süzgeç uygulanmadığında aynı fon birden fazla şemsiyede
+        görünüyor. Ölçüldü: bir turda Borçlanma'nın 31 fonunun HEPSİ Hisse
+        Senedi listesinde de vardı.
+
+        Yalnızca çakışan fonu düşürmek yetmez: aynı hatalı listenin geri
+        kalanı doğruymuş gibi yazılırdı. O fon tipinin tamamı bırakılıyor."""
+        handler = route_handler({
+            "fonTurGetir": ok([
+                {"sfonTuru": 100, "sfonTurAciklama": "Borçlanma Araçları Şemsiye Fonu"},
+                {"sfonTuru": 104, "sfonTurAciklama": "Hisse Senedi Şemsiye Fonu"},
+            ]),
+            # Aynı yanıt her şemsiye için: süzgecin uygulanmadığı hâl.
+            "fonGnlBlgSiraliGetir": ok([
+                {"fonKodu": "AAL", "fonUnvan": "ATA", "tarih": "2026-09-04",
+                 "fiyat": 1.0},
+            ]),
+        })
+        with caplog.at_level("WARNING"):
+            assert tefas_source.fetch_umbrellas(client_for(handler)) == []
+        assert "overlap" in caplog.text
+
+    def test_an_unread_umbrella_is_skipped_without_losing_the_others(
+        self, caplog, mocker,
+    ):
+        """Okunamayan şemsiye YALNIZCA kendini düşürüyor.
+
+        Listeler bağımsız: bir fon yalnızca göründüğü listeden ad alıyor,
+        dolayısıyla okunamayan bir şemsiyenin fonları başka bir şemsiyeye
+        yazılamaz. Tipin tamamını bırakmak, tek bir kısıtlanmış sayfa
+        yüzünden on bir doğru şemsiyeyi de atmak olurdu -- ölçüldü, gerçek
+        bir turda YAT'ın tamamı bu yüzden kaybedildi."""
+        # Yeniden deneme otuz saniye bekliyor; bir birim testi beklemez.
+        mocker.patch.object(tefas_source.time, "sleep")
+        calls = {"n": 0}
+
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(200, text="User-agent: *\nDisallow: /api/")
+            name = request.url.path.rstrip("/").split("/")[-1]
+            if name == "fonTurGetir":
+                return httpx.Response(200, text=json.dumps(ok([
+                    {"sfonTuru": 103, "sfonTurAciklama": "Garantili Şemsiye Fonu"},
+                    {"sfonTuru": 107, "sfonTurAciklama": "Para Piyasası Şemsiye Fonu"},
+                ])))
+            calls["n"] += 1
+            body = json.loads(request.content)
+            row = {"fonKodu": "AAL", "fonUnvan": "ATA", "tarih": "2026-09-04",
+                   "fiyat": 1.0}
+            if body.get("sfonTurKod") is None:
+                return httpx.Response(200, text=json.dumps(ok([row])))
+            # İlk şemsiye kısıtlanıyor (iki deneme de), ikincisi geçiyor.
+            if str(body["sfonTurKod"]) == "103":
+                return httpx.Response(429, text="slow down")
+            return httpx.Response(200, text=json.dumps(ok([row])))
+
+        with caplog.at_level("WARNING"):
+            pairs = tefas_source.fetch_umbrellas(client_for(handler))
+        assert "unread" in caplog.text
+        # Kısıtlanan şemsiye kayboldu, diğeri DURUYOR.
+        assert pairs == [{"code": "AAL", "umbrella": "Para Piyasası Şemsiye Fonu"}]
+
+    def test_a_throttled_page_is_retried_once(self, mocker):
+        """Beş saniyelik aralıkta bile 429 gelebiliyor -- ölçüldü. Tek bir
+        kısıtlanmış sayfa yüzünden bir fon tipinin tamamını bırakmak,
+        kaçınılabilir bir kayıp."""
+        mocker.patch.object(tefas_source.time, "sleep")
+        calls = {"n": 0}
+
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(200, text="User-agent: *\nDisallow: /api/")
+            name = request.url.path.rstrip("/").split("/")[-1]
+            if name == "fonTurGetir":
+                return httpx.Response(200, text=json.dumps(ok([
+                    {"sfonTuru": 107, "sfonTurAciklama": "Para Piyasası Şemsiye Fonu"},
+                ])))
+            calls["n"] += 1
+            rows = ok([{"fonKodu": "AAL", "fonUnvan": "ATA",
+                        "tarih": "2026-09-04", "fiyat": 1.0}])
+            # Günlük görüntü (fon tipi başına bir istek) geçiyor; ilk
+            # süzülmüş sayfa kısıtlanıyor, ikinci deneme geçiyor.
+            if calls["n"] == len(tefas_source.FUND_TYPES) + 1:
+                return httpx.Response(429, text="slow down")
+            return httpx.Response(200, text=json.dumps(rows))
+
+        pairs = tefas_source.fetch_umbrellas(client_for(handler))
+        assert {"code": "AAL", "umbrella": "Para Piyasası Şemsiye Fonu"} in pairs
+        # Nezaket beklemeleri de aynı `time.sleep`ten geçiyor; aranan,
+        # aralarında UZUN olanının bulunması.
+        waited = [call.args[0] for call in tefas_source.time.sleep.call_args_list]
+        assert tefas_source.RETRY_DELAY_SECONDS in waited
+
+    def test_a_fund_typed_two_ways_is_dropped_when_the_umbrellas_disagree(self):
+        """Bir fon tek bir tipte yaşıyor; aynı kod iki tipte de dönüyor ve
+        şemsiyeleri ayrışıyorsa, o kod hakkında söylenecek doğru bir şey
+        yok."""
+        calls = {"n": 0}
+
+        def handler(request):
+            if request.url.path == "/robots.txt":
+                return httpx.Response(200, text="User-agent: *\nDisallow: /api/")
+            name = request.url.path.rstrip("/").split("/")[-1]
+            if name == "fonTurGetir":
+                return httpx.Response(200, text=json.dumps(ok([
+                    {"sfonTuru": 107, "sfonTurAciklama": "Para Piyasası Şemsiye Fonu"},
+                    {"sfonTuru": 104, "sfonTurAciklama": "Hisse Senedi Şemsiye Fonu"},
+                ])))
+            calls["n"] += 1
+            body = json.loads(request.content)
+            row = {"fonKodu": "AAL", "fonUnvan": "ATA", "tarih": "2026-09-04",
+                   "fiyat": 1.0}
+            # Günlük görüntü aramasında süzgeç yok.
+            if body.get("sfonTurKod") is None:
+                return httpx.Response(200, text=json.dumps(ok([row])))
+            # YAT'ta Para Piyasası, EMK'da Hisse Senedi: her tip kendi
+            # içinde tutarlı ama birbirleriyle çelişiyorlar.
+            wanted = "107" if body["fonTipi"] == "YAT" else "104"
+            rows = [row] if str(body["sfonTurKod"]) == wanted else []
+            return httpx.Response(200, text=json.dumps(ok(rows)))
+
+        assert tefas_source.fetch_umbrellas(client_for(handler)) == []
+
+    def test_no_snapshot_means_no_umbrellas_rather_than_a_guess(self):
+        """Hafta sonu ve tatilde günlük uç boş dönüyor; süzülecek bir anlık
+        görüntü yoksa eşleme de yok."""
+        handler = route_handler({
+            "fonTurGetir": ok([
+                {"sfonTuru": 107, "sfonTurAciklama": "Para Piyasası Şemsiye Fonu"},
+            ]),
+            "fonGnlBlgSiraliGetir": ok([]),
+        })
+        assert tefas_source.fetch_umbrellas(client_for(handler)) == []
 
     def test_the_category_rank_rides_the_same_price_response(self):
         """Ayrıca istemek 2.602 isteği ikinci kez yapmak olurdu."""
@@ -266,10 +454,6 @@ class TestPricesAndProfile:
             {"tarih": "2025-09-04", "fiyat": 1.0},
         ])})
         assert tefas_source.fetch_prices("AAL", client_for(handler))[1] is None
-
-    def test_a_profile_without_an_umbrella_is_none(self):
-        handler = route_handler({"fonProfilDtyGetir": ok([{"fonTuru": ""}])})
-        assert tefas_source.fetch_profile("AAL", client_for(handler)) is None
 
 
 class TestFailures:

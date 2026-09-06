@@ -241,6 +241,101 @@ class TestNews:
         assert "source = 'KAP'" in str(db.execute.call_args_list[0].args[0])
 
 
+class TestFunds:
+    """TEFAS fon evreni ve NAV serisi.
+
+    Neden tohumlanıyor: fon getirileri seriden HESAPLANIYOR, saklanmıyor.
+    Serisi olmayan bir fonun her getiri sütunu `NA` görünüyor ve seri fon
+    BAŞINA bir TEFAS isteği -- tam tur ölçülen ~3,6 saat. Klonun bunu kendi
+    başına doldurmasını beklemek, Fonlar ekranının ilk yarım günü boş
+    kalması demekti.
+    """
+
+    FUND_HEADER = (
+        "code", "title", "founder", "operator", "umbrella", "fund_type",
+        "price", "shares", "investors", "size", "as_of",
+        "category_rank", "category_size", "active",
+    )
+    PRICE_HEADER = ("code", "as_of", "price")
+
+    def _cursor(self, db):
+        cursor = MagicMock()
+        db.connection.return_value.connection.cursor.return_value.__enter__ \
+            .return_value = cursor
+        return cursor
+
+    def _fund(self, code="AFA"):
+        return (code, "ATA PORTFÖY", "ATA", "ATA", "ALTIN", "YAT",
+                "12.5", "1000", "500", "12500", "2026-09-04",
+                "71", "86", "38.4", "True")
+
+    def test_the_universe_loads_by_its_natural_key(self, seed_dir, db):
+        """Sembol çözümlemesi YOK: fonun kodu her makinede aynı, dolayısıyla
+        mumlardaki `_symbol_ids` adımı burada gereksiz."""
+        cursor = self._cursor(db)
+        write_csv(seed_dir / "funds.csv.gz", self.FUND_HEADER, [self._fund()])
+        assert load_market.load_funds(db) == 1
+        assert "ON CONFLICT (code) DO NOTHING" in cursor.execute.call_args.args[0]
+
+    def test_a_local_row_is_never_overwritten(self, seed_dir, db):
+        """Yerel bir toplayıcı turu tohumdan daha güncel olabilir; tohumun
+        onu geri sarması, klonu bugünkü fiyattan dünküne döndürürdü."""
+        cursor = self._cursor(db)
+        write_csv(seed_dir / "funds.csv.gz", self.FUND_HEADER, [self._fund()])
+        load_market.load_funds(db)
+        assert "DO UPDATE" not in cursor.execute.call_args.args[0]
+
+    def test_a_full_table_skips_the_universe(self, seed_dir, db):
+        cursor = self._cursor(db)
+        write_csv(seed_dir / "funds.csv.gz", self.FUND_HEADER, [self._fund()])
+        db.execute.return_value.scalar.return_value = 2_602
+        assert load_market.load_funds(db, expected=2_602) == 0
+        assert cursor.copy_expert.called is False
+
+    def test_an_empty_universe_file_makes_no_query(self, seed_dir, db):
+        cursor = self._cursor(db)
+        write_csv(seed_dir / "funds.csv.gz", self.FUND_HEADER, [])
+        assert load_market.load_funds(db) == 0
+        assert cursor.copy_expert.called is False
+
+    def test_a_missing_universe_file_is_not_an_error(self, seed_dir, db):
+        assert load_market.load_funds(db) == 0
+
+    def test_the_series_goes_through_copy_not_row_by_row(self, seed_dir, db):
+        """Yüz binlerce satır. Tek tek INSERT etmek, backend'in açılmasını
+        bekleten dakikalar demek -- mumlarda ölçülen hatanın aynısı."""
+        cursor = self._cursor(db)
+        rows = [("AFA", f"2026-09-{day:02d}", "12.5") for day in range(1, 26)]
+        write_csv(seed_dir / "fund_prices.csv.gz", self.PRICE_HEADER, rows)
+
+        assert load_market.load_fund_prices(db) == 25
+        assert cursor.copy_expert.call_args.args[1].getvalue().count("\n") == 25
+
+    def test_reloading_the_series_writes_nothing(self, seed_dir, db):
+        cursor = self._cursor(db)
+        write_csv(seed_dir / "fund_prices.csv.gz", self.PRICE_HEADER,
+                  [("AFA", "2026-09-04", "12.5")])
+        load_market.load_fund_prices(db)
+        assert "ON CONFLICT (code, as_of) DO NOTHING" in cursor.execute.call_args.args[0]
+
+    def test_a_full_series_table_skips_the_load(self, seed_dir, db):
+        cursor = self._cursor(db)
+        write_csv(seed_dir / "fund_prices.csv.gz", self.PRICE_HEADER,
+                  [("AFA", "2026-09-04", "12.5")])
+        db.execute.return_value.scalar.return_value = 650_000
+        assert load_market.load_fund_prices(db, expected=650_000) == 0
+        assert cursor.copy_expert.called is False
+
+    def test_an_empty_series_file_makes_no_query(self, seed_dir, db):
+        cursor = self._cursor(db)
+        write_csv(seed_dir / "fund_prices.csv.gz", self.PRICE_HEADER, [])
+        assert load_market.load_fund_prices(db) == 0
+        assert cursor.copy_expert.called is False
+
+    def test_a_missing_series_file_is_not_an_error(self, seed_dir, db):
+        assert load_market.load_fund_prices(db) == 0
+
+
 class TestAlreadyLoaded:
     """Künye kontrolü.
 

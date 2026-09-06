@@ -217,12 +217,12 @@ class TestTefasConfig:
 
     def test_budgets_default_and_never_go_negative(self, monkeypatch):
         """Bütçe fon BAŞINA bir istek demek; negatif bir bütçe dilimlemeyi
-        tersine çevirirdi."""
-        monkeypatch.delenv("INGESTOR_TEFAS_PROFILE_BUDGET", raising=False)
+        tersine çevirirdi.
+
+        Şemsiye bütçesi KALKTI: şemsiye eşlemesi artık fon başına değil,
+        şemsiye başına bir istek (on iki istek, 2.602 değil), dolayısıyla
+        dilimlenecek bir şey yok."""
         monkeypatch.delenv("INGESTOR_TEFAS_PRICE_BUDGET", raising=False)
-        assert config.tefas_profile_budget() == 150
         assert config.tefas_price_budget() == 150
-        monkeypatch.setenv("INGESTOR_TEFAS_PROFILE_BUDGET", "-5")
         monkeypatch.setenv("INGESTOR_TEFAS_PRICE_BUDGET", "-5")
-        assert config.tefas_profile_budget() == 0
         assert config.tefas_price_budget() == 0

@@ -11,6 +11,9 @@ class InvestmentBalance(BaseModel):
     totalTRY: float
     totalUSD: float
     breakdown: InvestmentBreakdown
+    #: Bekleyen emirlerin tuttuğu nakit. Bakiyeden ZATEN düşülmüş; ayrıca
+    #: bildiriliyor çünkü nedeni yazılmayan bir eksilme bir hataya benziyor.
+    blockedTRY: float = 0.0
 
 class Position(BaseModel):
     symbol: str
@@ -56,6 +59,11 @@ class Order(BaseModel):
     #: The instrument's own currency. Dropped for a long time, which is why
     #: the frontend had to guess and guessed ₺ for a dollar-priced stock.
     currency: str = "TRY"
+    #: Kullanıcının verdiği tetikleyici fiyat; piyasa emrinde None.
+    limitPrice: Optional[float] = None
+    #: Bu emir şu an geri çekilebilir mi. Kaynak:
+    #: `market_service.CANCELLABLE_STATUSES`.
+    cancellable: bool = False
 
 
 class CandlestickDataPoint(BaseModel):

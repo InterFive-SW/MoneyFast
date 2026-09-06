@@ -1669,6 +1669,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/investment/transactions/{proposal_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bekleyen emri iptal et
+         * @description Bekleyen bir emri geri çeker ve bloke edilen varlığı iade eder.
+         *
+         *     Onay kapısının arkasında DEĞİL: iptal bir para hareketi değil, bir geri
+         *     alma. Bir kullanıcının kendi emrini geri çekmek için ikinci bir onay
+         *     ekranından geçmesi, bloke parasını daha uzun tutmaktan başka bir işe
+         *     yaramazdı.
+         */
+        post: operations["cancel_transaction_proposal_api_investment_transactions__proposal_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/investment/agent/{user_id}/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kullanıcının emirleri (MCP sözleşmesi)
+         * @description `GET /orders` ile AYNI veriyi döner, servis kimliğiyle.
+         *
+         *     Sohbetin "bekleyen emirlerim ne durumda" sorusuna cevap verebilmesi için.
+         *     İkinci bir kaynak değil, aynı `recent_orders`: panel ile sohbetin emir
+         *     listesi konusunda çelişmesi mümkün olmamalı.
+         */
+        get: operations["get_orders_for_ai_api_investment_agent__user_id__orders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/investment/agent/{user_id}/orders/{proposal_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bekleyen emri iptal et (MCP sözleşmesi)
+         * @description Sohbetten iptal. Sahiplik denetimi kullanıcı yolundakiyle AYNI:
+         *     `user_id` yolda geliyor ama emrin sahibi olmadığı sürece hiçbir şeye
+         *     dokunamıyor.
+         *
+         *     Tarayıcı yolu 204 dönüyor; bu yol bir GÖVDE dönüyor, çünkü MCP istemcisi
+         *     her yanıtı JSON nesnesi olarak çözüyor ve boş gövde orada "backend
+         *     JSON döndürmedi" hatasına dönüşürdü.
+         */
+        post: operations["cancel_order_for_ai_api_investment_agent__user_id__orders__proposal_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/investment/products": {
         parameters: {
             query?: never;
@@ -2522,6 +2597,31 @@ export interface paths {
          *     duruş.
          */
         get: operations["get_fund_prices_api_market_funds__code__prices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/funds/{code}/candles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fonun mum serisi
+         * @description Kovalanmış OHLC.
+         *
+         *     Fon günde TEK fiyat yayımlıyor, dolayısıyla GÜNLÜK mum diye bir şey
+         *     yok: açılış/yüksek/düşük/kapanış aynı sayı olurdu. Kova genişliği
+         *     yanıtta taşınıyor ki arayüz "haftalık mum" diye yazabilsin -- kullanıcı
+         *     baktığı çubuğun bir günü mü bir haftayı mı özetlediğini bilmeli.
+         */
+        get: operations["get_fund_candles_api_market_funds__code__candles_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4141,6 +4241,42 @@ export interface components {
             email: string;
         };
         /**
+         * FundCandleOut
+         * @description Kovalanmış bir mum.
+         *
+         *     Hacim YOK: bir fonun günlük işlem hacmi TEFAS'ta yayımlanmıyor ve
+         *     sıfır yazmak "hiç kimse almadı" demek olurdu.
+         */
+        FundCandleOut: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Open */
+            open: number;
+            /** High */
+            high: number;
+            /** Low */
+            low: number;
+            /** Close */
+            close: number;
+        };
+        /** FundCandleSeriesOut */
+        FundCandleSeriesOut: {
+            /** Code */
+            code: string;
+            /**
+             * Currency
+             * @default TRY
+             */
+            currency: string;
+            /** Bucket */
+            bucket: string;
+            /** Candles */
+            candles?: components["schemas"]["FundCandleOut"][];
+        };
+        /**
          * FundIngestRequest
          * @description Toplayıcının yazdığı gövde.
          */
@@ -4195,6 +4331,12 @@ export interface components {
             size?: number | null;
             /** Asof */
             asOf?: string | null;
+            /** Categoryrank */
+            categoryRank?: number | null;
+            /** Categorysize */
+            categorySize?: number | null;
+            /** Shares */
+            shares?: number | null;
             returns?: components["schemas"]["FundReturnsOut"];
         };
         /** FundPricePointOut */
@@ -4635,6 +4777,11 @@ export interface components {
             /** Totalusd */
             totalUSD: number;
             breakdown: components["schemas"]["InvestmentBreakdown"];
+            /**
+             * Blockedtry
+             * @default 0
+             */
+            blockedTRY: number;
         };
         /** InvestmentBreakdown */
         InvestmentBreakdown: {
@@ -4965,6 +5112,13 @@ export interface components {
              * @default TRY
              */
             currency: string;
+            /** Limitprice */
+            limitPrice?: number | null;
+            /**
+             * Cancellable
+             * @default false
+             */
+            cancellable: boolean;
         };
         /** PaymentConfirmOut */
         PaymentConfirmOut: {
@@ -9053,6 +9207,104 @@ export interface operations {
             };
         };
     };
+    cancel_transaction_proposal_api_investment_transactions__proposal_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_orders_for_ai_api_investment_agent__user_id__orders_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Order"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_order_for_ai_api_investment_agent__user_id__orders__proposal_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_products_api_investment_products_get: {
         parameters: {
             query?: never;
@@ -10095,6 +10347,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FundSeriesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_candles_api_market_funds__code__candles_get: {
+        parameters: {
+            query?: {
+                window?: string;
+            };
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundCandleSeriesOut"];
                 };
             };
             /** @description Validation Error */

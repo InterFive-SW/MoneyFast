@@ -34,6 +34,40 @@ log = logging.getLogger("moneyfast.ingestor.backfill")
 #: kaybedildiğinde kaybedilen iş de küçük olsun.
 CHUNK = 25
 
+#: Şemsiye eşlemesi tek bir turda çekiliyor ama YAZMA yine parçalı: iki bin
+#: satırlık tek bir gövde, yarısı yazılıp ölen bir istek demek.
+UMBRELLA_CHUNK = 500
+
+
+def backfill_umbrellas(client: httpx.Client) -> dict:
+    """Fon -> şemsiye türü eşlemesini bir turda doldurur.
+
+    Ayrı bir geçiş, çünkü ayrı bir uç: NAV serisi `fonFiyatBilgiGetir`ten,
+    şemsiye eşlemesi ise şemsiye listesi + `sfonTurKod` ile süzülmüş günlük
+    anlık görüntüden geliyor.
+
+    Neden gerekiyordu: 1.054 aktif fonun 1.029'unda şemsiye türü boştu ve
+    boş bir süzgeç "bu veri yok" demiyor -- hiç fon yokmuş gibi görünüyor.
+    """
+    coverage = sinks.fetch_fund_coverage(client)
+    if not coverage.get("missing_umbrella"):
+        log.info("umbrella backfill: nothing missing")
+        return {"written": 0}
+
+    with httpx.Client(
+        follow_redirects=True, headers={"User-Agent": config.user_agent()}
+    ) as tefas:
+        pairs = tefas_source.fetch_umbrellas(tefas)
+    if not pairs:
+        return {"written": 0}
+
+    written = 0
+    for start in range(0, len(pairs), UMBRELLA_CHUNK):
+        batch = pairs[start:start + UMBRELLA_CHUNK]
+        written += sinks.push_funds_to_backend(client, batch)["funds_written"]
+        log.info("umbrella backfill: %d/%d yazıldı", written, len(pairs))
+    return {"written": written}
+
 
 def backfill(client: httpx.Client, limit: Optional[int] = None) -> dict:
     """Serisi olmayan fonların NAV geçmişini indirir.
@@ -92,6 +126,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     limit = int(args[0]) if args else None
     with httpx.Client() as client:
         result = backfill(client, limit=limit)
+        # Şemsiye türü AYRI bir uçtan geliyor ve aynı gerekçeyle burada:
+        # günlük tur bütçesiyle aylar sürerdi.
+        result["umbrellas"] = backfill_umbrellas(client)
     log.info("backfill bitti: %s", result)
     return 0
 

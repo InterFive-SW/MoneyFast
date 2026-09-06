@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.scheduler import start_scheduler, scheduler
+from app.core.scheduler import start_scheduler, stop_scheduler
 from app.modules.market import stream
 
 @asynccontextmanager
@@ -31,10 +31,11 @@ async def lifespan(_app: FastAPI):
     
     yield
     
-    # Graceful Shutdown: Uygulama kapanırken arkadaki scheduler işlemleri durdurulur.
-    import app.core.scheduler as scheduler_module
-    if scheduler_module.scheduler:
-        scheduler_module.scheduler.shutdown()
+    # Graceful Shutdown: Uygulama kapanırken arkadaki scheduler işlemleri
+    # durdurulur ve referans BIRAKILIR -- kapanmış bir event loop'u tutan bir
+    # scheduler nesnesi, ikinci bir yaşam döngüsünde iş eklenemez hâle
+    # geliyordu.
+    stop_scheduler()
 
 app = FastAPI(
     title="MoneyFast API",

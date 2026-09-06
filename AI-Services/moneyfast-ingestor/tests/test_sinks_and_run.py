@@ -2022,8 +2022,8 @@ class TestTefasCycle:
                             lambda c: [{"code": "AAL", "title": "ATA"}])
         monkeypatch.setattr(run.tefas_source, "fetch_daily",
                             lambda c: [{"code": "AAL", "price": 3.35}])
-        monkeypatch.setattr(run.tefas_source, "fetch_profile",
-                            lambda code, c: {"code": code, "umbrella": "Para Piyasası"})
+        monkeypatch.setattr(run.tefas_source, "fetch_umbrellas",
+                            lambda c: [{"code": "AAL", "umbrella": "Para Piyasası"}])
         monkeypatch.setattr(
             run.tefas_source, "fetch_prices",
             lambda code, c: ([{"code": code, "as_of": "2026-09-05", "price": 1.0}], None),
@@ -2040,19 +2040,18 @@ class TestTefasCycle:
         assert result["prices"] == 1
         assert pushed[0] == (2, 0)
 
-    def test_budgets_bound_the_per_run_work(self, monkeypatch):
-        """Şemsiye türü ve NAV serisi fon BAŞINA birer istek ve evren 2.602
-        fon; sınırsız bırakmak tek bir turun saatlerce sürmesi demekti."""
+    def test_the_price_budget_bounds_the_per_run_work(self, monkeypatch):
+        """NAV serisi fon BAŞINA bir istek ve evren 2.602 fon; sınırsız
+        bırakmak tek bir turun saatlerce sürmesi demekti.
+
+        Şemsiye bütçesi YOK: o eşleme artık fon başına değil, şemsiye
+        başına bir istek."""
         self._enable(monkeypatch)
-        monkeypatch.setenv("INGESTOR_TEFAS_PROFILE_BUDGET", "2")
         monkeypatch.setenv("INGESTOR_TEFAS_PRICE_BUDGET", "1")
-        asked = {"profiles": [], "prices": []}
+        asked = {"prices": []}
         monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
         monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
-        monkeypatch.setattr(
-            run.tefas_source, "fetch_profile",
-            lambda code, c: asked["profiles"].append(code) or {"code": code, "umbrella": "X"},
-        )
+        monkeypatch.setattr(run.tefas_source, "fetch_umbrellas", lambda c: [])
         monkeypatch.setattr(
             run.tefas_source, "fetch_prices",
             lambda code, c: (asked["prices"].append(code) or [], None),
@@ -2065,7 +2064,6 @@ class TestTefasCycle:
             lambda c, funds, prices=None: {"funds_written": 0, "prices_written": 0},
         )
         run.run_tefas(None)
-        assert asked["profiles"] == ["A", "B"]
         assert asked["prices"] == ["A"]
 
     def test_the_category_rank_rides_the_price_fetch(self, monkeypatch):
@@ -2075,7 +2073,7 @@ class TestTefasCycle:
         pushed = {}
         monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
         monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
-        monkeypatch.setattr(run.tefas_source, "fetch_profile", lambda code, c: None)
+        monkeypatch.setattr(run.tefas_source, "fetch_umbrellas", lambda c: [])
         monkeypatch.setattr(
             run.tefas_source, "fetch_prices",
             lambda code, c: ([], {"code": code, "category_rank": 7, "category_size": 9}),
@@ -2096,8 +2094,8 @@ class TestTefasCycle:
         asked = []
         monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
         monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
-        monkeypatch.setattr(run.tefas_source, "fetch_profile",
-                            lambda code, c: asked.append(code))
+        monkeypatch.setattr(run.tefas_source, "fetch_umbrellas",
+                            lambda c: asked.append("umbrellas") or [])
         monkeypatch.setattr(run.tefas_source, "fetch_prices",
                             lambda code, c: (asked.append(code) or [], None))
         monkeypatch.setattr(run.sinks, "fetch_fund_coverage", lambda c: {})
@@ -2108,11 +2106,11 @@ class TestTefasCycle:
         assert run.run_tefas(None)["profiles"] == 0
         assert asked == []
 
-    def test_an_unreadable_profile_is_skipped_not_written(self, monkeypatch):
+    def test_an_unreadable_umbrella_pass_is_skipped_not_written(self, monkeypatch):
         self._enable(monkeypatch)
         monkeypatch.setattr(run.tefas_source, "fetch_universe", lambda c: [])
         monkeypatch.setattr(run.tefas_source, "fetch_daily", lambda c: [])
-        monkeypatch.setattr(run.tefas_source, "fetch_profile", lambda code, c: None)
+        monkeypatch.setattr(run.tefas_source, "fetch_umbrellas", lambda c: [])
         monkeypatch.setattr(run.tefas_source, "fetch_prices", lambda code, c: ([], None))
         monkeypatch.setattr(run.sinks, "fetch_fund_coverage",
                             lambda c: {"missing_umbrella": ["A"], "missing_prices": ["A"]})

@@ -235,3 +235,202 @@ class TestCoverage:
         assert out["missing_prices"] == ["AAS"]
         # AAS'ın serisi zaten yok; iki kez istenmemeli.
         assert out["missing_category"] == ["AAL"]
+
+
+class TestTradableBridge:
+    """Fonun enstrüman evrenindeki karşılığı.
+
+    Emirler, pozisyonlar, portföy değerlemesi ve risk yollarının HEPSİ
+    `investment.investment_products` üzerinden geçiyor; fonlar ayrı bir
+    tabloda durduğu sürece "fon al" diye bir yol yoktu. Köprü TEK TEK
+    kuruluyor: 2.602 fonu evrene yazmak, Piyasalar ekranını kimsenin
+    aramadığı fon kodlarıyla doldururdu.
+    """
+
+    def _db(self, existing=None, fund=None):
+        db = MagicMock()
+        db.execute.return_value.scalar_one_or_none.return_value = existing
+        db.get.return_value = fund
+        return db
+
+    def test_a_traded_fund_is_written_into_the_universe(self, mocker):
+        fund = SimpleNamespace(code="AFA", title="ATA PORTFÖY", active=True)
+        db = self._db(fund=fund)
+        mocker.patch.object(funds_service, "sync_quotes", return_value=1)
+
+        product = funds_service.ensure_tradable(db, "afa")
+        assert product.symbol == "AFA"
+        # İki `flush`: oturum `autoflush=False` ve kotasyon aynı istek
+        # içinde bir SELECT'e görünmeli. Ölçüldü -- fonun ilk emri "Fiyat
+        # bilgisi bulunamayan enstrüman" ile reddediliyordu.
+        assert db.flush.call_count == 2
+        assert product.product_type == funds_service.FUND_PRODUCT_TYPE
+        # `data_symbol` BOŞ: yfinance bir TEFAS kodunu fiyatlayamaz ve boş
+        # bırakmak "bunu fiyatlamaya çalışma" demek.
+        assert product.data_symbol is None
+        db.add.assert_called_once_with(product)
+
+    def test_an_existing_instrument_is_never_overwritten(self):
+        """Aynı kodu taşıyan bir hisse buradan sessizce ezilmemeli."""
+        existing = SimpleNamespace(symbol="AFA")
+        db = self._db(existing=existing)
+        assert funds_service.ensure_tradable(db, "AFA") is existing
+        db.add.assert_not_called()
+
+    @pytest.mark.parametrize("fund", [
+        None,
+        SimpleNamespace(code="AFA", title="X", active=False),
+    ])
+    def test_an_unknown_or_closed_fund_is_not_bridged(self, fund):
+        db = self._db(fund=fund)
+        assert funds_service.ensure_tradable(db, "AFA") is None
+        db.add.assert_not_called()
+
+    def test_an_empty_code_is_not_bridged(self):
+        db = self._db()
+        assert funds_service.ensure_tradable(db, "  ") is None
+        db.execute.assert_not_called()
+
+
+class TestFundQuotes:
+    """Tek fiyat kuralı: portföy değeri ve bekleyen fon emirleri
+    `market_quotes`tan okuyor, `market.funds`tan değil."""
+
+    def _db(self, products, funds, series=()):
+        db = MagicMock()
+        results = [
+            SimpleNamespace(all=lambda rows=products: rows),
+            SimpleNamespace(scalars=lambda rows=funds: rows),
+        ]
+        db.execute.side_effect = results
+        return db
+
+    def test_a_fund_with_two_days_reports_a_change(self, mocker):
+        db = self._db(
+            products=[("prod-1", "AFA")],
+            funds=[SimpleNamespace(code="AFA", price=12.5, as_of=date(2026, 9, 4))],
+        )
+        mocker.patch.object(
+            funds_service, "price_series",
+            return_value=[price("2026-09-03", 12.0), price("2026-09-04", 12.5)],
+        )
+        assert funds_service.sync_quotes(db) == 1
+        quote = db.merge.call_args[0][0]
+        assert float(quote.price) == 12.5
+        assert float(quote.previous_close) == 12.0
+        assert quote.change_percent == pytest.approx(4.1667, abs=1e-3)
+        assert quote.source == funds_service.FUND_QUOTE_SOURCE
+
+    def test_a_single_day_reports_an_unknown_change_not_zero(self, mocker):
+        """Sıfır yazmak, "gün içinde değişmedi" iddiası olurdu."""
+        db = self._db(
+            products=[("prod-1", "AFA")],
+            funds=[SimpleNamespace(code="AFA", price=12.5, as_of=date(2026, 9, 4))],
+        )
+        mocker.patch.object(
+            funds_service, "price_series", return_value=[price("2026-09-04", 12.5)]
+        )
+        funds_service.sync_quotes(db)
+        quote = db.merge.call_args[0][0]
+        assert quote.change_percent is None
+        assert quote.change_amount is None
+
+    @pytest.mark.parametrize("fund", [
+        None,
+        SimpleNamespace(code="AFA", price=None, as_of=date(2026, 9, 4)),
+        SimpleNamespace(code="AFA", price=12.5, as_of=None),
+    ])
+    def test_a_fund_without_a_usable_nav_is_skipped(self, fund, mocker):
+        db = self._db(
+            products=[("prod-1", "AFA")],
+            funds=[fund] if fund is not None else [],
+        )
+        mocker.patch.object(funds_service, "price_series", return_value=[])
+        assert funds_service.sync_quotes(db) == 0
+        db.merge.assert_not_called()
+
+    def test_no_bridged_funds_means_no_work(self):
+        db = MagicMock()
+        db.execute.return_value.all.return_value = []
+        assert funds_service.sync_quotes(db) == 0
+        db.merge.assert_not_called()
+
+    def test_a_code_filter_narrows_the_scan(self, mocker):
+        """Yeni köprülenen tek fonun kotasyonu yazılırken bütün evren
+        taranmamalı."""
+        db = self._db(
+            products=[("prod-1", "AFA")],
+            funds=[SimpleNamespace(code="AFA", price=12.5, as_of=date(2026, 9, 4))],
+        )
+        mocker.patch.object(
+            funds_service, "price_series", return_value=[price("2026-09-04", 12.5)]
+        )
+        assert funds_service.sync_quotes(db, ["afa"]) == 1
+
+
+class TestUpsertPrices:
+    """NAV serisi. `DO NOTHING` DEĞİL: TEFAS bir günün fiyatını sonradan
+    düzeltebiliyor ve ilk yazılanı korumak, düzeltilmiş bir fiyatı
+    reddetmek olurdu."""
+
+    def test_a_corrected_price_overwrites_the_first_one(self):
+        db = MagicMock()
+        assert funds_service.upsert_prices(
+            db, [{"code": "afa", "as_of": date(2026, 9, 4), "price": 12.5}]
+        ) == 1
+        assert "DO UPDATE" in str(db.execute.call_args[0][0])
+
+    @pytest.mark.parametrize("row", [
+        {"as_of": date(2026, 9, 4), "price": 12.5},
+        {"code": "AFA", "price": 12.5},
+        {"code": "AFA", "as_of": date(2026, 9, 4)},
+    ])
+    def test_an_incomplete_row_is_skipped(self, row):
+        """Günü ya da fiyatı olmayan bir NAV, seride bir delik değil bir
+        yalan olurdu."""
+        db = MagicMock()
+        assert funds_service.upsert_prices(db, [row]) == 0
+        db.execute.assert_not_called()
+
+
+class TestListingAndFacets:
+    def test_every_filter_narrows_the_query(self):
+        db = MagicMock()
+        funds_service.list_funds(
+            db, founder="ATA", umbrella="ALTIN", fund_type="yat",
+            search="ata", limit=5, offset=10,
+        )
+        compiled = str(db.execute.call_args[0][0])
+        for column in ("founder", "umbrella", "fund_type", "title", "code"):
+            assert column in compiled
+
+    def test_the_default_order_is_by_size_with_unknowns_last(self):
+        """Alfabetik sıralamak, ekranın ilk ekranını kimsenin aramadığı
+        fonlarla doldururdu. Büyüklüğü bilinmeyen fon SONA gidiyor, sıfır
+        sayılmıyor."""
+        db = MagicMock()
+        funds_service.list_funds(db)
+        compiled = str(db.execute.call_args[0][0]).upper()
+        assert "ORDER BY" in compiled
+        assert "NULLS LAST" in compiled
+
+    def test_the_dropdowns_are_read_from_the_data(self):
+        """Elle yazılmış bir liste, TEFAS yeni bir kurucu eklediğinde
+        sessizce eksik kalırdı."""
+        db = MagicMock()
+        db.execute.return_value.scalars.side_effect = [["ATA"], ["ALTIN"]]
+        assert funds_service.facets(db) == {
+            "founders": ["ATA"], "umbrellas": ["ALTIN"],
+        }
+
+
+class TestPriceSeries:
+    def test_the_series_comes_back_oldest_first(self):
+        """Sorgu en yeniden alıyor (limit son N günü kessin diye), grafik ise
+        eskiden yeniye çiziyor."""
+        db = MagicMock()
+        db.execute.return_value.scalars.return_value = [
+            price("2026-09-04", 12.5), price("2026-09-01", 12.0),
+        ]
+        rows = funds_service.price_series(db, " afa ")
+        assert [row.as_of.isoformat() for row in rows] == ["2026-09-01", "2026-09-04"]

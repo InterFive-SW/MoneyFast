@@ -638,14 +638,13 @@ def run_tefas(client: httpx.Client) -> dict:
         written = sinks.push_funds_to_backend(client, universe + daily)
 
         coverage = sinks.fetch_fund_coverage(client)
-        missing_umbrella = (coverage.get("missing_umbrella") or [])[
-            : config.tefas_profile_budget()
-        ]
-        profiles = [
-            profile for profile in
-            (tefas_source.fetch_profile(code, tefas) for code in missing_umbrella)
-            if profile is not None
-        ]
+        # Şemsiye türü artık FON BAŞINA değil, ŞEMSİYE BAŞINA bir istek:
+        # şemsiye listesi alınıp günlük uç `sfonTurKod` ile süzülüyor.
+        # Bütçeye ihtiyaç kalmadı -- tur başına on iki şemsiye, 1.054 fon
+        # değil -- ama eksik yoksa hiç yapılmıyor.
+        profiles: list[dict] = []
+        if coverage.get("missing_umbrella"):
+            profiles = tefas_source.fetch_umbrellas(tefas)
         if profiles:
             written["funds_written"] += sinks.push_funds_to_backend(
                 client, profiles,

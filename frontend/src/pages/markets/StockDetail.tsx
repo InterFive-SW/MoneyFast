@@ -6,6 +6,7 @@ import SampleDataBadge from '../../components/markets/SampleDataBadge'
 import TeknikGorunum from '../../components/markets/TeknikGorunum'
 import InstrumentCandleChart from '../../components/markets/InstrumentCandleChart'
 import NewsWidget from '../../components/widgets/NewsWidget'
+import TradeModal from '../../components/portfolio/TradeModal'
 import { compact, pct, ratio, useFundamentals } from '../../hooks/useFundamentals'
 
 // `fon-pozisyonlari` KALDIRILDI: TEFAS hisse bazında fon dağılımı
@@ -47,6 +48,7 @@ function Row({ label, value, tone }: { label: string; value: string; tone?: numb
 export default function StockDetail() {
   const { symbol = '' } = useParams()
   const [activeTab, setActiveTab] = useState<DetailTab>('ozet')
+  const [trading, setTrading] = useState(false)
 
   // Live, from /api/market/instruments. Resolving against MOCK_MARKET_INSTRUMENTS
   // meant this page showed a frozen price for the row the user just clicked.
@@ -104,14 +106,40 @@ export default function StockDetail() {
             </div>
             <p className="text-sm text-slate-400 mt-0.5">{instrument.name}</p>
           </div>
-          <div className="text-right">
-            <div className="text-2xl font-bold tabular-nums text-white">{fmt(instrument.price, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {instrument.unit}</div>
-            <div className={`text-sm font-semibold tabular-nums ${instrument.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-              {instrument.changePercent > 0 ? '+' : ''}{instrument.changePercent.toFixed(2)}%
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <div className="text-2xl font-bold tabular-nums text-white">{fmt(instrument.price, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {instrument.unit}</div>
+              <div className={`text-sm font-semibold tabular-nums ${instrument.changePercent < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                {instrument.changePercent > 0 ? '+' : ''}{instrument.changePercent.toFixed(2)}%
+              </div>
             </div>
+            {/* Emir yolu baktığın yerde. Alım-satım tek bir yerde -- Portföy
+                ekranındaki hızlı emir kutusunda -- duruyordu, yani bir
+                hisseyi inceleyen kullanıcının onu alması için önce başka bir
+                ekrana gitmesi gerekiyordu.
+
+                Fiyatı bilinmeyen enstrümanda düğme YOK: neyi kaça aldığını
+                söyleyemeyeceğimiz bir emir hazırlatmak olurdu. */}
+            {Number.isFinite(instrument.price) && instrument.price > 0 && (
+              <button
+                onClick={() => setTrading(true)}
+                className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-emerald-500/30 transition-colors hover:bg-emerald-600"
+              >
+                Al / Sat
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {trading && (
+        <TradeModal
+          symbol={instrument.symbol}
+          price={instrument.price}
+          currency={instrument.currency}
+          onClose={() => setTrading(false)}
+        />
+      )}
 
       <div className="flex flex-wrap bg-slate-800/5 p-1 rounded-lg w-fit mb-6">
         {TABS.map((tab) => (

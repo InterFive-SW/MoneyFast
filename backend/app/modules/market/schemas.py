@@ -575,7 +575,6 @@ class FundOut(BaseModel):
     categoryRank: Optional[int] = None
     categorySize: Optional[int] = None
     #: Kategorinin ortalama getirisi -- fonun kendi getirisinin ölçüldüğü yer.
-    categoryReturn: Optional[float] = None
     #: Tedavüldeki pay sayısı.
     shares: Optional[float] = None
     returns: FundReturnsOut = Field(default_factory=FundReturnsOut)

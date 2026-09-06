@@ -6120,3 +6120,161 @@ class TestCompoundRouting:
         assert orchestrator.route_after_router(
             {**base_state, "sub_requests": [], "target_agent": "MARKET_DATA_AGENT"}
         ) == "market_data"
+
+
+class TestCancelOrderNode:
+    """«Emrimi iptal et» — önce OKU, sonra iptal et.
+
+    Model emir numarasını bilemez ve uydurmasına da izin verilmiyor
+    (`cancel_order` sözleşmesi bunu açıkça yasaklıyor), dolayısıyla iptal her
+    zaman iki adım. Belirsizlik SORULUYOR: iki bekleyen emri olan birinin
+    "emrimi iptal et" demesi, ikisinden birini seçmek için yeterli değil.
+    """
+
+    def _order(self, order_id="PROP-1", symbol="THYAO", cancellable=True):
+        return {
+            "id": order_id, "symbol": symbol, "status": "Fiyat bekliyor",
+            "type": "Alış", "quantity": 10.0, "price": 290.0, "total": 2900.0,
+            "currency": "TRY", "limit_price": 290.0, "cancellable": cancellable,
+            "date": "2026-09-05T18:00:00+00:00",
+        }
+
+    def _listing(self, orders, status="OK"):
+        return {
+            "specialist_output": {
+                "agent": "TRANSACTION_AGENT", "status": status,
+                "tool": "get_open_orders",
+                "data": {"orders": orders, "open_count": len(orders)},
+            },
+            "tools_used": ["get_open_orders"],
+        }
+
+    def _fake(self, mocker, *outcomes):
+        calls = []
+
+        async def fake(state, tool, args, **kw):
+            calls.append((tool, args))
+            return outcomes[len(calls) - 1]
+
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_the_only_open_order_is_cancelled(self, mocker):
+        calls = self._fake(
+            mocker,
+            self._listing([self._order()]),
+            {"specialist_output": {"agent": "TRANSACTION_AGENT", "status": "OK",
+                                   "tool": "cancel_order",
+                                   "data": {"order_id": "PROP-1", "cancelled": True}}},
+        )
+        out = await orchestrator._cancel_order_node(
+            {"user_id": "user-1"}, {"tool": "cancel_order", "arguments": {}}
+        )
+        assert [tool for tool, _ in calls] == ["get_open_orders", "cancel_order"]
+        assert calls[1][1] == {"user_id": "user-1", "order_id": "PROP-1"}
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_no_open_order_is_reported_as_empty_not_cancelled(self, mocker):
+        """Olmayan bir emri "iptal ettim" diye bildirmek, kullanıcının hiç
+        vermediği bir emri geri aldığını sanmasına yol açar."""
+        calls = self._fake(mocker, self._listing([]))
+        out = await orchestrator._cancel_order_node({"user_id": "user-1"}, {})
+        assert [tool for tool, _ in calls] == ["get_open_orders"]
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_a_filled_order_is_not_cancellable(self, mocker):
+        """Gerçekleşmiş bir emri geri almak, ters yönde ikinci bir emirdir."""
+        calls = self._fake(mocker, self._listing([self._order(cancellable=False)]))
+        out = await orchestrator._cancel_order_node({"user_id": "user-1"}, {})
+        assert [tool for tool, _ in calls] == ["get_open_orders"]
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_several_open_orders_are_asked_about_not_guessed(self, mocker):
+        self._fake(
+            mocker,
+            self._listing([self._order("PROP-1"), self._order("PROP-2", "ASELS")]),
+        )
+        out = await orchestrator._cancel_order_node({"user_id": "user-1"}, {})
+        output = out["specialist_output"]
+        assert output["status"] == "NEEDS_INPUT"
+        assert "THYAO" in output["clarification_request"]
+        assert "ASELS" in output["clarification_request"]
+
+    @pytest.mark.asyncio
+    async def test_a_named_symbol_settles_the_ambiguity(self, mocker):
+        calls = self._fake(
+            mocker,
+            self._listing([self._order("PROP-1"), self._order("PROP-2", "ASELS")]),
+            {"specialist_output": {"agent": "TRANSACTION_AGENT", "status": "OK",
+                                   "tool": "cancel_order", "data": {}}},
+        )
+        await orchestrator._cancel_order_node(
+            {"user_id": "user-1", "entities": {"tickers": ["ASELS"]}}, {}
+        )
+        assert calls[1][1]["order_id"] == "PROP-2"
+
+    @pytest.mark.asyncio
+    async def test_a_named_symbol_with_no_order_still_asks(self, mocker):
+        """Sembol hiçbir emirle eşleşmiyorsa aday kümesi daralmıyor: elde
+        olanı sormak, olmayanı iptal etmekten iyi."""
+        self._fake(
+            mocker,
+            self._listing([self._order("PROP-1"), self._order("PROP-2", "ASELS")]),
+        )
+        out = await orchestrator._cancel_order_node(
+            {"user_id": "user-1", "entities": {"tickers": ["GARAN"]}}, {}
+        )
+        assert out["specialist_output"]["status"] == "NEEDS_INPUT"
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_list_is_surfaced_rather_than_cancelled_blind(
+        self, mocker
+    ):
+        calls = self._fake(mocker, self._listing([], status="ERROR"))
+        out = await orchestrator._cancel_order_node({"user_id": "user-1"}, {})
+        assert [tool for tool, _ in calls] == ["get_open_orders"]
+        assert out["specialist_output"]["status"] == "ERROR"
+
+    @pytest.mark.asyncio
+    async def test_the_transaction_node_routes_a_cancellation_before_staging(
+        self, mocker
+    ):
+        """İptal, yön/adet/sembol denetimlerinden ÖNCE ayrılıyor: geri alma
+        bir emir vermek değil ve o denetimlerin hiçbiri ona uymuyor."""
+        mocker.patch.object(
+            orchestrator, "_llm_json",
+            return_value={"status": "READY", "tool": "cancel_order", "arguments": {}},
+        )
+        node = mocker.patch.object(
+            orchestrator, "_cancel_order_node", return_value={"specialist_output": {}}
+        )
+        await orchestrator.transaction_node(
+            {"user_id": "user-1", "user_message": "emrimi iptal et"}
+        )
+        node.assert_awaited_once()
+
+
+class TestOpenOrdersInPortfolioNode:
+    @pytest.mark.asyncio
+    async def test_the_portfolio_node_can_read_open_orders(self, mocker):
+        """Bekleyen bir alım emri bir POZİSYON değil ama parayı bloke ediyor;
+        "bakiyem neden azaldı" sorusunun cevabı orada."""
+        calls = []
+
+        async def fake(state, tool, args, **kw):
+            calls.append((tool, args))
+            return {"specialist_output": {"agent": "PORTFOLIO_AGENT", "status": "OK"}}
+
+        mocker.patch.object(
+            orchestrator, "_llm_json",
+            return_value={"tool": "get_open_orders", "arguments": {}},
+        )
+        mocker.patch.object(orchestrator, "_run_tool", side_effect=fake)
+        await orchestrator.portfolio_node(
+            {"user_id": "user-1", "user_message": "bekleyen emirlerim"}
+        )
+        assert calls == [("get_open_orders", {"user_id": "user-1"})]

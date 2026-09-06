@@ -744,6 +744,18 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
             empty_when=lambda p: not p.get("sections"),
         )
 
+    # Beşinci araç: VERİLMİŞ ama henüz GERÇEKLEŞMEMİŞ emirler. Pozisyonlardan
+    # ayrı bir soru ve pozisyon aracı onu cevaplayamıyor: bekleyen bir alım
+    # emri bir pozisyon DEĞİL, ama parayı bloke ediyor. "Bakiyem neden az"
+    # sorusunun cevabı çoğu zaman burada.
+    if plan.get("tool") == "get_open_orders":
+        return await _run_tool(
+            state, "get_open_orders", {"user_id": args["user_id"]},
+            assumptions=plan.get("assumptions") or [],
+            # Boş liste TAM bir cevap: bu kişinin emri yok. Eksik sayılırsa
+            # ajan "veriye ulaşamadım" der ve bu bambaşka bir şey.
+        )
+
     if plan.get("tool") == "get_cash_flow_summary":
         return await _run_tool(
             state, "get_cash_flow_summary",
@@ -2023,8 +2035,82 @@ def _named_symbol(plan: dict[str, Any], state: MoneyFastState) -> Optional[str]:
     return None
 
 
+async def _cancel_order_node(state: MoneyFastState, plan: dict[str, Any]) -> dict[str, Any]:
+    """"Emrimi iptal et" — önce OKU, sonra iptal et.
+
+    Model emir numarasını bilemez ve uydurmasına izin verilmiyor
+    (`cancel_order`ın sözleşmesi de bunu yasaklıyor), dolayısıyla iptal her
+    zaman iki adım: açık emirleri oku, hangisinin kastedildiğini belirle,
+    sonra iptal et.
+
+    Belirsizlik SORULUYOR, tahmin edilmiyor. İki bekleyen emri olan birinin
+    "emrimi iptal et" demesi, ikisinden birini seçmek için yeterli değil ve
+    yanlış olanı iptal etmek geri alınamaz bir şey değil ama kullanıcının
+    istemediği bir şey.
+    """
+    user_id = state.get("user_id") or "unknown"
+    listing = await _run_tool(state, "get_open_orders", {"user_id": user_id})
+    output = listing.get("specialist_output") or {}
+    if output.get("status") == "ERROR":
+        return listing
+
+    orders = [
+        row for row in ((output.get("data") or {}).get("orders") or [])
+        if row.get("cancellable")
+    ]
+
+    if not orders:
+        return {
+            "specialist_output": {
+                "agent": "TRANSACTION_AGENT",
+                "status": "EMPTY",
+                "tool": "get_open_orders",
+                "data": output.get("data") or {},
+                "assumptions": [],
+            },
+            "tools_used": listing.get("tools_used") or [],
+        }
+
+    # Kullanıcı bir sembol söylediyse aday kümesi ona daralıyor. Söylemediyse
+    # tek emir varsa o, birden fazlaysa soruluyor.
+    named = (_named_symbol(plan, state) or "").strip().upper()
+    if named:
+        matched = [row for row in orders if str(row.get("symbol", "")).upper() == named]
+        if matched:
+            orders = matched
+
+    if len(orders) > 1:
+        return {
+            "specialist_output": {
+                "agent": "TRANSACTION_AGENT",
+                "status": "NEEDS_INPUT",
+                "missing_fields": ["order_id"],
+                "clarification_request": (
+                    "Birden fazla bekleyen emriniz var: "
+                    + ", ".join(
+                        f"{row.get('symbol')} {row.get('type')} {row.get('quantity'):g}"
+                        for row in orders
+                    )
+                    + ". Hangisini iptal edeyim?"
+                ),
+            },
+            "tools_used": listing.get("tools_used") or [],
+        }
+
+    return await _run_tool(
+        state, "cancel_order",
+        {"user_id": user_id, "order_id": orders[0]["id"]},
+        assumptions=plan.get("assumptions") or [],
+    )
+
+
 async def transaction_node(state: MoneyFastState) -> dict[str, Any]:
     plan = await _llm_json(SPECIALIST_PROMPTS["TRANSACTION_AGENT"], _specialist_task(state))
+
+    # İptal, hazırlama yolundan ÖNCE: geri alma bir emir vermek değil ve
+    # aşağıdaki yön/adet/sembol denetimlerinin hiçbiri ona uymuyor.
+    if plan.get("tool") == "cancel_order":
+        return await _cancel_order_node(state, plan)
 
     if plan.get("status") == "NEEDS_INPUT" or not plan.get("arguments"):
         # About to ask for something more -- usually a quantity. Confirm the

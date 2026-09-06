@@ -45,9 +45,12 @@ class _NullClient:
         return False
 
 
-def coverage(monkeypatch, codes):
+def coverage(monkeypatch, codes, umbrellas=()):
     monkeypatch.setattr(
-        sinks, "fetch_fund_coverage", lambda client: {"missing_prices": list(codes)},
+        sinks, "fetch_fund_coverage",
+        lambda client: {
+            "missing_prices": list(codes), "missing_umbrella": list(umbrellas),
+        },
     )
 
 
@@ -94,9 +97,77 @@ class TestIncremental:
         assert pushed == []
 
 
+class TestUmbrellas:
+    """Şemsiye eşlemesi AYRI bir geçiş ve fon başına DEĞİL, şemsiye başına
+    bir istek.
+
+    Ölçüldü: 1.054 aktif fonun 1.029'unda şemsiye türü boştu. Günlük turun
+    bütçesiyle Fonlar ekranındaki süzgeç aylarca neredeyse boş kalırdı -- ve
+    boş bir süzgeç "bu veri yok" demiyor, hiç fon yokmuş gibi görünüyor.
+    """
+
+    @pytest.fixture
+    def wired_umbrellas(self, monkeypatch):
+        state = {"pushes": []}
+        monkeypatch.setattr(
+            sinks, "push_funds_to_backend",
+            lambda client, funds, prices=None: state["pushes"].append(len(funds))
+            or {"funds_written": len(funds), "prices_written": 0},
+        )
+        monkeypatch.setattr(httpx, "Client", lambda **kw: _NullClient())
+        return state
+
+    def _coverage(self, monkeypatch, codes):
+        monkeypatch.setattr(
+            sinks, "fetch_fund_coverage",
+            lambda client: {"missing_umbrella": list(codes)},
+        )
+
+    def test_the_pairs_are_written_in_chunks(self, wired_umbrellas, monkeypatch):
+        """İki bin satırlık tek bir gövde, yarısı yazılıp ölen bir istek
+        demek."""
+        pairs = [
+            {"code": f"F{i:04d}", "umbrella": "X"}
+            for i in range(backfill_funds.UMBRELLA_CHUNK + 1)
+        ]
+        monkeypatch.setattr(tefas_source, "fetch_umbrellas", lambda client: pairs)
+        self._coverage(monkeypatch, ["F0000"])
+        assert backfill_funds.backfill_umbrellas(None) == {
+            "written": len(pairs),
+        }
+        assert wired_umbrellas["pushes"] == [backfill_funds.UMBRELLA_CHUNK, 1]
+
+    def test_nothing_missing_asks_for_nothing(self, wired_umbrellas, monkeypatch):
+        asked = []
+        monkeypatch.setattr(
+            tefas_source, "fetch_umbrellas", lambda client: asked.append(1) or [],
+        )
+        self._coverage(monkeypatch, [])
+        assert backfill_funds.backfill_umbrellas(None) == {"written": 0}
+        assert asked == []
+
+    def test_an_empty_mapping_writes_nothing(self, wired_umbrellas, monkeypatch):
+        """Hafta sonu anlık görüntü boş dönüyor; süzülecek bir şey yoksa
+        yazılacak bir şey de yok."""
+        monkeypatch.setattr(tefas_source, "fetch_umbrellas", lambda client: [])
+        self._coverage(monkeypatch, ["AAL"])
+        assert backfill_funds.backfill_umbrellas(None) == {"written": 0}
+        assert wired_umbrellas["pushes"] == []
+
+
 class TestEntryPoint:
     def test_it_runs_without_arguments(self, wired, monkeypatch):
         coverage(monkeypatch, ["AAL"])
+        assert backfill_funds.main([]) == 0
+
+    def test_both_passes_run(self, wired, monkeypatch):
+        """Fiyat serisi ve şemsiye eşlemesi AYRI uçlar; tek geçiş ikisini
+        birden dolduramaz."""
+        coverage(monkeypatch, ["AAL"], umbrellas=["AAS"])
+        monkeypatch.setattr(
+            tefas_source, "fetch_umbrellas",
+            lambda client: [{"code": "AAS", "umbrella": "Serbest Şemsiye Fonu"}],
+        )
         assert backfill_funds.main([]) == 0
 
     def test_a_positional_limit_is_honoured(self, wired, monkeypatch):

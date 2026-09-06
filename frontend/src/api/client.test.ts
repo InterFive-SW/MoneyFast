@@ -1590,3 +1590,33 @@ describe('getFundCandles', () => {
         expect(calledUrl(fetchMock)).toBe('/api/market/funds/a%2Fb/candles?window=5Y')
     })
 })
+
+describe('emir iptali', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('emir numarasını adreste kodlar', async () => {
+    const fetchMock = mockFetch({}, 204)
+    await apiClient.cancelOrder('PROP/1')
+
+    expect(calledUrl(fetchMock)).toContain('transactions/PROP%2F1/cancel')
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST')
+  })
+
+  it('bloke tutar iade edildiği için bildirimleri tazeler', async () => {
+    mockFetch({}, 204)
+    const listener = vi.fn()
+    window.addEventListener('refreshNotifications', listener)
+    await apiClient.cancelOrder('PROP-1')
+    window.removeEventListener('refreshNotifications', listener)
+
+    expect(listener).toHaveBeenCalled()
+  })
+
+  it('iptal edilemeyen emir hata fırlatır', async () => {
+    /* Sessizce başarılı saymak, kullanıcıya emrinin geri çekildiğini söyleyip
+       parasını bloke bırakmak olurdu. */
+    mockFetch({ detail: 'Bu emir artık iptal edilemez.' }, 409)
+    await expect(apiClient.cancelOrder('PROP-1')).rejects.toThrow()
+  })
+})

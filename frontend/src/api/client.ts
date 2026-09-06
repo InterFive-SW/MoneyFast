@@ -72,7 +72,6 @@ export interface ApiFund {
     categoryRank?: number | null
     categorySize?: number | null
     /** Kategorinin ortalama getirisi -- fonun getirisinin ölçüldüğü yer. */
-    categoryReturn?: number | null
     shares?: number | null
     returns: FundReturns
 }
@@ -828,6 +827,28 @@ class ApiClient {
 
     getOrders() {
         return this.request<Order[]>('/investment/orders');
+    }
+
+    /**
+     * Bekleyen bir emri geri çeker; bloke edilen tutar iade edilir.
+     *
+     * Onay kapısının ARKASINDA değil: iptal bir para hareketi değil, bir geri
+     * alma. Kullanıcının kendi emrini geri çekmek için ikinci bir onay
+     * ekranından geçmesi, bloke parasını daha uzun tutmaktan başka bir işe
+     * yaramazdı.
+     *
+     * 204 dönüyor, gövde yok -- `request` gövde beklediği için `authedFetch`
+     * doğrudan kullanılıyor.
+     */
+    async cancelOrder(orderId: string): Promise<void> {
+        const response = await this.authedFetch(
+            `${this.baseUrl}/investment/transactions/${encodeURIComponent(orderId)}/cancel`,
+            { method: 'POST' },
+        );
+        if (!response.ok) throw new Error(await describeError(response));
+        // Bloke tutar geri geldi ve emir listesi değişti; bildirim şeridi
+        // bunu bir sonraki yoklamaya kadar göstermezdi.
+        window.dispatchEvent(new Event('refreshNotifications'));
     }
 
     getAssetAllocation() {

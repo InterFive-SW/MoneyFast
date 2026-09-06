@@ -408,16 +408,6 @@ def tefas_enabled() -> bool:
     return (os.getenv("INGESTOR_TEFAS_ENABLED") or "").strip().lower() in {"1", "true", "yes"}
 
 
-def tefas_profile_budget() -> int:
-    """Tek turda kaç fonun şemsiye türü çekilir.
-
-    Şemsiye türü fon BAŞINA bir istek ve evren 2.602 fon. Sınırsız
-    bırakmak, tek bir turun saatlerce sürmesi demekti -- `kap_corpus_budget`
-    ile aynı gerekçe.
-    """
-    return max(0, _int("INGESTOR_TEFAS_PROFILE_BUDGET", 150))
-
-
 def tefas_price_budget() -> int:
     """Tek turda kaç fonun NAV serisi çekilir. Aynı gerekçe."""
     return max(0, _int("INGESTOR_TEFAS_PRICE_BUDGET", 150))

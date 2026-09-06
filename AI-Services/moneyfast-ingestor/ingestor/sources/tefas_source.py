@@ -46,6 +46,7 @@ sütunlar arayüzden kaldırılıyor, `null` ile doldurulmuyor.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
@@ -65,6 +66,10 @@ FUND_TYPES = ("YAT", "EMK", "BYF")
 #: serbest bir aralık; 1.000 ile bir fon tipi iki istekte iniyor. Sayfa ne
 #: kadar büyükse o kadar az istek, o kadar az 429 riski.
 PAGE_SIZE = 1000
+
+#: Kısıtlanan bir sayfa için ikinci denemeden önceki bekleme. Olağan
+#: aralığın (5 sn) katı: aynı hızda tekrar denemek aynı cevabı alırdı.
+RETRY_DELAY_SECONDS = 30.0
 
 #: NAV yayımlanmayan günlerde kaç gün geriye bakılır. Hafta sonu iki gün,
 #: araya bir tatil girerse birkaç gün daha.
@@ -295,22 +300,164 @@ def fetch_prices(
     return out, metrics
 
 
-def fetch_profile(code: str, client: httpx.Client) -> Optional[dict[str, Any]]:
-    """Şemsiye türü. Ekrandaki "Şemsiye Türü" süzgecinin tamamı."""
-    rows = _rows(_post("funds/fonProfilDtyGetir",
-                       {"dil": "TR", "fonKodu": code, "periyod": "12"}, client))
-    for row in rows:
-        umbrella = str(row.get("fonTuru") or "").strip()
-        if umbrella:
-            return {
-                "code": code,
-                "umbrella": umbrella,
-                # Kategorinin ortalama getirisi. Fonun kendi getirisinin
-                # yanında ANLAMLI bir karşılaştırma: %38 iyi mi kötü mü,
-                # ancak kategorisi %41 yaptıysa cevaplanabiliyor.
-                "category_return": _number(row.get("fonTurGetiri")),
-            }
+def fetch_umbrellas(client: httpx.Client) -> list[dict[str, Any]]:
+    """Fon -> şemsiye türü. Ekrandaki "Şemsiye Türü" süzgecinin tamamı.
+
+    **Fon başına bir istek DEĞİL, şemsiye başına.** Önce `fonTurGetir` ile
+    şemsiye listesi alınıyor (id -> ad), sonra günlük uç her şemsiye için
+    `sfonTurKod` süzgeciyle sorgulanıyor: dönen her fon o şemsiyeye ait.
+    On iki şemsiye x fon tipi kadar istek, 1.054 değil.
+
+    ÖNCEKİ UYGULAMA YANLIŞTI ve ölçüldü. `fonProfilDtyGetir` fonun şemsiye
+    türünü DÖNDÜRMÜYOR; karşılaştırma grafiğinin gösterge listesini
+    döndürüyor (ALTIN, BIST100, BIST30 ...) ve yanıt HER FON İÇİN AYNI.
+    İlk satırın `fonTuru` alanı okunduğu için 1.054 aktif fonun 1.021'i
+    "ALTIN" şemsiyesine yazıldı -- boş bir sütundan çok daha kötü, çünkü
+    uydurulmuş bir değer doğruymuş gibi süzülüyor.
+    """
+    types = [
+        (str(row.get("sfonTuru") or "").strip(),
+         str(row.get("sfonTurAciklama") or "").strip())
+        for row in _rows(_post("funds/fonTurGetir", {"dil": "TR"}, client))
+    ]
+    day = _latest_daily_day(client)
+    if day is None:
+        log.info("tefas: no daily snapshot, umbrellas skipped")
+        return []
+
+    named = [(code, name) for code, name in types if code and name]
+    # Fon tipleri BİRLEŞTİRİLİYOR: bir fon tek bir tipte yaşıyor ama aynı
+    # kod iki tipte de dönerse ve şemsiyeleri AYRIŞIYORSA, o kod hakkında
+    # söylenecek doğru bir şey yok -- düşürülüyor.
+    merged: dict[str, Optional[str]] = {}
+    for fund_type in FUND_TYPES:
+        for pair in _umbrellas_for_type(fund_type, named, day, client):
+            code, name = pair["code"], pair["umbrella"]
+            if code in merged and merged[code] != name:
+                merged[code] = None
+            else:
+                merged[code] = name
+    out = [
+        {"code": code, "umbrella": name}
+        for code, name in sorted(merged.items())
+        if name is not None
+    ]
+    log.info("tefas: %d fund/umbrella pairs", len(out))
+    return out
+
+
+def _umbrellas_for_type(
+    fund_type: str,
+    types: list[tuple[str, str]],
+    day: date,
+    client: httpx.Client,
+) -> list[dict[str, Any]]:
+    """Tek bir fon tipi için fon -> şemsiye eşlemesi.
+
+    **Fon tipi başına doğrulanıyor.** Süzgeç her fon tipinde uygulanmıyor:
+    ölçüldü, bir turda Borçlanma'nın 31 fonunun HEPSİ Hisse Senedi
+    listesinde de vardı. Aynı fonun iki şemsiyede görünmesi, o fon tipinde
+    süzgecin çalışmadığının kanıtı -- ve o durumda doğru cevap birini
+    seçmek değil, O FON TİPİNİN TAMAMINI bırakmak. Yalnızca tek bir fonu
+    düşürmek, aynı hatalı listenin geri kalanını doğruymuş gibi yazardı.
+
+    Okunamayan bir şemsiye (429) ise yalnızca O ŞEMSİYEYİ düşürüyor, tipi
+    değil: listeler birbirinden bağımsız, bir fon yalnızca göründüğü
+    listeden ad alıyor, dolayısıyla okunamayan bir şemsiyenin fonları
+    başka bir şemsiyeye YAZILAMAZ -- eşleşmeden kalır ve bir sonraki tur
+    yeniden dener. Tipin tamamını bırakmak, tek bir kısıtlanmış sayfa
+    yüzünden on bir doğru şemsiyeyi de atmak olurdu (ölçüldü).
+    """
+    seen: dict[str, str] = {}
+    for code, name in types:
+        found = _codes_in_umbrella(fund_type, code, day, client)
+        if found is None:
+            log.warning("tefas: %s/%s unread, skipped", fund_type, name)
+            continue
+        for fund_code in found:
+            if seen.setdefault(fund_code, name) != name:
+                log.warning(
+                    "tefas: %s umbrellas overlap (%s in %s and %s), "
+                    "dropping the whole fund type",
+                    fund_type, fund_code, seen[fund_code], name,
+                )
+                return []
+    return [
+        {"code": fund_code, "umbrella": name}
+        for fund_code, name in sorted(seen.items())
+    ]
+
+
+def _latest_daily_day(client: httpx.Client) -> Optional[date]:
+    """En son NAV yayımlanan gün. Hafta sonu ve tatilde uç boş dönüyor."""
+    today = datetime.now(timezone.utc).date()
+    for back in range(MAX_LOOKBACK_DAYS + 1):
+        day = today - timedelta(days=back)
+        if _daily_for(day, client):
+            return day
     return None
+
+
+def _codes_in_umbrella(
+    fund_type: str, umbrella_code: str, day: date, client: httpx.Client
+) -> Optional[list[str]]:
+    """Bir şemsiyedeki fon kodları, ya da sayfası okunamadıysa `None`.
+
+    Boş liste ile `None` AYRI: birincisi "bu şemsiyede fon yok", ikincisi
+    "sorabildiğimiz kadarını soramadık". Ölçüldü -- 429 alan bir sayfa
+    `_rows` üzerinden boş dönüyor ve son sayfa sanılıyordu, yani
+    kısıtlanan bir tur o şemsiyenin yarısını sessizce düşürüyordu.
+    """
+    stamp = day.strftime("%Y%m%d")
+    codes: list[str] = []
+    start = 1
+    while True:
+        payload = _retrying_post(
+            "funds/fonGnlBlgSiraliGetir",
+            {
+                "fonTipi": fund_type, "fonKodu": None, "aramaMetni": None,
+                "fonTurKod": None, "fonGrubu": None,
+                "sfonTurKod": umbrella_code,
+                "basTarih": stamp, "bitTarih": stamp,
+                "basSira": start, "bitSira": start + PAGE_SIZE - 1,
+                "fonTurAciklama": None, "dil": "TR", "kurucuKod": None,
+            },
+            client,
+        )
+        if payload is None:
+            return None
+        rows = _rows(payload)
+        if not rows:
+            break
+        codes.extend(
+            str(row.get("fonKodu") or "").strip().upper()
+            for row in rows if row.get("fonKodu")
+        )
+        if len(rows) < PAGE_SIZE:
+            break
+        start += PAGE_SIZE
+    return codes
+
+
+def _retrying_post(
+    path: str, body: dict[str, Any], client: httpx.Client
+) -> Optional[Any]:
+    """Bir kez daha dener, daha uzun bekleyerek.
+
+    `MIN_HOST_DELAY_SECONDS` beş saniye ve TEFAS bu aralıkta bile 429
+    dönebiliyor -- ölçüldü, beş saniye arayla iki istek arka arkaya
+    kısıtlandı. Tek bir kısıtlanmış sayfa yüzünden bir fon tipinin tamamını
+    bırakmak, kaçınılabilir bir kayıp.
+
+    İkinci denemeden fazlası YOK: kısıtlama ısrar ediyorsa doğru cevap
+    beklemeye devam etmek değil, o turu bırakıp yarın yeniden denemek.
+    """
+    payload = _post(path, body, client)
+    if payload is not None:
+        return payload
+    log.info("tefas: retrying %s after %.0fs", path, RETRY_DELAY_SECONDS)
+    time.sleep(RETRY_DELAY_SECONDS)
+    return _post(path, body, client)
 
 
 def _number(value: Any) -> Optional[float]:

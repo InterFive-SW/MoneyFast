@@ -30,6 +30,8 @@ dumps/
 .coverage.*
 coverage.xml
 junit.xml
+# Elle çalıştırılan bir `pytest -q > ...` çıktısı; rapor değil, kâğıt parçası.
+.pytest-out.txt
 htmlcov/
 # Yola sabitli DEĞİL. `frontend/coverage/` idi ve `vitest --coverage` çıktıyı
 # çalıştırıldığı dizine yazıyor: komut bir kez `frontend/src` içinden

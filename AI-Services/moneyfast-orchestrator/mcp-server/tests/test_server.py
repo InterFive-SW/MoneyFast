@@ -67,6 +67,12 @@ EXPECTED_TOOLS = {
     # çıkardığı `company_names` hiçbir yerde okunmuyordu ve adla sorulan her
     # soru süzgeçsiz aramaya düşüyordu.
     "resolve_instruments",
+    # v2.20: bekleyen emirler. Emir akışının karşılığı -- bir alım artık
+    # onaylandığı anda gerçekleşmiyor, fiyatı gelene kadar bekliyor ve
+    # parası bloke duruyor. Bunu göremeyen bir sohbet "aldım mı almadım mı"
+    # ve "bakiyem neden azaldı" sorularının ikisini de cevapsız bırakıyordu.
+    "get_open_orders",
+    "cancel_order",
 }
 
 #: Every tool that reaches the backend. classify_and_route_intent is
@@ -84,7 +90,8 @@ class TestWiring:
         # sözleşme değişikliği, dolayısıyla iddia gevşetilmiyor, onunla
         # birlikte taşınıyor.
         # v2.19: `resolve_instruments`.
-        assert server.CONTRACT_VERSION == "v2.19"
+        # v2.20: `get_open_orders` + `cancel_order`.
+        assert server.CONTRACT_VERSION == "v2.20"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -101,7 +108,7 @@ class TestWiring:
             "orchestrator", "portfolio", "market_data", "market_research",
             "risk_strategy", "compliance", "transaction", "banking",
             "technical", "news", "scenario", "fundamentals", "cash_flow",
-            "report", "instrument",
+            "report", "instrument", "order",
         }
 
     def test_every_domain_module_exposes_register(self):

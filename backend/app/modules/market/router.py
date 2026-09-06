@@ -1006,8 +1006,12 @@ def ingest_funds(
     """Toplayıcının yazdığı yer. `news/ingest` ile aynı desen."""
     written = funds_service.upsert_funds(db, request.funds)
     prices = funds_service.upsert_prices(db, request.prices)
+    # İşlem gören fonların kotasyonu da tazelensin: portföy değeri ve
+    # bekleyen fon emirleri `market_quotes`tan okuyor, `market.funds`tan
+    # değil.
+    quotes = funds_service.sync_quotes(db)
     db.commit()
-    return {"funds_written": written, "prices_written": prices}
+    return {"funds_written": written, "prices_written": prices, "quotes_written": quotes}
 
 
 @router.get("/funds/meta/coverage", summary="Eksik fon verisi (servis işi)")
@@ -1038,7 +1042,6 @@ def _fund_row(db: Session, row) -> dict:
         "asOf": row.as_of,
         "categoryRank": row.category_rank,
         "categorySize": row.category_size,
-        "categoryReturn": float(row.category_return) if row.category_return is not None else None,
         "shares": float(row.shares) if row.shares is not None else None,
         "returns": funds_service.returns_for(series),
     }

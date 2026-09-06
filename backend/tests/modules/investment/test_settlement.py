@@ -423,3 +423,156 @@ class TestRecordCashMovement:
             description="x" * 400,
         )
         assert len(movement.description) == 255
+
+
+# --------------------------------------------------------------------------
+# İki fazlı takas: blokaj, sonra dolum ya da iade.
+#
+# Bu üçlü `settle`den ayrı bir yol ve HİÇ testi yoktu. Emir akışı onun
+# üzerine kuruluyor: onay parayı bloke ediyor, eşleştirici günler sonra
+# dolduruyor ya da iptal iade ediyor. Aradaki her adım ölçülmediği sürece
+# "bloke" ile "kayıp" birbirinden ayırt edilemez.
+# --------------------------------------------------------------------------
+class TestBlockFunds:
+    def test_a_buy_takes_the_cash_out_immediately(self):
+        """Çift harcamayı önleyen şey bu: aynı bakiyeye karşı iki emir
+        verilip ikisi de beklemeye alınabiliyor."""
+        fixture = Fixture()
+        owner = account(cash=25000.0)
+        applied = service.block_funds(fixture.db, proposal(), owner)
+
+        assert owner.cash_balance == pytest.approx(25000.0 - 3022.26)
+        assert applied["cash_delta"] == pytest.approx(-3022.26)
+        movement = next(m for m in fixture.added if isinstance(m, CashMovement))
+        assert movement.direction == "DEBIT"
+        assert "Blokesi" in movement.description
+
+    def test_a_buy_beyond_the_balance_is_refused_with_both_figures(self):
+        fixture = Fixture()
+        with pytest.raises(service.SettlementError) as excinfo:
+            service.block_funds(fixture.db, proposal(), account(cash=100.0))
+        assert "3.022,26" in str(excinfo.value).replace(",", "X").replace(".", ",").replace("X", ".")
+
+    def test_a_sell_takes_the_shares_out_not_the_cash(self):
+        """Çift satışı önleyen şey bu. Nakit HAREKET ETMİYOR: satışın parası
+        dolumda geliyor."""
+        position = SimpleNamespace(quantity=30.0, updated_at=None)
+        fixture = Fixture(position=position)
+        owner = account()
+        applied = service.block_funds(
+            fixture.db, proposal(transaction_type="SELL"), owner
+        )
+        assert position.quantity == pytest.approx(20.0)
+        assert applied["cash_delta"] == 0.0
+        assert owner.cash_balance == 25000.0
+
+    def test_selling_the_whole_position_removes_the_row(self):
+        """Sıfır adetlik bir satır, portföyde artık tutulmayan bir hisseyi
+        tutuluyormuş gibi gösterirdi."""
+        fixture = Fixture(position=SimpleNamespace(quantity=10.0, updated_at=None))
+        service.block_funds(fixture.db, proposal(transaction_type="SELL"), account())
+        assert len(fixture.deleted) == 1
+
+    def test_selling_more_than_is_held_is_refused(self):
+        fixture = Fixture(position=SimpleNamespace(quantity=3.0, updated_at=None))
+        with pytest.raises(service.SettlementError):
+            service.block_funds(fixture.db, proposal(transaction_type="SELL"), account())
+
+    def test_selling_with_no_position_at_all_is_refused(self):
+        fixture = Fixture(position=None)
+        with pytest.raises(service.SettlementError):
+            service.block_funds(fixture.db, proposal(transaction_type="SELL"), account())
+
+    def test_a_proposal_without_an_amount_is_refused(self):
+        """Sıfırlanmış bir tutarla bloke etmek, bedava bir emir olurdu."""
+        fixture = Fixture()
+        with pytest.raises(service.SettlementError):
+            service.block_funds(fixture.db, proposal(net_amount=None), account())
+
+    def test_an_unknown_direction_has_no_blocking_step(self):
+        fixture = Fixture()
+        with pytest.raises(service.SettlementError):
+            service.block_funds(
+                fixture.db, proposal(transaction_type="TRANSFER"), account()
+            )
+
+
+class TestFinalizeSettlement:
+    def test_a_buy_delivers_the_shares_without_touching_cash_again(self):
+        """Nakit blokajda çıktı. İkinci kez düşmek, aynı alımı iki kez
+        ödetirdi."""
+        fixture = Fixture(position=None)
+        owner = account(cash=21977.74)
+        service.finalize_settlement(fixture.db, proposal(), owner)
+
+        position = next(p for p in fixture.added if isinstance(p, PortfolioPosition))
+        assert float(position.quantity) == pytest.approx(10.0)
+        assert float(position.average_buy_price) == pytest.approx(301.75)
+        assert owner.cash_balance == 21977.74
+
+    def test_a_second_buy_averages_the_cost(self):
+        position = SimpleNamespace(
+            quantity=10.0, average_buy_price=200.0, updated_at=None
+        )
+        fixture = Fixture(position=position)
+        service.finalize_settlement(fixture.db, proposal(), account())
+        assert float(position.quantity) == pytest.approx(20.0)
+        assert float(position.average_buy_price) == pytest.approx((200.0 + 301.75) / 2)
+
+    def test_a_sell_pays_the_cash_the_blocked_shares_were_worth(self):
+        fixture = Fixture()
+        owner = account(cash=25000.0)
+        applied = service.finalize_settlement(
+            fixture.db, proposal(transaction_type="SELL"), owner
+        )
+        assert owner.cash_balance == pytest.approx(25000.0 + 3022.26)
+        assert applied["cash_delta"] == pytest.approx(3022.26)
+
+    def test_an_unknown_direction_is_refused(self):
+        fixture = Fixture()
+        with pytest.raises(service.SettlementError):
+            service.finalize_settlement(
+                fixture.db, proposal(transaction_type="TRANSFER"), account()
+            )
+
+
+class TestRollbackFunds:
+    def test_a_cancelled_buy_returns_the_cash_to_the_kurus(self):
+        fixture = Fixture()
+        owner = account(cash=21977.74)
+        service.rollback_funds(fixture.db, proposal(), owner)
+
+        assert owner.cash_balance == pytest.approx(25000.0)
+        movement = next(m for m in fixture.added if isinstance(m, CashMovement))
+        assert movement.direction == "CREDIT"
+        assert "İade" in movement.description
+
+    def test_a_cancelled_sell_puts_the_shares_back_on_an_existing_row(self):
+        position = SimpleNamespace(quantity=20.0, updated_at=None)
+        fixture = Fixture(position=position)
+        service.rollback_funds(
+            fixture.db, proposal(transaction_type="SELL"), account()
+        )
+        assert position.quantity == pytest.approx(30.0)
+
+    def test_a_cancelled_sell_recreates_a_row_that_was_emptied(self):
+        """Blokaj pozisyonu SİLİYOR: tamamı satılan bir emrin iptalinde geri
+        koyacak satır yok ve olmayan satıra eklemek hisseyi yok ederdi."""
+        fixture = Fixture(position=None)
+        service.rollback_funds(
+            fixture.db, proposal(transaction_type="SELL"), account()
+        )
+        position = next(p for p in fixture.added if isinstance(p, PortfolioPosition))
+        assert float(position.quantity) == pytest.approx(10.0)
+        assert float(position.average_buy_price) == pytest.approx(301.75)
+
+    def test_an_unknown_direction_moves_nothing(self):
+        """Tanımadığı bir türde sessizce para iade etmek, olmayan bir
+        blokajı geri vermek olurdu."""
+        fixture = Fixture()
+        owner = account(cash=100.0)
+        service.rollback_funds(
+            fixture.db, proposal(transaction_type="TRANSFER"), owner
+        )
+        assert owner.cash_balance == 100.0
+        assert fixture.added == []

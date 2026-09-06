@@ -533,23 +533,116 @@ class TestBreakdownHelpers:
         proposal = SimpleNamespace(
             id="PROP-1", symbol="THYAO", status="CONFIRMED", transaction_type="BUY",
             quantity=10, payload={"estimate": {"reference_price": 304.0}}, created_at=NOW,
+            limit_price=None,
         )
         db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [proposal]
         rows = market_service.recent_orders(db, "user-1")
         assert rows[0]["status"] == "Gerçekleşti"
         assert rows[0]["type"] == "Alış"
         assert rows[0]["total"] == pytest.approx(3040.0)
+        # Gerçekleşmiş bir emir geri alınamaz; iptal düğmesi görünmemeli.
+        assert rows[0]["cancellable"] is False
+        assert rows[0]["limitPrice"] is None
+
+    def test_a_waiting_order_carries_its_trigger_and_is_cancellable(self):
+        """Arayüz iptal düğmesini Türkçe etikete bakarak karar vermemeli:
+        etiket bir gösterim, `cancellable` bir yetki."""
+        db = MagicMock(spec=Session)
+        proposal = SimpleNamespace(
+            id="PROP-3", symbol="THYAO", status="WAITING_PRICE", transaction_type="BUY",
+            quantity=5, payload={"estimate": {"reference_price": 290.0}}, created_at=NOW,
+            limit_price=290.0,
+        )
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [proposal]
+        rows = market_service.recent_orders(db, "user-1")
+        assert rows[0]["status"] == "Fiyat bekliyor"
+        assert rows[0]["cancellable"] is True
+        assert rows[0]["limitPrice"] == pytest.approx(290.0)
 
     def test_an_unpriced_proposal_totals_zero_rather_than_raising(self):
         db = MagicMock(spec=Session)
         proposal = SimpleNamespace(
             id="PROP-2", symbol=None, status="REJECTED_VALIDATION", transaction_type="SELL",
-            quantity=None, payload={}, created_at=NOW,
+            quantity=None, payload={}, created_at=NOW, limit_price=None,
         )
         db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [proposal]
         rows = market_service.recent_orders(db, "user-1")
         assert rows[0]["type"] == "Satış"
         assert rows[0]["total"] == 0.0
+
+
+class TestBlockedCash:
+    """Bekleyen emirlerin tuttuğu nakit.
+
+    GTC bir emir parayı süresiz tutabiliyor ve bakiyede eksilen ama nedeni
+    hiçbir yerde yazmayan bir tutar kullanıcıya bir HATA gibi görünüyor.
+    """
+
+    def _db(self, rows):
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.filter.return_value.all.return_value = rows
+        return db
+
+    def _waiting(self, kind="BUY", amount=1000.0, fx=None):
+        estimate = {"net_amount": amount, "currency": "TRY"}
+        if fx is not None:
+            estimate["fx"] = fx
+            estimate["currency"] = fx["from_currency"]
+        return SimpleNamespace(
+            transaction_type=kind, payload={"estimate": estimate},
+        )
+
+    def test_waiting_buys_are_summed(self):
+        db = self._db([self._waiting(), self._waiting(amount=250.0)])
+        assert market_service.blocked_cash(db, "user-1") == pytest.approx(1250.0)
+
+    def test_a_waiting_sell_blocks_shares_not_cash(self):
+        """Satışta bloke edilen pozisyonun kendisi ve o zaten pozisyon
+        satırından düşmüş görünüyor."""
+        db = self._db([self._waiting(kind="SELL")])
+        assert market_service.blocked_cash(db, "user-1") == 0.0
+
+    def test_a_foreign_order_is_converted_at_the_frozen_rate(self):
+        db = self._db([self._waiting(
+            amount=100.0,
+            fx={"rate": 41.0, "from_currency": "USD", "to_currency": "TRY"},
+        )])
+        assert market_service.blocked_cash(db, "user-1") == pytest.approx(4100.0)
+
+    def test_a_foreign_order_without_a_rate_is_left_out(self):
+        """1.0 varsaymak, 15.098 TL'lik bir blokajı 315 TL göstermek
+        olurdu."""
+        db = self._db([self._waiting(
+            amount=100.0,
+            fx={"rate": None, "from_currency": "USD", "to_currency": "TRY"},
+        )])
+        assert market_service.blocked_cash(db, "user-1") == 0.0
+
+    def test_an_unpriced_order_is_left_out(self):
+        db = self._db([SimpleNamespace(
+            transaction_type="BUY", payload={"estimate": {}},
+        )])
+        assert market_service.blocked_cash(db, "user-1") == 0.0
+
+    def test_an_anonymous_caller_has_nothing_blocked(self):
+        """Süzgeçsiz bir toplam, herkesin blokajını tek kişiye
+        gösterirdi."""
+        db = MagicMock(spec=Session)
+        assert market_service.blocked_cash(db, None) == 0.0
+        db.query.assert_not_called()
+
+
+class TestDirectionLabel:
+    """Emir listesi ve bildirimler AYNI kelimeyi kullanmalı; ikisi
+    ayrışırsa aynı emir iki farklı yönde okunur."""
+
+    @pytest.mark.parametrize("kind", ["BUY", "buy", "ALIS", "ALIŞ"])
+    def test_every_spelling_of_a_buy_reads_as_alis(self, kind):
+        assert market_service.direction_tr(kind) == "Alış"
+
+    @pytest.mark.parametrize("kind", ["SELL", "SATIŞ", None, ""])
+    def test_anything_else_reads_as_satis(self, kind):
+        assert market_service.direction_tr(kind) == "Satış"
 
 
 class TestAccount:
@@ -671,7 +764,7 @@ class TestAliasResolution:
         "typed,expected",
         [
             ("XAU", "XAUUSD"), ("xau", "XAUUSD"), ("altın", "XAUUSD"),
-            ("ALTIN", "XAUUSD"), ("gold", "XAUUSD"), ("ons", "XAUUSD"),
+            ("ALTIN", "XAUUSD"), ("gold", "XAUUSD"), ("ons altın", "XAUUSD"),
             ("dolar", "USDTRY"), ("Dolar", "USDTRY"), ("USD", "USDTRY"),
             ("euro", "EURTRY"), ("EUR", "EURTRY"), ("avro", "EURTRY"),
             ("bist100", "XU100"), ("BIST 100", "XU100"),
@@ -681,6 +774,27 @@ class TestAliasResolution:
         target = product(expected)
         db = self._db(found=target)
         assert market_service.resolve_symbol(db, typed) is target
+
+    def test_a_bare_ons_is_a_fund_code_not_gold(self):
+        """ONS gerçek bir TEFAS fon kodu (İŞ PORTFÖY ONİKİNCİ SERBEST).
+        Takma ad olarak dururken ÖLÇÜLDÜ: "ONS al" diyen biri altın alıyordu.
+        Altını isteyen "altın", "ons altın", "gold" ya da "xau" yazıyor."""
+        assert "ons" not in market_service._ALIASES
+
+    def test_a_real_symbol_beats_an_everyday_word(self):
+        """Sembol KAYITLI BİR GERÇEK; takma ad kullanıcının ne demek
+        istediğine dair bir tahmin. Tahmin gerçeği geçmemeli -- sıra
+        tersken fon evreni köprülendikçe günlük dildeki bir kelime gerçek
+        bir kodun önüne geçiyordu.
+
+        Evrende İKİSİ de var: "XAU" kodlu bir enstrüman ve takma adın işaret
+        ettiği XAUUSD. Sıra alias-önce olsaydı XAUUSD dönerdi."""
+        typed_code = product("XAU")
+        gold = product("XAUUSD")
+        db = Universe(typed_code, gold).db
+        assert market_service.resolve_symbol(db, "XAU") is typed_code
+        # Takma ad hâlâ çalışıyor: kod OLMAYAN kelimeler için.
+        assert market_service.resolve_symbol(db, "altın") is gold
 
     def test_the_alias_wins_over_a_name_that_merely_contains_the_word(self):
         """"altın" is not in XAUUSD's ticker and IS in another company's name,

@@ -15,7 +15,7 @@ bırakması olurdu.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional, Sequence
 
 from sqlalchemy import select, update
@@ -77,6 +77,136 @@ def upsert_funds(db: Session, rows: Sequence[dict[str, Any]]) -> int:
         if not values.get("title"):
             continue
         db.execute(insert(Fund).values(code=code, **values))
+        written += 1
+    return written
+
+
+#: Fonun enstrüman evrenindeki karşılığı. `data_symbol` BOŞ: yfinance bir
+#: TEFAS fon kodunu fiyatlayamaz ve boş bırakmak "bunu fiyatlamaya çalışma"
+#: demek (bkz. `InvestmentProduct.data_symbol`). Fiyat `market.funds`tan
+#: geliyor.
+FUND_PRODUCT_TYPE = "fund"
+FUND_MARKET = "TEFAS"
+
+#: TEFAS fiyatının `market_quotes` satırındaki kaynağı. Sağlayıcı adı
+#: kullanıcıya çıkmıyor (`sanitize.py`), ama hangi beslemenin yazdığı
+#: kayıtta durmalı.
+FUND_QUOTE_SOURCE = "TEFAS_DAILY"
+
+
+def ensure_tradable(db: Session, code: str):
+    """Bir fonu, İHTİYAÇ DUYULDUĞUNDA enstrüman evrenine yazar.
+
+    Emirler, pozisyonlar, portföy değerlemesi ve risk yollarının HEPSİ
+    `investment.investment_products` üzerinden geçiyor. Fonlar ayrı bir
+    tabloda durduğu sürece "fon al" diye bir yol yoktu; paralel bir fon-emri
+    yolu yazmak ise `settle`i ikinci kez yazmak olurdu.
+
+    **Toptan değil, tek tek.** 2.602 fonu evrene yazmak, Piyasalar ekranını
+    ve enstrüman listesini kimsenin aramadığı fon kodlarıyla doldururdu --
+    Fonlar ekranı zaten var ve orası fonların yeri. Burası yalnızca gerçekten
+    işlem gören fonu köprülüyor.
+
+    Var olan bir enstrüman satırına DOKUNMUYOR: aynı kodu taşıyan bir hisse
+    buradan sessizce ezilmemeli.
+    """
+    from app.modules.investment.models import InvestmentProduct
+
+    code = (code or "").strip().upper()
+    if not code:
+        return None
+    existing = db.execute(
+        select(InvestmentProduct).where(InvestmentProduct.symbol == code)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    fund = db.get(Fund, code)
+    if fund is None or not fund.active:
+        return None
+
+    product = InvestmentProduct(
+        symbol=code,
+        data_symbol=None,
+        name=fund.title,
+        product_type=FUND_PRODUCT_TYPE,
+        market=FUND_MARKET,
+        currency_code="TRY",
+        status="active",
+    )
+    db.add(product)
+    db.flush()
+    sync_quotes(db, [code])
+    # İkinci `flush` ŞART: oturum `autoflush=False` ile kuruluyor
+    # (`core/database.py`), dolayısıyla `sync_quotes`un yazdığı kotasyon
+    # aynı istek içinde bir SELECT'e görünmüyor. Ölçüldü -- fonun ilk emri
+    # "Fiyat bilgisi bulunamayan enstrüman: GRO" ile reddediliyordu, oysa
+    # fiyat o anda yazılmıştı.
+    db.flush()
+    return product
+
+
+def sync_quotes(db: Session, codes: Optional[Sequence[str]] = None) -> int:
+    """İşlem gören fonların NAV'ını `market_quotes`a yansıtır.
+
+    **Tek fiyat kuralı:** portföy değerlemesi, pozisyon satırı ve risk
+    hesabının hepsi `investment.market_quotes`tan okuyor. Fon fiyatını orada
+    yazmamak, satın alınmış bir fon pozisyonunun değerinin boş görünmesi
+    demekti.
+
+    Yalnızca evrende KARŞILIĞI OLAN fonlar yazılıyor -- yani birilerinin
+    işlem yaptığı fonlar. Bütün fonlara kotasyon açmak, Piyasalar ekranındaki
+    her listeye 2.602 satır eklerdi.
+
+    `change_percent` bir önceki NAV'dan hesaplanıyor; ikinci bir gün yoksa
+    NULL kalıyor. Sıfır yazmak, "gün içinde değişmedi" iddiası olurdu.
+    """
+    from app.modules.investment.models import InvestmentProduct, MarketQuote
+
+    query = select(InvestmentProduct.id, InvestmentProduct.symbol).where(
+        InvestmentProduct.product_type == FUND_PRODUCT_TYPE
+    )
+    if codes is not None:
+        query = query.where(InvestmentProduct.symbol.in_([c.upper() for c in codes]))
+    products = db.execute(query).all()
+    if not products:
+        return 0
+
+    funds = {
+        fund.code: fund
+        for fund in db.execute(
+            select(Fund).where(Fund.code.in_([symbol for _, symbol in products]))
+        ).scalars()
+    }
+    written = 0
+    for product_id, symbol in products:
+        fund = funds.get(symbol)
+        if fund is None or fund.price is None or fund.as_of is None:
+            continue
+        series = price_series(db, symbol, limit=2)
+        previous = float(series[0].price) if len(series) > 1 else None
+        price = float(fund.price)
+        change = None if previous in (None, 0) else price - previous
+        db.merge(
+            MarketQuote(
+                id=f"fundq:{symbol}",
+                product_id=product_id,
+                price=price,
+                change_amount=change,
+                change_percent=(
+                    None if change is None else round(change / previous * 100, 4)
+                ),
+                previous_close=previous,
+                volume=None,
+                # NAV'ın kendi günü. Gün içi bir zaman damgası uydurmak,
+                # olmayan bir anlık fiyatı varmış gibi göstermek olurdu.
+                market_timestamp=datetime.combine(
+                    fund.as_of, time(0, 0), tzinfo=timezone.utc
+                ),
+                received_at=datetime.now(timezone.utc),
+                source=FUND_QUOTE_SOURCE,
+            )
+        )
         written += 1
     return written
 

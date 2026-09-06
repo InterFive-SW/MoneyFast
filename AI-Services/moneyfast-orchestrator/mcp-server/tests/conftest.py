@@ -125,6 +125,12 @@ ROUTES = {
     "/banking/cash-flow": "cash_flow",
     "/banking/bills/lookup": "lookup",
     "/banking/payments/stage": "payment_stage",
+    # v2.20. Bekleyen emirler. İki yol tek bir önekin altında ve SIRA
+    # önemli: iptal yolu "/orders/" içeriyor, listeleme yolu ise "/orders"
+    # ile BİTİYOR -- daha uzun parça önce yazılmazsa iptal isteği listeleme
+    # olarak eşleşirdi.
+    "/orders/": "order_cancel",
+    "/orders": "orders",
     # Served by the rag service on its own base URL, matched on path alone.
     "/search": "search",
 }

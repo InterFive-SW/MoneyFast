@@ -109,3 +109,102 @@ Yani ağ geçidi ayakta, arkasındaki servis değil. Kaynak bu durumu ayrı
 logluyor (`upstream unavailable`) ve tur yarın yeniden deniyor. API geri
 geldiğinde doğrulanacak ilk şey: fon sayısının TEFAS'ın kendi ekranındaki
 "2.041 sonuç bulundu" ifadesiyle karşılaştırılması.
+
+## Fon geçmişi tohumlanıyor
+
+Fon getirileri seriden **hesaplanıyor**, saklanmıyor (`market/funds.py`).
+Yani NAV serisi olmayan bir fonun her getiri sütunu `NA` görünüyor — ve seri
+fon BAŞINA bir istek. Ölçülen: tek istek beş yılı veriyor (`periyod: 60`,
+1.258 satır), dolayısıyla sorun derinlik değil, 2.602 isteğin süresi; 5
+saniyelik aralıkla ~3,6 saat.
+
+`ingestor/backfill_funds.py` bunu 25'lik parçalar hâlinde ve kaldığı yerden
+devam ederek yapıyor. Sonuç `seeds/market/funds.csv.gz` (evren) ve
+`seeds/market/fund_prices.csv.gz` (bir yıllık NAV) olarak commit'leniyor;
+`scripts/export_market.py` yazıyor, `scripts/load_market.py` her açılışta
+teklif ediyor. Mumlarla aynı yol: geçici tabloya `COPY`, sonra tek
+`INSERT ... ON CONFLICT DO NOTHING`, ve künyedeki satır sayısı "zaten dolu"
+demeyi mümkün kılıyor.
+
+Bir yıl, beş değil: beş yılın tamamı ~3,2 milyon satır ve bu, bir klonun
+açılışta ihtiyaç duyduğu ZEMİN değil — toplayıcı üstüne çıkıyor.
+
+**Pre-commit hook'una BAĞLI DEĞİL.** Kullanıcı tohumları her commit'te
+yeniden yazılıyor; bu ise elle üretilen bir arşiv ve gzip blob'u
+delta'lanmadığı için her yeniden yazma kalıcı geçmiş demek (KAP gövdelerinde
+alınan kararın aynısı).
+
+## Fon almak
+
+Fonlar bir dönem hiç alınamıyordu: `transaction_proposals.symbol`
+`investment.investment_products` (`symbol`) üzerinden çözülüyor, fonlar ise
+`market.funds` (`code`) içinde — iki ayrı evren.
+
+Köprü **ilk emirde** kuruluyor (`funds.ensure_tradable`), toptan değil:
+2.602 fonu enstrüman evrenine yazmak, Piyasalar ekranını ve enstrüman
+listesini kimsenin aramadığı fon kodlarıyla doldururdu, ve Fonlar ekranı
+zaten var. Yazılan satır `product_type='fund'`, `market='TEFAS'` ve
+`data_symbol=NULL` taşıyor — sonuncusu "bunu fiyatlamaya çalışma" demek,
+çünkü yfinance bir TEFAS kodunu fiyatlayamaz.
+
+Fiyat `funds.sync_quotes` ile `market_quotes`a yansıtılıyor, yalnızca
+köprülenmiş fonlar için. Böylece portföy değerlemesi, pozisyon satırı, risk
+ve emir eşleştirme yollarının hepsi olduğu gibi çalışıyor; paralel bir
+fon-emri yolu yazmak `settle`i ikinci kez yazmak olurdu.
+
+**Fon limit emri günde bir kez kontrol ediliyor** — NAV günde bir
+yayımlanıyor ve gün içi fiyat yok. Bu bir hata değil, ürünün doğası; arayüz
+ve sohbet ikisi de bunu yazıyor, yoksa emrin donduğu sanılır.
+
+
+## `fonProfilDtyGetir` sanıldığı şeyi döndürmüyor
+
+Ölçüldü ve düzeltildi. O uç fonun profilini değil, **karşılaştırma
+grafiğinin gösterge listesini** döndürüyor:
+
+```json
+{"fonKodu": "ALTIN",   "fonTuru": "ALTIN",   "fonTurGetiri": 0.466166}
+{"fonKodu": "BIST100", "fonTuru": "BIST100", "fonTurGetiri": 0.286596}
+{"fonKodu": "BIST30",  "fonTuru": "BIST30",  "fonTurGetiri": 0.383213}
+```
+
+Yanıt **her fon için aynı** — `fonKodu` istenen fonu değil, göstergeyi
+adlandırıyor. Toplayıcı ilk satırın `fonTuru`sunu şemsiye türü,
+`fonTurGetiri`sini kategori getirisi sanıyordu. Sonuç: 1.054 aktif fonun
+1.021'i "ALTIN" şemsiyesine yazıldı ve hepsine aynı %46,6 kategori
+getirisi kondu. Boş bir sütundan kötü — uydurulmuş bir değer doğruymuş
+gibi süzülüyordu.
+
+**Şemsiye türünün doğru kaynağı iki uçtan geliyor:**
+
+| Uç | Ne verir |
+|---|---|
+| `POST /api/funds/fonTurGetir` | Şemsiye listesi: `sfonTuru` (id) → `sfonTurAciklama` (ad) |
+| `POST /api/funds/fonGnlBlgSiraliGetir` + `sfonTurKod` | O şemsiyedeki fonlar |
+
+Yani eşleme fon başına değil **şemsiye başına** bir istek: on iki şemsiye ×
+fon tipi, 1.054 değil. `INGESTOR_TEFAS_PROFILE_BUDGET` bu yüzden kalktı —
+dilimlenecek bir şey yok.
+
+**Süzgeç her fon tipinde uygulanmıyor ve bu ölçülüyor.** `YAT`'ta
+`sfonTurKod` gerçekten süzüyor (Borçlanma 85, Hisse 192, Para Piyasası 81,
+sıfır kesişim). `EMK` ve `BYF`'de süzülmüyor: aynı fon (`AAJ`, `BLH`) her
+turda iki farklı şemsiyede birden dönüyor. Bir fon tipi içinde çakışma
+görüldüğünde **o tipin tamamı bırakılıyor** — yalnızca çakışan fonu
+düşürmek, aynı hatalı listenin geri kalanını doğruymuş gibi yazardı.
+
+Kısıtlanan (429) tek bir şemsiye ise yalnızca kendini düşürüyor, tipi
+değil: listeler bağımsız, bir fon yalnızca göründüğü listeden ad alıyor.
+Tipin tamamını bırakmak, tek bir sayfa yüzünden on bir doğru şemsiyeyi de
+atmak demekti — ölçüldü, bir turda `YAT`'ın tamamı bu yüzden kayboldu.
+Kısıtlanan sayfa bir kez, otuz saniye sonra yeniden deneniyor; ısrar
+ederse o şemsiye bir sonraki tura kalıyor.
+
+Sonuç (6 Eylül 2026): 1.054 aktif fonun **1.052'sinde** şemsiye türü dolu,
+dokuz şemsiye adı altında. Kalan iki fon `EMK`/`BYF` tarafında.
+
+**`category_return` sütunu düştü** (migration 0041). Doğru kaynağı yok:
+gösterge listesi fonun kategorisiyle eşleşmiyor ve TEFAS'ın döndürdüğü
+hiçbir alan "kategorinin ortalama getirisi" değil. Kategori **sırası**
+(`category_rank` / `category_size`) gerçek ve kalıyor; "1.333 fon içinde
+751." zaten aynı soruyu cevaplıyor.

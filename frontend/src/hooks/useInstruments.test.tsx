@@ -53,6 +53,17 @@ describe('useInstruments', () => {
     expect(result.current.instruments[0].market).toBe(expected)
   })
 
+  it('keeps the ISO code beside the display unit', async () => {
+    /* İkisi AYRI: gösterim işareti ekrana, ISO kodu işlem yoluna gidiyor.
+       Yalnızca "$" taşındığında `TradeModal` kendi varsayılanına düşüyor ve
+       bir dolar hissesi liraya fiyatlanıyordu. */
+    mockApi([apiRow({ currency: 'USD' })])
+    const { result } = renderHook(() => useInstruments())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.instruments[0].unit).toBe('$')
+    expect(result.current.instruments[0].currency).toBe('USD')
+  })
+
   it('maps the currency onto a display unit', async () => {
     mockApi([apiRow({ currency: 'USD' })])
     const { result } = renderHook(() => useInstruments())

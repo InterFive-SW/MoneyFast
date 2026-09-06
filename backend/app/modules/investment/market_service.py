@@ -1430,6 +1430,11 @@ def sector_by_symbol(db: Session) -> dict[str, str]:
               InstrumentFundamentals.product_id == InvestmentProduct.id)
         .where(InstrumentFundamentals.sector.isnot(None))
     )
+    # Elle yazılmış sektör YOK. Bir dönem yirmi iki sembol için sabit bir
+    # sözlük buraya eklenmişti ("AAPL: Teknoloji (ABD)" gibi): ekranda
+    # ölçülmüş sektörle uydurulmuş sektör ayırt edilemez hâle geliyordu ve
+    # mevcut test düşüyordu. Sektörü olmayan enstrüman `Bilinmiyor`
+    # görünür -- ölçülmüş bir boşluk, uydurulmuş bir değer değil.
     return {symbol: sector for symbol, sector in db.execute(statement).all()}
 
 

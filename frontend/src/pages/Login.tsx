@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import logo from '../assets/logo-inline.png'
+import logo from '../assets/logo-icon.png'
 import { api } from '../api/client'
 
 export default function Login() {
@@ -55,15 +55,11 @@ export default function Login() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-300">
-      {/* Animated Background Blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brandBlue/20 blur-[120px] mix-blend-screen animate-blob" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-600/20 blur-[120px] mix-blend-screen animate-blob animation-delay-2000" />
-
+    <div className="relative min-h-screen antialiased bg-hologram-global text-slate-300 overflow-hidden">
       {/* Logo */}
       <header className="absolute left-6 top-6 z-10 sm:left-10 sm:top-8">
         <Link to="/" className="flex items-center gap-3">
-          <img src={logo} alt="MoneyFast Logo" className="h-20 sm:h-28 w-auto object-contain transition-transform duration-300 hover:scale-105" />
+          <img src={logo} alt="MoneyFast Logo" className="h-10 sm:h-12 w-auto object-contain transition-transform duration-300 hover:scale-105" />
         </Link>
       </header>
 
@@ -73,17 +69,11 @@ export default function Login() {
           <div className="mx-auto max-w-md">
             {/* Başlık */}
             <div className="mb-9 text-center">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-brandBlue/10 border border-brandBlue/20 px-3 py-1.5 text-xs font-semibold text-brandBlue">
-                <span className="h-2 w-2 rounded-full bg-brandBlue" />
-                Güvenli Giriş
-              </div>
-
-              <h2 className="text-3xl font-bold tracking-tight text-white">
-                Hoş geldin 👋
+              <h2 className="text-3xl font-bold tracking-tight text-gradient-hero inline-block">
+                MoneyFast'e Hoş Geldin
               </h2>
-
               <p className="mt-3 text-sm leading-6 text-slate-400">
-                MoneyFast hesabına giriş yaparak finansal görünümüne eriş.
+                Kişiselleştirilmiş finansal görünümünüze güvenli şekilde erişin
               </p>
             </div>
 
@@ -99,17 +89,7 @@ export default function Login() {
 
                 <div className="relative">
                   <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <circle cx="12" cy="8" r="4" />
                       <path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" />
                     </svg>
@@ -123,9 +103,7 @@ export default function Login() {
                     autoComplete="username"
                     maxLength={11}
                     value={tcNo}
-                    onChange={(event) =>
-                      handleTcChange(event.target.value)
-                    }
+                    onChange={(event) => handleTcChange(event.target.value)}
                     placeholder="11 haneli T.C. Kimlik No"
                     className="w-full rounded-2xl border border-white/10 bg-white/5 py-3.5 pl-12 pr-4 text-sm text-white outline-none transition duration-200 placeholder:text-slate-500 hover:border-white/20 focus:border-brandBlue focus:bg-white/10 focus:ring-4 focus:ring-brandBlue/20"
                   />
@@ -143,17 +121,7 @@ export default function Login() {
 
                 <div className="relative">
                   <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <rect x="5" y="10" width="14" height="10" rx="2" />
                       <path d="M8 10V7a4 4 0 0 1 8 0v3" />
                     </svg>
@@ -165,21 +133,28 @@ export default function Login() {
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
                     value={password}
-                    onChange={(event) =>
-                      setPassword(event.target.value)
-                    }
+                    onChange={(event) => setPassword(event.target.value)}
                     placeholder="Şifrenizi girin"
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 py-3.5 pl-12 pr-20 text-sm text-white outline-none transition duration-200 placeholder:text-slate-500 hover:border-white/20 focus:border-brandBlue focus:bg-white/10 focus:ring-4 focus:ring-brandBlue/20"
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 py-3.5 pl-12 pr-12 text-sm text-white outline-none transition duration-200 placeholder:text-slate-500 hover:border-white/20 focus:border-brandBlue focus:bg-white/10 focus:ring-4 focus:ring-brandBlue/20"
                   />
 
                   <button
                     type="button"
-                    onClick={() =>
-                      setShowPassword((current) => !current)
-                    }
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400 transition hover:text-brandBlue"
+                    onClick={() => setShowPassword((current) => !current)}
+                    aria-label={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-white"
                   >
-                    {showPassword ? 'Gizle' : 'Göster'}
+                    {showPassword ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    )}
                   </button>
                 </div>
               </div>

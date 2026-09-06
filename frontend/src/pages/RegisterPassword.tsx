@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
-import logo from '../assets/logo-inline.png'
+import logo from '../assets/logo-icon.png'
 import { api } from '../api/client'
 
 export default function RegisterPassword() {
@@ -18,7 +18,9 @@ export default function RegisterPassword() {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [acceptedTerms, setAcceptedTerms] = useState(false)
+
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
@@ -57,6 +59,10 @@ export default function RegisterPassword() {
       return
     }
 
+
+    // Sözleşme onayı bir SUNUM ayrıntısı değil, bir kapı. Kutu ve bu
+    // kontrol bir dönem silinmişti ve kullanıcı sözleşmeyi onaylamadan
+    // kayıt olabiliyordu.
     if (!acceptedTerms) {
       setError('Devam etmek için kullanıcı sözleşmesini onaylamalısınız.')
       return
@@ -86,15 +92,11 @@ export default function RegisterPassword() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-300">
-      {/* Animated Background Blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brandBlue/20 blur-[120px] mix-blend-screen animate-blob" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-600/20 blur-[120px] mix-blend-screen animate-blob animation-delay-2000" />
-
+    <div className="relative min-h-screen antialiased bg-hologram-global text-slate-300 overflow-hidden">
       {/* Logo */}
       <header className="absolute left-6 top-6 z-10 sm:left-10 sm:top-8">
         <Link to="/" className="flex items-center gap-3">
-          <img src={logo} alt="MoneyFast Logo" className="h-20 sm:h-28 w-auto object-contain transition-transform duration-300 hover:scale-105" />
+          <img src={logo} alt="MoneyFast Logo" className="h-10 sm:h-12 w-auto object-contain transition-transform duration-300 hover:scale-105" />
         </Link>
       </header>
 
@@ -114,34 +116,29 @@ export default function RegisterPassword() {
               </h2>
               
               <p className="mb-8 text-slate-400">
-                Güvenliğiniz için kayıt olduğunuz e-posta adresine bir doğrulama bağlantısı gönderdik. 
-                Sisteme giriş yapabilmek için lütfen e-postanızı kontrol edin ve hesabınızı doğrulayın.
+                Güvenliğiniz için kayıt olduğunuz e-posta adresine bir doğrulama bağlantısı gönderildi 
+                <br />
+                Giriş yapabilmek için lütfen e-postanızı kontrol edin ve hesabınızı doğrulayın
               </p>
 
               <Link
                 to="/login"
-                className="inline-flex items-center justify-center rounded-2xl bg-brandBlue px-6 py-3 font-semibold text-white shadow-lg shadow-brandBlue/20 transition hover:-translate-y-0.5 hover:bg-brandBlue/90"
+                className="inline-flex w-full items-center justify-center rounded-2xl bg-brandBlue px-4 py-3.5 font-semibold text-white transition hover:bg-blue-600"
               >
-                Giriş Ekranına Git
+                Giriş Yap
               </Link>
             </div>
           ) : (
             <div className="mx-auto max-w-md">
               {/* Başlık */}
-              <div className="mb-8 text-center">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-brandBlue/10 border border-brandBlue/20 px-3 py-1.5 text-xs font-semibold text-brandBlue">
-                <span className="h-2 w-2 rounded-full bg-brandBlue" />
-                Hesap Oluştur
+              <div className="mb-8 text-center flex flex-col items-center">
+                <h1 className="text-3xl font-bold tracking-tight text-gradient-hero inline-block">
+                  Şifre Belirleme
+                </h1>
+                <p className="mt-3 text-sm leading-6 text-slate-400">
+                  Hesabınızın güvenliği için güçlü bir şifre oluşturun
+                </p>
               </div>
-
-              <h1 className="text-3xl font-bold tracking-tight text-white">
-                Şifreni oluştur
-              </h1>
-
-              <p className="mt-3 text-sm leading-6 text-slate-400">
-                MoneyFast hesabın için güvenli bir şifre belirle.
-              </p>
-            </div>
 
             {/* Adım göstergesi */}
             <div className="mb-3 flex items-center gap-3">
@@ -179,9 +176,20 @@ export default function RegisterPassword() {
                     onClick={() =>
                       setShowPassword((current) => !current)
                     }
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400 transition hover:text-brandBlue"
+                    aria-label={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-white"
                   >
-                    {showPassword ? 'Gizle' : 'Göster'}
+                    {showPassword ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    )}
                   </button>
                 </div>
 
@@ -199,30 +207,47 @@ export default function RegisterPassword() {
                   Şifre Tekrar
                 </label>
 
-                <input
-                  id="confirmPassword"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(event) =>
-                    setConfirmPassword(event.target.value)
-                  }
-                  placeholder="Şifrenizi tekrar girin"
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 text-sm text-white outline-none transition placeholder:text-slate-500 hover:border-white/20 focus:border-brandBlue focus:bg-white/10 focus:ring-4 focus:ring-brandBlue/20"
-                />
+                <div className="relative">
+                  <input
+                    id="confirmPassword"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(event) =>
+                      setConfirmPassword(event.target.value)
+                    }
+                    placeholder="Şifrenizi tekrar girin"
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 pr-20 text-sm text-white outline-none transition placeholder:text-slate-500 hover:border-white/20 focus:border-brandBlue focus:bg-white/10 focus:ring-4 focus:ring-brandBlue/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((curr) => !curr)}
+                    aria-label={showConfirmPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-white"
+                  >
+                    {showConfirmPassword ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Sözleşme */}
-              <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-slate-800 p-4">
+              <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-white/5 p-4">
                 <input
                   type="checkbox"
                   checked={acceptedTerms}
-                  onChange={(event) =>
-                    setAcceptedTerms(event.target.checked)
-                  }
+                  onChange={(event) => setAcceptedTerms(event.target.checked)}
                   className="mt-0.5 h-4 w-4 accent-brandBlue"
                 />
-
                 <span className="text-sm leading-5 text-slate-400">
                   <button
                     type="button"
@@ -230,7 +255,7 @@ export default function RegisterPassword() {
                   >
                     Kullanıcı sözleşmesini
                   </button>{' '}
-                  okudum ve kabul ediyorum.
+                  okudum ve kabul ediyorum
                 </span>
               </label>
 

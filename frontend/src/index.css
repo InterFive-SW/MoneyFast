@@ -82,3 +82,47 @@
     display: none;
   }
 }
+
+
+/* --- Appended from old project --- */
+.bg-hologram-global {
+  background-color: #000000;
+  background-image:
+    radial-gradient(circle at 90% 10%, rgba(139, 92, 246, 0.10) 0%, transparent 40%),
+    radial-gradient(circle at 75% 50%, rgba(56, 189, 248, 0.06) 0%, transparent 50%),
+    radial-gradient(circle at 90% 70%, rgba(14, 165, 233, 0.06) 0%, transparent 50%),
+    radial-gradient(circle at 70% 95%, rgba(139, 92, 246, 0.08) 0%, transparent 55%),
+    radial-gradient(circle at 90% 90%, rgba(14, 165, 233, 0.07) 0%, transparent 60%);
+  background-attachment: fixed;
+}
+
+.timeline-track {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.05);
+  z-index: 0;
+  border-radius: 4px;
+}
+
+.timeline-progress {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: linear-gradient(to bottom, #FDE68A, #F472B6, #60A5FA);
+  z-index: 1;
+  border-radius: 4px;
+  box-shadow: 0 0 16px rgba(244, 114, 182, 0.5);
+}
+
+.text-gradient-hero {
+  background: linear-gradient(90deg, #FDE68A 0%, #F472B6 40%, #818CF8 80%, #60A5FA 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}

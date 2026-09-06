@@ -28,6 +28,10 @@ interface HeaderProps {
  * Örnek: "Perşembe, 14 Ağustos 2026"
  */
 function getFormattedDate(): string {
+  // `lib/datetime.ts` üzerinden: uygulamanın saati Europe/Istanbul ve
+  // tarayıcının yerel dilimi başka bir ülkedeyse burada başka bir gün
+  // yazardı. Aynı sebeple gece yarısı zamanlayıcısı da
+  // `msUntilLocalMidnight()` kullanıyor.
   return formatLongDate(new Date())
 }
 
@@ -129,7 +133,7 @@ function NotificationButton() {
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         aria-label="Bildirimleri görüntüle"
-        className={`relative flex h-9 w-9 items-center justify-center rounded-xl border bg-slate-900/50 shadow-sm backdrop-blur-sm transition ${
+        className={`relative flex h-9 w-9 items-center justify-center rounded-xl border bg-black/30 shadow-sm backdrop-blur-sm transition ${
           isOpen ? 'border-brandBlue text-brandBlue' : 'border-white/10 text-slate-400 hover:border-white/20 hover:bg-white/10 hover:text-white'
         }`}
       >
@@ -158,7 +162,7 @@ function NotificationButton() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/95 shadow-2xl backdrop-blur-xl z-50">
+        <div className="absolute right-0 mt-2 w-80 overflow-hidden rounded-2xl border border-white/10 bg-black/80 shadow-2xl backdrop-blur-xl z-50">
           <div className="border-b border-white/10 px-4 py-3 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-white">Bildirimler</h3>
             {unreadCount > 0 && (
@@ -223,26 +227,35 @@ function NotificationButton() {
 export default function Header({ pageTitle }: HeaderProps) {
   const navigate = useNavigate()
   const [dateStr, setDateStr] = useState<string>(getFormattedDate)
+  const [timeStr, setTimeStr] = useState<string>(new Date().toLocaleTimeString('tr-TR'))
   const { profile, isLoading } = useUser()
 
-  /**
-   * Gece yarısı geçişinde tarih etiketini otomatik olarak günceller.
-   * Bir sonraki gece yarısına kalan süre hesaplanarak tek bir setTimeout kurulur.
-   */
   useEffect(() => {
-    // Gece yarısı ANKARA'nın gece yarısı: tarayıcının kendi diliminde
-    // hesaplanan bir zamanlayıcı tarihi saatlerce erken ya da geç çevirirdi.
     const timer = setTimeout(() => setDateStr(getFormattedDate()), msUntilLocalMidnight())
     return () => clearTimeout(timer)
   }, [dateStr])
 
-  return (
-    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/10 bg-slate-950/80 px-6 backdrop-blur-xl sm:px-8">
+  useEffect(() => {
+    const clock = setInterval(() => {
+      setTimeStr(new Date().toLocaleTimeString('tr-TR'))
+    }, 1000)
+    return () => clearInterval(clock)
+  }, [])
 
-      {/* ── Sol: Sayfa Başlığı ve Tarih ──────────────────────────────── */}
-      <div>
-        <h1 className="text-base font-bold leading-none text-white">{pageTitle}</h1>
-        <p className="mt-1 text-xs capitalize text-slate-400">{dateStr}</p>
+  return (
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-white/10 bg-black/40 px-6 backdrop-blur-xl sm:px-8">
+
+      {/* ── Sol: Sayfa başlığı, tarih ve saat ───────────────── */}
+      <div className="flex items-center gap-4">
+        {/* Sayfanın tek `<h1>`i. Bir dönem kaldırılmıştı: ekran
+            okuyucu için sayfanın adı, gören kullanıcı için nerede
+            olduğu kayboluyordu. */}
+        <h1 className="text-sm font-semibold text-white">{pageTitle}</h1>
+        <div className="hidden items-center gap-3 sm:flex">
+          <span className="text-sm font-medium text-slate-300">{dateStr}</span>
+          <span className="text-sm font-medium tabular-nums text-slate-300">{timeStr}</span>
+          <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
+        </div>
       </div>
 
       {/* ── Sağ: Aksiyon Grubu ───────────────────────────────────────── */}
@@ -250,7 +263,7 @@ export default function Header({ pageTitle }: HeaderProps) {
         <NotificationButton />
 
         {/* Kullanıcı kimlik kartı */}
-        <button type="button" onClick={() => navigate('/profile')} className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-slate-900/50 px-3 py-1.5 shadow-sm backdrop-blur-sm hover:bg-slate-800/50 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-brandBlue/50 text-left">
+        <button type="button" onClick={() => navigate('/profile')} className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-black/30 px-3 py-1.5 shadow-sm backdrop-blur-sm hover:bg-slate-800/50 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-brandBlue/50 text-left">
 
           {/* Gradient avatar — baş harfler veya iskelet */}
           {isLoading ? (

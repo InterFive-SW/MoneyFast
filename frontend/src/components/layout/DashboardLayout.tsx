@@ -105,24 +105,7 @@ export default function DashboardLayout() {
 
   return (
     <ChatProvider>
-      <div className="relative flex h-screen overflow-hidden bg-slate-950 font-sans text-slate-300 selection:bg-brandBlue selection:text-white">
-
-        {/* ── Atmosferik Arka Plan Orb'ları ───────────────────────────── */}
-        <div
-          className="pointer-events-none absolute -left-40 -top-40 h-[500px] w-[500px] rounded-full bg-primary-500/10 blur-[100px] mix-blend-screen"
-          aria-hidden="true"
-        />
-        <div
-          className="pointer-events-none absolute -bottom-40 -right-40 h-[600px] w-[600px] rounded-full bg-brandBlue/10 blur-[120px] mix-blend-screen"
-          aria-hidden="true"
-        />
-        <div
-          className="pointer-events-none absolute left-1/2 top-1/3 h-[400px] w-[400px] -translate-x-1/2 rounded-full bg-accent-400/5 blur-[100px] mix-blend-screen"
-          aria-hidden="true"
-        />
-
-        {/* Dekoratif Izgara Arka Plan */}
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGcgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utb3BhY2l0eT0iMC4wNSIgZmlsbD0ibm9uZSI+PHBhdGggZD0iTTAgNjBoNjBNNjAgMGwwIDYwIi8+PC9nPjwvc3ZnPg==')] opacity-20 pointer-events-none" />
+      <div className="relative flex h-screen overflow-hidden bg-hologram-global font-sans text-slate-300 selection:bg-brandBlue selection:text-white">
 
         {/* ── Kenar Çubuğu ─────────────────────────────────────────────── */}
         <Sidebar />

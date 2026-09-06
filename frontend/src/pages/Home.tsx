@@ -3,17 +3,13 @@ import { Link } from 'react-router-dom'
 import {
   Bar,
   BarChart,
-  Cell,
   Line,
   LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts'
-
 import {
   apiClient,
   type ApiCard,
@@ -23,6 +19,7 @@ import {
   type RiskProfile,
   type RiskSnapshot,
 } from '../api/client'
+import { RingChart } from '../components/ui/RingChart'
 import { useMarketStream } from '../hooks/useMarketStream'
 import { useWatchlist } from '../hooks/useWatchlist'
 import MarketBand from '../components/markets/MarketBand'
@@ -30,7 +27,6 @@ import { BASE_CURRENCY, convert, formatCompact, formatMoney } from '../lib/money
 import { paddedDomain } from '../lib/chartFormat'
 import { usePortfolioWeekSeries } from '../hooks/usePortfolioWeekSeries'
 import { formatDate, formatTime } from '../lib/datetime'
-
 /** Hesap türü etiketleri; ekranda görünen ad sunumun işi, kaydın değil. */
 const ACCOUNT_LABELS: Record<string, string> = {
   vadesiz: 'Vadesiz Hesap',
@@ -76,8 +72,6 @@ const RANGES = [
 type RangeKey = (typeof RANGES)[number]['key']
 
 /** Donut dilim renkleri. Sıra sabit: aynı hesap türü her yüklemede aynı renk. */
-const SLICE_COLORS = ['#4B7BE5', '#22C55E', '#F59E0B', '#A855F7', '#EC4899', '#14B8A6']
-
 /**
  * Şeridin sabit kısmı: temel kurlar ve altın.
  *
@@ -349,7 +343,7 @@ export default function Home() {
           <button
             onClick={() => void load(true)}
             disabled={refreshing}
-            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brandBlue/60 disabled:opacity-50"
+            className="rounded-lg border border-slate-700 bg-black/40 backdrop-blur-md px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brandBlue/60 disabled:opacity-50"
           >
             {refreshing ? 'Yenileniyor…' : 'Yenile'}
           </button>
@@ -357,7 +351,7 @@ export default function Home() {
               kurmak yerine oraya bağlanıyor. */}
           <Link
             to="/hizli-finans"
-            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brandBlue/60"
+            className="rounded-lg border border-slate-700 bg-black/40 backdrop-blur-md px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-brandBlue/60"
           >
             Paneli düzenle
           </Link>
@@ -372,53 +366,19 @@ export default function Home() {
 
       {/* ── 1. sıra: dağılım · performans · hızlı işlemler ───────────────── */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-black/40 backdrop-blur-md p-5">
           <h2 className="text-sm font-semibold text-white">Toplam Varlık</h2>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-white">
-            {formatMoney(total)}
-          </p>
           {slices.length === 0 ? (
             <p className="mt-6 text-sm text-slate-400">Gösterilecek bakiye yok.</p>
           ) : (
-            <>
-              <div className="mt-2 h-40">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={slices}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius="60%"
-                      outerRadius="90%"
-                      stroke="none"
-                    >
-                      {slices.map((slice, index) => (
-                        <Cell key={slice.name} fill={SLICE_COLORS[index % SLICE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value: unknown) => formatMoney(Number(value))}
-                      contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, fontSize: 12 }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <ul className="mt-2 space-y-1">
-                {slices.map((slice, index) => (
-                  <li key={slice.name} className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-2 text-slate-300">
-                      <span
-                        aria-hidden
-                        className="h-2 w-2 rounded-full"
-                        style={{ background: SLICE_COLORS[index % SLICE_COLORS.length] }}
-                      />
-                      {slice.name}
-                    </span>
-                    <span className="tabular-nums text-slate-200">{formatMoney(slice.value)}</span>
-                  </li>
-                ))}
-              </ul>
-            </>
+            <div className="mt-4">
+              <RingChart
+                data={slices}
+                totalValue={formatMoney(total)}
+                totalLabel="Toplam Varlık"
+                size={220}
+              />
+            </div>
           )}
           {unconvertible.length > 0 && (
             <p className="mt-3 text-xs text-amber-400">
@@ -428,7 +388,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-black/40 backdrop-blur-md p-5">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">Portföy Performansı</h2>
             <div className="flex rounded-lg border border-slate-700 p-0.5">
@@ -488,7 +448,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-black/40 backdrop-blur-md p-5">
           <h2 className="text-sm font-semibold text-white">Hızlı İşlemler</h2>
           <div className="mt-4 grid grid-cols-2 gap-4">
             {ACTIONS.map((action) => (
@@ -509,7 +469,7 @@ export default function Home() {
           </div>
 
           {investment && (
-            <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+            <div className="mt-6 rounded-xl border border-slate-800 bg-black/50 backdrop-blur-md p-3">
               <p className="text-[11px] uppercase tracking-wide text-slate-500">
                 Yatırım nakdi
               </p>
@@ -523,7 +483,7 @@ export default function Home() {
 
       {/* ── 2. sıra: pozisyonlar · risk · asistan ────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5 lg:col-span-1">
+        <section className="rounded-2xl border border-slate-800 bg-black/40 backdrop-blur-md p-5 lg:col-span-1">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">Son Pozisyonlar</h2>
             <Link to="/portfolio" className="text-xs text-brandBlue hover:underline">
@@ -566,7 +526,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-black/40 backdrop-blur-md p-5">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white">Risk Skoru</h2>
             <Link to="/risk" className="text-xs text-brandBlue hover:underline">
@@ -728,7 +688,7 @@ export default function Home() {
             <Link
               key={account.id}
               to="/banking/accounts"
-              className="rounded-xl border border-slate-800 bg-slate-900 p-4 transition hover:border-slate-700"
+              className="rounded-xl border border-slate-800 bg-black/40 backdrop-blur-md p-4 transition hover:border-slate-700"
             >
               <p className="text-sm font-medium text-white">
                 {ACCOUNT_LABELS[account.account_type] ?? 'Hesap'}
@@ -754,7 +714,7 @@ export default function Home() {
         </div>
 
         {cards.length === 0 ? (
-          <p className="mt-3 rounded-xl border border-slate-800 bg-slate-900 p-5 text-sm text-slate-400">
+          <p className="mt-3 rounded-xl border border-slate-800 bg-black/40 backdrop-blur-md p-5 text-sm text-slate-400">
             Henüz kartınız yok.
           </p>
         ) : (
@@ -804,3 +764,4 @@ export default function Home() {
     </div>
   )
 }
+

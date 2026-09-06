@@ -217,7 +217,7 @@ export default function Sidebar() {
     <aside
       onMouseEnter={() => setCollapsed(false)}
       onMouseLeave={() => setCollapsed(true)}
-      className={`relative flex h-screen shrink-0 flex-col border-r border-white/10 bg-slate-950/80 backdrop-blur-xl shadow-sm transition-all duration-300 ease-in-out z-50 ${
+      className={`relative flex h-screen shrink-0 flex-col border-r border-white/10 bg-black/40 backdrop-blur-xl shadow-sm transition-all duration-300 ease-in-out z-50 ${
         isCollapsed ? 'w-[80px]' : 'w-[256px]'
       }`}
     >

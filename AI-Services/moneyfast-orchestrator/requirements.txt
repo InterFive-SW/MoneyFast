@@ -10,7 +10,7 @@ langchain-core>=0.3.29,<0.4
 # yolunda kullanılıyor, `ainvoke` yolunda değil -- yani istek sırasında
 # beklenmedik bir indirme olmuyor, ki `agents` `ai-egress`'te olduğu için
 # bu önemli.
-langchain-openai>=0.2,<0.4
+langchain-openai>=0.2,<0.4 
 
 # MCP client. Keep below 2.0: mcp.client.sse and mcp.server.fastmcp both moved.
 mcp>=1.9,<2

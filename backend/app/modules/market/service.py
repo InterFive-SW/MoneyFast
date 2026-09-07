@@ -8,14 +8,14 @@ from typing import Any, Optional, Sequence
 
 import httpx
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.modules.investment.models import InvestmentProduct
 
 from . import symbol_match
-from .models import NewsItem
+from .models import DirectionSignal, NewsItem
 
 log = logging.getLogger("moneyfast.market")
 
@@ -448,3 +448,76 @@ def known_news_ids(db: Session, source: str) -> list[int]:
         if match:
             found.append(int(match.group(1)))
     return sorted(set(found))
+
+
+# ── Yön okumaları: gecelik hesap ve tarama ───────────────────────────────────
+
+#: Taramanın döndürebileceği en fazla satır. `MAX_LIMIT` desenleriyle aynı:
+#: sınırsız bir liste, indeksli aramayı isteğe bağlı bir tablo taramasına
+#: çevirmenin en kolay yolu.
+DIRECTION_MAX_LIMIT = 200
+
+
+def store_direction_signals(db: Session, rows: list[dict[str, Any]]) -> int:
+    """Hesaplanan okumaları yazar; aynı (enstrüman, vade) üzerine biner.
+
+    `ON CONFLICT DO UPDATE`: gecelik iş yeniden çalıştırılabilir olmalı ve
+    yarıda kesilen bir tur, bir sonrakinde kaldığı yeri değil TAMAMINI
+    yeniden yazsın -- okuma bir birikim değil, o anki ölçümün fotoğrafı.
+    """
+    if not rows:
+        return 0
+    statement = insert(DirectionSignal).values(rows)
+    statement = statement.on_conflict_do_update(
+        index_elements=["product_id", "horizon"],
+        set_={
+            key: getattr(statement.excluded, key)
+            for key in ("symbol", "direction", "lean", "evidence",
+                        "observations", "narrative", "computed_at")
+        },
+    )
+    db.execute(statement)
+    db.commit()
+    return len(rows)
+
+
+def direction_screen(
+    db: Session,
+    horizon: str,
+    direction: Optional[str] = None,
+    limit: int = 50,
+) -> list[DirectionSignal]:
+    """Tarama satırları: en güçlü meyilden başlayarak.
+
+    Sıralama MUTLAK meyle göre değil, işaretliye göre: "yükseliş yönünde en
+    güçlü" ile "düşüş yönünde en güçlü" iki ayrı sorudur ve tek bir listede
+    karıştırmak, kullanıcıya hangisini gösterdiğini söylemeden sıralamak
+    olurdu. `direction` verilmezse liste yukarıdan aşağı, yani meyil azalarak
+    geliyor.
+
+    `INSUFFICIENT` satırlar DIŞARIDA: ölçülemeyen bir okumayı sıralamaya
+    katmak, ölçülmüş bir okuma gibi göstermek olurdu.
+    """
+    query = db.query(DirectionSignal).filter(
+        DirectionSignal.horizon == horizon,
+        DirectionSignal.lean.isnot(None),
+        DirectionSignal.direction != "INSUFFICIENT",
+    )
+    if direction:
+        query = query.filter(DirectionSignal.direction == direction)
+    return (
+        query.order_by(DirectionSignal.lean.desc(), DirectionSignal.symbol)
+        .limit(max(1, min(DIRECTION_MAX_LIMIT, limit)))
+        .all()
+    )
+
+
+def direction_computed_at(db: Session, horizon: str) -> Optional[datetime]:
+    """Taramanın ne zaman hesaplandığı.
+
+    Ekranda yazılıyor ve gizlenmiyor: bir okumanın ne zaman yapıldığını
+    söylemeden göstermek, dünkü ölçümü bugünün ölçümü gibi göstermek olurdu.
+    """
+    return db.query(func.max(DirectionSignal.computed_at)).filter(
+        DirectionSignal.horizon == horizon
+    ).scalar()

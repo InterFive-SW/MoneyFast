@@ -4,6 +4,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.modules.investment.matching import match_open_orders_job
 from app.modules.news.service import send_daily_market_briefing_to_all
+from app.modules.market.signals import refresh_all_signals
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,24 @@ def start_scheduler():
         id="limit_order_matching_job",
         # Bir tur uzarsa ikincisi ÜST ÜSTE binmemeli: iki tur aynı emri
         # okuyup iki kez doldurabilirdi.
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
+
+    # Yön okumaları, gecelik. Mumlar yazıldıktan SONRA: okuma barlardan
+    # çıkıyor ve bugünün barı yazılmadan hesaplamak, dünün okumasını bugünün
+    # tarihiyle damgalamak olurdu. `ingestor` mumları kapanıştan bir saat
+    # sonra yazıyor; bu iş üç saat sonra.
+    #
+    # Yalnızca TARAMA için: tek sembol sorulduğunda okuma taze hesaplanıyor.
+    # 1.011 enstrümanı istek anında hesaplamak sembol başına üç sorgu demek.
+    scheduler.add_job(
+        refresh_all_signals,
+        "cron",
+        hour=22,
+        minute=30,
+        id="direction_signals_job",
         max_instances=1,
         coalesce=True,
         replace_existing=True,

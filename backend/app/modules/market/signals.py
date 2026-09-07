@@ -19,9 +19,13 @@ Hiçbir yerde hedef fiyat, "al/sat", "en iyi" ya da uygunluk yargısı yok.
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional, Sequence
 
 from . import technicals
+
+log = logging.getLogger("moneyfast.market")
 
 #: Sorulabilecek ileri vadeler. Kapalı küme, çünkü elimizdeki kanıtların
 #: konuştuğu vade sınırlı: hareketli ortalamalar birkaç aylık, çeyreklik
@@ -557,3 +561,76 @@ def _horizon_note(horizon: str) -> str:
         f"%{int(weights[TECHNICAL])}, temel veriler %{int(weights[FUNDAMENTAL])} "
         f"ağırlıkla tartıldı; bu bir varsayım."
     )
+
+
+async def refresh_all_signals() -> dict[str, int]:
+    """Evrenin tamamı için yön okumalarını yeniden hesaplar.
+
+    Gecelik iş. Neden burada değil de zamanlayıcıda tetikleniyor: hesap
+    `market` modülünün işi, ne zaman çalışacağı uygulamanın.
+
+    **Tek bir enstrümanın hatası turu düşürmez.** 1.011 enstrümanın birinde
+    beklenmedik bir değer, tarama tablosunun tamamının boş kalması demek
+    olmamalı -- ingestor'ın parçalı itme gerekçesiyle aynı.
+
+    Yazma tek seferde: satır satır commit etmek, yarıda kesilen bir turda
+    tablonun yarısını dünün, yarısını bugünün okumasıyla bırakırdı.
+    """
+    # Modül içi import: `signals` saf kalıyor ve veritabanını yalnızca bu
+    # fonksiyon tanıyor. Üstte import etmek, saf motoru DB'ye bağlardı.
+    from app.core.database import SessionLocal
+    from app.modules.investment import market_service
+    from app.modules.investment.models import InvestmentProduct
+    from . import service as market_module, technicals
+
+    written: dict[str, int] = {}
+    db = SessionLocal()
+    try:
+        products = (
+            db.query(InvestmentProduct)
+            .filter(
+                InvestmentProduct.status == "active",
+                InvestmentProduct.product_type == "stock",
+            )
+            .all()
+        )
+        for horizon in HORIZONS:
+            rows = []
+            for product in products:
+                try:
+                    bars = market_service.candle_series(
+                        db, product.symbol, limit=technicals.BARS_NEEDED
+                    )
+                    payload = evaluate(
+                        product.symbol,
+                        horizon,
+                        technicals.compute(bars),
+                        market_service.fundamentals_for(db, product.symbol),
+                        market_service.quarterly_for(db, product.symbol),
+                        market_module.latest_news(
+                            db,
+                            limit=NEWS_SAMPLE_LIMIT,
+                            symbols=[product.symbol],
+                            since=datetime.now(timezone.utc)
+                            - timedelta(days=NEWS_WINDOW_DAYS),
+                        ),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("direction failed for %s: %s", product.symbol, exc)
+                    continue
+                rows.append({
+                    "product_id": product.id,
+                    "horizon": horizon,
+                    "symbol": product.symbol,
+                    "direction": payload["direction"],
+                    "lean": payload["lean"],
+                    "evidence": payload["evidence"],
+                    "observations": payload["coverage"]["observations"],
+                    "narrative": payload["narrative"],
+                    "computed_at": datetime.now(timezone.utc),
+                })
+            written[horizon] = market_module.store_direction_signals(db, rows)
+        log.info("direction signals refreshed: %s", written)
+        return written
+    finally:
+        db.close()

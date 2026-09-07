@@ -756,3 +756,67 @@ class TestDirectionEndpoint:
         assert captured["symbols"] == ["ASELS"]
         assert captured["since"] is not None
         assert captured["limit"] == signals.NEWS_SAMPLE_LIMIT
+
+
+class TestDirectionScreenEndpoint:
+    """`GET /api/market/direction/screen` — Piyasalar ekranının okuduğu yer.
+
+    **"En iyi hisseler" listesi DEĞİL**: sıralanan şey ölçülen kanıtların
+    meyli, bir cazibe sıralaması değil. `lean` her satırda görünür duruyor ki
+    sıralamanın neye göre yapıldığı okunabilsin.
+    """
+
+    URL = "/api/market/direction/screen"
+
+    def test_a_horizon_beyond_the_evidence_returns_an_empty_list_and_says_why(
+        self, market_client, mocker
+    ):
+        body = market_client.get(self.URL, params={"horizon": "2Y"}).json()
+        assert body["items"] == []
+        assert body["note"] == signals.OUT_OF_RANGE_TR
+        assert body["computedAt"] is None
+
+    def test_rows_carry_their_evidence(self, market_client, mocker):
+        """Gerekçesiz bir yön, kullanıcının doğrulayamayacağı bir iddiadır."""
+        mocker.patch.object(
+            service, "direction_screen",
+            return_value=[SimpleNamespace(
+                symbol="ASELS", direction="UP_LEAN", lean=0.633,
+                observations=252, narrative="okuma",
+                evidence=[{"source": "TECHNICAL", "key": "trend",
+                           "direction": "UP", "value": 1, "text": "t"}],
+            )],
+        )
+        mocker.patch.object(service, "direction_computed_at", return_value=None)
+
+        body = market_client.get(self.URL, params={"horizon": "3M"}).json()
+
+        assert body["items"][0]["symbol"] == "ASELS"
+        assert body["items"][0]["lean"] == pytest.approx(0.633)
+        assert body["items"][0]["evidence"]
+
+    def test_an_unmeasured_lean_is_carried_as_null(self, market_client, mocker):
+        mocker.patch.object(
+            service, "direction_screen",
+            return_value=[SimpleNamespace(
+                symbol="X", direction="MIXED", lean=None, observations=None,
+                narrative=None, evidence=None,
+            )],
+        )
+        mocker.patch.object(service, "direction_computed_at", return_value=None)
+
+        body = market_client.get(self.URL, params={"horizon": "3M"}).json()
+
+        assert body["items"][0]["lean"] is None
+        assert body["items"][0]["evidence"] == []
+
+    def test_the_computation_time_is_surfaced(self, market_client, mocker):
+        """Bayat bir hesabı bugünün ölçümü gibi göstermemek için."""
+        from datetime import datetime, timezone
+
+        moment = datetime(2026, 9, 7, 22, 30, tzinfo=timezone.utc)
+        mocker.patch.object(service, "direction_screen", return_value=[])
+        mocker.patch.object(service, "direction_computed_at", return_value=moment)
+
+        body = market_client.get(self.URL, params={"horizon": "3M"}).json()
+        assert body["computedAt"].startswith("2026-09-07")

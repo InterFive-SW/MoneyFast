@@ -502,6 +502,55 @@ def _direction_payload(db: Session, product, horizon: str) -> dict:
 
 
 @router.get(
+    "/direction/screen",
+    summary="Ölçülen kanıt yönüne göre tarama",
+)
+def get_direction_screen(
+    horizon: str = Query(signals.DEFAULT_HORIZON),
+    direction: Optional[str] = Query(None, description="UP_LEAN / DOWN_LEAN / MIXED"),
+    limit: int = Query(50, ge=1, le=service.DIRECTION_MAX_LIMIT),
+    db: Session = Depends(get_db),
+):
+    """Gecelik hesaplanmış yön okumaları, meyle göre sıralı.
+
+    **Bu bir "en iyi hisseler" listesi DEĞİL** ve kolonun adı da öyle demiyor:
+    sıralanan şey ölçülen kanıtların meyli, bir cazibe sıralaması değil.
+    `lean` değeri her satırda görünür duruyor ki sıralamanın neye göre
+    yapıldığı okunabilsin.
+
+    Tek sembol sorulduğunda okuma TAZE hesaplanıyor (`GET /market/direction`);
+    burası 1.011 enstrümanı istek anında hesaplamamak için var.
+
+    `computed_at` yanıtta: bayat bir hesabı bugünün ölçümü gibi göstermemek
+    için, ekranda "şu tarih itibarıyla" diye yazılıyor.
+    """
+    if horizon not in signals.HORIZONS:
+        return {
+            "horizon": horizon,
+            "items": [],
+            "computedAt": None,
+            "note": signals.OUT_OF_RANGE_TR,
+        }
+    rows = service.direction_screen(db, horizon, direction, limit)
+    return {
+        "horizon": horizon,
+        "computedAt": service.direction_computed_at(db, horizon),
+        "note": None,
+        "items": [
+            {
+                "symbol": row.symbol,
+                "direction": row.direction,
+                "lean": float(row.lean) if row.lean is not None else None,
+                "observations": row.observations,
+                "narrative": row.narrative,
+                "evidence": row.evidence or [],
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get(
     "/portfolio/technical",
     response_model=PortfolioTechnicalOut,
     summary="Portföy geneli teknik görünüm",

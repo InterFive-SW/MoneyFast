@@ -529,3 +529,67 @@ class TestWording:
             for banned in ("almalı", "satmalı", "alın", "satın", "öneri",
                            "tavsiye", "kaçırmayın", "en iyi", "ucuz", "pahalı"):
                 assert banned not in lowered, f"{banned}: {narrative}"
+
+
+class TestNightlyRefresh:
+    """Gecelik toplu hesap. Tek sembol sorulduğunda okuma TAZE hesaplanıyor;
+    bu iş yalnızca 1.011 enstrümanı istek anında hesaplamamak için var."""
+
+    def _product(self, symbol="ASELS"):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(id=f"p-{symbol}", symbol=symbol)
+
+    def _patch(self, mocker, products, side_effect=None):
+        import app.core.database as database
+        from app.modules.investment import market_service
+        from app.modules.market import service as market_module
+
+        db = mocker.MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = products
+        mocker.patch.object(database, "SessionLocal", return_value=db)
+        mocker.patch.object(
+            market_service, "candle_series",
+            side_effect=side_effect or (lambda *a, **k: []),
+        )
+        mocker.patch.object(market_service, "fundamentals_for", return_value=None)
+        mocker.patch.object(market_service, "quarterly_for", return_value=None)
+        mocker.patch.object(market_module, "latest_news", return_value=[])
+        stored = mocker.patch.object(
+            market_module, "store_direction_signals", side_effect=lambda d, rows: len(rows)
+        )
+        return db, stored
+
+    @pytest.mark.asyncio
+    async def test_every_horizon_is_written(self, mocker):
+        _, stored = self._patch(mocker, [self._product()])
+        result = await signals.refresh_all_signals()
+        assert set(result) == set(signals.HORIZONS)
+        assert stored.call_count == len(signals.HORIZONS)
+
+    @pytest.mark.asyncio
+    async def test_one_bad_instrument_does_not_lose_the_rest(self, mocker):
+        """1.011 enstrümanın birinde beklenmedik bir değer, tarama tablosunun
+        tamamının boş kalması demek olmamalı."""
+        def series(db, symbol, limit=None):
+            if symbol == "PATLAK":
+                raise ValueError("bozuk seri")
+            return []
+
+        _, stored = self._patch(
+            mocker, [self._product("PATLAK"), self._product("ASELS")], series
+        )
+        result = await signals.refresh_all_signals()
+        assert result["3M"] == 1, "sağlam enstrüman yazılmalı"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_universe_writes_nothing(self, mocker):
+        _, stored = self._patch(mocker, [])
+        result = await signals.refresh_all_signals()
+        assert result == {horizon: 0 for horizon in signals.HORIZONS}
+
+    @pytest.mark.asyncio
+    async def test_the_session_is_closed(self, mocker):
+        db, _ = self._patch(mocker, [])
+        await signals.refresh_all_signals()
+        db.close.assert_called_once()

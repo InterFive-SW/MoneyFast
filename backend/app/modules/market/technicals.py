@@ -267,8 +267,12 @@ def _locative(count: int) -> str:
     return f"{count}'{suffix}" if suffix else str(count)
 
 
-def _tr(value: float, digits: int = 1) -> str:
-    """Türkçe sayı biçimi: ondalık virgül, binlik nokta."""
+def format_number(value: float, digits: int = 1) -> str:
+    """Türkçe sayı biçimi: ondalık virgül, binlik nokta.
+
+    Public, çünkü `signals.py` de aynı biçimi kullanıyor ve iki kopya, iki
+    ayrı ondalık ayracı demek olurdu.
+    """
     text = f"{value:,.{digits}f}"
     return text.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
 
@@ -295,7 +299,7 @@ def narrate(symbol: str, signals: dict[str, Any]) -> Optional[str]:
             continue
         side = "üzerinde" if distance >= 0 else "altında"
         facts.append(
-            f"{window} günlük ortalamasının %{_tr(abs(distance))} {side}"
+            f"{window} günlük ortalamasının %{format_number(abs(distance))} {side}"
         )
         break
 
@@ -308,7 +312,7 @@ def narrate(symbol: str, signals: dict[str, Any]) -> Optional[str]:
 
     position = signals.get("week52_position_pct")
     if position is not None:
-        facts.append(f"52 hafta aralığının %{_tr(position)} seviyesinde")
+        facts.append(f"52 hafta aralığının %{format_number(position)} seviyesinde")
 
     if not facts:
         return None
@@ -444,7 +448,7 @@ def _aggregate_statement(
         f"{AGGREGATE_SMA} günlük ortalamasının altında"
     ]
     if weight_below is not None:
-        parts[0] += f" (portföy değerinin %{_tr(weight_below * 100)}'i)"
+        parts[0] += f" (portföy değerinin %{format_number(weight_below * 100)}'i)"
 
     trend_parts = [
         f"{_plural_locative(counts[key])} {_TREND_TR[key]}"

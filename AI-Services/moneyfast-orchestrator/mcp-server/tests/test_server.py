@@ -21,6 +21,8 @@ import pytest
 import server
 
 EXPECTED_TOOLS = {
+    # v2.21: ölçülen kanıtların hangi yöne meylettiği, gerekçesiyle.
+    "get_direction_signal",
     "get_portfolio_positions",
     "get_market_data",
     "rag_semantic_market_search",
@@ -91,7 +93,8 @@ class TestWiring:
         # birlikte taşınıyor.
         # v2.19: `resolve_instruments`.
         # v2.20: `get_open_orders` + `cancel_order`.
-        assert server.CONTRACT_VERSION == "v2.20"
+        # v2.21: `get_direction_signal`.
+        assert server.CONTRACT_VERSION == "v2.21"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it

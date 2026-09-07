@@ -6278,3 +6278,181 @@ class TestOpenOrdersInPortfolioNode:
             {"user_id": "user-1", "user_message": "bekleyen emirlerim"}
         )
         assert calls == [("get_open_orders", {"user_id": "user-1"})]
+
+
+class TestDirectionSignalBranch:
+    """v2.21. Araç adı YALNIZCA plandan okunmuyor.
+
+    Ölçülen hata: "ASELS önümüzdeki 3 ayda nasıl gider" turunda planlayıcı
+    `{"horizon": "3M", "symbols": ["ASELS"]}` üretti ama aracı
+    `get_market_data` seçti -- vadeyi doğru anladı, aracı yanlış. `horizon`
+    argümanını kabul eden tek araç bu; prompt tavsiye, kod zorlar.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_named_tool_is_used(self, fake_mcp, patched_llm, base_state):
+        fake_mcp.responses["get_direction_signal"] = {
+            "symbol": "ASELS", "direction": "UP_LEAN", "narrative": "okuma",
+        }
+        patched_llm.set_response(
+            '{"tool": "get_direction_signal", "arguments": '
+            '{"symbol": "ASELS", "horizon": "6M"}}'
+        )
+        out = await orchestrator.market_data_node(base_state)
+        assert fake_mcp.calls[0][0] == "get_direction_signal"
+        assert fake_mcp.calls[0][1] == {"symbol": "ASELS", "horizon": "6M"}
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_a_horizon_argument_selects_the_tool_by_itself(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Planlayıcı aracı yanlış seçse bile vadeyi doğru anlamışsa okuma
+        kurulur -- yoksa kullanıcı fiyat tablosu alır ve sorduğu soru
+        cevapsız kalır."""
+        fake_mcp.responses["get_direction_signal"] = {
+            "symbol": "ASELS", "direction": "MIXED", "narrative": "okuma",
+        }
+        patched_llm.set_response(
+            '{"tool": "get_market_data", "arguments": '
+            '{"symbols": ["ASELS"], "horizon": "3M", "top_k": 20}}'
+        )
+        await orchestrator.market_data_node(base_state)
+        assert fake_mcp.calls[0][0] == "get_direction_signal"
+        assert fake_mcp.calls[0][1]["symbol"] == "ASELS"
+
+    @pytest.mark.asyncio
+    async def test_the_default_horizon_matches_the_backend(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """İkisi ayrışırsa kullanıcı sorduğundan başka bir vadenin okumasını
+        alır ve bunu fark etmesinin bir yolu yoktur."""
+        fake_mcp.responses["get_direction_signal"] = {
+            "symbol": "X", "direction": "MIXED", "narrative": "okuma",
+        }
+        patched_llm.set_response(
+            '{"tool": "get_direction_signal", "arguments": {"symbol": "X"}}'
+        )
+        await orchestrator.market_data_node(base_state)
+        assert fake_mcp.calls[0][1]["horizon"] == orchestrator.DEFAULT_DIRECTION_HORIZON
+        assert orchestrator.DEFAULT_DIRECTION_HORIZON == "3M"
+
+    @pytest.mark.asyncio
+    async def test_the_routers_ticker_is_used_when_the_plan_names_none(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["get_direction_signal"] = {
+            "symbol": "THYAO", "direction": "MIXED", "narrative": "okuma",
+        }
+        patched_llm.set_response('{"tool": "get_direction_signal", "arguments": {}}')
+        await orchestrator.market_data_node(
+            {**base_state, "entities": {"tickers": ["THYAO"]}}
+        )
+        assert fake_mcp.calls[0][1]["symbol"] == "THYAO"
+
+    @pytest.mark.asyncio
+    async def test_without_any_symbol_the_turn_falls_back_to_the_price_path(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Tek sembollük bir aracı sembolsüz çağırmak yerine, kullanıcının
+        gerçekten adını verdiği şeyden cevaplanır."""
+        fake_mcp.responses["get_market_data"] = {"instruments": []}
+        patched_llm.set_response('{"tool": "get_direction_signal", "arguments": {}}')
+        await orchestrator.market_data_node(base_state)
+        assert fake_mcp.calls[0][0] == "get_market_data"
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_reading_is_reported_not_hidden(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Boş `narrative` okumanın kurulamadığını söylüyor; rakamlar yine
+        gidiyor ve ajan boşluğu bildiriyor."""
+        fake_mcp.responses["get_direction_signal"] = {
+            "symbol": "YENI", "direction": "INSUFFICIENT", "narrative": None,
+        }
+        patched_llm.set_response(
+            '{"tool": "get_direction_signal", "arguments": {"symbol": "YENI"}}'
+        )
+        out = await orchestrator.market_data_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    def test_the_direction_reading_is_hedged_in_code(self):
+        """Ölçüldü: araç `narrative`i çekincesiyle döndürdü, model onu
+        EXPECTATION MANAGEMENT'ın madde yapısına çevirdi ve kapanış
+        çekincesini düşürdü. Kalan metin dokuz ölçüm ve "veriler artış
+        yönündeki baskıya işaret ediyor" idi -- koşulsuz ve çekincesiz."""
+        assert "get_direction_signal" in orchestrator.HEDGED_TOOLS
+        out = orchestrator._keep_hedge(
+            {"tools_used": ["get_direction_signal"]},
+            {"final_output": "Veriler artış yönünde.", "disclosures": []},
+        )
+        assert any(orchestrator._HEDGE_MARK in item for item in out["disclosures"])
+
+    def test_a_technical_reading_is_hedged_too(self):
+        """`technicals.narrate` de koşullu bir okuma üretiyor ve aynı yeniden
+        yazma ona da yapılabilir."""
+        assert "get_technical_signals" in orchestrator.HEDGED_TOOLS
+
+    def test_a_text_that_kept_its_caveat_is_not_hedged_twice(self):
+        out = orchestrator._keep_hedge(
+            {"tools_used": ["get_direction_signal"]},
+            {"final_output": "... geçmiş fiyat hareketi geleceği belirlemez.",
+             "disclosures": []},
+        )
+        assert out["disclosures"] == []
+
+
+class TestHorizonComesFromTheUser:
+    """Vade kullanıcının sorusunun bir parçası, planlayıcının bir tercihi değil.
+
+    Ölçüldü: "THYAO önümüzdeki 6 ayda nasıl gider" turunda planlayıcı
+    `horizon: "3M"` gönderdi. Kullanıcı altı ay sordu, üç aylık okuma aldı ve
+    cevabın içinde "6 aylık tahmin için doğrudan veri bulunmamaktadır"
+    yazıyordu -- oysa araç altı ayı destekliyor.
+    """
+
+    @pytest.mark.parametrize("message,expected", [
+        ("THYAO önümüzdeki 6 ayda nasıl gider", "6M"),
+        ("ASELS altı ayda ne olur", "6M"),
+        ("3 aylık görünüm ne", "3M"),
+        ("üç ay sonrası için", "3M"),
+        ("bir ay içinde nasıl gider", "1M"),
+        ("1 aylık okuma ver", "1M"),
+        ("AKBNK nasıl gidiyor", None),
+        ("", None),
+        ("12 ayda ne olur", None),
+    ])
+    def test_the_horizon_is_read_from_the_message(self, message, expected):
+        assert orchestrator._horizon_from_message(message) == expected
+
+    @pytest.mark.asyncio
+    async def test_the_users_words_beat_the_planners_choice(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["get_direction_signal"] = {
+            "symbol": "THYAO", "direction": "MIXED", "narrative": "okuma",
+        }
+        patched_llm.set_response(
+            '{"tool": "get_direction_signal", "arguments": '
+            '{"symbol": "THYAO", "horizon": "3M"}}'
+        )
+        await orchestrator.market_data_node(
+            {**base_state, "user_message": "THYAO önümüzdeki 6 ayda nasıl gider?"}
+        )
+        assert fake_mcp.calls[0][1]["horizon"] == "6M"
+
+    @pytest.mark.asyncio
+    async def test_a_message_without_a_horizon_leaves_the_plan_alone(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["get_direction_signal"] = {
+            "symbol": "THYAO", "direction": "MIXED", "narrative": "okuma",
+        }
+        patched_llm.set_response(
+            '{"tool": "get_direction_signal", "arguments": '
+            '{"symbol": "THYAO", "horizon": "6M"}}'
+        )
+        await orchestrator.market_data_node(
+            {**base_state, "user_message": "THYAO görünümü ne?"}
+        )
+        assert fake_mcp.calls[0][1]["horizon"] == "6M"

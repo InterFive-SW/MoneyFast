@@ -377,7 +377,7 @@ class TestPortfolioAbsence:
 
 
 class TestPortfolioRegistration:
-    def test_both_technical_tools_are_attached(self):
+    def test_every_technical_tool_is_attached(self):
         registered = []
         technical_tools.register(
             type("FakeMCP", (), {"tool": lambda self: registered.append})()
@@ -385,4 +385,110 @@ class TestPortfolioRegistration:
         assert registered == [
             technical_tools.get_technical_signals,
             technical_tools.get_portfolio_technicals,
+            # v2.21: üç kaynağın birleşimi. `get_technical_signals`'ın v2.10
+            # yükü değişmedi; bu ayrı bir soru ve ayrı bir başarısızlık
+            # biçimi var (vade dışı istek REDDEDİLİYOR).
+            technical_tools.get_direction_signal,
         ]
+
+
+class TestDirectionSignal:
+    """v2.21. Ölçüm ve gerekçesi; cümle backend'de kuruluyor."""
+
+    @pytest.mark.asyncio
+    async def test_it_asks_the_backend_with_the_horizon(self, mocker):
+        called = {}
+
+        async def fake(method, path, tool=None, params=None, **kw):
+            called.update({"method": method, "path": path, "params": params})
+            return {"symbol": "ASELS", "direction": "UP_LEAN", "evidence": []}
+
+        mocker.patch.object(technical_tools.backend_client, "request", side_effect=fake)
+        await technical_tools.get_direction_signal("ASELS", "6M")
+        assert called["path"] == "/market/direction"
+        assert called["params"] == {"symbol": "ASELS", "horizon": "6M"}
+
+    @pytest.mark.asyncio
+    async def test_the_default_horizon_is_three_months(self, mocker):
+        called = {}
+
+        async def fake(method, path, tool=None, params=None, **kw):
+            called.update(params or {})
+            return {"symbol": "X", "direction": "MIXED", "evidence": []}
+
+        mocker.patch.object(technical_tools.backend_client, "request", side_effect=fake)
+        await technical_tools.get_direction_signal("X")
+        assert called["horizon"] == "3M"
+
+    def test_a_body_without_the_required_keys_is_refused(self):
+        """Eksik alan sessizce default'lanmaz; sözleşme ihlali görünür olmalı."""
+        with pytest.raises(ContractViolationError):
+            technical_tools._normalize_direction({"symbol": "X"})
+
+    def test_an_unmeasured_lean_stays_null(self):
+        """0.0 "ölçtük ve dengede" demek olurdu; null "ölçmedik" demek ve
+        ikisi farklı cevaplar."""
+        out = technical_tools._normalize_direction(
+            {"symbol": "X", "direction": "INSUFFICIENT", "evidence": [], "lean": None}
+        )
+        assert out["lean"] is None
+
+    def test_the_evidence_list_is_projected_field_by_field(self):
+        out = technical_tools._normalize_direction({
+            "symbol": "ASELS", "direction": "UP_LEAN", "lean": 0.6,
+            "evidence": [
+                {"source": "TECHNICAL", "key": "trend", "direction": "UP",
+                 "value": 1, "text": "yükseliş eğiliminde", "fazladan": "atılır"},
+                "bir dize, sözlük değil",
+            ],
+            "coverage": {"sources_measured": 2, "evidence_count": 1,
+                         "missing": ["haber"], "observations": 252},
+            "narrative": "okuma", "horizon_note": "varsayım",
+        })
+        assert len(out["evidence"]) == 1, "sözlük olmayan satır düşer"
+        # `value` ve `direction` yazara GİTMİYOR: ölçüldü, model her maddenin
+        # sonuna ham alanı ekledi -- "(değer 3,97)", "(trend DOWN)".
+        assert set(out["evidence"][0]) == {"source", "text"}
+        assert out["coverage"]["missing"] == ["haber"]
+        assert out["narrative"] == "okuma"
+
+    def test_an_empty_narrative_becomes_null(self):
+        out = technical_tools._normalize_direction(
+            {"symbol": "X", "direction": "MIXED", "evidence": [], "narrative": ""}
+        )
+        assert out["narrative"] is None
+
+    def test_the_horizon_set_matches_the_backend(self):
+        """İkisi ayrışırsa model geçersiz bir vade üretir ve kullanıcı boş
+        cevap alır -- `ALLOWED_SORTS`'un `prompts.py` ile ilişkisiyle aynı."""
+        assert technical_tools.ALLOWED_HORIZONS == ("1M", "3M", "6M")
+
+    def test_the_docstring_forbids_dropping_the_caveat(self):
+        """Koşullu okuma ve çekincesi tek cümle; yarısı farklı bir iddia."""
+        # Docstring 88 sütunda sarmalanıyor, dolayısıyla iddia edilecek bir
+        # kural rutin olarak iki satıra bölünüyor.
+        doc = " ".join(technical_tools.get_direction_signal.__doc__.split())
+        assert "ancak geçmiş fiyat hareketi" in doc
+        assert "OUT_OF_RANGE" in doc
+        assert "not advice" in doc.lower()
+
+    def test_the_two_sides_are_grouped_by_the_tool(self):
+        """Gruplamayı modele bırakmak, ham `direction` değerini ona
+        göndermeyi gerektirirdi -- ve o değer cevabın içinde çıkıyordu."""
+        out = technical_tools._normalize_direction({
+            "symbol": "THYAO", "direction": "MIXED", "lean": 0.02,
+            "evidence": [
+                {"direction": "UP", "text": "hasılat arttı", "source": "FUNDAMENTAL"},
+                {"direction": "DOWN", "text": "düşüş eğiliminde", "source": "TECHNICAL"},
+                {"direction": "NEUTRAL", "text": "göreli güç endeksi 36", "source": "TECHNICAL"},
+            ],
+        })
+        assert out["supporting"] == ["hasılat arttı"]
+        assert out["opposing"] == ["düşüş eğiliminde"]
+        assert len(out["evidence"]) == 3, "nötr ölçüm de listede kalır"
+
+    def test_the_opposing_side_is_never_dropped(self):
+        """Karşı tarafı düşürmek, sonucu desteksiz ve kullanıcıyı
+        denetleyemez bırakır."""
+        doc = " ".join(technical_tools.get_direction_signal.__doc__.split())
+        assert "`opposing` exists so it reaches the user" in doc

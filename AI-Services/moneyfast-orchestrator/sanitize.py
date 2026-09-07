@@ -58,6 +58,13 @@ INTERNAL_KEYS = (
     "instrument_currency", "base_currency", "asset_class", "product_type",
     "source_account_id", "destination_account_id", "idempotency_key",
     "proposal_id", "user_id", "trace_id", "top_k", "min_similarity",
+    # v2.21. `lean` bir SIRALAMA büyüklüğü ve kullanıcıya hiçbir şey
+    # söylemiyor; ölçüldü, model onu "(lean -%0,017)" diye cevabın içine
+    # yazdı. Araç sözleşmesi bunu açıkça yasaklıyor ve prompt tavsiye olduğu
+    # için kural burada da duruyor. `sources_measured` ve `evidence_count`
+    # aynı sınıftan: okumanın muhasebesi, okumanın kendisi değil.
+    "lean", "sources_measured", "evidence_count", "horizon_note",
+    "by_source", "up_lean", "down_lean",
     "max_weight", "order_type", "time_in_force", "price_history",
     "market_corpus", "valuation_mode", "rebalance_assumption", "confidence_level",
     # Risk profile summary (v2.4). `measured_level` and `declared_tolerance`

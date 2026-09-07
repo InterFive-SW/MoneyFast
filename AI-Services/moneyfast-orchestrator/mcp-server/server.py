@@ -6,7 +6,7 @@ Each module exposes a `register(mcp)` function; the tool callables stay at
 module level so they can be imported and unit-tested without a running
 server.
 
-Contracts follow "MCP Tools Interface Definitions v2.20" (see
+Contracts follow "MCP Tools Interface Definitions v2.21" (see
 CONTRACT_VERSION below -- that constant is the authority; this paragraph
 described v2.9 long after the constant had moved on). It is the union of two
 lineages that developed in parallel: v2.4 on main added
@@ -111,7 +111,15 @@ SERVER_NAME = "moneyfast"
 #: gelene kadar bekliyor ve parası bloke duruyor. Bekleyen emri sohbette
 #: görememek, "aldım mı almadım mı" ve "bakiyem neden azaldı" sorularının
 #: ikisini de cevapsız bırakıyordu.
-CONTRACT_VERSION = "v2.20"
+#: v2.21: `get_direction_signal`. Uygulama ne olduğunu ölçüyordu ama ileriye
+#: dair hiçbir şey söylemiyordu; "önümüzdeki üç ayda nasıl gider" sorusunun
+#: gidebileceği bir araç yoktu ve model ya cevapsız kalıyor ya kendi
+#: yorumunu üretiyordu. Araç ÖLÇÜMÜ ve gerekçesini döndürüyor; cümle
+#: backend'de kuruluyor ve koşullu okuma çekincesinden ayrılamıyor.
+#: `get_technical_signals`'ın v2.10 yükü DEĞİŞMEDİ -- o tek bir göstergeler
+#: okuması, bu üç kaynağın birleşimi ve farklı bir başarısızlık biçimi var
+#: (vade dışı bir istek REDDEDİLİYOR).
+CONTRACT_VERSION = "v2.21"
 
 SERVER_INSTRUCTIONS = """\
 MoneyFast tool server. Twenty-three tools across sixteen domains.

@@ -798,6 +798,36 @@ async def market_data_node(state: MoneyFastState) -> dict[str, Any]:
     # open ones ("yorumlar mısın") to the document search is what produced
     # "Akbank hakkında veri bulunamadı" for an instrument with seven hundred
     # bars of history.
+    # Dördüncü araç: ölçülen kanıtların hangi yöne meylettiği.
+    #
+    # Araç adı YALNIZCA plandan okunmuyor ve bu ölçülmüş bir sebep: "ASELS
+    # önümüzdeki 3 ayda nasıl gider" turunda planlayıcı `{"horizon": "3M",
+    # "symbols": ["ASELS"]}` üretti ama aracı `get_market_data` seçti --
+    # vadeyi doğru anladı, aracı yanlış. `horizon` argümanını kabul eden tek
+    # araç bu, dolayısıyla onun varlığı aracın kendisini söylüyor.
+    # `_SORT_SYNONYMS` ile aynı desen: prompt tavsiye, kod zorlar.
+    wants_direction = (
+        plan.get("tool") == "get_direction_signal" or "horizon" in args
+    )
+    if wants_direction:
+        symbol = args.get("symbol") or _first_ticker(state)
+        if not symbol:
+            symbols = args.get("symbols") or []
+            symbol = str(symbols[0]).upper() if symbols else None
+        if symbol:
+            horizon = (
+                _horizon_from_message(state.get("user_message") or "")
+                or str(args.get("horizon") or DEFAULT_DIRECTION_HORIZON).upper()
+            )
+            return await _run_tool(
+                state, "get_direction_signal",
+                {"symbol": str(symbol).upper(), "horizon": horizon},
+                assumptions=assumptions,
+                # Boş `narrative` okumanın kurulamadığını söylüyor; rakamlar
+                # yine gidiyor ve ajan boşluğu bildiriyor.
+                empty_when=lambda p: not p.get("narrative"),
+            )
+
     if plan.get("tool") == "get_technical_signals":
         symbol = args.get("symbol") or _first_ticker(state)
         if symbol:
@@ -1080,6 +1110,39 @@ async def _resolve_named_company(
 
 #: Dar arama bu kadar satır bulamazsa süzgeç kaldırılıp yeniden aranır.
 WIDEN_FLOOR = 3
+
+#: Vade söylenmediğinde kullanılan okuma. Sunucudaki `signals.DEFAULT_HORIZON`
+#: ile aynı ve bilerek tekrar yazılmış: ikisi ayrışırsa kullanıcı sorduğundan
+#: başka bir vadenin okumasını alır ve bunu fark etmesinin bir yolu yoktur.
+DEFAULT_DIRECTION_HORIZON = "3M"
+
+#: Kullanıcının cümlesinden vade çıkarmak için desen. Rakam ve yazıyla
+#: yazılmış hâller birlikte: "6 ay", "altı ayda", "3 aylık", "bir ay sonra".
+_HORIZON_WORDS = {
+    "1": "1M", "bir": "1M", "3": "3M", "uc": "3M", "üç": "3M",
+    "6": "6M", "alti": "6M", "altı": "6M",
+}
+_HORIZON_RE = re.compile(
+    r"\b(1|3|6|bir|[uü][cç]|alt[iı])\s*ay", re.IGNORECASE
+)
+
+
+def _horizon_from_message(message: str) -> Optional[str]:
+    """Kullanıcının kendi yazdığı vade.
+
+    Planlayıcının seçtiğinden ÖNCE geliyor ve sebebi ölçüldü: "THYAO
+    önümüzdeki 6 ayda nasıl gider" turunda planlayıcı `horizon: "3M"`
+    gönderdi. Kullanıcı altı ay sordu, üç aylık okuma aldı ve cevabın içinde
+    "6 aylık tahmin için doğrudan veri bulunmamaktadır" yazıyordu -- oysa
+    araç altı ayı destekliyor.
+
+    Vade kullanıcının sorusunun bir parçası, planlayıcının bir tercihi değil;
+    `_SORT_SYNONYMS` ile aynı desen -- prompt tavsiye, kod zorlar.
+    """
+    match = _HORIZON_RE.search(message or "")
+    if not match:
+        return None
+    return _HORIZON_WORDS.get(match.group(1).lower())
 
 #: Ticker süzgeçli bir aramada benzerlik tabanı. 0,45 (bkz.
 #: `market_research_node`) süzgeçSİZ aramalar için ölçülmüştü: orada
@@ -2571,9 +2634,25 @@ SCENARIO_HEDGE_TR = (
 #: aramak, modelin küçük bir yeniden ifadesinde ikinci bir kopya eklerdi.
 _HEDGE_MARK = "geleceği belirlemez"
 
-#: Çekincenin garanti edildiği araçlar. Üçü de KOŞULLU okuma üretiyor.
+#: Çekincenin garanti edildiği araçlar. Hepsi KOŞULLU okuma üretiyor.
+#:
+#: `get_direction_signal` v2.21 ile eklendi ve sebebi yine ÖLÇÜLDÜ: "ASELS
+#: önümüzdeki 3 ayda nasıl gider" turunda araç `narrative`i çekincesiyle
+#: birlikte döndürdü, model onu EXPECTATION MANAGEMENT'ın madde yapısına
+#: çevirdi ve kapanış çekincesini düşürdü. Kalan metin dokuz ölçüm ve
+#: "Veriler ağırlıklı olarak artış yönündeki baskıya işaret ediyor" idi --
+#: koşulsuz ve çekincesiz.
+#:
+#: `get_technical_signals` de burada, aynı sebeple: o da `technicals.narrate`
+#: ile koşullu bir okuma üretiyor ve aynı yeniden yazma ona da yapılabilir.
 HEDGED_TOOLS = frozenset(
-    {"run_portfolio_scenario", "get_portfolio_stress_test", "simulate_position_change"}
+    {
+        "run_portfolio_scenario",
+        "get_portfolio_stress_test",
+        "simulate_position_change",
+        "get_direction_signal",
+        "get_technical_signals",
+    }
 )
 
 

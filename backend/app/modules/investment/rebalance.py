@@ -165,6 +165,13 @@ def plan(
 
     return {
         "disclaimer": DISCLAIMER_TR,
+        # Sohbete GİDEN şey bu, satırlar değil. Gerekçe: ekranda duran liste
+        # kullanıcının kendi koyduğu hedeften çıkıyor ve onayı kendi
+        # tıklaması veriyor; aynı listeyi sohbette adet ve yönle yeniden
+        # basmak, o nedensellik zincirini kopardığı için dışarıdan bakan biri
+        # için bir tavsiyeden ayırt edilemez hâle geliyor. Ölçüldü: model
+        # satırları bir alım-satım tablosuna çevirdi.
+        "summary": _summary(rows, unresolved),
         "rows": rows,
         "unresolved": unresolved,
         "rounding_residual_base": round(residual_total, 2),
@@ -173,6 +180,41 @@ def plan(
         "blocked_cash_base": round(blocked_cash, 2),
         "warning": warning,
     }
+
+
+def _summary(
+    rows: Sequence[dict[str, Any]], unresolved: Sequence[dict[str, Any]]
+) -> str:
+    """Listenin ŞEKLİNİ anlatan cümle; satırların kendisini değil.
+
+    Sohbet bu cümleyi aktarıyor ve emirler ekranda kalıyor. "Kaç satır var,
+    hangi kovalarda, kaçı neden üretilemedi" sorusunun cevabı burada; "ne
+    kadar sat" sorusununki ekranda ve orada kullanıcının kendi tıklaması
+    onaylıyor.
+    """
+    if not rows and not unresolved:
+        return "Hedefinizle ölçülen ağırlıklar arasında emre dönüşen bir fark yok."
+
+    parts: list[str] = []
+    if rows:
+        buckets = sorted({row["label"] for row in rows})
+        sells = sum(1 for row in rows if row["side"] == SELL)
+        buys = len(rows) - sells
+        shape = []
+        if sells:
+            shape.append(f"{sells} satış")
+        if buys:
+            shape.append(f"{buys} alış")
+        parts.append(
+            f"Dengeleme ekranında {' ve '.join(shape)} satırı var "
+            f"({', '.join(buckets)})."
+        )
+    if unresolved:
+        parts.append(
+            f"{len(unresolved)} kova için emir üretilemedi ve her birinin "
+            "nedeni listede yazılı."
+        )
+    return " ".join(parts)
 
 
 def _order_row(

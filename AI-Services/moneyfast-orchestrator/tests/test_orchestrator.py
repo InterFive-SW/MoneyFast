@@ -6456,3 +6456,114 @@ class TestHorizonComesFromTheUser:
             {**base_state, "user_message": "THYAO görünümü ne?"}
         )
         assert fake_mcp.calls[0][1]["horizon"] == "6M"
+
+
+class TestRebalanceScreenQuestion:
+    """v2.22. Kullanıcı ekranda duran listeyi sorduğunda sohbet onu OKUYOR.
+
+    Araç adı yalnızca plandan okunmuyor: planlayıcı bu turda risk ölçümüne
+    yönelirse kullanıcı sorduğu ekran hakkında hiçbir şey duymaz.
+    """
+
+    @pytest.mark.parametrize("message,expected", [
+        ("dengeleme ekranında ne yazıyor", True),
+        ("Dengeleme sekmesindeki liste ne diyor", True),
+        ("o listede neden ASELS var", True),
+        ("portföyümü nasıl dengelemeliyim", False),
+        ("riskim ne durumda", False),
+        ("", False),
+    ])
+    def test_only_a_screen_question_takes_the_branch(self, message, expected):
+        """Kelime kümesi DAR: "dengele" tek başına yetmiyor, çünkü
+        "portföyümü nasıl dengelemeliyim" bir SEÇİM sorusu ve cevabı ekranı
+        işaret etmek."""
+        assert orchestrator._asks_about_rebalance({"user_message": message}) is expected
+
+    @pytest.mark.asyncio
+    async def test_the_plan_is_read_without_the_risk_chain(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Üç çağrılık zinciri boşuna kurmak, cevabı geciktirmekten başka bir
+        şey yapmazdı."""
+        fake_mcp.responses["get_rebalance_plan"] = {
+            "hasTarget": True, "rows": [{"statement": "satır"}],
+            "disclaimer": "Bu liste yatırım tavsiyesi değildir.",
+        }
+        out = await orchestrator.risk_node(
+            {**base_state, "user_message": "dengeleme ekranında ne yazıyor?"}
+        )
+        assert [call[0] for call in fake_mcp.calls] == ["get_rebalance_plan"]
+        assert out["specialist_output"]["status"] == "OK"
+
+    @pytest.mark.asyncio
+    async def test_no_target_is_a_complete_answer(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """"Hedefi siz koyarsınız" demek, boş bir liste göstermekten iyi."""
+        fake_mcp.responses["get_rebalance_plan"] = {
+            "hasTarget": False, "rows": [], "disclaimer": "d",
+            "statement": "Hedef dağılım belirlemediniz.",
+        }
+        out = await orchestrator.risk_node(
+            {**base_state, "user_message": "dengeleme listesi ne diyor?"}
+        )
+        assert out["specialist_output"]["status"] == "EMPTY"
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_risk_question_still_measures(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        fake_mcp.responses["get_portfolio_positions"] = {"positions": []}
+        fake_mcp.responses["get_risk_profile_summary"] = {"score": 80}
+        fake_mcp.responses["calculate_portfolio_risk_metrics"] = {"metrics": {}}
+        patched_llm.set_response("{}")
+        await orchestrator.risk_node(
+            {**base_state, "user_message": "riskim ne durumda?"}
+        )
+        assert fake_mcp.calls[0][0] == "get_portfolio_positions"
+
+    def test_the_plan_disclaimer_is_guaranteed_in_code(self):
+        """Ölçüldü: model listeyi tabloya çevirdi, planın kendi çekincesini
+        düşürdü ve yerine genel uygunluk cümlesini koydu -- dahası
+        "dengeleme önerileri oluşturdum" diye yazdı, yani listeyi KENDİSİNİN
+        ürettiğini iddia etti."""
+        out = orchestrator._keep_plan_disclaimer(
+            {"tools_used": ["get_rebalance_plan"]},
+            {"final_output": "Dengeleme önerileri oluşturdum.", "disclosures": []},
+        )
+        assert orchestrator.PLAN_DISCLAIMER_TR in out["disclosures"]
+
+    def test_the_general_disclosure_does_not_replace_it(self):
+        """Genel açıklama içeriğin danışmanlık olmadığını söylüyor; bu ise
+        listenin KİMİN hedefinden çıktığını."""
+        out = orchestrator._keep_plan_disclaimer(
+            {"tools_used": ["get_rebalance_plan"]},
+            {"final_output": "x",
+             "disclosures": ["Bu içerik yatırım danışmanlığı değildir."]},
+        )
+        assert len(out["disclosures"]) == 2
+
+    def test_a_text_that_kept_it_is_not_disclaimed_twice(self):
+        out = orchestrator._keep_plan_disclaimer(
+            {"tools_used": ["get_rebalance_plan"]},
+            {"final_output": "... kendi belirlediğiniz hedefin aritmetik karşılığı.",
+             "disclosures": []},
+        )
+        assert out["disclosures"] == []
+
+    def test_an_existing_copy_is_not_added_again(self):
+        """Model çekinceyi kendi yazdıysa ikinci bir kopya eklemek, aynı
+        cümleyi iki kez göstermek olurdu."""
+        out = orchestrator._keep_plan_disclaimer(
+            {"tools_used": ["get_rebalance_plan"]},
+            {"final_output": "tablo",
+             "disclosures": [orchestrator.PLAN_DISCLAIMER_TR]},
+        )
+        assert out["disclosures"] == [orchestrator.PLAN_DISCLAIMER_TR]
+
+    def test_a_turn_without_the_tool_is_untouched(self):
+        out = orchestrator._keep_plan_disclaimer(
+            {"tools_used": ["calculate_portfolio_risk_metrics"]},
+            {"final_output": "x", "disclosures": []},
+        )
+        assert out["disclosures"] == []

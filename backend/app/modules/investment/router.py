@@ -1295,6 +1295,11 @@ def get_rebalance_plan(
     nedenini taşıyor, çünkü sessiz bir atlama kullanıcının hedefine
     ulaşamamasının sebebini görünmez yapardı.
     """
+    return _rebalance_payload(db, user_id)
+
+
+def _rebalance_payload(db: Session, user_id: Optional[str]) -> dict:
+    """Planın gövdesi; oturum ucu ile servis ucu paylaşıyor."""
     result, inputs = _drift_inputs(db, user_id)
     account = inputs["account"]
     positions = [
@@ -1324,6 +1329,26 @@ def get_rebalance_plan(
         "statement": result["statement"],
         **plan,
     }
+
+
+@router.get(
+    "/agent/{user_id}/rebalance-plan",
+    summary="Dengeleme planı (MCP sözleşmesi)",
+    dependencies=[Depends(require_service_token)],
+)
+def get_rebalance_plan_for_ai(user_id: str, db: Session = Depends(get_db)):
+    """
+    Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+
+    `get_portfolio_technical_for_ai` ile aynı desen: MCP araçları kullanıcıyı
+    doğrulanmış oturum zarfından alıp yola koyuyor. İkisi TEK bir yardımcıyı
+    çağırıyor, böylece ekranın ve sohbetin aynı portföy için farklı bir plan
+    göstermesi mümkün değil.
+
+    **Salt okuma.** Sohbet bu listeyi ÜRETMİYOR; ekranda duranı açıklıyor.
+    Cümleler burada kuruluyor ve model onları aynen aktarıyor.
+    """
+    return _rebalance_payload(db, user_id)
 
 
 def _drift_inputs(db: Session, user_id: Optional[str]):

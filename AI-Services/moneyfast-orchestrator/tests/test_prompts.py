@@ -365,11 +365,23 @@ def test_every_specialist_is_english_only(agent):
     "agent,tool",
     [
         ("MARKET_RESEARCH_AGENT", "rag_semantic_market_search"),
-        ("RISK_STRATEGY_AGENT", "calculate_portfolio_risk_metrics"),
     ],
 )
 def test_tool_binding_names_exactly_one_tool(agent, tool):
     assert f"TOOL BINDING: {tool} only" in prompts.SPECIALIST_PROMPTS[agent]
+
+
+def test_the_risk_agent_binds_measurement_and_a_read_only_screen_reader():
+    """v2.22: ikinci araç SALT OKUMA. `get_rebalance_plan` bir dengeleme
+    ÖNERMİYOR, kullanıcının ekranında duranı okuyor -- ve "Never recommend a
+    rebalance" cümlesi yerinde duruyor (bkz.
+    `TestRebalanceOpeningIsReadOnly`)."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert (
+        "TOOL BINDING: calculate_portfolio_risk_metrics, and get_rebalance_plan "
+        "when the user asks about their Dengeleme screen" in text
+    )
+    assert "READ-ONLY; only when the user asks about that screen" in text
 
 
 def test_the_transaction_agent_binds_staging_and_cancelling_and_nothing_else():
@@ -528,7 +540,13 @@ PROMPT_BUDGETS = {
     #: sıfır sapma SAYILMAMASI, ve ikisinin de METRİK ADI OLMADIĞI -- sonuncusu
     #: ölçüldü, planlayıcı `metrics: ["allocation_drift"]` gönderip turu
     #: düşürdü.
-    "RISK_STRATEGY_AGENT": 3700,
+    #: v2.22 ile salt okuma açıklığı: kullanıcı Dengeleme ekranındaki listeyi
+    #: SORABİLİYOR. Bütçeyi aşan kısım kısaltılınca kaybolan şey açıklığın
+    #: SINIRLARI olurdu -- liste kurmama, sembol/adet anmama, hedef önermeme,
+    #: "çalıştırın" dememe -- ve sınırsız bir açıklık, üstündeki yasağı
+    #: fiilen kaldırır. En pahalı paragraf, emir satırlarının modele NEDEN
+    #: verilmediğini anlatan yer; onu kısaltmak kuralı bir tercihe çevirir.
+    "RISK_STRATEGY_AGENT": 5100,
 }
 DEFAULT_PROMPT_BUDGET = 2500
 
@@ -861,3 +879,66 @@ class TestDirectionSignalIsBound:
         router = flat(prompts.ROUTER_PROMPT)
         assert "Kimse size kazandırır diyemez" in router
         assert "routing it away leaves nothing to write" in router
+
+
+class TestRebalanceOpeningIsReadOnly:
+    """v2.22. Sohbet ekrandaki listeyi OKUYABİLİR ama üretemez.
+
+    Bu sınıfın asıl işi, iki cümlenin BİRLİKTE durduğunu sabitlemek: dar
+    açıklık eklendi diye yasak gevşemedi.
+    """
+
+    def test_the_prohibition_is_still_there_word_for_word(self):
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        assert "Never recommend a rebalance, hedge or target weight" in prompt
+        assert "Despite the name, you produce no strategy" in prompt
+
+    def test_the_opening_is_explicitly_read_only(self):
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        assert "ONE NARROW OPENING, and it is read-only" in prompt
+        assert "get_rebalance_plan describes it" in prompt
+
+    def test_the_order_rows_are_kept_off_the_chat(self):
+        """Ekranda kullanıcı hedefi kendi koydu ve her satırı kendi tıklaması
+        onaylıyor; sembol, yön ve adedi sohbette yeniden basmak o zinciri
+        koparıyor ve cevap bir tavsiyeden ayırt edilemez hâle geliyor."""
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        assert "The ORDER ROWS THEMSELVES are not given to you" in prompt
+        assert "point at the screen for the rows" in prompt
+        assert 'Asked "kaç lot", say the amounts are on the screen' in prompt
+
+    def test_the_opening_names_what_it_does_not_allow(self):
+        """Açıklığın kendisi sınırlarını taşımalı: eklendiği yerde
+        okunmayan bir sınır, yokmuş gibi davranılan bir sınırdır."""
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        for rule in (
+            "you never build a list",
+            "never name a symbol with a quantity",
+            "never propose a target",
+            "never tell them to execute anything",
+            "never raise the subject yourself",
+        ):
+            assert rule in prompt, rule
+
+    def test_a_choice_question_is_deflected_to_the_user(self):
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        assert "the target is theirs to set and point at the screen" in prompt
+
+    def test_the_target_prohibition_elsewhere_is_untouched(self):
+        """`allocation_drift` tarafındaki "kendi hedefini önerme" kuralı bu
+        değişiklikten etkilenmiyor."""
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        assert "NEVER propose a target of your own" in prompt
+
+    def test_a_screen_question_is_routed_to_the_risk_agent(self):
+        """Ölçülen hata: "dengeleme ekranında ne yazıyor" EDUCATION_AGENT'a
+        gitti, hiçbir araç çalışmadı ve kullanıcıya veri "bulunamadı" dendi --
+        kendi ekranında çizilmiş bir liste için."""
+        router = flat(prompts.ROUTER_PROMPT)
+        assert "ABOUT THE DENGELEME SCREEN is RISK_STRATEGY_AGENT" in router
+        assert "get_rebalance_plan reads it" in router
+
+    def test_a_choice_question_is_not_routed_there(self):
+        router = flat(prompts.ROUTER_PROMPT)
+        assert '"Portföyümü nasıl dengelemeliyim" is NOT this' in router
+        assert "the target is theirs to set" in router

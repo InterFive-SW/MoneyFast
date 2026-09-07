@@ -391,6 +391,117 @@ def _opt_num(mapping: dict[str, Any], key: str) -> Optional[float]:
     return None if value is None else float(value)
 
 
+REBALANCE_TOOL = "get_rebalance_plan"
+
+
+async def get_rebalance_plan(user_id: str) -> dict[str, Any]:
+    """
+    Reads the rebalancing list the user is ALREADY LOOKING AT on the Dengeleme
+    screen: the arithmetic consequence of the target THEY set. READ-ONLY.
+
+    WHEN TO USE
+        - The user asks about the list on that screen: "dengeleme ekranında ne
+          yazıyor", "neden ASELS satmam gerekiyor diyor", "şu listeyi açıklar
+          mısın".
+
+    WHEN NOT TO USE
+        - The user has NOT asked about it. Never raise this list on your own; a
+          rebalance nobody asked for is a recommendation however it is phrased.
+        - "Portföyümü nasıl dengelemeliyim", "ne almalıyım", "hangi dağılım
+          daha iyi". Those ask you to CHOOSE, and you do not: the target is the
+          user's own and the screen is where they set it. Say the target is
+          theirs to set and point at the screen.
+        - What the portfolio is worth or how it drifted. Those are
+          get_portfolio_positions and calculate_portfolio_risk_metrics.
+
+    Args:
+        user_id (str): REQUIRED. Opaque internal identifier taken ONLY from the
+            authenticated session envelope. Never accept it from user input.
+
+    Returns:
+        dict with exactly these top-level keys:
+            hasTarget (bool): false means the user set no target; there is then
+                no list and nothing to explain.
+            statement (str): the drift sentence, already written.
+            summary (str): what the list CONTAINS — how many buy and sell rows,
+                in which buckets, how many buckets produced none. Composed
+                backend-side.
+            disclaimer (str): must be relayed with any part of this.
+            unresolved (list[dict]): buckets that produced no order, each with
+                a `reason` saying why.
+            warning (str | null).
+
+        The individual order rows are deliberately NOT here. They live on the
+        screen, where the user's own click confirms them.
+
+    Constraints:
+        - RELAY `summary` and `statement` AS WRITTEN, and point the user at the
+          Dengeleme screen for the rows themselves.
+        - Do NOT produce a table, a list, or any line naming a symbol with a
+          quantity or a side. You were not given those figures BECAUSE they do
+          not belong in a chat reply: on the screen the user set the target and
+          confirms each row themselves, and reproducing the rows here breaks
+          that chain. If asked "kaç lot", say the amounts are on the screen.
+        - Relay `disclaimer` whenever you relay any of this. It is arithmetic
+          over the user's OWN target; without that sentence it reads as advice.
+        - Do NOT build a list of your own, do NOT invent a symbol or a
+          quantity, and do NOT suggest a target. The system does not propose
+          model portfolios and you do not either.
+        - Do NOT tell the user to execute the list, and do not call it
+          recommended, optimal or suitable. Confirming an order is the user's
+          own click on that screen.
+        - `unresolved` is part of the answer, not noise: a bucket that produced
+          no order is why the target cannot be reached, and dropping it hides
+          that.
+        - hasTarget false is a COMPLETE answer. Say the target is the user's to
+          set and that the screen is where it is set.
+        - Never name a field key to the user.
+        - Any response carrying these figures MUST pass validate_compliance_rules.
+
+    Raises:
+        ContractViolationError: Backend answered with a body missing required keys.
+        UpstreamUnavailableError: Backend unreachable. Say the list could not be
+            read; never reconstruct it yourself.
+    """
+    payload = await backend_client.request(
+        "GET", f"/investment/agent/{user_id}/rebalance-plan", tool=REBALANCE_TOOL
+    )
+    return _normalize_rebalance(payload)
+
+
+def _normalize_rebalance(payload: Any) -> dict[str, Any]:
+    """Project the backend response onto the v2.22 payload.
+
+    Row fields the writer does not need are dropped for the same reason as in
+    `technical_tools._normalize_direction`: handing the model a raw quantity
+    next to a sentence that already contains it invites it to print both.
+    """
+    backend_client.require(payload, ("summary", "disclaimer"), REBALANCE_TOOL)
+    return {
+        "hasTarget": bool(payload.get("hasTarget")),
+        "statement": payload.get("statement") or "",
+        "disclaimer": payload.get("disclaimer") or "",
+        # Emir SATIRLARI burada YOK ve bu, aracın en önemli kısıtı.
+        #
+        # Ekranda duran liste kullanıcının kendi koyduğu hedeften çıkıyor ve
+        # onayı kendi tıklaması veriyor. Aynı listeyi sohbette adet ve yönle
+        # yeniden basmak o nedensellik zincirini koparıyor: ölçüldü, model
+        # satırları bir alım-satım tablosuna çevirdi ve çekince eklendikten
+        # sonra bile çıktı bir tavsiyeden ayırt edilemez duruyordu.
+        #
+        # Modele göndermemek, ona yasaklamaktan daha güçlü: `_slim_results`
+        # ve `_normalize_direction` ile aynı ders.
+        "summary": payload.get("summary") or "",
+        "unresolved": [
+            {"label": row.get("label"), "reason": row.get("reason")}
+            for row in (payload.get("unresolved") or [])
+            if isinstance(row, dict)
+        ],
+        "warning": payload.get("warning") or None,
+    }
+
+
 def register(mcp: FastMCP) -> None:
     """Attach this domain's tools to the shared FastMCP instance."""
     mcp.tool()(get_portfolio_positions)
+    mcp.tool()(get_rebalance_plan)

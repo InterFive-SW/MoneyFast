@@ -6,7 +6,7 @@ Each module exposes a `register(mcp)` function; the tool callables stay at
 module level so they can be imported and unit-tested without a running
 server.
 
-Contracts follow "MCP Tools Interface Definitions v2.21" (see
+Contracts follow "MCP Tools Interface Definitions v2.22" (see
 CONTRACT_VERSION below -- that constant is the authority; this paragraph
 described v2.9 long after the constant had moved on). It is the union of two
 lineages that developed in parallel: v2.4 on main added
@@ -119,7 +119,13 @@ SERVER_NAME = "moneyfast"
 #: `get_technical_signals`'ın v2.10 yükü DEĞİŞMEDİ -- o tek bir göstergeler
 #: okuması, bu üç kaynağın birleşimi ve farklı bir başarısızlık biçimi var
 #: (vade dışı bir istek REDDEDİLİYOR).
-CONTRACT_VERSION = "v2.21"
+#: v2.22: `get_rebalance_plan`. SALT OKUMA. Dengeleme ekranı kullanıcının
+#: kendi hedefinin aritmetik karşılığını gösteriyor ve kullanıcı sohbete
+#: "şu listede ne yazıyor" diye sorabiliyordu; sohbetin o listeyi GÖREMEMESİ,
+#: cevabı "ekrana bakın"a indiriyordu. Araç listeyi ÜRETMİYOR, okuyor:
+#: `prompts.py:859`'daki "Never recommend a rebalance" cümlesi yerinde
+#: duruyor ve testi (`test_prompts.py`) onu sabitlemeye devam ediyor.
+CONTRACT_VERSION = "v2.22"
 
 SERVER_INSTRUCTIONS = """\
 MoneyFast tool server. Twenty-three tools across sixteen domains.

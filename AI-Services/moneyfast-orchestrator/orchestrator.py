@@ -1711,6 +1711,23 @@ def _slim_results(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+#: Kullanıcının Dengeleme ekranını sorduğunu gösteren kelimeler.
+#:
+#: Araç adı yalnızca plandan okunmuyor, `get_direction_signal`'in `horizon`
+#: argümanıyla aynı gerekçe: planlayıcı bu turda risk ölçümüne yönelirse
+#: kullanıcı sorduğu ekran hakkında hiçbir şey duymaz. Kelime kümesi DAR --
+#: "dengele" tek başına yetmiyor, çünkü "portföyümü nasıl dengelemeliyim"
+#: bir SEÇİM sorusu ve cevabı ekranı işaret etmek.
+_REBALANCE_SCREEN_WORDS = ("dengeleme ekran", "dengeleme sekme", "dengeleme listesi",
+                           "dengeleme planı", "o listede", "bu listede")
+
+
+def _asks_about_rebalance(state: MoneyFastState) -> bool:
+    """Kullanıcı ekranda duran listeyi mi soruyor."""
+    message = _fold(state.get("user_message") or "")
+    return any(_fold(word) in message for word in _REBALANCE_SCREEN_WORDS)
+
+
 async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     """Three calls: positions, the profile summary, then the raw statistics.
 
@@ -1724,6 +1741,19 @@ async def risk_node(state: MoneyFastState) -> dict[str, Any]:
     """
     mcp = get_mcp_client()
     user_id = state.get("user_id") or "unknown"
+
+    # Dengeleme ekranı SALT OKUMA bir soru ve risk ölçümüne hiç ihtiyacı yok:
+    # üç çağrılık zinciri boşuna kurmak, cevabı geciktirmekten başka bir şey
+    # yapmazdı. Ekranı sormayan bir turda bu dal hiç girilmiyor.
+    if _asks_about_rebalance(state):
+        return await _run_tool(
+            state, "get_rebalance_plan", {"user_id": user_id},
+            assumptions=[],
+            # Hedefi olmayan bir kullanıcıda liste YOK ve bu TAM bir cevap:
+            # "hedefi siz koyarsınız" demek, boş bir liste göstermekten iyi.
+            empty_when=lambda p: not p.get("hasTarget"),
+        )
+
     try:
         holdings = await mcp.call(
             "get_portfolio_positions",
@@ -2656,6 +2686,43 @@ HEDGED_TOOLS = frozenset(
 )
 
 
+#: Dengeleme listesinin kendi çekincesi. Genel uygunluk açıklaması bunun
+#: yerini TUTMUYOR: o, içeriğin yatırım danışmanlığı olmadığını söylüyor; bu
+#: ise listenin KİMİN hedefinden çıktığını -- kullanıcının kendi girdiği
+#: hedeften.
+PLAN_DISCLAIMER_TR = (
+    "Bu liste yatırım tavsiyesi değildir; kendi belirlediğiniz hedefin "
+    "aritmetik karşılığıdır."
+)
+
+_PLAN_MARK = "kendi belirlediğiniz hedefin"
+
+
+def _keep_plan_disclaimer(
+    state: MoneyFastState, out: dict[str, Any]
+) -> dict[str, Any]:
+    """Dengeleme listesinin çekincesini kapının HER dalından geçirir.
+
+    `_keep_hedge` ile aynı ders ve aynı ölçüm: prompt tavsiyedir. Araç
+    sözleşmesi "`disclaimer`ı her satırla birlikte aktar" diyor ve ÖLÇÜLDÜ --
+    model listeyi tabloya çevirdi, planın kendi çekincesini düşürdü ve yerine
+    genel uygunluk cümlesini koydu. Dahası "dengeleme önerileri oluşturdum"
+    diye yazdı: listeyi KENDİSİNİN ürettiğini iddia etti.
+
+    Çekince o iddiayı da düzeltiyor, çünkü listenin kullanıcının kendi
+    hedefinden çıktığını söylüyor.
+    """
+    if "get_rebalance_plan" not in set(state.get("tools_used") or []):
+        return out
+    if _PLAN_MARK in (out.get("final_output") or ""):
+        return out
+    existing = out.get("disclosures") or []
+    if any(_PLAN_MARK in item for item in existing):
+        return out
+    out["disclosures"] = existing + [PLAN_DISCLAIMER_TR]
+    return out
+
+
 def _keep_hedge(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
     """Koşullu bir turun çekincesini kapının HER dalından geçirir.
 
@@ -2694,6 +2761,7 @@ def _keep_crisis(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
     hepsinden geçiyor.
     """
     out = _keep_hedge(state, out)
+    out = _keep_plan_disclaimer(state, out)
     notices = state.get("crisis_notices") or []
     if not notices:
         return out

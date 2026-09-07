@@ -1069,3 +1069,47 @@ class TestRebalancePlan:
         drift = client.get("/api/investment/allocation-drift").json()
         assert plan["totalValue"] == drift["totalValue"]
         assert plan["statement"] == drift["statement"]
+
+
+class TestRebalancePlanForAgent:
+    """Servis token'lı ikiz uç. Ekranın ve sohbetin aynı portföy için farklı
+    bir plan göstermesi mümkün olmamalı."""
+
+    URL = "/api/investment/agent/u-1/rebalance-plan"
+
+    def test_without_a_service_token_it_is_refused(self, client, monkeypatch):
+        """Bir kullanıcının planını başkasının okuyabilmesi, oturum
+        doğrulamasını atlatmak olurdu."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        assert client.get(self.URL).status_code == 401
+
+    def test_an_unconfigured_key_refuses_rather_than_waves_through(
+        self, client, monkeypatch
+    ):
+        """Anahtar hiç kurulmadıysa kapı AÇILMIYOR: yapılandırılmamış bir
+        koruma, olmayan bir korumadır."""
+        monkeypatch.delenv("BACKEND_API_KEY", raising=False)
+        assert client.get(self.URL).status_code == 503
+
+    def test_it_serves_the_same_body_as_the_session_endpoint(
+        self, client, mocker, monkeypatch
+    ):
+        from app.modules.investment import market_service, router as investment_router
+
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+
+        mocker.patch.object(market_service, "holdings", return_value=[])
+        mocker.patch.object(market_service, "latest_quotes", return_value={})
+        mocker.patch.object(
+            market_service, "account",
+            return_value=SimpleNamespace(id="a1", cash_balance=0.0,
+                                         currency_code="TRY", account_number="TR-1"),
+        )
+        mocker.patch.object(market_service, "blocked_cash", return_value=0.0)
+        mocker.patch.object(investment_router, "_targets_for", return_value={})
+
+        body = client.get(
+            self.URL, headers={"Authorization": "Bearer secret"}
+        ).json()
+        assert "disclaimer" in body
+        assert body["hasTarget"] is False

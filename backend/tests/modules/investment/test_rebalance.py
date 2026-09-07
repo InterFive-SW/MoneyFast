@@ -217,6 +217,71 @@ class TestCash:
         assert out["warning"] is None
 
 
+class TestSummary:
+    """Sohbete GİDEN cümle. Emir satırları ona hiç ulaşmıyor.
+
+    Gerekçe: ekranda kullanıcı hedefi kendi koydu ve her satırı kendi
+    tıklaması onaylıyor. Aynı listeyi sohbette adet ve yönle yeniden basmak o
+    nedensellik zincirini koparıyor -- ölçüldü, model satırları bir alım-satım
+    tablosuna çevirdi ve çekince eklendikten sonra bile çıktı bir tavsiyeden
+    ayırt edilemiyordu.
+    """
+
+    def test_it_describes_the_shape_not_the_rows(self):
+        out = rebalance.plan(
+            [_drift("bist_equity", "BIST Hisse", 10_000.0)],
+            [_holding("A", "bist_equity", 100, 100.0, 10_000.0)],
+            {}, "TRY",
+        )
+        assert "1 satış" in out["summary"]
+        assert "BIST Hisse" in out["summary"]
+        # Sembol ve adet cümlede YOK.
+        assert "A için" not in out["summary"]
+        assert "100 adet" not in out["summary"]
+
+    def test_both_sides_are_counted(self):
+        out = rebalance.plan(
+            [
+                _drift("bist_equity", "BIST Hisse", 10_000.0),
+                _drift("us_equity", "ABD Hisse", -7_000.0),
+            ],
+            [
+                _holding("A", "bist_equity", 100, 100.0, 10_000.0),
+                _holding("AAPL", "us_equity", 10, 200.0, 70_000.0, currency="USD"),
+            ],
+            {"USD": 35.0}, "TRY", available_cash=99_999.0,
+        )
+        assert "1 satış ve 1 alış" in out["summary"]
+
+    def test_buckets_without_an_order_are_counted_too(self):
+        """Kaç kovanın emir üretemediği listenin şeklinin parçası; sessizce
+        atlamak hedefe ulaşılamamasının sebebini görünmez yapardı."""
+        out = rebalance.plan(
+            [_drift("gold", "Altın", -5_000.0)], [], {}, "TRY",
+        )
+        assert "1 kova için emir üretilemedi" in out["summary"]
+
+    def test_nothing_to_do_says_so(self):
+        out = rebalance.plan([], [], {}, "TRY")
+        assert "emre dönüşen bir fark yok" in out["summary"]
+
+    def test_only_sells_reads_naturally(self):
+        out = rebalance.plan(
+            [_drift("bist_equity", "BIST Hisse", 10_000.0)],
+            [_holding("A", "bist_equity", 100, 100.0, 10_000.0)],
+            {}, "TRY",
+        )
+        assert " ve " not in out["summary"].split(" satırı")[0]
+
+    def test_only_buys_reads_naturally(self):
+        out = rebalance.plan(
+            [_drift("bist_equity", "BIST Hisse", -10_000.0)],
+            [_holding("A", "bist_equity", 100, 100.0, 10_000.0)],
+            {}, "TRY", available_cash=99_999.0,
+        )
+        assert "1 alış satırı" in out["summary"]
+
+
 class TestWording:
     """Üretilen HİÇBİR cümle uygunluk kurallarına takılmamalı.
 
@@ -242,6 +307,7 @@ class TestWording:
         texts = [row["statement"] for row in out["rows"]]
         texts += [row["reason"] for row in out["unresolved"]]
         texts.append(out["disclaimer"])
+        texts.append(out["summary"])
         if out["warning"]:
             texts.append(out["warning"])
         return texts

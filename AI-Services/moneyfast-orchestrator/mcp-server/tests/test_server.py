@@ -23,6 +23,8 @@ import server
 EXPECTED_TOOLS = {
     # v2.21: ölçülen kanıtların hangi yöne meylettiği, gerekçesiyle.
     "get_direction_signal",
+    # v2.22: ekranda duran dengeleme listesi. Araç onu ÜRETMİYOR, okuyor.
+    "get_rebalance_plan",
     "get_portfolio_positions",
     "get_market_data",
     "rag_semantic_market_search",
@@ -94,7 +96,8 @@ class TestWiring:
         # v2.19: `resolve_instruments`.
         # v2.20: `get_open_orders` + `cancel_order`.
         # v2.21: `get_direction_signal`.
-        assert server.CONTRACT_VERSION == "v2.21"
+        # v2.22: `get_rebalance_plan` (salt okuma).
+        assert server.CONTRACT_VERSION == "v2.22"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it

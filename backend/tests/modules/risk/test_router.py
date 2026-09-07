@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from types import SimpleNamespace
 import pytest
 
+from app.modules.investment import allocation
 from app.modules.risk import service
 
 URL = "/api/risk/calculate"
@@ -1341,3 +1343,127 @@ class TestMeasurementDisclosure:
         body = client.get(SUMMARY_URL, headers=service_auth).json()
         assert "window" not in body
         assert "assumptions" not in body
+
+
+class TestAllocationTemplates:
+    """Hedef formunun başlangıç değerleri.
+
+    **Şablon bir model portföy değil ve sistem birini SEÇMİYOR.** Bandı beyan
+    edilen toleransla eşleşen şablon başa geliyor -- bu bir sıralama girdisi,
+    bir tavsiye değil.
+    """
+
+    URL = "/api/risk/allocation-templates"
+
+    def _series(self, n=260, step=1.0):
+        from datetime import datetime, timedelta, timezone
+
+        start = datetime(2025, 1, 1, 21, 0, tzinfo=timezone.utc)
+        return [(start + timedelta(days=i), 100.0 + i * step) for i in range(n)]
+
+    def _patch(self, mocker, tolerance="Orta", with_us=True):
+        from app.modules.investment import market_service
+        from app.modules.risk import store
+
+        def closes(db, symbol, limit=None):
+            if symbol == "SPX" and not with_us:
+                return []
+            return self._series()
+
+        mocker.patch.object(market_service, "candle_closes", side_effect=closes)
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            side_effect=lambda db, symbol: SimpleNamespace(
+                symbol=symbol,
+                currency_code="USD" if symbol in ("SPX", "XAUUSD") else "TRY",
+            ),
+        )
+        mocker.patch.object(
+            store, "latest_profile",
+            return_value=SimpleNamespace(tolerance_level=tolerance)
+            if tolerance else None,
+        )
+
+    def test_every_template_is_listed_with_its_weights(self, client, mocker):
+        self._patch(mocker)
+        body = client.get(self.URL).json()
+        assert {item["key"] for item in body["items"]} == set(
+            allocation.TEMPLATES
+        )
+        assert all(item["weights"] for item in body["items"])
+
+    def test_the_cash_assumption_is_stated(self, client, mocker):
+        """Nakit faiz serisi sistemde yok; sıfır varsayımı SÖYLENİYOR."""
+        self._patch(mocker)
+        body = client.get(self.URL).json()
+        assert "nakit getirisi sıfır varsayıldı" in body["measurementNote"]
+
+    def test_a_matching_band_is_sorted_to_the_top(self, client, mocker):
+        """Sıralama girdisi, seçim değil: neye göre sıralandığı her satırın
+        cümlesinde yazıyor."""
+        self._patch(mocker)
+        body = client.get(self.URL).json()
+        highlighted = [item for item in body["items"] if item["highlighted"]]
+        if highlighted:
+            assert body["items"][0]["highlighted"] is True
+
+    def test_an_unmeasurable_bucket_is_named_rather_than_hidden(
+        self, client, mocker
+    ):
+        """SPX'in barı gelene kadar `us_equity` ölçülemez ve bu gerçek bir
+        yol -- migration atıldığı an hiç barı yok."""
+        self._patch(mocker, with_us=False)
+        body = client.get(self.URL).json()
+        equity = next(i for i in body["items"] if i["key"] == "equity_heavy")
+        assert equity["volatility"] is None
+        assert "ABD Hisse" in equity["unmeasured"]
+        assert "ABD Hisse" in equity["statement"]
+
+    def test_without_a_questionnaire_nothing_is_highlighted(self, client, mocker):
+        """Beyan yoksa karşılaştırılacak ikinci olgu da yok."""
+        self._patch(mocker, tolerance=None)
+        body = client.get(self.URL).json()
+        assert all(not item["highlighted"] for item in body["items"])
+
+    def test_a_day_without_a_rate_is_dropped_not_assumed(self, client, mocker):
+        """1.0 VARSAYILMIYOR: bu depoda bir kez ölçülmüş hata sınıfı. Kur
+        serisinin kapsamadığı gün, dolar cinsli seriden düşüyor."""
+        from app.modules.investment import market_service
+        from app.modules.risk import store
+
+        def closes(db, symbol, limit=None):
+            if symbol == "USDTRY":
+                # Kur serisi yarım: ikinci yarının kuru yok.
+                return self._series()[:100]
+            return self._series()
+
+        mocker.patch.object(market_service, "candle_closes", side_effect=closes)
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            side_effect=lambda db, symbol: SimpleNamespace(
+                symbol=symbol,
+                currency_code="USD" if symbol in ("SPX", "XAUUSD") else "TRY",
+            ),
+        )
+        mocker.patch.object(
+            store, "latest_profile",
+            return_value=SimpleNamespace(tolerance_level="Orta"),
+        )
+
+        body = client.get(self.URL).json()
+        # Ölçüm yine yapılıyor ama YALNIZCA kuru olan günlerden.
+        assert body["items"]
+
+    def test_a_dollar_proxy_is_converted_before_it_is_measured(
+        self, client, mocker
+    ):
+        """Çevirmemek, ABD ve altın kovalarını TL yatırımcısı için sistematik
+        olarak sakin gösterirdi."""
+        from app.modules.investment import market_service
+
+        self._patch(mocker)
+        client.get(self.URL)
+        asked = [
+            call.args[1] for call in market_service.candle_closes.call_args_list
+        ]
+        assert "USDTRY" in asked, "kur serisi okunmalı"

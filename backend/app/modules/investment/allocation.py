@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
+from app.modules.risk import returns as risk_returns
+
 CASH = "cash"
 OTHER = "other"
 
@@ -165,3 +167,129 @@ def _statement(rows: list[dict[str, Any]], has_target: bool, total: float) -> st
         f"%{widest['current_percent']:g} — hedefin "
         f"{abs(widest['gap_points']):g} puan {direction}."
     )
+
+
+# ── Hazır dağılım şablonları ────────────────────────────────────────────────
+#
+# Şablon bir MODEL PORTFÖY DEĞİL ve `AllocationTarget` modelindeki gerekçe
+# burada da geçerli: sistemin hedefi koyması, tam olarak vermeyeceği kararı
+# vermek olurdu. Bunlar formun BAŞLANGIÇ DEĞERİ; kaydedilen şey yine
+# kullanıcının kendi PUT'u ve istediği gibi değiştirebiliyor.
+#
+# Adlar yargı taşımıyor: "Ağırlıklı nakit" ne yaptığını söylüyor, "temkinli"
+# gibi bir nitelemede bulunmuyor -- ikincisi kullanıcının durumu hakkında bir
+# iddia olurdu.
+
+TEMPLATES: dict[str, dict[str, Any]] = {
+    "cash_heavy": {
+        "label": "Ağırlıklı nakit",
+        "weights": {CASH: 60, "bist_equity": 20, "gold": 10, "fx": 10},
+    },
+    "balanced": {
+        "label": "Dengeli",
+        "weights": {
+            CASH: 25, "bist_equity": 30, "us_equity": 20, "gold": 15, "fx": 10
+        },
+    },
+    "equity_heavy": {
+        "label": "Ağırlıklı hisse",
+        "weights": {CASH: 10, "bist_equity": 45, "us_equity": 35, "gold": 10},
+    },
+}
+
+#: Kovanın oynaklığını ölçmek için okunacak seri.
+#:
+#: `us_equity` için `SPX` migration 0043 ile eklendi; öncesinde evrende ABD
+#: endeksi yoktu ve kova ölçülemiyordu. `INDEX_CODES` yalnızca ÜYELİK tablosu,
+#: fiyat serisi değil.
+#:
+#: Nakit için vekil YOK ve olmaması bir eksiklik değil: getirisi sıfır
+#: alınıyor ve bu bir VARSAYIM olarak raporlanıyor -- nakit faiz serisi
+#: sistemde yok, `scenario.py`'nin faizi dışarıda bırakma gerekçesiyle aynı.
+PROXY_FOR_BUCKET: dict[str, Optional[str]] = {
+    "bist_equity": "XU100",
+    "us_equity": "SPX",
+    "gold": "XAUUSD",
+    "fx": "USDTRY",
+    CASH: None,
+}
+
+#: Ölçüm için gereken en az ORTAK işlem günü. Altmışın altında bir seri,
+#: yıllıklandırıldığında gürültüyü bir orana çeviriyor.
+MIN_COMMON_DAYS = 60
+
+#: Ölçülemeyen kovaların toplam ağırlığı bu puanı aşarsa şablonun oynaklığı
+#: hiç raporlanmıyor. Yüzde otuzu ölçülemeyen bir karışımın oynaklığını tek
+#: bir sayı olarak sunmak, ölçülen yüzde yetmişi bütünmüş gibi göstermek
+#: olurdu.
+UNMEASURED_WEIGHT_LIMIT = 10
+
+
+def template_volatility(
+    weights: dict[str, float],
+    closes_by_bucket: dict[str, list[tuple[Any, float]]],
+) -> dict[str, Any]:
+    """Bir ağırlık kümesinin geçmiş veriyle ÖLÇÜLEN yıllık oynaklığı.
+
+    Seriler çağıran tarafından TL'ye çevrilmiş olarak veriliyor. Çevirmemek,
+    ABD ve altın kovalarını TL yatırımcısı için sistematik olarak sakin
+    gösterirdi -- bu depoda bir kez 48 kat olarak ölçülmüş hata sınıfı.
+
+    Nakit getirisi sıfır ve bu bir VARSAYIM olarak dönüyor; sistemde nakit
+    faiz serisi yok.
+
+    Tarihe göre hizalanıyor, uzunluğa göre değil: iki seriyi son N gününe
+    göre eşlemek, farklı günleri yan yana koymak olurdu (`paired_returns`ün
+    kendi gerekçesi).
+    """
+    measured: dict[str, list[float]] = {}
+    unmeasured: list[str] = []
+
+    common: Optional[set] = None
+    for bucket, weight in weights.items():
+        if bucket == CASH:
+            continue
+        series = closes_by_bucket.get(bucket) or []
+        if len(series) < MIN_COMMON_DAYS:
+            unmeasured.append(bucket)
+            continue
+        dates = {row[0] for row in series}
+        common = dates if common is None else (common & dates)
+
+    if common is not None and len(common) < MIN_COMMON_DAYS:
+        # Seriler tek tek yeterliydi ama ORTAK günleri yetmiyor: farklı
+        # takvimlerde işlem gören iki piyasa (BIST ve NASDAQ) böyle.
+        unmeasured = [b for b in weights if b != CASH]
+        common = None
+
+    for bucket, weight in weights.items():
+        if bucket == CASH or bucket in unmeasured:
+            continue
+        series = [row for row in (closes_by_bucket.get(bucket) or [])
+                  if common is None or row[0] in common]
+        series.sort(key=lambda row: row[0])
+        measured[bucket] = risk_returns.simple_returns([row[1] for row in series])
+
+    unmeasured_weight = sum(
+        weights.get(bucket, 0) for bucket in unmeasured
+    )
+    if unmeasured_weight > UNMEASURED_WEIGHT_LIMIT or not measured:
+        return {
+            "volatility": None,
+            "unmeasured": sorted({label_for(b) for b in unmeasured}),
+            "cash_assumed_flat": CASH in weights,
+        }
+
+    length = min(len(series) for series in measured.values())
+    blended = [
+        sum(
+            weights[bucket] / 100.0 * measured[bucket][-length:][i]
+            for bucket in measured
+        )
+        for i in range(length)
+    ]
+    return {
+        "volatility": risk_returns.annualised_volatility(blended),
+        "unmeasured": sorted({label_for(b) for b in unmeasured}),
+        "cash_assumed_flat": CASH in weights,
+    }

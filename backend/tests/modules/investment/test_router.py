@@ -987,3 +987,85 @@ class TestAllocationDrift:
         }
         assert written == {"bist_equity": 70.0, "cash": 30.0}
         db.commit.assert_called_once()
+
+
+class TestRebalancePlan:
+    """Sapmanın emir karşılığı. Sistem hedefi KOYMUYOR ve enstrüman SEÇMİYOR:
+    kova farkı mevcut pozisyonlara orantılı dağıtılıyor."""
+
+    URL = "/api/investment/rebalance-plan"
+
+    def _portfolio(self, mocker, rows, cash=100000.0, blocked=0.0):
+        from app.modules.investment import market_service, router as investment_router
+
+        mocker.patch.object(market_service, "holdings", return_value=rows)
+        mocker.patch.object(
+            market_service, "latest_quotes",
+            return_value={"USDTRY": {"price": 40.0}},
+        )
+        mocker.patch.object(
+            market_service, "account",
+            return_value=SimpleNamespace(id="a1", cash_balance=cash,
+                                         currency_code="TRY", account_number="TR-1"),
+        )
+        mocker.patch.object(market_service, "blocked_cash", return_value=blocked)
+
+    def _row(self, symbol, market, quantity, price, currency="TRY"):
+        return {"symbol": symbol, "currency": currency, "market": market,
+                "quantity": quantity, "price": price, "avg_cost": price,
+                "name": symbol, "product_type": "stock"}
+
+    def _targets(self, mocker, mapping):
+        from app.modules.investment import router as investment_router
+
+        mocker.patch.object(
+            investment_router, "_targets_for", return_value=mapping
+        )
+
+    def test_the_disclaimer_always_travels_with_the_plan(self, client, mocker):
+        """Sunucudan geliyor ki arayüzde ikinci kez yazılmasın."""
+        self._portfolio(mocker, [])
+        self._targets(mocker, {})
+        body = client.get(self.URL).json()
+        assert "yatırım tavsiyesi değildir" in body["disclaimer"]
+
+    def test_no_target_produces_no_orders(self, client, mocker):
+        self._portfolio(mocker, [self._row("THYAO", "BIST", 90, 100.0)])
+        self._targets(mocker, {})
+        body = client.get(self.URL).json()
+        assert body["hasTarget"] is False
+        assert body["rows"] == []
+
+    def test_an_overweight_bucket_produces_sell_rows(self, client, mocker):
+        self._portfolio(mocker, [self._row("THYAO", "BIST", 100, 100.0)], cash=0.0)
+        self._targets(mocker, {"bist_equity": 50.0, "cash": 50.0})
+        body = client.get(self.URL).json()
+        rows = [row for row in body["rows"] if row["symbol"] == "THYAO"]
+        assert rows and rows[0]["side"] == "SELL"
+        assert "karşılığı" in rows[0]["statement"]
+
+    def test_a_bucket_without_holdings_is_explained(self, client, mocker):
+        self._portfolio(mocker, [self._row("THYAO", "BIST", 100, 100.0)], cash=0.0)
+        self._targets(mocker, {"bist_equity": 50.0, "gold": 50.0})
+        body = client.get(self.URL).json()
+        reasons = " ".join(row["reason"] for row in body["unresolved"])
+        assert "sizin seçiminiz" in reasons
+
+    def test_the_blocked_amount_is_carried(self, client, mocker):
+        """Bakiyede eksilen ama nedeni yazmayan bir tutar kullanıcıya hata
+        gibi görünür."""
+        self._portfolio(mocker, [], cash=5000.0, blocked=1500.0)
+        self._targets(mocker, {})
+        body = client.get(self.URL).json()
+        assert body["blocked_cash_base"] == 1500.0
+        assert body["usable_cash_base"] == 3500.0
+
+    def test_the_plan_and_the_drift_read_the_same_portfolio(self, client, mocker):
+        """İkisi ayrı okusaydı "aynı portföy için iki farklı sapma" mümkün
+        olurdu -- ekranda bir sayı, emir listesinde başka bir sayı."""
+        self._portfolio(mocker, [self._row("THYAO", "BIST", 100, 100.0)], cash=0.0)
+        self._targets(mocker, {"bist_equity": 50.0, "cash": 50.0})
+        plan = client.get(self.URL).json()
+        drift = client.get("/api/investment/allocation-drift").json()
+        assert plan["totalValue"] == drift["totalValue"]
+        assert plan["statement"] == drift["statement"]

@@ -44,6 +44,11 @@ EXPECTED_TOOLS = {
     # aramasından ayrı, çünkü bu bir sorgu değil bir kesişim: eşleşme sembol
     # eşitliğiyle kesin, semantik yakınlıkla değil.
     "get_portfolio_news",
+    # v2.23: aynı kesişim, YORUMLANMIŞ hâliyle. Yukarıdakinden ayrı çünkü
+    # dayanağı ayrı -- o yayımlanmış olguyu, bu bir modelin okumasını
+    # taşıyor. Tek araçta birleştirmek ikisini aynı dayanağa sahipmiş gibi
+    # gösterirdi.
+    "get_news_impact_digest",
     # v2.12: aynı okuma, her POZİSYON için, artı tek bir toplam cümlesi.
     # Tek-sembol aracının n kez çağrılmasıyla aynı şey değil: sayı ile değer
     # ayrışıyor ve toplamı modele hesaplatmak her turda başka bir sayı
@@ -97,7 +102,9 @@ class TestWiring:
         # v2.20: `get_open_orders` + `cancel_order`.
         # v2.21: `get_direction_signal`.
         # v2.22: `get_rebalance_plan` (salt okuma).
-        assert server.CONTRACT_VERSION == "v2.22"
+        # v2.23: `get_news_impact_digest` (salt okuma). Sistemdeki tek araç
+        # ki taşıdığı şey bir ölçüm değil, bir modelin metin okuması.
+        assert server.CONTRACT_VERSION == "v2.23"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it

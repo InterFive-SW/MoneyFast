@@ -1967,6 +1967,48 @@ class TestPortfolioNewsBranch:
         assert out["tools_used"] == ["get_portfolio_news"]
         assert out["specialist_output"]["status"] == "OK"
 
+    DIGEST = {"window_hours": 24, "headline": "Son 24 saatte...",
+              "disclaimer": "Bu özet ... yorumlanmasıdır.",
+              "entries": [{"symbol": "AKBNK", "sentence": "AKBNK: 1 haber yorumu.",
+                           "reasons": []}]}
+
+    @pytest.mark.asyncio
+    async def test_the_plan_can_choose_the_digest_tool(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Ayrı bir araç çünkü ayrı bir dayanak: yukarıdaki başlıkları
+        taşıyor, bu bir modelin okumasını."""
+        patched_llm.set_response(
+            '{"tool": "get_news_impact_digest", "arguments": {"hours": 48}}')
+        fake_mcp.responses["get_news_impact_digest"] = self.DIGEST
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["tools_used"] == ["get_news_impact_digest"]
+        assert fake_mcp.calls[0][1]["hours"] == 48
+
+    @pytest.mark.asyncio
+    async def test_the_digest_user_also_comes_from_state(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        patched_llm.set_response(
+            '{"tool": "get_news_impact_digest",'
+            ' "arguments": {"user_id": "u_someone_else"}}')
+        fake_mcp.responses["get_news_impact_digest"] = self.DIGEST
+        await orchestrator.portfolio_node(base_state)
+        assert fake_mcp.calls[0][1]["user_id"] == "u_123"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_digest_is_a_complete_answer(
+        self, fake_mcp, patched_llm, base_state
+    ):
+        """Pencerede yorumlanmış haber yok -- ama penceresiyle birlikte
+        söylenmeli, o yüzden yük yine gidiyor."""
+        patched_llm.set_response('{"tool": "get_news_impact_digest", "arguments": {}}')
+        fake_mcp.responses["get_news_impact_digest"] = {
+            **self.DIGEST, "entries": []}
+        out = await orchestrator.portfolio_node(base_state)
+        assert out["specialist_output"]["status"] == "EMPTY"
+        assert out["specialist_output"]["data"]["window_hours"] == 24
+
     @pytest.mark.asyncio
     async def test_the_user_still_comes_from_state(self, fake_mcp, patched_llm, base_state):
         """Aynı güvenlik değişmezi: model kimin haberlerinin okunacağını
@@ -6532,6 +6574,52 @@ class TestRebalanceScreenQuestion:
             {"final_output": "Dengeleme önerileri oluşturdum.", "disclosures": []},
         )
         assert orchestrator.PLAN_DISCLAIMER_TR in out["disclosures"]
+
+    def test_the_news_disclaimer_is_guaranteed_in_code(self):
+        """Prompt tavsiyedir ve burada kaybı ağır: kullanıcının okuduğu her
+        cümle bir modelin metin okuması, ve bunu söyleyen tek şey bu çekince.
+        Düştüğünde geriye ölçülmüş bir bulgudan ayırt edilemeyen bir yorum
+        kalıyor."""
+        out = orchestrator._keep_news_disclaimer(
+            {"tools_used": ["get_news_impact_digest"]},
+            {"final_output": "ASELS hakkında iki haber yükseliş yönünde okundu.",
+             "disclosures": []},
+        )
+        assert orchestrator.NEWS_DIGEST_DISCLAIMER_TR in out["disclosures"]
+
+    def test_the_general_disclosure_does_not_replace_the_news_one(self):
+        """Genel açıklama içeriğin danışmanlık olmadığını söylüyor; bu ise
+        içeriğin bir ÖLÇÜM DEĞİL, bir model okuması olduğunu."""
+        out = orchestrator._keep_news_disclaimer(
+            {"tools_used": ["get_news_impact_digest"]},
+            {"final_output": "x",
+             "disclosures": ["Bu içerik yatırım danışmanlığı değildir."]},
+        )
+        assert len(out["disclosures"]) == 2
+
+    def test_a_news_text_that_kept_it_is_not_disclaimed_twice(self):
+        out = orchestrator._keep_news_disclaimer(
+            {"tools_used": ["get_news_impact_digest"]},
+            {"final_output": "... yapay zeka tarafından yorunmasıdır"
+                             .replace("yorunmasıdır", "yorumlanmasıdır"),
+             "disclosures": []},
+        )
+        assert out["disclosures"] == []
+
+    def test_an_existing_news_copy_is_not_added_again(self):
+        out = orchestrator._keep_news_disclaimer(
+            {"tools_used": ["get_news_impact_digest"]},
+            {"final_output": "özet",
+             "disclosures": [orchestrator.NEWS_DIGEST_DISCLAIMER_TR]},
+        )
+        assert out["disclosures"] == [orchestrator.NEWS_DIGEST_DISCLAIMER_TR]
+
+    def test_a_turn_without_the_news_tool_is_untouched(self):
+        out = orchestrator._keep_news_disclaimer(
+            {"tools_used": ["get_portfolio_news"]},
+            {"final_output": "x", "disclosures": []},
+        )
+        assert out["disclosures"] == []
 
     def test_the_general_disclosure_does_not_replace_it(self):
         """Genel açıklama içeriğin danışmanlık olmadığını söylüyor; bu ise

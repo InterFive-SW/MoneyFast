@@ -16,7 +16,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 
-import { apiClient, type NewsImpactEntry } from '../api/client';
+import { apiClient, type NewsDigest, type NewsImpactEntry } from '../api/client';
 
 export const DIGEST_ERROR = 'Haber özeti alınamadı.';
 
@@ -61,7 +61,11 @@ function useImpactFeed(feed: Feed, initialHours: number, limit: number) {
         let cancelled = false;
         setLoading(true);
         setError(null);
-        const request =
+        // İki uç aynı gövdeyi döndürüyor, tek farkla: piyasa genelinde
+        // özetlenecek bir portföy olmadığı için `headline` yok. Ortak şekil
+        // burada adlandırılıyor -- birleşim tipini olduğu gibi taşımak,
+        // eksik alanı her okumada daraltma gerektirirdi.
+        const request: Promise<Partial<NewsDigest>> =
             feed === 'portfolio'
                 ? apiClient.getNewsDigest(hours)
                 : apiClient.getNewsImpactSummary(hours, limit);
@@ -69,7 +73,7 @@ function useImpactFeed(feed: Feed, initialHours: number, limit: number) {
             .then((data) => {
                 if (cancelled) return;
                 setEntries(data.entries ?? []);
-                setHeadline('headline' in data ? (data.headline ?? '') : '');
+                setHeadline(data.headline ?? '');
                 // Çekince sunucudan geliyor ve burada YEDEĞİ YOK: arayüzde
                 // yazılı bir kopya, sunucudaki metin değiştiğinde sessizce
                 // eskiyen ikinci bir çekince olurdu.

@@ -521,7 +521,14 @@ PROMPT_BUDGETS = {
     #: v2.20 ile beşinci araç: `get_open_orders`. Bekleyen bir emir bir
     #: pozisyon DEĞİL ama parayı bloke ediyor, dolayısıyla "bakiyem neden
     #: azaldı" sorusunun cevabı orada ve bu ajandan başkası göremiyor.
-    "PORTFOLIO_AGENT": 4700,
+    #: v2.23 ile altıncı araç: `get_news_impact_digest`. Bütçeyi aşan kısım
+    #: kısaltılınca kaybolan kurallar üç tane ve üçü de sessizce yanlış bir
+    #: cevap üretiyor: hazır cümlenin YENİDEN YAZILMAMASI, çekincenin
+    #: DEĞİŞMEDEN taşınması (içeriğin bir ölçüm değil bir model okuması
+    #: olduğunu söyleyen tek cümle o), ve mekanizmanın bir OLGU gibi
+    #: sunulmaması. Ayrım da burada duruyor: `get_portfolio_news` yayımlanmış
+    #: olguyu, bu araç onun okumasını taşıyor.
+    "PORTFOLIO_AGENT": 5400,
     #: v2.20: limit emri artık ONAYLANDIĞINDA GERÇEKLEŞMİYOR. Bütçeyi aşan
     #: kısım kısaltılınca kaybolan kural, modelin "aldınız" demesinin
     #: YASAK olması: emir vermek başka, gerçekleşmek başka ve ikisini

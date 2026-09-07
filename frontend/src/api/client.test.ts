@@ -109,6 +109,9 @@ describe('endpoint paths', () => {
     // "Detaylı Rapor Oluştur": tek çağrı, altı bölüm.
     ['getPortfolioReport', '/api/analytics/report'],
     ['getAllocationDrift', '/api/investment/allocation-drift'],
+    // Sapmanın emir karşılığı; `disclaimer` sunucudan gelir.
+    ['getRebalancePlan', '/api/investment/rebalance-plan'],
+    ['getAllocationTemplates', '/api/risk/allocation-templates'],
     ['getSectorAllocation', '/api/investment/sector-allocation'],
     ['getHeatmap', '/api/investment/heatmap'],
     ['getMarketTickers', '/api/market/tickers'],
@@ -127,6 +130,43 @@ describe('endpoint paths', () => {
     const fetchMock = mockFetch({})
     ;(apiClient as never as Record<string, () => void>)[method]()
     expect(calledUrl(fetchMock)).toBe(path)
+  })
+
+  it('yön okuması sembol ve vadeyi sorguya koyar', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getDirectionSignal('ASELS', '6M')
+    expect(calledUrl(fetchMock)).toBe('/api/market/direction?symbol=ASELS&horizon=6M')
+  })
+
+  it('vade verilmezse üç ay sorulur', () => {
+    // Sunucudaki `signals.DEFAULT_HORIZON` ile aynı; ayrışırsa kullanıcı
+    // sorduğundan başka bir vadenin okumasını alır.
+    const fetchMock = mockFetch({})
+    apiClient.getDirectionSignal('THYAO')
+    expect(calledUrl(fetchMock)).toContain('horizon=3M')
+  })
+
+  it('sembol adresle güvenli biçimde kodlanır', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getDirectionSignal('A B&C')
+    expect(calledUrl(fetchMock)).toContain('symbol=A%20B%26C')
+  })
+
+  it('tarama vade ve limiti taşır', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getDirectionScreen('1M', 'UP_LEAN', 10)
+    const url = calledUrl(fetchMock)
+    expect(url).toContain('horizon=1M')
+    expect(url).toContain('direction=UP_LEAN')
+    expect(url).toContain('limit=10')
+  })
+
+  it('yön süzgeci verilmezse sorguya hiç girmez', () => {
+    // Boş bir `direction` "hiçbiri" gibi okunabilirdi; hiç göndermemek
+    // "süzgeç yok" demek.
+    const fetchMock = mockFetch({})
+    apiClient.getDirectionScreen('3M')
+    expect(calledUrl(fetchMock)).not.toContain('direction=')
   })
 
   it('senaryo faktörü ve şoku gövdede gider', () => {

@@ -5,6 +5,7 @@ import { useInstrument } from '../../hooks/useInstrument'
 import SampleDataBadge from '../../components/markets/SampleDataBadge'
 import TeknikGorunum from '../../components/markets/TeknikGorunum'
 import InstrumentCandleChart from '../../components/markets/InstrumentCandleChart'
+import YonKarti from '../../components/markets/YonKarti'
 import NewsWidget from '../../components/widgets/NewsWidget'
 import TradeModal from '../../components/portfolio/TradeModal'
 import { compact, pct, ratio, useFundamentals } from '../../hooks/useFundamentals'
@@ -180,6 +181,9 @@ export default function StockDetail() {
               verdiği ilk soru "bu hisse nasıl davrandı" ve buna tek bir
               günlük yüzdeyle cevap verilemiyordu. */}
           <InstrumentCandleChart symbol={symbol.toUpperCase()} />
+          {/* Aynı uç noktayı sohbet de okuyor: ikisi aynı hisse için
+              farklı bir yön söyleyemesin. */}
+          <YonKarti symbol={symbol.toUpperCase()} />
 
           {/* Hesaplanmış eğilim. Sohbetin okuduğu uç noktanın AYNISI: ikisi
               ayrı hesaplasaydı aynı hisse için farklı bir eğilim

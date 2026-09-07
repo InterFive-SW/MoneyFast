@@ -11,6 +11,8 @@ rather than smoothing it over.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import portfolio_tools
@@ -391,13 +393,17 @@ class TestFailures:
 # Registration
 # ==========================================================================
 class TestRegistration:
-    async def test_register_attaches_the_tool(self, mocker):
-        fake_mcp = mocker.MagicMock()
-        portfolio_tools.register(fake_mcp)
-        fake_mcp.tool.assert_called_once_with()
-        fake_mcp.tool.return_value.assert_called_once_with(
-            portfolio_tools.get_portfolio_positions
+    async def test_register_attaches_both_tools(self, mocker):
+        """v2.22 ile ikinci araç: ekranda duran dengeleme listesi. Onu
+        ÜRETMİYOR, okuyor."""
+        registered = []
+        portfolio_tools.register(
+            type("FakeMCP", (), {"tool": lambda self: registered.append})()
         )
+        assert registered == [
+            portfolio_tools.get_portfolio_positions,
+            portfolio_tools.get_rebalance_plan,
+        ]
 
     async def test_the_tool_is_a_coroutine_function(self):
         """FastMCP awaits it; a sync function here would block the event loop
@@ -599,3 +605,81 @@ class TestStaleness:
         bilmediği bir şeyi iddia etmek olurdu."""
         doc = " ".join(portfolio_tools.get_portfolio_positions.__doc__.split())
         assert "do NOT assert WHY" in doc
+
+
+class TestRebalancePlanTool:
+    """v2.22. SALT OKUMA: sohbet listeyi üretmiyor, ekranda duranı okuyor."""
+
+    @pytest.mark.asyncio
+    async def test_it_asks_the_service_endpoint(self, mocker):
+        called = {}
+
+        async def fake(method, path, tool=None, **kw):
+            called.update({"method": method, "path": path})
+            return {"summary": "s", "disclaimer": "d"}
+
+        mocker.patch.object(portfolio_tools.backend_client, "request", side_effect=fake)
+        await portfolio_tools.get_rebalance_plan("u-1")
+        assert called["path"] == "/investment/agent/u-1/rebalance-plan"
+        assert called["method"] == "GET"
+
+    def test_a_body_without_the_required_keys_is_refused(self):
+        with pytest.raises(ContractViolationError):
+            portfolio_tools._normalize_rebalance({"summary": "x"})
+
+    def test_the_order_rows_never_reach_the_writer(self):
+        """En önemli kısıt. Ekranda kullanıcı hedefi kendi koydu ve her satırı
+        kendi tıklaması onaylıyor; aynı listeyi sohbette adet ve yönle yeniden
+        basmak o zinciri koparıyor. Ölçüldü: model satırları bir alım-satım
+        tablosuna çevirdi ve çekince eklendikten sonra bile çıktı bir
+        tavsiyeden ayırt edilemiyordu.
+
+        Modele göndermemek, ona yasaklamaktan daha güçlü."""
+        out = portfolio_tools._normalize_rebalance({
+            "disclaimer": "Bu liste yatırım tavsiyesi değildir.",
+            "hasTarget": True,
+            "statement": "Sapma ölçüldü.",
+            "summary": "Dengeleme ekranında 5 satış ve 1 alış satırı var.",
+            "rows": [{
+                "symbol": "THYAO", "side": "SELL", "label": "BIST Hisse",
+                "quantity": 12, "price": 300.0,
+                "statement": "THYAO için 12 adet satışın karşılığı 3.600,00 TRY.",
+            }],
+            "unresolved": [{"label": "Altın", "reason": "pozisyonunuz yok",
+                            "gap_amount": -5000}],
+        })
+        assert "rows" not in out
+        assert "THYAO" not in json.dumps(out, ensure_ascii=False)
+        assert out["summary"].startswith("Dengeleme ekranında")
+        assert set(out["unresolved"][0]) == {"label", "reason"}
+
+    def test_a_non_dict_unresolved_row_is_dropped(self):
+        out = portfolio_tools._normalize_rebalance({
+            "disclaimer": "d", "summary": "s", "unresolved": ["dize"],
+        })
+        assert out["unresolved"] == []
+
+    def test_no_target_is_carried_as_a_complete_answer(self):
+        out = portfolio_tools._normalize_rebalance({
+            "disclaimer": "d", "summary": "", "hasTarget": False,
+            "statement": "Hedef belirlemediniz.",
+        })
+        assert out["hasTarget"] is False
+        assert "Hedef belirlemediniz." in out["statement"]
+
+    def test_the_docstring_forbids_building_a_list(self):
+        """Sohbet listeyi ÜRETMİYOR; `prompts.py:859` yerinde duruyor."""
+        doc = " ".join(portfolio_tools.get_rebalance_plan.__doc__.split())
+        assert "Do NOT build a list of your own" in doc
+        assert "Never raise this list on your own" in doc
+        assert "do NOT suggest a target" in doc
+
+    def test_the_docstring_says_why_the_rows_are_withheld(self):
+        """Kural bir tercih gibi okunmamalı: sebebi aynı yerde yazılı."""
+        doc = " ".join(portfolio_tools.get_rebalance_plan.__doc__.split())
+        assert "You were not given those figures BECAUSE" in doc
+        assert "the amounts are on the screen" in doc
+
+    def test_the_docstring_requires_the_disclaimer(self):
+        doc = " ".join(portfolio_tools.get_rebalance_plan.__doc__.split())
+        assert "Relay `disclaimer` whenever you relay any of this" in doc

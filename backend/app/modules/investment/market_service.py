@@ -10,11 +10,11 @@ import difflib
 import logging
 import re
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Iterable, Optional
 
-from sqlalchemy import false, func, select
+from sqlalchemy import case, false, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -912,17 +912,75 @@ def calendar_rows(db: Session, limit: int = 40) -> dict[str, list[dict[str, Any]
     }
 
 
-def symbols_without_fundamentals(db: Session) -> list[str]:
-    """Temel verisi hiç olmayan enstrümanlar.
+#: Bir enstrümanın temel verisinin "dolu" sayılması için gereken alanlar.
+#:
+#: `FUNDAMENTAL_FIELDS`'in tamamı DEĞİL, bilerek: bir bankanın `gross_margin`'ı
+#: yoktur ve olmaması bir eksiklik değildir. Buradakiler sağlayıcının her
+#: sektör için yayımladığı ve taramanın gerçekten okuduğu alanlar.
+FUNDAMENTAL_COVERAGE_FIELDS = (
+    "market_cap",
+    "sector",
+    "profit_margin",
+    "return_on_equity",
+    "revenue_growth",
+    "debt_to_equity",
+)
+
+#: Bir kaydın "doldurulmuş" sayılması için gereken en az dolu kapsama alanı.
+#:
+#: Üç, ölçülerek seçildi. Seed satırları kapsama alanlarının 6'sından yalnızca
+#: 2'sini taşıyor (`market_cap` ve `sector`); sağlayıcının gerçekten
+#: doldurduğu bir hisse satırı 5-6'sını taşıyor. Aradaki boşluk geniş ve
+#: eşiğin iki tarafı da ölçülebilir.
+#:
+#: "Hepsi boş mu" diye bakmak YETMİYORDU ve bu ölçüldü: seed `market_cap`'i
+#: yazdığı için hiçbir satır "hepsi boş" olmuyor, dolayısıyla temiz bir klonda
+#: 1.001 sembolün hiçbiri seçilmiyordu -- düzeltilmek istenen hatanın ta
+#: kendisi.
+FUNDAMENTAL_COVERAGE_MINIMUM = 3
+
+#: Bu kadar gün geçmiş bir kayıt yeniden istenir.
+#:
+#: Oranlar çeyreklik bilançoyla değişiyor ama fiyata bağlı olanlar (F/K, PD/DD)
+#: her gün. Yedi gün, "hiç tazelenmesin" ile "her açılışta bin istek" arasında
+#: duruyor.
+FUNDAMENTALS_STALE_AFTER_DAYS = 7
+
+
+def symbols_without_fundamentals(
+    db: Session, stale_after_days: int = FUNDAMENTALS_STALE_AFTER_DAYS
+) -> list[str]:
+    """Temel verisi eksik ya da bayat olan enstrümanlar.
 
     Isı haritası tayfını PİYASA DEĞERİNDEN alıyor ve o değer burada duruyor.
     Migration 0019 evreni 190'dan 1009'a çıkardı ama günlük temel veri işi
-    henüz üzerlerinden geçmedi: 1009 hissenin yalnızca 183'ünde piyasa değeri
-    var ve NYSE'de hiç yok, yani S&P sekmesi bugün boş çizilirdi.
+    henüz üzerlerinden geçmedi.
 
-    Açılışta yalnızca EKSİK olanlar isteniyor; hepsini her açılışta yeniden
-    çekmek, değişmeyen çeyreklik oranları durmadan yeniden yazmak olurdu.
+    **Yalnızca `market_cap`'e bakmak yetmiyordu ve bu ölçüldü.** `seeds/market/
+    fundamentals.csv.gz` 1.011 satırın 1.001'i için piyasa değeri taşıyor, ama
+    `profit_margin` yalnızca 10'unda dolu. Sorgu piyasa değerine baktığı sürece
+    temiz bir klon o 1.001 sembolü "dolu" sayıyor ve marj, büyüme, özkaynak
+    kârlılığı alanları HİÇ dolmuyordu -- yani veri, seed'i üreten makinede
+    vardı ve klonlayanda yoktu. Ölçülen fark: canlı veritabanında
+    `profit_margin` 978/1011, seed'de 10/1011.
+
+    Üç koşulun birleşimi:
+
+    * kayıt hiç yok,
+    * kayıt var ama kapsama alanlarının `FUNDAMENTAL_COVERAGE_MINIMUM`'dan
+      azı dolu (seed'in yazdığı iskelet satır böyle),
+    * kayıt bayat (`stale_after_days`).
+
+    Üçüncüsü olmadan, sağlayıcının gerçekten yayımlamadığı alanlar her açılışta
+    sonsuza kadar yeniden istenirdi. `upsert_fundamentals` çakışmada
+    `updated_at`'i tazeliyor, dolayısıyla bir kez çekilen sembol pencere
+    dolana kadar geri gelmiyor.
     """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=stale_after_days)
+    filled = sum(
+        case((getattr(InstrumentFundamentals, field).isnot(None), 1), else_=0)
+        for field in FUNDAMENTAL_COVERAGE_FIELDS
+    )
     rows = db.execute(
         select(InvestmentProduct.symbol)
         .outerjoin(
@@ -932,11 +990,17 @@ def symbols_without_fundamentals(db: Session) -> list[str]:
         .where(
             InvestmentProduct.status == "active",
             InvestmentProduct.data_symbol.isnot(None),
-            InstrumentFundamentals.market_cap.is_(None),
+            or_(
+                # Kayıt hiç yok: dış birleşim tüm sütunları NULL bırakır.
+                InstrumentFundamentals.product_id.is_(None),
+                filled < FUNDAMENTAL_COVERAGE_MINIMUM,
+                InstrumentFundamentals.updated_at < cutoff,
+            ),
         )
         .order_by(InvestmentProduct.symbol)
     ).all()
     return [row[0] for row in rows]
+
 
 def intraday_symbols(db: Session) -> list[str]:
     """Gün içi bar tutulması gereken enstrümanlar.

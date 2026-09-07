@@ -365,11 +365,23 @@ def test_every_specialist_is_english_only(agent):
     "agent,tool",
     [
         ("MARKET_RESEARCH_AGENT", "rag_semantic_market_search"),
-        ("RISK_STRATEGY_AGENT", "calculate_portfolio_risk_metrics"),
     ],
 )
 def test_tool_binding_names_exactly_one_tool(agent, tool):
     assert f"TOOL BINDING: {tool} only" in prompts.SPECIALIST_PROMPTS[agent]
+
+
+def test_the_risk_agent_binds_measurement_and_a_read_only_screen_reader():
+    """v2.22: ikinci araç SALT OKUMA. `get_rebalance_plan` bir dengeleme
+    ÖNERMİYOR, kullanıcının ekranında duranı okuyor -- ve "Never recommend a
+    rebalance" cümlesi yerinde duruyor (bkz.
+    `TestRebalanceOpeningIsReadOnly`)."""
+    text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+    assert (
+        "TOOL BINDING: calculate_portfolio_risk_metrics, and get_rebalance_plan "
+        "when the user asks about their Dengeleme screen" in text
+    )
+    assert "READ-ONLY; only when the user asks about that screen" in text
 
 
 def test_the_transaction_agent_binds_staging_and_cancelling_and_nothing_else():
@@ -516,14 +528,25 @@ PROMPT_BUDGETS = {
     #: karıştırmak kullanıcıya sahip olmadığı bir şeyi söylemek demek.
     #: `cancel_order` da burada: iptal bir emir vermek değil, geri almak.
     "TRANSACTION_AGENT": 4200,
-    "MARKET_DATA_AGENT": 4100,
+    #: v2.21 ile beşinci araç: `get_direction_signal`. Bütçeyi aşan kısım
+    #: kısaltılınca kaybolan kurallar üç tane ve üçü de sessizce yanlış cevap
+    #: üretiyor: hazır cümlenin YENİDEN YAZILMAMASI (çekince ondan
+    #: ayrılamıyor), altı aydan uzun vadenin REDDEDİLDİĞİ ve kısa okumadan
+    #: cevaplanmadığı, ve `lean` sayısının kullanıcıya ULAŞMAMASI.
+    "MARKET_DATA_AGENT": 4800,
     #: v2.17 ile iki karşılaştırma daha yanında geliyor: ürün grubu beyanı ve
     #: kullanıcının kendi hedefinden sapma. Bütçeyi aşan kısım kısaltılınca
     #: kaybolan kurallar: hazır cümlelerin YENİDEN YAZILMAMASI, hedefsizliğin
     #: sıfır sapma SAYILMAMASI, ve ikisinin de METRİK ADI OLMADIĞI -- sonuncusu
     #: ölçüldü, planlayıcı `metrics: ["allocation_drift"]` gönderip turu
     #: düşürdü.
-    "RISK_STRATEGY_AGENT": 3700,
+    #: v2.22 ile salt okuma açıklığı: kullanıcı Dengeleme ekranındaki listeyi
+    #: SORABİLİYOR. Bütçeyi aşan kısım kısaltılınca kaybolan şey açıklığın
+    #: SINIRLARI olurdu -- liste kurmama, sembol/adet anmama, hedef önermeme,
+    #: "çalıştırın" dememe -- ve sınırsız bir açıklık, üstündeki yasağı
+    #: fiilen kaldırır. En pahalı paragraf, emir satırlarının modele NEDEN
+    #: verilmediğini anlatan yer; onu kısaltmak kuralı bir tercihe çevirir.
+    "RISK_STRATEGY_AGENT": 5100,
 }
 DEFAULT_PROMPT_BUDGET = 2500
 
@@ -800,3 +823,122 @@ def test_the_risk_specialist_names_the_closed_lookback_set():
     for window in ("1M", "3M", "6M", "1Y", "3Y", "5Y", "MAX"):
         assert f'"{window}"' in text
     assert "Never a" in text and "day count" in text
+
+
+class TestDirectionSignalIsBound:
+    """v2.21. Aracı eklemek yetmiyor: ajan onu TANIMALI, yoksa "önümüzdeki üç
+    ayda nasıl gider" sorusu yine gidecek yer bulamaz."""
+
+    def test_the_tool_is_bound_to_the_market_data_agent(self):
+        prompt = prompts.SPECIALIST_PROMPTS["MARKET_DATA_AGENT"]
+        assert "get_direction_signal" in prompt
+
+    def test_the_agent_is_told_the_horizon_set(self):
+        prompt = prompts.SPECIALIST_PROMPTS["MARKET_DATA_AGENT"]
+        assert "1M/3M/6M" in prompt
+
+    def test_a_longer_horizon_is_relayed_as_a_refusal(self):
+        """Kısa okumadan uzun vadeyi cevaplamak, ölçülmemiş bir şeyi ölçülmüş
+        gibi göstermek olurdu."""
+        prompt = " ".join(prompts.SPECIALIST_PROMPTS["MARKET_DATA_AGENT"].split())
+        assert "REFUSED" in prompt
+        assert "you do not answer it from the shorter" in prompt
+
+    def test_the_internal_magnitude_never_reaches_the_user(self):
+        prompt = " ".join(prompts.SPECIALIST_PROMPTS["MARKET_DATA_AGENT"].split())
+        assert "never reaches the user" in prompt
+
+    def test_the_narrow_opening_still_names_its_three_conditions(self):
+        """Açıklık genişletildi ama koşulları DEĞİŞMEDİ: koşullu olmak,
+        ölçüme bağlı olmak, çekinceyi aynı nefeste taşımak."""
+        prompt = " ".join(prompts.ORCHESTRATOR_SYSTEM_PROMPT.split())
+        assert "combined evidence reading" in prompt
+        assert "conditional, attached to a stated measurement" in prompt
+        assert "carries its own limit in the same breath" in prompt
+        assert 'A bare "yükselecek" has none of those and stays forbidden' in prompt
+
+    def test_the_rebalance_prohibition_is_untouched(self):
+        """Yön sinyali eklemek, dengeleme yasağını gevşetmiyor. İkisi ayrı
+        kararlar ve bu test onların birlikte durduğunu sabitliyor."""
+        prompt = " ".join(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"].split())
+        assert "Never recommend a rebalance, hedge or target weight" in prompt
+
+    def test_a_forward_question_is_routed_to_the_data_agent(self):
+        """Ölçülen hata: "ASELS önümüzdeki 3 ayda nasıl gider" OUT_OF_SCOPE
+        sayılıp EDUCATION_AGENT'a gitti, hiçbir araç çalışmadı ve kullanıcıya
+        veri "alınamıyor" dendi -- 252 barı, çeyreklik serisi ve dokuz
+        etiketli haberi olan bir enstrüman için."""
+        router = flat(prompts.ROUTER_PROMPT)
+        assert "FORWARD-LOOKING question is MARKET_DATA_AGENT" in router
+        assert "önümüzdeki üç ayda nasıl gider" in router
+        assert "These are NOT out of scope" in router
+
+    def test_rejecting_the_premise_is_still_the_writers_job(self):
+        """Premisi reddetmek yönlendirmeyi değiştirmiyor: yazar zaten
+        reddediyor, yönlendirme onu analiz edecek veriden mahrum bırakmamalı."""
+        router = flat(prompts.ROUTER_PROMPT)
+        assert "Kimse size kazandırır diyemez" in router
+        assert "routing it away leaves nothing to write" in router
+
+
+class TestRebalanceOpeningIsReadOnly:
+    """v2.22. Sohbet ekrandaki listeyi OKUYABİLİR ama üretemez.
+
+    Bu sınıfın asıl işi, iki cümlenin BİRLİKTE durduğunu sabitlemek: dar
+    açıklık eklendi diye yasak gevşemedi.
+    """
+
+    def test_the_prohibition_is_still_there_word_for_word(self):
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        assert "Never recommend a rebalance, hedge or target weight" in prompt
+        assert "Despite the name, you produce no strategy" in prompt
+
+    def test_the_opening_is_explicitly_read_only(self):
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        assert "ONE NARROW OPENING, and it is read-only" in prompt
+        assert "get_rebalance_plan describes it" in prompt
+
+    def test_the_order_rows_are_kept_off_the_chat(self):
+        """Ekranda kullanıcı hedefi kendi koydu ve her satırı kendi tıklaması
+        onaylıyor; sembol, yön ve adedi sohbette yeniden basmak o zinciri
+        koparıyor ve cevap bir tavsiyeden ayırt edilemez hâle geliyor."""
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        assert "The ORDER ROWS THEMSELVES are not given to you" in prompt
+        assert "point at the screen for the rows" in prompt
+        assert 'Asked "kaç lot", say the amounts are on the screen' in prompt
+
+    def test_the_opening_names_what_it_does_not_allow(self):
+        """Açıklığın kendisi sınırlarını taşımalı: eklendiği yerde
+        okunmayan bir sınır, yokmuş gibi davranılan bir sınırdır."""
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        for rule in (
+            "you never build a list",
+            "never name a symbol with a quantity",
+            "never propose a target",
+            "never tell them to execute anything",
+            "never raise the subject yourself",
+        ):
+            assert rule in prompt, rule
+
+    def test_a_choice_question_is_deflected_to_the_user(self):
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        assert "the target is theirs to set and point at the screen" in prompt
+
+    def test_the_target_prohibition_elsewhere_is_untouched(self):
+        """`allocation_drift` tarafındaki "kendi hedefini önerme" kuralı bu
+        değişiklikten etkilenmiyor."""
+        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
+        assert "NEVER propose a target of your own" in prompt
+
+    def test_a_screen_question_is_routed_to_the_risk_agent(self):
+        """Ölçülen hata: "dengeleme ekranında ne yazıyor" EDUCATION_AGENT'a
+        gitti, hiçbir araç çalışmadı ve kullanıcıya veri "bulunamadı" dendi --
+        kendi ekranında çizilmiş bir liste için."""
+        router = flat(prompts.ROUTER_PROMPT)
+        assert "ABOUT THE DENGELEME SCREEN is RISK_STRATEGY_AGENT" in router
+        assert "get_rebalance_plan reads it" in router
+
+    def test_a_choice_question_is_not_routed_there(self):
+        router = flat(prompts.ROUTER_PROMPT)
+        assert '"Portföyümü nasıl dengelemeliyim" is NOT this' in router
+        assert "the target is theirs to set" in router

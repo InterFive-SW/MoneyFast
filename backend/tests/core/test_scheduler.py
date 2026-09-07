@@ -36,7 +36,14 @@ class TestJobsRegistered:
     async def test_both_jobs_are_scheduled(self):
         scheduler_module.start_scheduler()
         ids = {job.id for job in scheduler_module.scheduler.get_jobs()}
-        assert ids == {"daily_market_briefing_job", "limit_order_matching_job"}
+        assert ids == {
+            "daily_market_briefing_job",
+            "limit_order_matching_job",
+            # Yön okumaları, mumlar yazıldıktan SONRA: okuma barlardan
+            # çıkıyor ve bugünün barı yazılmadan hesaplamak, dünün okumasını
+            # bugünün tarihiyle damgalamak olurdu.
+            "direction_signals_job",
+        }
 
     async def test_the_briefing_runs_on_istanbul_time(self):
         """Container UTC'de; 10:00 TSİ demek için saat dilimi açıkça
@@ -60,7 +67,7 @@ class TestLifecycle:
         first = scheduler_module.scheduler
         scheduler_module.start_scheduler()
         assert scheduler_module.scheduler is not first
-        assert len(scheduler_module.scheduler.get_jobs()) == 2
+        assert len(scheduler_module.scheduler.get_jobs()) == 3
 
     async def test_stopping_releases_the_reference(self):
         scheduler_module.start_scheduler()

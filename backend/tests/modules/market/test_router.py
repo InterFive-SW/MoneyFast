@@ -23,6 +23,8 @@ from app.main import app
 from app.modules.investment import market_service
 from app.modules.market import router as market_router
 from app.modules.market import service as market_module_service
+from app.modules.market import signals, technicals
+from app.modules.market import service
 
 NOW = datetime.now(timezone.utc)
 
@@ -644,3 +646,177 @@ class TestSessionStateEndpoint:
     def test_it_is_guarded_like_the_other_service_endpoints(self, client, monkeypatch):
         monkeypatch.setenv("BACKEND_API_KEY", "secret")
         assert client.post(self.URL, json={"open": []}).status_code == 401
+
+
+class TestDirectionEndpoint:
+    """`GET /api/market/direction` — sohbet, hisse detay kartı ve Piyasalar
+    taraması AYNI okumayı okuyor. Ayrı hesaplasalardı aynı hisse için farklı
+    bir yön söyleyebilirlerdi."""
+
+    URL = "/api/market/direction"
+
+    def _bars(self, n=260, rising=True):
+        return [
+            {"timestamp": f"2026-01-{(i % 28) + 1:02d}",
+             "open": 100.0 + (i if rising else -i),
+             "high": 100.0 + (i if rising else -i),
+             "low": 100.0 + (i if rising else -i),
+             "close": 100.0 + (i if rising else -i), "volume": 1000}
+            for i in range(n)
+        ]
+
+    def _patch(self, mocker, bars=None, fundamentals=None, quarterly=None, news=()):
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            return_value=SimpleNamespace(symbol="ASELS", currency_code="TRY"),
+        )
+        mocker.patch.object(
+            market_service, "candle_series", return_value=bars if bars is not None else self._bars()
+        )
+        mocker.patch.object(market_service, "fundamentals_for", return_value=fundamentals)
+        mocker.patch.object(market_service, "quarterly_for", return_value=quarterly)
+        mocker.patch.object(service, "latest_news", return_value=list(news))
+
+    def test_an_unknown_symbol_is_an_empty_reading_not_an_error(
+        self, market_client, mocker
+    ):
+        """"Bu enstrümanın geçmişi yok" bir cevaptır."""
+        mocker.patch.object(market_service, "resolve_symbol", return_value=None)
+
+        body = market_client.get(self.URL, params={"symbol": "YOKBOYLE"}).json()
+
+        assert body["symbol"] == "YOKBOYLE"
+        assert body["direction"] == "INSUFFICIENT"
+        assert body["coverage"]["observations"] == 0
+
+    def test_a_horizon_beyond_the_evidence_is_refused(self, market_client, mocker):
+        """Elimizdeki ölçümler iki yıla konuşamaz; uydurmaktansa reddetmek."""
+        self._patch(mocker)
+
+        body = market_client.get(
+            self.URL, params={"symbol": "ASELS", "horizon": "2Y"}
+        ).json()
+
+        assert body["direction"] == "OUT_OF_RANGE"
+        assert body["lean"] is None
+        assert body["evidence"] == []
+
+    def test_a_reading_carries_its_evidence_and_its_hedge(self, market_client, mocker):
+        self._patch(
+            mocker,
+            fundamentals={"return_on_equity": 0.4, "profit_margin": 0.3,
+                          "revenue_growth": 0.4},
+        )
+
+        body = market_client.get(
+            self.URL, params={"symbol": "asels", "horizon": "3M"}
+        ).json()
+
+        assert body["symbol"] == "ASELS"
+        assert body["direction"] == "UP_LEAN"
+        assert body["coverage"]["sources_measured"] >= 2
+        assert body["evidence"], "kanıt listesi görünür olmalı"
+        assert technicals.HEDGE_TR in body["narrative"]
+        assert body["horizon_note"]
+
+    def test_the_default_horizon_is_used_when_none_is_given(
+        self, market_client, mocker
+    ):
+        self._patch(mocker)
+        body = market_client.get(self.URL, params={"symbol": "ASELS"}).json()
+        assert body["horizon"] == signals.DEFAULT_HORIZON
+
+    def test_the_instrument_currency_is_carried(self, market_client, mocker):
+        """Bir fiyat, para birimi olmadan taşınmaz -- kart bunu gösterecek."""
+        mocker.patch.object(
+            market_service, "resolve_symbol",
+            return_value=SimpleNamespace(symbol="AAPL", currency_code="USD"),
+        )
+        mocker.patch.object(market_service, "candle_series", return_value=self._bars())
+        mocker.patch.object(market_service, "fundamentals_for", return_value=None)
+        mocker.patch.object(market_service, "quarterly_for", return_value=None)
+        mocker.patch.object(service, "latest_news", return_value=[])
+
+        body = market_client.get(self.URL, params={"symbol": "AAPL"}).json()
+        assert body["currency"] == "USD"
+
+    def test_the_news_window_is_asked_for_on_the_server(self, market_client, mocker):
+        """Pencereyi çağırana bırakmak, "son 90 günde 4 haber" cümlesinin
+        `limit` kadar satır çekip içinden sayması demekti."""
+        self._patch(mocker)
+        captured = {}
+
+        def fake(db, limit=20, symbols=None, since=None):
+            captured.update({"limit": limit, "symbols": symbols, "since": since})
+            return []
+
+        mocker.patch.object(service, "latest_news", side_effect=fake)
+        market_client.get(self.URL, params={"symbol": "ASELS"})
+
+        assert captured["symbols"] == ["ASELS"]
+        assert captured["since"] is not None
+        assert captured["limit"] == signals.NEWS_SAMPLE_LIMIT
+
+
+class TestDirectionScreenEndpoint:
+    """`GET /api/market/direction/screen` — Piyasalar ekranının okuduğu yer.
+
+    **"En iyi hisseler" listesi DEĞİL**: sıralanan şey ölçülen kanıtların
+    meyli, bir cazibe sıralaması değil. `lean` her satırda görünür duruyor ki
+    sıralamanın neye göre yapıldığı okunabilsin.
+    """
+
+    URL = "/api/market/direction/screen"
+
+    def test_a_horizon_beyond_the_evidence_returns_an_empty_list_and_says_why(
+        self, market_client, mocker
+    ):
+        body = market_client.get(self.URL, params={"horizon": "2Y"}).json()
+        assert body["items"] == []
+        assert body["note"] == signals.OUT_OF_RANGE_TR
+        assert body["computedAt"] is None
+
+    def test_rows_carry_their_evidence(self, market_client, mocker):
+        """Gerekçesiz bir yön, kullanıcının doğrulayamayacağı bir iddiadır."""
+        mocker.patch.object(
+            service, "direction_screen",
+            return_value=[SimpleNamespace(
+                symbol="ASELS", direction="UP_LEAN", lean=0.633,
+                observations=252, narrative="okuma",
+                evidence=[{"source": "TECHNICAL", "key": "trend",
+                           "direction": "UP", "value": 1, "text": "t"}],
+            )],
+        )
+        mocker.patch.object(service, "direction_computed_at", return_value=None)
+
+        body = market_client.get(self.URL, params={"horizon": "3M"}).json()
+
+        assert body["items"][0]["symbol"] == "ASELS"
+        assert body["items"][0]["lean"] == pytest.approx(0.633)
+        assert body["items"][0]["evidence"]
+
+    def test_an_unmeasured_lean_is_carried_as_null(self, market_client, mocker):
+        mocker.patch.object(
+            service, "direction_screen",
+            return_value=[SimpleNamespace(
+                symbol="X", direction="MIXED", lean=None, observations=None,
+                narrative=None, evidence=None,
+            )],
+        )
+        mocker.patch.object(service, "direction_computed_at", return_value=None)
+
+        body = market_client.get(self.URL, params={"horizon": "3M"}).json()
+
+        assert body["items"][0]["lean"] is None
+        assert body["items"][0]["evidence"] == []
+
+    def test_the_computation_time_is_surfaced(self, market_client, mocker):
+        """Bayat bir hesabı bugünün ölçümü gibi göstermemek için."""
+        from datetime import datetime, timezone
+
+        moment = datetime(2026, 9, 7, 22, 30, tzinfo=timezone.utc)
+        mocker.patch.object(service, "direction_screen", return_value=[])
+        mocker.patch.object(service, "direction_computed_at", return_value=moment)
+
+        body = market_client.get(self.URL, params={"horizon": "3M"}).json()
+        assert body["computedAt"].startswith("2026-09-07")

@@ -49,6 +49,7 @@ import Analiz from './pages/Analiz'
 import GenelBakis from './pages/analiz/GenelBakis'
 import RiskSekmesi from './pages/analiz/RiskSekmesi'
 import Senaryo from './pages/analiz/Senaryo'
+import Dengeleme from './pages/analiz/Dengeleme'
 
 import SettingsLayout from './pages/settings/SettingsLayout'
 import ProfileSettings from './pages/settings/ProfileSettings'
@@ -127,6 +128,7 @@ export default function App() {
                 <Route path="genel"      element={<GenelBakis />} />
                 <Route path="risk"       element={<RiskSekmesi />} />
                 <Route path="senaryo"    element={<Senaryo />} />
+                <Route path="dengeleme" element={<Dengeleme />} />
               </Route>
               <Route path="investment" element={<Investment />}>
                 <Route index                element={<Navigate to="hisseler" replace />} />

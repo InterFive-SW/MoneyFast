@@ -39,6 +39,111 @@ export type AssetAllocationItem = GetResponseType<paths['/api/investment/asset-a
 export type AllocationTarget = GetResponseType<paths['/api/investment/allocation-target']>;
 export type AllocationDrift = GetResponseType<paths['/api/investment/allocation-drift']>;
 export type PortfolioReport = GetResponseType<paths['/api/analytics/report']>;
+
+/**
+ * Elle yazılmış tipler: bu uçlar `response_model` taşımıyor, dolayısıyla
+ * üretilen şemadan anlamlı bir tip çıkmıyor. Dosyanın kendi deseni.
+ */
+export interface RebalanceRow {
+    symbol: string;
+    name?: string | null;
+    bucket: string;
+    label: string;
+    side: 'BUY' | 'SELL';
+    quantity: number;
+    price: number;
+    currency: string;
+    amount_base: number;
+    /** Yuvarlamadan artan fark. Saklanmıyor, yazılıyor. */
+    residual_base: number;
+    statement: string;
+}
+
+export interface RebalanceUnresolved {
+    bucket: string;
+    label: string;
+    symbol?: string;
+    gap_amount?: number | null;
+    /** Emrin neden üretilemediği. Sessiz bir atlama sebebi görünmez yapardı. */
+    reason: string;
+}
+
+export interface RebalancePlan {
+    hasTarget: boolean;
+    totalValue: number;
+    statement: string;
+    /** Ekranda koşulsuz gösterilir; sunucudan gelir. */
+    disclaimer: string;
+    rows: RebalanceRow[];
+    unresolved: RebalanceUnresolved[];
+    rounding_residual_base: number;
+    buy_total_base: number;
+    usable_cash_base: number;
+    blocked_cash_base: number;
+    warning: string | null;
+}
+
+export interface AllocationTemplateItem {
+    key: string;
+    label: string;
+    weights: { bucket: string; label: string; percent: number }[];
+    /** Ölçülemeyen bir karışımda null -- "orta" değil. */
+    volatility: number | null;
+    band: string | null;
+    /** Bandı beyan edilen toleransla eşleşiyor mu. Sıralama girdisi. */
+    highlighted: boolean;
+    statement: string;
+    unmeasured: string[];
+}
+
+export interface AllocationTemplates {
+    declaredTolerance: string | null;
+    items: AllocationTemplateItem[];
+    measurementNote: string;
+}
+
+export interface DirectionEvidence {
+    source: string;
+    key: string;
+    direction: 'UP' | 'DOWN' | 'NEUTRAL';
+    value: unknown;
+    text: string;
+}
+
+export interface DirectionSignal {
+    symbol: string;
+    horizon: string;
+    direction: 'UP_LEAN' | 'DOWN_LEAN' | 'MIXED' | 'INSUFFICIENT' | 'OUT_OF_RANGE';
+    /** Vade dışı istekte null -- sıfır "ölçtük ve dengede" demek olurdu. */
+    lean: number | null;
+    evidence: DirectionEvidence[];
+    coverage: {
+        sources_measured: number;
+        evidence_count: number;
+        missing: string[];
+        observations: number | null;
+    };
+    by_source: Record<string, number | null>;
+    narrative: string | null;
+    horizon_note: string | null;
+    currency: string;
+}
+
+export interface DirectionScreenRow {
+    symbol: string;
+    direction: string;
+    lean: number | null;
+    observations: number | null;
+    narrative: string | null;
+    evidence: DirectionEvidence[];
+}
+
+export interface DirectionScreen {
+    horizon: string;
+    computedAt: string | null;
+    note: string | null;
+    items: DirectionScreenRow[];
+}
 export type StageTransactionRequest = components['schemas']['StageTransactionRequest'];
 export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
@@ -900,6 +1005,42 @@ class ApiClient {
     /** Ölçülen ağırlık ile kullanıcının kendi hedefi arasındaki fark. */
     getAllocationDrift() {
         return this.request<AllocationDrift>('/investment/allocation-drift');
+    }
+
+    /**
+     * Sapmanın emir karşılığı.
+     *
+     * Sistem hedef koymuyor ve enstrüman seçmiyor: kova farkı o kovadaki
+     * mevcut pozisyonlara mevcut ağırlıkları oranında dağıtılıyor. `disclaimer`
+     * sunucudan geliyor ve ekranda koşulsuz gösteriliyor -- arayüzde ikinci kez
+     * yazsaydık iki kopyadan biri değişip diğeri kalabilirdi.
+     */
+    getRebalancePlan() {
+        return this.request<RebalancePlan>('/investment/rebalance-plan');
+    }
+
+    /** Hazır dağılım şablonları ve her birinin ölçülen oynaklığı. */
+    getAllocationTemplates() {
+        return this.request<AllocationTemplates>('/risk/allocation-templates');
+    }
+
+    /**
+     * Bir enstrümanın yön okuması.
+     *
+     * Sohbet ile aynı uç nokta: ayrı hesaplasalardı aynı hisse için farklı bir
+     * yön söyleyebilirlerdi.
+     */
+    getDirectionSignal(symbol: string, horizon = '3M') {
+        return this.request<DirectionSignal>(
+            `/market/direction?symbol=${encodeURIComponent(symbol)}&horizon=${encodeURIComponent(horizon)}`,
+        );
+    }
+
+    /** Gecelik hesaplanmış yön okumaları; Piyasalar ekranının taraması. */
+    getDirectionScreen(horizon = '3M', direction?: string, limit = 50) {
+        const params = new URLSearchParams({ horizon, limit: String(limit) });
+        if (direction) params.set('direction', direction);
+        return this.request<DirectionScreen>(`/market/direction/screen?${params}`);
     }
 
     /** Follow an instrument. Idempotent — starring twice is not an error. */

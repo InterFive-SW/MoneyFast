@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -13,8 +13,9 @@ from app.core.deps import get_current_user_id, require_service_token
 from app.modules.investment import ai_service, market_service
 from app.modules.notification import service as notification_service
 from . import funds as funds_service
-from . import service, stream, technicals
+from . import service, signals, stream, technicals
 from .schemas import (
+    DirectionSignalOut,
     CandleSeriesOut,
     FundCandleSeriesOut,
     FundIngestRequest,
@@ -437,6 +438,119 @@ def get_technicals(
 
 
 @router.get(
+    "/direction",
+    response_model=DirectionSignalOut,
+    summary="Bir enstrümanın yön okuması ve gerekçesi",
+)
+def get_direction(
+    symbol: str = Query(..., min_length=1),
+    horizon: str = Query(
+        signals.DEFAULT_HORIZON,
+        description="1M / 3M / 6M. Üstü reddedilir.",
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Teknik, temel ve haber ölçümlerinin hangi yöne meylettiği.
+
+    `get_technicals` ile aynı sözleşme ve aynı sebep: sohbet ile hisse detay
+    sayfası AYNI uç noktayı okuyor. Ayrı hesaplasalardı ikisi aynı hisse için
+    farklı bir yön söyleyebilirdi.
+
+    **Bu bir tavsiye değil.** `narrative` ölçülen kanıtların özeti; koşullu,
+    çekincesiyle birlikte ve kodda kurulu. Hedef fiyat, "al/sat" ya da
+    uygunluk yargısı hiçbir dalda üretilmiyor -- `test_signals.py::TestWording`
+    bunu üretilebilir her cümle için sınıyor.
+
+    Bilinmeyen sembol boş bir ölçüm döndürür, hata değil; vade dışı bir istek
+    ise REDDEDİLİR ve neyin cevaplanabileceğini söyler.
+    """
+    product = market_service.resolve_symbol(db, symbol)
+    if product is None:
+        payload = signals.evaluate(symbol.upper(), horizon, technicals.compute([]))
+        return {**payload, "currency": "TRY"}
+
+    payload = _direction_payload(db, product, horizon)
+    return {**payload, "currency": product.currency_code or "TRY"}
+
+
+def _direction_payload(db: Session, product, horizon: str) -> dict:
+    """Bir enstrümanın yön okuması; okuma tek yerde toplanıyor.
+
+    Hem tek sembol ucu hem gecelik toplu iş buradan geçiyor. İkisi ayrı
+    okusaydı, ekranda görünen okuma ile tabloya yazılan okuma ayrışabilirdi.
+    """
+    if horizon not in signals.HORIZONS:
+        return signals.evaluate(product.symbol, horizon, technicals.compute([]))
+    bars = market_service.candle_series(
+        db, product.symbol, limit=technicals.BARS_NEEDED
+    )
+    return signals.evaluate(
+        product.symbol,
+        horizon,
+        technicals.compute(bars),
+        market_service.fundamentals_for(db, product.symbol),
+        market_service.quarterly_for(db, product.symbol),
+        service.latest_news(
+            db,
+            limit=signals.NEWS_SAMPLE_LIMIT,
+            symbols=[product.symbol],
+            since=datetime.now(timezone.utc)
+            - timedelta(days=signals.NEWS_WINDOW_DAYS),
+        ),
+    )
+
+
+@router.get(
+    "/direction/screen",
+    summary="Ölçülen kanıt yönüne göre tarama",
+)
+def get_direction_screen(
+    horizon: str = Query(signals.DEFAULT_HORIZON),
+    direction: Optional[str] = Query(None, description="UP_LEAN / DOWN_LEAN / MIXED"),
+    limit: int = Query(50, ge=1, le=service.DIRECTION_MAX_LIMIT),
+    db: Session = Depends(get_db),
+):
+    """Gecelik hesaplanmış yön okumaları, meyle göre sıralı.
+
+    **Bu bir "en iyi hisseler" listesi DEĞİL** ve kolonun adı da öyle demiyor:
+    sıralanan şey ölçülen kanıtların meyli, bir cazibe sıralaması değil.
+    `lean` değeri her satırda görünür duruyor ki sıralamanın neye göre
+    yapıldığı okunabilsin.
+
+    Tek sembol sorulduğunda okuma TAZE hesaplanıyor (`GET /market/direction`);
+    burası 1.011 enstrümanı istek anında hesaplamamak için var.
+
+    `computed_at` yanıtta: bayat bir hesabı bugünün ölçümü gibi göstermemek
+    için, ekranda "şu tarih itibarıyla" diye yazılıyor.
+    """
+    if horizon not in signals.HORIZONS:
+        return {
+            "horizon": horizon,
+            "items": [],
+            "computedAt": None,
+            "note": signals.OUT_OF_RANGE_TR,
+        }
+    rows = service.direction_screen(db, horizon, direction, limit)
+    return {
+        "horizon": horizon,
+        "computedAt": service.direction_computed_at(db, horizon),
+        "note": None,
+        "items": [
+            {
+                "symbol": row.symbol,
+                "direction": row.direction,
+                "lean": float(row.lean) if row.lean is not None else None,
+                "observations": row.observations,
+                "narrative": row.narrative,
+                "evidence": row.evidence or [],
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get(
     "/portfolio/technical",
     response_model=PortfolioTechnicalOut,
     summary="Portföy geneli teknik görünüm",
@@ -698,13 +812,28 @@ def intraday_symbols(db: Session = Depends(get_db)):
     summary="Temel verisi eksik enstrümanlar (servisler arası)",
     dependencies=[Depends(require_service_token)],
 )
-def fundamentals_missing(db: Session = Depends(get_db)):
+def fundamentals_missing(
+    stale_days: int = Query(
+        market_service.FUNDAMENTALS_STALE_AFTER_DAYS,
+        ge=1,
+        le=365,
+        description="Bu kadar gün geçmiş kayıtlar da eksik sayılır.",
+    ),
+    db: Session = Depends(get_db),
+):
     """`ingestor`'ın açılışta neyi dolduracağını sorduğu uç nokta.
 
-    Yalnızca eksik olanlar: hepsini her açılışta yeniden çekmek, çeyreklik
-    raporlarla değişen oranları durmadan yeniden yazmak olurdu.
+    Yalnızca eksik ya da bayat olanlar: hepsini her açılışta yeniden çekmek,
+    çeyreklik raporlarla değişen oranları durmadan yeniden yazmak olurdu.
+
+    Yanıt şekli (`{"symbols": [...]}`) DEĞİŞMEDİ: `stale_days` isteğe bağlı bir
+    daraltma ve ingestor'ın bugünkü çağrısı olduğu gibi çalışmaya devam ediyor.
     """
-    return {"symbols": market_service.symbols_without_fundamentals(db)}
+    return {
+        "symbols": market_service.symbols_without_fundamentals(
+            db, stale_after_days=stale_days
+        )
+    }
 
 
 def _notify_holders(db: Session, fresh: list[dict]) -> int:

@@ -153,6 +153,15 @@ def push_market_data(
 
 
 def push_fundamentals(client: httpx.Client, rows: list[dict]) -> Optional[dict]:
+    """Temel veri satırlarını yazar; hata hâlinde `None`.
+
+    Hata gövdesi de loglanıyor ve sebebi ölçülmüş bir kör nokta: uç nokta
+    gövdeyi tek bir Pydantic modeline doğruluyor, dolayısıyla bir tek geçersiz
+    değer 422 ile isteğin tamamını düşürüyor -- ama `HTTPStatusError`'ın
+    metninde yalnızca durum kodu var, HANGİ alanın reddedildiği yanıt
+    gövdesinde. O gövde bugüne kadar hiç yazılmıyordu ve hatanın nadir olması
+    (828 satırda bir) onu bir daha bulunamaz hâle getiriyordu.
+    """
     if not rows:
         return None
     try:
@@ -164,6 +173,16 @@ def push_fundamentals(client: httpx.Client, rows: list[dict]) -> Optional[dict]:
         )
         response.raise_for_status()
         return response.json()
+    except httpx.HTTPStatusError as exc:
+        # Kırpılıyor: 422 gövdesi satır başına bir madde taşıyabiliyor ve
+        # tamamını loglamak, aradığımız ilk maddeyi ekranlarca metnin altına
+        # gömerdi.
+        log.error(
+            "fundamentals ingest failed: %s | %s",
+            exc,
+            (exc.response.text or "")[:300],
+        )
+        return None
     except Exception as exc:
         log.error("fundamentals ingest failed: %s", exc)
         return None

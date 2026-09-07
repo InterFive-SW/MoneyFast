@@ -15,7 +15,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 from sqlalchemy import Boolean, Date, DateTime, Index, Integer, Numeric, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -125,3 +125,43 @@ class FundPrice(Base):
     code: Mapped[str] = mapped_column(String(16), primary_key=True)
     as_of: Mapped[date] = mapped_column(Date, primary_key=True)
     price: Mapped[float] = mapped_column(Numeric(19, 6), nullable=False)
+
+
+class DirectionSignal(Base):
+    """Bir enstrümanın bir vadedeki yön okuması, gecelik hesaplanmış hâliyle.
+
+    Neden saklanıyor: Piyasalar ekranı "ölçülen kanıt yönü" kolonuyla
+    sıralanabiliyor ve 1.011 enstrümanın okumasını istek anında hesaplamak
+    sembol başına üç sorgu demek. Tek sembol sorulduğunda hâlâ TAZE
+    hesaplanıyor (`GET /market/direction`); burası yalnızca tarama için.
+
+    `computed_at` gizlenmiyor: bayat bir hesap "şu tarih itibarıyla" diye
+    sunuluyor. Bir okumanın ne zaman yapıldığını söylemeden göstermek, dünkü
+    ölçümü bugünün ölçümü gibi göstermek olurdu.
+
+    `evidence` JSONB olarak saklanıyor çünkü tarama satırı da gerekçesini
+    taşımak zorunda -- gerekçesiz bir yön, kullanıcının doğrulayamayacağı bir
+    iddiadır. Sorgulanmıyor, yalnızca okunuyor; ayrı bir tabloya bölmek
+    okumayı bir birleştirmeye çevirirdi.
+    """
+
+    __tablename__ = "direction_signals"
+    __table_args__ = (
+        Index("idx_direction_signals_horizon_lean", "horizon", "lean"),
+        {"schema": SCHEMA},
+    )
+
+    product_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    horizon: Mapped[str] = mapped_column(String(4), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: UP_LEAN / DOWN_LEAN / MIXED / INSUFFICIENT
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: Ölçülemeyen bir okumada None -- sıfır değil, çünkü sıfır "ölçtük ve
+    #: dengede" demek olurdu ve tarama onu MIXED satırlarla karıştırırdı.
+    lean: Mapped[float | None] = mapped_column(Numeric(6, 4), nullable=True)
+    evidence: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    observations: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    narrative: Mapped[str | None] = mapped_column(Text, nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )

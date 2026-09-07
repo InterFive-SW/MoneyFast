@@ -1067,6 +1067,11 @@ class TestScheduler:
             # Gün içi barlar, toplu turla aynı ritimde.
             "candles_intraday": "interval",
             "candles": "cron", "fundamentals": "cron",
+            # Çeyreklik gelir tablosu HAFTALIK: rakamlar üç ayda bir
+            # açıklanıyor, günde bir çekmek doksan gün boyunca aynı satırı
+            # doksan kez yazmak olurdu. Bu iş bir dönem hiç zamanlanmamıştı
+            # ve `instrument_quarterly` her kurulumda boş kalıyordu.
+            "quarterly": "cron",
             # Vadeli hesap faizi, gün dönümünden hemen sonra.
             "interest": "cron",
             # A one-shot, not part of the warm start: `fetch_candles` is
@@ -1216,10 +1221,83 @@ class TestFundamentalsCycle:
         assert run.run_fundamentals(None) == {"fetched": 1, "fundamentals_written": 1}
 
     def test_push_failure_still_reports_what_was_fetched(self, monkeypatch):
+        """Yazılan sayı AÇIKÇA sıfır dönüyor, anahtar düşürülmüyor: eskiden
+        `fundamentals_written` hiç görünmüyordu ve turu okuyan biri "hiçbir şey
+        yazılmadı" ile "istek düştü"yü ayırt edemiyordu."""
         monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
         monkeypatch.setattr(run.yfinance_source, "fetch_fundamentals", lambda p: [{"symbol": "X"}])
         monkeypatch.setattr(run.sinks, "push_fundamentals", lambda c, r: None)
-        assert run.run_fundamentals(None) == {"fetched": 1}
+        assert run.run_fundamentals(None) == {"fetched": 1, "fundamentals_written": 0}
+
+    def test_the_daily_cycle_chunks_like_the_backfill(self, monkeypatch):
+        """Parçalama backfill'de vardı, GÜNLÜK TURDA yoktu -- oysa gerekçe
+        aynı: uç nokta gövdeyi tek bir modele doğruluyor, bir tek geçersiz
+        değer 1.011 satırın tamamını 422 yapıyor. Ölçülmüştü: 828 satır bu
+        yüzden düşmüştü."""
+        pushed = []
+        rows = [{"symbol": f"S{i}"} for i in range(run.FUNDAMENTALS_PUSH_CHUNK + 3)]
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.yfinance_source, "fetch_fundamentals", lambda p: rows)
+        monkeypatch.setattr(
+            run.sinks, "push_fundamentals",
+            lambda c, chunk: pushed.append(len(chunk)) or {"fundamentals_written": len(chunk)},
+        )
+        result = run.run_fundamentals(None)
+        assert pushed == [run.FUNDAMENTALS_PUSH_CHUNK, 3]
+        assert result["fundamentals_written"] == len(rows)
+
+    def test_one_failed_chunk_does_not_lose_the_others(self, monkeypatch):
+        """Parçalamanın bütün amacı bu: en fazla bir parça kaybedilir."""
+        rows = [{"symbol": f"S{i}"} for i in range(run.FUNDAMENTALS_PUSH_CHUNK * 2)]
+        seen = []
+
+        def push(client, chunk):
+            seen.append(len(chunk))
+            return None if len(seen) == 1 else {"fundamentals_written": len(chunk)}
+
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.yfinance_source, "fetch_fundamentals", lambda p: rows)
+        monkeypatch.setattr(run.sinks, "push_fundamentals", push)
+        result = run.run_fundamentals(None)
+        assert result["fundamentals_written"] == run.FUNDAMENTALS_PUSH_CHUNK
+
+    def test_a_failed_chunk_is_counted_in_the_log(self, monkeypatch, caplog):
+        """"0 yazıldı" ile "istek düştü" aynı log satırına bakan biri için
+        ayırt edilebilir olmalı."""
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.yfinance_source, "fetch_fundamentals", lambda p: [{"symbol": "X"}])
+        monkeypatch.setattr(run.sinks, "push_fundamentals", lambda c, r: None)
+        with caplog.at_level("WARNING"):
+            run.run_fundamentals(None)
+        assert "1 of 1 chunk(s) failed" in caplog.text
+
+    def test_no_warning_when_every_chunk_lands(self, monkeypatch, caplog):
+        monkeypatch.setattr(run.sinks, "fetch_products", lambda c: [])
+        monkeypatch.setattr(run.yfinance_source, "fetch_fundamentals", lambda p: [{"symbol": "X"}])
+        monkeypatch.setattr(run.sinks, "push_fundamentals",
+                            lambda c, r: {"fundamentals_written": 1})
+        with caplog.at_level("WARNING"):
+            run.run_fundamentals(None)
+        assert "chunk(s) failed" not in caplog.text
+
+    def test_the_rejected_body_is_logged(self, caplog):
+        """422 gövdesi HANGİ alanın reddedildiğini taşıyor; `HTTPStatusError`
+        metninde yalnızca durum kodu var. O gövde bugüne kadar hiç
+        yazılmıyordu ve hatanın nadir olması onu bulunamaz kılıyordu."""
+        handler = recorder(status=422, body={"detail": [{"loc": ["market_cap"]}]})
+        with caplog.at_level("ERROR"):
+            assert sinks.push_fundamentals(client_for(handler), [{"symbol": "X"}]) is None
+        assert "market_cap" in caplog.text
+
+    def test_a_non_http_failure_still_logs_without_a_body(self, caplog):
+        """Bağlantı hiç kurulamadıysa okunacak bir yanıt yok; ikinci dal bunun
+        için var."""
+        def boom(request):
+            raise httpx.ConnectError("down")
+
+        with caplog.at_level("ERROR"):
+            assert sinks.push_fundamentals(client_for(boom), [{"symbol": "X"}]) is None
+        assert "fundamentals ingest failed" in caplog.text
 
     def test_empty_batch_makes_no_request(self):
         handler = recorder()

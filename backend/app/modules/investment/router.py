@@ -9,7 +9,7 @@ from app.core.deps import get_current_user_id, get_optional_user_id
 from app.modules.auth.models import User
 from app.core.email import send_transaction_request_email
 from app.modules.notification.models import Notification
-from . import ai_service, allocation, matching, market_service, service
+from . import ai_service, allocation, matching, market_service, rebalance, service
 from app.modules.analytics import service as analytics_service
 from app.modules.market import funds as funds_service
 from app.core.deps import require_service_token
@@ -1276,20 +1276,87 @@ def set_allocation_target(
 
 
 @router.get(
-    "/allocation-drift",
-    response_model=AllocationDriftOut,
-    summary="Hedeften sapma",
+    "/rebalance-plan",
+    summary="Hedeften sapmanın emir karşılığı",
 )
-def get_allocation_drift(
+def get_rebalance_plan(
     db: Session = Depends(get_db),
     user_id: Optional[str] = Depends(get_optional_user_id),
 ):
     """
-    Ölçülen ağırlıklar ile kullanıcının kendi hedefi arasındaki fark.
+    Kullanıcının KENDİ hedefindeki sapmanın lot karşılığı.
 
-    Tavsiye değil, iki olgunun çıkarması: biri portföyden ölçülüyor, diğeri
-    kullanıcının kendi girdiği sayı. Hiçbir yerde ne yapılması gerektiği
-    söylenmiyor -- yalnızca hedefe ulaşmak için kaç lira fark olduğu.
+    **Sistem hedefi koymuyor ve enstrüman seçmiyor.** Kova farkı, o kovadaki
+    mevcut pozisyonlara mevcut ağırlıkları oranında dağıtılıyor -- seçmek bir
+    tavsiye olurdu, orantılı dağıtmak aritmetiktir. `disclaimer` sunucudan
+    geliyor ve ekranda koşulsuz gösteriliyor.
+
+    Emir üretilemeyen kovalar SESSİZCE atlanmıyor: `unresolved` her birinin
+    nedenini taşıyor, çünkü sessiz bir atlama kullanıcının hedefine
+    ulaşamamasının sebebini görünmez yapardı.
+    """
+    return _rebalance_payload(db, user_id)
+
+
+def _rebalance_payload(db: Session, user_id: Optional[str]) -> dict:
+    """Planın gövdesi; oturum ucu ile servis ucu paylaşıyor."""
+    result, inputs = _drift_inputs(db, user_id)
+    account = inputs["account"]
+    positions = [
+        {
+            "symbol": row.get("symbol"),
+            "name": row.get("name"),
+            "bucket": allocation.bucket_for(row.get("market")),
+            "quantity": float(row.get("quantity") or 0.0),
+            "price": float(row.get("price")) if row.get("price") else None,
+            "currency": row.get("currency"),
+            "asset_kind": row.get("product_type"),
+            "value_base": value,
+        }
+        for row, value in inputs["valued"]
+    ]
+    plan = rebalance.plan(
+        result["buckets"],
+        positions,
+        inputs["rates"],
+        base_currency=(account.currency_code if account else "TRY") or "TRY",
+        blocked_cash=market_service.blocked_cash(db, user_id),
+        available_cash=float(account.cash_balance) if account else 0.0,
+    )
+    return {
+        "hasTarget": result["has_target"],
+        "totalValue": result["total_value"],
+        "statement": result["statement"],
+        **plan,
+    }
+
+
+@router.get(
+    "/agent/{user_id}/rebalance-plan",
+    summary="Dengeleme planı (MCP sözleşmesi)",
+    dependencies=[Depends(require_service_token)],
+)
+def get_rebalance_plan_for_ai(user_id: str, db: Session = Depends(get_db)):
+    """
+    Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+
+    `get_portfolio_technical_for_ai` ile aynı desen: MCP araçları kullanıcıyı
+    doğrulanmış oturum zarfından alıp yola koyuyor. İkisi TEK bir yardımcıyı
+    çağırıyor, böylece ekranın ve sohbetin aynı portföy için farklı bir plan
+    göstermesi mümkün değil.
+
+    **Salt okuma.** Sohbet bu listeyi ÜRETMİYOR; ekranda duranı açıklıyor.
+    Cümleler burada kuruluyor ve model onları aynen aktarıyor.
+    """
+    return _rebalance_payload(db, user_id)
+
+
+def _drift_inputs(db: Session, user_id: Optional[str]):
+    """Sapma hesabının okuma bloğu; sapma ucu ile dengeleme planı paylaşıyor.
+
+    İkisi ayrı okusaydı "aynı portföy için iki farklı sapma" mümkün olurdu --
+    ekranda bir sayı, emir listesinde başka bir sayı. Değerleme
+    `ai_service.holding_value` ile, yani tek uygulamayla yapılıyor.
     """
     rows = market_service.holdings(db, user_id=user_id)
     quotes = market_service.latest_quotes(db)
@@ -1305,6 +1372,31 @@ def get_allocation_drift(
         valued, float(account.cash_balance) if account else 0.0
     )
     result = allocation.drift(amounts, _targets_for(db, user_id))
+    return result, {
+        "valued": valued,
+        "rates": rates,
+        "account": account,
+        "quotes": quotes,
+    }
+
+
+@router.get(
+    "/allocation-drift",
+    response_model=AllocationDriftOut,
+    summary="Hedeften sapma",
+)
+def get_allocation_drift(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    Ölçülen ağırlıklar ile kullanıcının kendi hedefi arasındaki fark.
+
+    Tavsiye değil, iki olgunun çıkarması: biri portföyden ölçülüyor, diğeri
+    kullanıcının kendi girdiği sayı. Hiçbir yerde ne yapılması gerektiği
+    söylenmiyor -- yalnızca hedefe ulaşmak için kaç lira fark olduğu.
+    """
+    result, _ = _drift_inputs(db, user_id)
     return {
         "hasTarget": result["has_target"],
         "totalValue": result["total_value"],

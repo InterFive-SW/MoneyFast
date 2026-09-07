@@ -259,14 +259,42 @@ def run_quotes(
     return {"fetched": len(quotes), "seconds": round(elapsed, 2), **result}
 
 
+def _push_fundamentals_chunked(client: httpx.Client, rows: list[dict]) -> int:
+    """Temel veri satırlarını parçalar hâlinde iter, yazılan sayıyı döner.
+
+    Parçalama açılıştaki backfill'de vardı, günlük turda YOKTU -- ve gerekçe
+    ikisinde de aynı: uç nokta gövdeyi tek bir Pydantic modeline doğruluyor,
+    dolayısıyla TEK bir geçersiz değer isteğin tamamını 422 yapıyor.
+    Ölçülmüştü: 828 satırın tamamı bu yüzden düşüyordu. Günlük tur evrenin
+    tamamını (1.011 satır) tek gövdede itiyordu, yani aynı hataya açıktı ve
+    `push_fundamentals` hatayı yutup `None` döndüğü için tur "0 yazıldı" diye
+    raporluyordu -- sessiz kayıp.
+
+    Kaç parçanın düştüğü SAYILIYOR: "hiçbir şey yazılmadı" ile "istek düştü"
+    aynı log satırına bakan biri için ayırt edilebilir olmalı.
+    """
+    written = 0
+    failed = 0
+    total = (len(rows) + FUNDAMENTALS_PUSH_CHUNK - 1) // FUNDAMENTALS_PUSH_CHUNK
+    for start in range(0, len(rows), FUNDAMENTALS_PUSH_CHUNK):
+        chunk = rows[start:start + FUNDAMENTALS_PUSH_CHUNK]
+        result = sinks.push_fundamentals(client, chunk)
+        if result is None:
+            failed += 1
+            continue
+        written += result.get("fundamentals_written", 0)
+    if failed:
+        log.warning("fundamentals: %d of %d chunk(s) failed", failed, total)
+    return written
+
+
 def run_fundamentals(client: httpx.Client) -> dict:
     """Valuation ratios. Daily, because the provider has no batch form."""
     products = sinks.fetch_products(client)
     rows = yfinance_source.fetch_fundamentals(products)
-    result = sinks.push_fundamentals(client, rows) or {}
-    log.info("fundamentals cycle: %d fetched, %s written",
-             len(rows), result.get("fundamentals_written", 0))
-    return {"fetched": len(rows), **result}
+    written = _push_fundamentals_chunked(client, rows)
+    log.info("fundamentals cycle: %d fetched, %d written", len(rows), written)
+    return {"fetched": len(rows), "fundamentals_written": written}
 
 
 def run_quarterly(client: httpx.Client) -> dict:
@@ -318,14 +346,7 @@ def backfill_fundamentals(client: httpx.Client) -> dict:
     products = [p for p in sinks.fetch_products(client) if p.get("symbol") in wanted]
     rows = yfinance_source.fetch_fundamentals(products)
 
-    # Parçalayarak itiliyor. Tek gövdede gönderildiğinde bir tek geçersiz değer
-    # 828 satırın tamamını düşürüyordu; parçalar hâlinde en fazla bir parça
-    # kaybedilir ve gerisi yazılır.
-    written = 0
-    for start in range(0, len(rows), FUNDAMENTALS_PUSH_CHUNK):
-        chunk = rows[start:start + FUNDAMENTALS_PUSH_CHUNK]
-        result = sinks.push_fundamentals(client, chunk) or {}
-        written += result.get("fundamentals_written", 0)
+    written = _push_fundamentals_chunked(client, rows)
 
     log.info("fundamentals backfill: %d of %d symbols returned data, %d written",
              len(rows), len(products), written)
@@ -911,7 +932,8 @@ def _with_bodies(items: list, client: httpx.Client) -> list:
 
 
 
-def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False) -> dict:
+def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False,
+             quarterly: bool = False) -> dict:
     results = {}
     with httpx.Client() as client:
         # Each job is guarded separately: a dead RSS host must not cost us the
@@ -924,6 +946,8 @@ def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False
             results["news"] = _guard("news", run_news, client)
         if fundamentals:
             results["fundamentals"] = _guard("fundamentals", run_fundamentals, client)
+        if quarterly:
+            results["quarterly"] = _guard("quarterly", run_quarterly, client)
     return results
 
 
@@ -1074,6 +1098,25 @@ def start_scheduler() -> None:
         max_instances=1,
     )
 
+    # Çeyreklik gelir tablosu. HAFTALIK, günlük değil: rakamlar üç ayda bir
+    # açıklanıyor ve `run_quarterly`'nin kendi yorumu bunu söylüyor -- günde bir
+    # çekmek, doksan gün boyunca aynı satırı doksan kez yazmak olurdu. Ölçülen
+    # süre ~0,8 sn/sembol, yani evrenin tamamı ~13 dakika.
+    #
+    # Bu iş bugüne kadar HİÇ ZAMANLANMAMIŞTI: `run_quarterly` tanımlıydı ama
+    # ne burada, ne `run_once`'ta, ne CLI'da çağrılıyordu. Ölçüldü, sonucu
+    # `investment.instrument_quarterly` tablosunun her kurulumda boş kalması
+    # ve "bir önceki çeyreğe göre" diyen her okumanın sessizce üretilememesi.
+    scheduler.add_job(
+        _job("quarterly", run_quarterly),
+        "cron",
+        day_of_week="sun",
+        hour=config.MARKET_CLOSE_HOUR + 2,
+        minute=15,
+        id="quarterly",
+        max_instances=1,
+    )
+
     log.info(
         "scheduler started: band every %ds, quotes every %ds (market hours), "
         "news every %dm, kap every %dm, candles daily at %d:15",
@@ -1140,16 +1183,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--candles", action="store_true", help="candles only")
     parser.add_argument("--news", action="store_true", help="news only")
     parser.add_argument("--fundamentals", action="store_true", help="fundamentals only")
+    parser.add_argument("--quarterly", action="store_true", help="quarterly financials only")
     args = parser.parse_args(argv)
 
-    selected = args.quotes or args.candles or args.news or args.fundamentals
+    selected = (args.quotes or args.candles or args.news or args.fundamentals
+                or args.quarterly)
     quotes = args.quotes or not selected
     candles = args.candles or not selected
     news = args.news or not selected
     fundamentals = args.fundamentals or not selected
+    quarterly = args.quarterly or not selected
 
     if args.once:
-        results = run_once(quotes, candles, news, fundamentals)
+        results = run_once(quotes, candles, news, fundamentals, quarterly)
         log.info("one-shot run complete: %s", results)
         return 0
 

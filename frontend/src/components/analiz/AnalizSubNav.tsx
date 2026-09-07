@@ -4,6 +4,7 @@ const TABS = [
     { to: '/analiz/genel', label: 'Genel Bakış' },
     { to: '/analiz/risk', label: 'Risk' },
     { to: '/analiz/senaryo', label: 'Senaryo & Geçmiş' },
+    { to: '/analiz/dengeleme', label: 'Dengeleme' },
 ]
 
 /**

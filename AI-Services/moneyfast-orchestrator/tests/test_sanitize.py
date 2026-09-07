@@ -149,3 +149,32 @@ class TestSanitizedWrapper:
         with caplog.at_level("WARNING"):
             assert sanitize.sanitized("orijinal metin") == "orijinal metin"
         assert "sanitize failed" in caplog.text
+
+
+class TestDirectionInternals:
+    """v2.21. `lean` bir SIRALAMA büyüklüğü ve kullanıcıya hiçbir şey
+    söylemiyor. Ölçüldü: model onu "(lean -%0,017)" diye cevabın içine yazdı,
+    araç sözleşmesi açıkça yasaklamasına rağmen -- prompt tavsiyedir."""
+
+    def test_the_ordering_magnitude_is_removed(self):
+        out, removed = sanitize.sanitize(
+            "Veriler düşüşe işaret ediyor (lean -%0,017)."
+        )
+        assert "lean" not in out
+        assert "lean" in removed
+
+    def test_the_coverage_bookkeeping_is_removed(self):
+        """Okumanın muhasebesi, okumanın kendisi değil."""
+        out, removed = sanitize.sanitize(
+            "sources_measured 3 ve evidence_count 13 olarak ölçüldü."
+        )
+        assert "sources_measured" not in out
+        assert "evidence_count" not in out
+
+    def test_an_ordinary_word_is_not_touched(self):
+        """Temizleyici TANIMLAYICI arıyor, kelime değil: aksi hâlde sıradan
+        Türkçe metni de keserdi."""
+        text = "Şirketin borçlanma eğilimi arttı."
+        out, removed = sanitize.sanitize(text)
+        assert out == text
+        assert removed == []

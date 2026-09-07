@@ -520,6 +520,23 @@ class TestLatestNews:
         news_service.latest_news(db, limit=5, symbols=None)
         db.query.return_value.filter.assert_not_called()
 
+    def test_a_window_narrows_the_query_not_the_page(self):
+        """Pencereyi çağırana bırakmak, "son 90 günde 4 haber" cümlesinin
+        `limit` kadar satır çekip içinden sayması demekti -- yani limitin
+        altında kalan bir pencerede sayı sessizce yanlış çıkardı."""
+        from datetime import datetime, timezone
+
+        db = MagicMock(spec=Session)
+        news_service.latest_news(
+            db, limit=5, since=datetime(2026, 1, 1, tzinfo=timezone.utc)
+        )
+        db.query.return_value.filter.assert_called_once()
+
+    def test_no_window_means_no_date_filter(self):
+        db = MagicMock(spec=Session)
+        news_service.latest_news(db, limit=5, since=None)
+        db.query.return_value.filter.assert_not_called()
+
     def test_symbols_filter_on_array_overlap(self):
         """Süzgeç SORGUDA: dönen sayfayı süzmek, "en yeni 20"de o hisse yoksa
         "haber yok" cevabı üretiyordu -- oysa soru hiç sorulmamış oluyordu."""
@@ -660,3 +677,60 @@ class TestRefreshQuotes:
             side_effect=RuntimeError("ingestor down"),
         )
         assert market_module_service.refresh_quotes(["THYAO"]) is False
+
+
+class TestDirectionSignalStore:
+    """Tarama tablosu. Tek sembol sorulduğunda okuma taze hesaplanıyor; bu
+    tablo yalnızca 1.011 enstrümanı istek anında hesaplamamak için var."""
+
+    def test_an_empty_batch_makes_no_query(self):
+        db = MagicMock(spec=Session)
+        assert news_service.store_direction_signals(db, []) == 0
+        assert db.execute.called is False
+
+    def test_a_rerun_overwrites_rather_than_appends(self):
+        """Okuma bir birikim değil, o anki ölçümün fotoğrafı: yarıda kesilen
+        bir tur bir sonrakinde TAMAMINI yeniden yazmalı."""
+        db = MagicMock(spec=Session)
+        rows = [{"product_id": "p1", "horizon": "3M", "symbol": "ASELS",
+                 "direction": "UP_LEAN", "lean": 0.5, "evidence": [],
+                 "observations": 252, "narrative": "x",
+                 "computed_at": NOW}]
+        assert news_service.store_direction_signals(db, rows) == 1
+        statement = str(db.execute.call_args.args[0])
+        assert "ON CONFLICT" in statement.upper()
+        assert db.commit.called
+
+    def test_unmeasured_readings_are_left_out_of_the_screen(self):
+        """Ölçülemeyen bir okumayı sıralamaya katmak, ölçülmüş bir okuma gibi
+        göstermek olurdu."""
+        db = MagicMock(spec=Session)
+        news_service.direction_screen(db, "3M")
+        filters = db.query.return_value.filter.call_args.args
+        rendered = " ".join(str(f) for f in filters)
+        assert "lean IS NOT NULL" in rendered
+        assert "direction !=" in rendered
+
+    def test_a_direction_filter_narrows_further(self):
+        db = MagicMock(spec=Session)
+        news_service.direction_screen(db, "3M", direction="UP_LEAN")
+        assert db.query.return_value.filter.return_value.filter.called
+
+    def test_the_limit_is_capped(self):
+        db = MagicMock(spec=Session)
+        chain = db.query.return_value.filter.return_value.order_by.return_value
+        news_service.direction_screen(db, "3M", limit=10_000)
+        chain.limit.assert_called_once_with(news_service.DIRECTION_MAX_LIMIT)
+
+    def test_a_zero_limit_still_asks_for_one_row(self):
+        db = MagicMock(spec=Session)
+        chain = db.query.return_value.filter.return_value.order_by.return_value
+        news_service.direction_screen(db, "3M", limit=0)
+        chain.limit.assert_called_once_with(1)
+
+    def test_the_computation_time_is_readable(self):
+        """Bir okumanın ne zaman yapıldığını söylemeden göstermek, dünkü
+        ölçümü bugünün ölçümü gibi göstermek olurdu."""
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.scalar.return_value = NOW
+        assert news_service.direction_computed_at(db, "3M") == NOW

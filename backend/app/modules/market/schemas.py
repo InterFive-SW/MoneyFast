@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from pydantic import BaseModel, Field
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 class MarketTicker(BaseModel):
     """
@@ -353,6 +353,55 @@ class TechnicalSignalsOut(BaseModel):
     #: Kullanıcıya gösterilecek Türkçe cümle, tam hâliyle. Yeterli geçmiş
     #: yoksa None -- boş bir cümle üretmek yerine hiç üretilmiyor.
     narrative: Optional[str] = None
+
+
+class DirectionEvidenceOut(BaseModel):
+    """Tek bir ölçüm ve hangi yöne saydığı.
+
+    Liste görünür kalıyor, bilerek: bir yön okumasının kullanıcı tarafından
+    denetlenebilmesi, hangi ölçümlerden çıkarıldığının görünmesine bağlı.
+    """
+
+    source: str
+    key: str
+    #: UP / DOWN / NEUTRAL. NEUTRAL bir ölçümün yöne KATILMADIĞINI söyler,
+    #: ölçülemediğini değil -- ölçülemeyen kanıt hiç üretilmez.
+    direction: str
+    value: Optional[Any] = None
+    text: str
+
+
+class DirectionCoverageOut(BaseModel):
+    sources_measured: int = 0
+    evidence_count: int = 0
+    #: Ölçülemeyen ölçümlerin ADI. "Yetersiz" demek yetmiyor; neyin eksik
+    #: olduğu söylenmezse kullanıcı okumanın neden kurulamadığını bilemez.
+    missing: List[str] = Field(default_factory=list)
+    observations: Optional[int] = None
+
+
+class DirectionSignalOut(BaseModel):
+    """Bir enstrümanın yön okuması.
+
+    `narrative` kullanıcıya gösterilecek metnin kendisi ve KODDA kuruluyor.
+    Sayıları modele verip "yorumla" demek, aynı ölçümlerin her turda biraz
+    farklı anlatılması demekti.
+    """
+
+    symbol: str
+    horizon: str
+    #: UP_LEAN / DOWN_LEAN / MIXED / INSUFFICIENT / OUT_OF_RANGE
+    direction: str
+    #: [-1, 1]. Vade dışı bir istekte None -- sıfır değil, çünkü sıfır
+    #: "ölçtük ve dengede" demek olurdu.
+    lean: Optional[float] = None
+    evidence: List[DirectionEvidenceOut] = Field(default_factory=list)
+    coverage: DirectionCoverageOut = Field(default_factory=DirectionCoverageOut)
+    by_source: Dict[str, Optional[float]] = Field(default_factory=dict)
+    narrative: Optional[str] = None
+    #: Ağırlıklandırmanın bir varsayım olduğunu söyleyen cümle.
+    horizon_note: Optional[str] = None
+    currency: str = "TRY"
 
 
 class PortfolioTechnicalRow(TechnicalSignalsOut):

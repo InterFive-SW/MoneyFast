@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user_id
+from app.core.deps import get_current_user_id, get_optional_user_id
 from app.modules.banking import service as banking_service
 from app.modules.investment import ai_service, allocation, market_service
 from app.modules.investment import service as investment_service
@@ -124,6 +125,115 @@ def _current_positions(db: Session, user_id: str):
             }
         )
     return positions, rates, warnings
+
+
+#: Şablon oynaklığının ölçüldüğü pencere. Bir yıl: daha kısası tek bir
+#: piyasa dalgasına, daha uzunu ise bugünkü karışımın taşımadığı bir rejime
+#: bakmak olurdu.
+TEMPLATE_LOOKBACK_BARS = 252
+
+
+@router.get(
+    "/allocation-templates",
+    summary="Hazır dağılım şablonları ve ölçülen oynaklıkları",
+)
+def get_allocation_templates(
+    db: Session = Depends(get_db),
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """
+    Hedef formunun başlangıç değerleri, her birinin ÖLÇÜLEN oynaklığıyla.
+
+    **Şablon bir model portföy değil ve sistem birini SEÇMİYOR.** Bandı beyan
+    edilen toleransla eşleşen şablon listenin başına geliyor -- bu bir
+    sıralama girdisi, bir tavsiye değil, ve neye göre sıralandığı her satırın
+    cümlesinde yazıyor. Kaydedilen şey yine kullanıcının kendi PUT'u.
+
+    Oynaklık kova vekillerinden ölçülüyor ve dolar cinsli seriler TL'ye
+    ÇEVRİLİYOR: çevirmemek, ABD ve altın kovalarını TL yatırımcısı için
+    sistematik olarak sakin gösterirdi.
+    """
+    closes_by_bucket = _proxy_series(db)
+    declared = store.latest_profile(db, user_id) if user_id else None
+    tolerance = declared.tolerance_level if declared else None
+
+    items = []
+    for key, template in allocation.TEMPLATES.items():
+        measured = allocation.template_volatility(
+            template["weights"], closes_by_bucket
+        )
+        comparison = profile.template_comparison(
+            template["label"],
+            measured["volatility"],
+            tolerance,
+            measured["unmeasured"],
+        )
+        items.append({
+            "key": key,
+            "label": template["label"],
+            "weights": [
+                {"bucket": bucket, "label": allocation.label_for(bucket),
+                 "percent": percent}
+                for bucket, percent in template["weights"].items()
+            ],
+            "volatility": measured["volatility"],
+            "band": comparison["band"],
+            "highlighted": comparison["highlighted"],
+            "statement": comparison["statement"],
+            "unmeasured": measured["unmeasured"],
+        })
+
+    # Eşleşen şablon başa; geri kalanı tanımlı sırasında kalıyor.
+    items.sort(key=lambda row: not row["highlighted"])
+    return {
+        "declaredTolerance": tolerance,
+        "items": items,
+        "measurementNote": (
+            "Oynaklık son bir yılın günlük kapanışlarından ölçüldü; nakit "
+            "getirisi sıfır varsayıldı."
+        ),
+    }
+
+
+def _proxy_series(db: Session) -> dict[str, list]:
+    """Kova vekillerinin TL cinsinden kapanış serileri.
+
+    Dolar cinsli vekiller (SPX, XAUUSD) USDTRY ile çarpılıyor ve tarih
+    üzerinden hizalanıyor -- uzunluğa göre eşlemek farklı günleri yan yana
+    koymak olurdu.
+    """
+    # GÜNE göre hizalanıyor, zaman damgasına göre değil ve bu ölçüldü:
+    # XU100'ün barı 21:00, USDTRY'ninki 23:00, XAUUSD'ninki 04:00 damgalı.
+    # Damgaya göre kesiştirmek aynı günün üç serisini hiç örtüştürmüyordu ve
+    # her şablon "ölçülemedi" diyordu.
+    usd = {
+        moment.date(): float(price)
+        for moment, price in market_service.candle_closes(
+            db, "USDTRY", limit=TEMPLATE_LOOKBACK_BARS
+        )
+    }
+    series: dict[str, list] = {}
+    for bucket, symbol in allocation.PROXY_FOR_BUCKET.items():
+        if not symbol:
+            continue
+        closes = market_service.candle_closes(
+            db, symbol, limit=TEMPLATE_LOOKBACK_BARS
+        )
+        product = market_service.resolve_symbol(db, symbol)
+        in_usd = bool(product and (product.currency_code or "").upper() == "USD")
+        rows = []
+        for moment, price in closes:
+            day = moment.date()
+            if not in_usd:
+                rows.append((day, float(price)))
+                continue
+            rate = usd.get(day)
+            # Kuru olmayan gün DÜŞÜYOR, 1.0 varsayılmıyor: bu depoda bir kez
+            # ölçülmüş hata sınıfı.
+            if rate:
+                rows.append((day, float(price) * rate))
+        series[bucket] = rows
+    return series
 
 
 def _measure(db: Session, user_id: str, lookback: str) -> dict:

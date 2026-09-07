@@ -61,6 +61,73 @@ class PortfolioNewsOut(BaseModel):
     windowDays: int
 
 
+class NewsImpactReason(BaseModel):
+    """Bir haberin bir enstrümana etkisi hakkındaki tek gerekçe.
+
+    `newsId` DIŞARI VERİLİYOR: bir yorumu kaynağına kadar izleyememek, onu
+    doğrulanamaz bir iddiaya çevirir. Arayüz bu id ile haberin kendisine
+    bağlanabiliyor.
+
+    `confidence` YOK. Modelin kendi beyanı bir ölçüm değil ve ekranda bir
+    yüzde olarak göstermek, ölçülmemiş bir şeye ölçülmüş bir otorite
+    verirdi; sıralamada kullanılıyor, gösterilmiyor.
+    """
+
+    newsId: str
+    direction: str
+    scope: str
+    magnitude: str
+    mechanism: str
+    publishedAt: datetime
+
+
+class NewsImpactMeasure(BaseModel):
+    """Yorumun oturduğu ÖLÇÜLEN zemin. Ölçülemediğinde alan hiç dönmüyor."""
+
+    typicalMovePct: float
+    recentMovePct: float
+
+
+class NewsImpactEntry(BaseModel):
+    """Tek enstrüman için özet.
+
+    `sentence` sunucuda kuruluyor ve arayüz onu AYNEN yazıyor: cümlenin
+    koşulluluğu ve çekincesi kodda çivili (`technicals.narrate` deseni).
+    Arayüzde yeniden kurulan bir cümle, o çivinin dışında kalırdı.
+    """
+
+    symbol: str
+    sentence: str
+    counts: dict[str, int]
+    directCount: int
+    spilloverCount: int
+    measured: Optional[NewsImpactMeasure] = None
+    reasons: List[NewsImpactReason]
+
+
+class NewsDigestOut(BaseModel):
+    """Portföyün günlük haber özeti.
+
+    Boşken de dönen bir gövde: `headline` "haber yok" der. Sessizce kaybolan
+    bir panel, veri yokluğunu özellik yokluğu gibi gösterirdi.
+    """
+
+    headline: str
+    entries: List[NewsImpactEntry]
+    windowHours: int
+    #: Koşulsuz. Kullanıcının okuduğu şey bir modelin yorumu.
+    disclaimer: str
+
+
+class NewsImpactSummaryOut(BaseModel):
+    """Piyasa geneli: hangi enstrüman, hangi yönde ve neden."""
+
+    entries: List[NewsImpactEntry]
+    windowHours: int
+    disclaimer: str
+
+
+
 
 # ---------------------------------------------------------------------------
 # Service-to-service ingest contracts

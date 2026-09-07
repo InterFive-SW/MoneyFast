@@ -13,7 +13,7 @@ from app.core.deps import get_current_user_id, require_service_token
 from app.modules.investment import ai_service, market_service
 from app.modules.notification import service as notification_service
 from . import funds as funds_service
-from . import service, signals, stream, technicals
+from . import news_impact, service, signals, stream, technicals
 from .schemas import (
     DirectionSignalOut,
     CandleSeriesOut,
@@ -30,6 +30,8 @@ from .schemas import (
     MarketCalendarOut,
     MarketHeatmapOut,
     MarketTicker,
+    NewsDigestOut,
+    NewsImpactSummaryOut,
     NewsIngestRequest,
     NewsItem,
     PortfolioNewsOut,
@@ -204,6 +206,117 @@ def _portfolio_news_payload(db: Session, user_id: str, limit: int, days: int) ->
             for row in rows
         ],
         "windowDays": days,
+    }
+
+
+@router.get(
+    "/news/digest",
+    response_model=NewsDigestOut,
+    summary="Portföyün günlük haber özeti (yorumlanmış)",
+)
+def get_news_digest(
+    hours: int = Query(default=news_impact.DIGEST_WINDOW_HOURS, ge=1, le=168),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Kullanıcının enstrümanlarına dokunan haberlerin YORUMLANMIŞ özeti.
+
+    `/news/portfolio`den farkı tek cümlede: orası başlıkları listeliyor ve
+    yorumlamıyor, burası yorumluyor. İkisi ayrı uçlar çünkü ayrı sorular --
+    "ne yayımlandı" ile "bu ne anlama geliyor" aynı şey değil ve ikincisi bir
+    modelin yargısına dayanıyor, birincisi dayanmıyor.
+
+    Oturum ZORUNLU, demo portföyüne düşülmüyor: "portföyünüz" başlığı altında
+    başkasının portföyünü özetlemek, `/news/portfolio`nun kaçındığı hatanın
+    aynısı olurdu.
+
+    Cümleler SUNUCUDA kuruluyor. Model yapılandırılmış satır üretiyor; sayılar
+    `market_candles`tan ölçülüyor; birleştiren cümle kodda ve çekincesini
+    yanında taşıyor.
+    """
+    return _news_digest_payload(db, user_id, hours=hours)
+
+
+@router.get(
+    "/news/digest/{user_id}",
+    response_model=NewsDigestOut,
+    summary="Portföyün günlük haber özeti (MCP sözleşmesi)",
+    # `/news/portfolio/{user_id}` ile aynı koruma ve aynı gerekçe: konusunu
+    # YOLDA adlandıran bir uç, korumasızken bir kullanıcı id'si bilen herkese
+    # o kişinin tuttuğu sembolleri okutur.
+    dependencies=[Depends(require_service_token)],
+)
+def get_news_digest_for_ai(
+    user_id: str,
+    hours: int = Query(default=news_impact.DIGEST_WINDOW_HOURS, ge=1, le=168),
+    db: Session = Depends(get_db),
+):
+    """Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli."""
+    return _news_digest_payload(db, user_id, hours=hours)
+
+
+def _news_digest_payload(db: Session, user_id: str, hours: int) -> dict:
+    """İki ucun ortak gövdesi.
+
+    Kapanmış pozisyonlar dışarıda (`held_symbols`): sattığın bir hissenin
+    haberi "portföyüne dokunan haber" değil.
+
+    Fiyat serisi sembol BAŞINA okunuyor ve yalnızca haberi olan semboller
+    için: portföyün tamamı için mum çekmek, çoğu hiç kullanılmayacak olan bir
+    okuma demekti.
+    """
+    holdings = market_service.holdings(db, user_id=user_id)
+    symbols = service.held_symbols(holdings)
+    rows = news_impact.impacts_since(db, symbols=symbols, hours=hours)
+    grouped = news_impact.group_by_symbol(rows)
+    entries = [
+        news_impact.symbol_entry(
+            symbol,
+            symbol_rows,
+            closes=[
+                close
+                for _stamp, close in market_service.candle_closes(db, symbol, limit=260)
+            ],
+        )
+        for symbol, symbol_rows in grouped.items()
+    ]
+    entries.sort(key=lambda entry: (-sum(entry["counts"].values()), entry["symbol"]))
+    return {
+        "headline": news_impact.portfolio_headline(entries, hours),
+        "entries": entries,
+        "windowHours": hours,
+        "disclaimer": news_impact.DISCLAIMER_TR,
+    }
+
+
+@router.get(
+    "/news/impact-summary",
+    response_model=NewsImpactSummaryOut,
+    summary="Haberlerin hangi enstrümanı hangi yönde etkilediği (piyasa geneli)",
+)
+def get_news_impact_summary(
+    hours: int = Query(default=news_impact.DIGEST_WINDOW_HOURS, ge=1, le=168),
+    limit: int = Query(default=12, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """Portföyden bağımsız: pencere içinde en çok yoruma konu olan enstrümanlar.
+
+    Oturum ARANMIYOR, çünkü burada kullanıcıya ait hiçbir şey yok -- piyasa
+    geneli bir okuma. `/news` gibi.
+
+    Sıralama yorum SAYISINA göre, modelin beyan ettiği güvene göre değil:
+    beyan bir ölçüm değil ve onunla sıralamak, ekrandaki sıraya ölçülmemiş
+    bir otorite verirdi.
+
+    Burada fiyat ölçümü YOK ve bilerek: on iki enstrümanın her biri için mum
+    okumak, portföy özetinden farklı olarak, kullanıcının hiç sormadığı
+    semboller için yapılmış bir iş olurdu. Ölçüm, sembolün kendi sayfasında.
+    """
+    rows = news_impact.impacts_since(db, symbols=None, hours=hours)
+    return {
+        "entries": news_impact.market_entries(rows, limit=limit),
+        "windowHours": hours,
+        "disclaimer": news_impact.DISCLAIMER_TR,
     }
 
 

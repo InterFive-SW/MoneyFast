@@ -165,3 +165,59 @@ class DirectionSignal(Base):
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
+
+
+class NewsImpact(Base):
+    """Bir haberin bir enstrümana etkisi hakkında YAPILANDIRILMIŞ yargı.
+
+    Neden düzyazı değil de satır: bu yargıyı LLM üretiyor ve bir modelin
+    ürettiği metin denetlenemez. Satır olarak saklandığında her iddia belirli
+    bir habere kadar izlenebiliyor, günlük özet KODDA toplanabiliyor, ve
+    toplayıcı test edilebiliyor. Model yorumluyor, kod topluyor ve cümleyi
+    kuruyor -- `widgets.py` ve `sources.py` ile aynı ayrım.
+
+    `mechanism` bir CÜMLE, sayı değil. Sayılar ölçümden gelir; modelin
+    ürettiği bir yüzde, ölçülmemiş bir şeyi ölçülmüş gibi gösterirdi.
+
+    `scope` yayılmayı doğrudan etkiden ayırıyor: bir savunma ihalesi haberi
+    ASELS için DIRECT, tedarikçisi için SPILLOVER. İkisini aynı listede
+    karıştırmak, haberin kimin hakkında olduğunu okunamaz yapardı.
+
+    `confidence` modelin kendi beyanı ve öyle olduğu biliniyor: bir ölçüm
+    değil. Sıralamada kullanılıyor, kullanıcıya sayı olarak GÖSTERİLMİYOR.
+    """
+
+    __tablename__ = "news_impacts"
+    __table_args__ = (
+        # Aynı haber aynı enstrüman için iki kez yargılanmaz.
+        Index("uq_news_impacts_news_symbol", "news_id", "symbol", unique=True),
+        # Günlük özet: "şu tarihten beri şu sembolleri etkileyen haberler".
+        Index("idx_news_impacts_symbol_time", "symbol", "published_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    news_id: Mapped[str] = mapped_column(String, nullable=False)
+    #: Enstrüman kodu. Evren dışı bir ad KAYDEDİLMEZ -- model uydurabiliyor
+    #: ve olmayan bir sembol için etki saklamak, ekranda bulunamayan bir
+    #: satır demek.
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: UP / DOWN / NEUTRAL. NEUTRAL "etkisiz" demek, "ölçemedim" değil --
+    #: ölçülemeyen haber hiç satır üretmiyor.
+    direction: Mapped[str] = mapped_column(String(8), nullable=False)
+    #: DIRECT / SPILLOVER
+    scope: Mapped[str] = mapped_column(String(12), nullable=False, default="DIRECT")
+    #: LOW / MEDIUM / HIGH. Modelin beyanı; ölçüm değil.
+    magnitude: Mapped[str] = mapped_column(String(8), nullable=False, default="LOW")
+    confidence: Mapped[float] = mapped_column(Numeric(4, 3), nullable=False, default=0.5)
+    #: NEDEN. Tek Türkçe cümle, kullanıcıya gösterilecek hâliyle.
+    mechanism: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Haberin yayın zamanı, `news_items`tan kopyalanıyor: günlük özet
+    #: sorgusu bir birleştirme olmadan tarihe göre süzebilsin.
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: Hangi model üretti. Yargıyı üretenin değiştiğini bilmeden, dünkü
+    #: yargıyla bugünkünü karşılaştırmak yanıltırdı.
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    analyzed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )

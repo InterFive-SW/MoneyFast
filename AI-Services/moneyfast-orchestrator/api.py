@@ -23,6 +23,7 @@ import widgets
 from mcp_client import get_mcp_client
 import orchestrator
 from orchestrator import run_turn, run_turn_streaming
+from prompts import NEWS_IMPACT_JUDGE_PROMPT, NEWS_IMPACT_TASK_TEMPLATE
 
 log = logging.getLogger("moneyfast.api")
 app = FastAPI(title="MoneyFast Orchestrator", version="1.0.0")
@@ -97,6 +98,133 @@ async def readyz() -> dict[str, Any]:
         "llm_provider": orchestrator.provider_name(),
         "llm_model": orchestrator.model_name(fast=False),
     }
+
+
+class NewsItemIn(BaseModel):
+    """Yargılanacak tek haber."""
+
+    news_id: str
+    title: str = Field(min_length=1, max_length=500)
+    summary: str = Field(default="", max_length=4000)
+    source: str = Field(default="", max_length=120)
+
+
+class NewsImpactRequest(BaseModel):
+    """Bir toplu iş: haberler ve içinden seçilebilecek enstrüman evreni.
+
+    Evren isteğin İÇİNDE geliyor, burada tutulmuyor: bu servisin veritabanı
+    yok ve olmamalı. Model yalnızca bu listeden seçebiliyor; dışındaki bir ad
+    aşağıda düşürülüyor.
+    """
+
+    items: list[NewsItemIn] = Field(default_factory=list, max_length=100)
+    universe: list[str] = Field(default_factory=list, max_length=2000)
+
+
+@app.post("/analyze/news-impact")
+async def analyze_news_impact(request: NewsImpactRequest) -> dict[str, Any]:
+    """Haberleri yargılar; her biri için yapılandırılmış etki satırları döner.
+
+    Kullanıcıyla konuşmuyor, grafiğe girmiyor: bir toplu iş. Backend
+    zamanlıyor ve sonucu saklıyor, LLM çıkışı burada kalıyor -- CLAUDE.md'nin
+    "LLM çıkışı yalnızca `agents` servisinde" kuralı.
+
+    **Tek bir haberin hatası turu düşürmez.** Yüz haberin birinde bozuk bir
+    JSON, tüm partinin kaybı olmamalı -- ingestor'ın parçalı itme
+    gerekçesiyle aynı.
+    """
+    universe = {code.strip().upper() for code in request.universe if code.strip()}
+    results: list[dict[str, Any]] = []
+    failed = 0
+
+    for item in request.items:
+        try:
+            plan = await orchestrator._llm_json(
+                NEWS_IMPACT_JUDGE_PROMPT,
+                NEWS_IMPACT_TASK_TEMPLATE.format(
+                    source=item.source or "bilinmiyor",
+                    title=item.title,
+                    summary=item.summary or "(özet yok)",
+                    universe=", ".join(sorted(universe)) or "(boş)",
+                ),
+                fast=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("news impact judge failed for %s: %s", item.news_id, exc)
+            failed += 1
+            continue
+        results.append({
+            "news_id": item.news_id,
+            "impacts": _clean_impacts(plan.get("impacts"), universe),
+        })
+
+    return {
+        "analyzed": len(results),
+        "failed": failed,
+        "model": orchestrator.model_name(fast=True),
+        "results": results,
+    }
+
+
+#: Modelin üretebileceği değerler. Tanınmayan bir değer satırı DÜŞÜRÜYOR,
+#: varsayılana çevirmiyor: "UP" yerine "BULLISH" yazan bir model, sessizce
+#: nötre çevrildiğinde yanlış bir yargıyı doğru gibi saklardı.
+_DIRECTIONS = {"UP", "DOWN", "NEUTRAL"}
+_SCOPES = {"DIRECT", "SPILLOVER"}
+_MAGNITUDES = {"LOW", "MEDIUM", "HIGH"}
+
+#: Bir haber için en fazla satır. Prompt da altıyı söylüyor; burası onu
+#: ZORLUYOR, çünkü prompt tavsiyedir.
+MAX_IMPACTS_PER_ITEM = 6
+
+#: Mekanizma cümlesinin üst sınırı. Uzun bir metin, "tek cümle" kuralının
+#: tutulmadığı anlamına gelir ve ekranda satır olarak okunmaz.
+MAX_MECHANISM_CHARS = 400
+
+
+def _clean_impacts(raw: Any, universe: set[str]) -> list[dict[str, Any]]:
+    """Modelin çıktısını saklanabilir satırlara indirger.
+
+    Evren dışı sembol, tanınmayan yön ve mekanizmasız satır DÜŞÜYOR.
+    Uydurmaya karşı asıl kilit burası: prompt "listeden seç" diyor ama prompt
+    tavsiyedir, ve olmayan bir sembol için etki saklamak ekranda bulunamayan
+    bir satır demek.
+    """
+    if not isinstance(raw, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        mechanism = str(row.get("mechanism") or "").strip()
+        direction = str(row.get("direction") or "").strip().upper()
+        if symbol not in universe or symbol in seen or not mechanism:
+            continue
+        if direction not in _DIRECTIONS:
+            continue
+        scope = str(row.get("scope") or "DIRECT").strip().upper()
+        magnitude = str(row.get("magnitude") or "LOW").strip().upper()
+        try:
+            confidence = float(row.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            confidence = 0.5
+        seen.add(symbol)
+        rows.append({
+            "symbol": symbol,
+            "direction": direction,
+            "scope": scope if scope in _SCOPES else "DIRECT",
+            "magnitude": magnitude if magnitude in _MAGNITUDES else "LOW",
+            # Aralığın dışına taşan bir güven, modelin ölçeği anlamadığını
+            # gösteriyor; kırpmak onu sessizce doğru saymak olurdu ama satırı
+            # düşürmek de tek bir alan yüzünden yargıyı atmak olurdu.
+            "confidence": min(1.0, max(0.0, confidence)),
+            "mechanism": mechanism[:MAX_MECHANISM_CHARS],
+        })
+        if len(rows) >= MAX_IMPACTS_PER_ITEM:
+            break
+    return rows
 
 
 @app.post("/chat", response_model=ChatResponse)

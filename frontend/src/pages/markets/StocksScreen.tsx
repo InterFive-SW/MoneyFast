@@ -4,6 +4,7 @@ import { useInstruments } from '../../hooks/useInstruments'
 import NewsWidget from '../../components/widgets/NewsWidget'
 import MarketInstrumentsTable from '../../components/markets/MarketInstrumentsTable'
 import MarketMoversWidget from '../../components/markets/MarketMoversWidget'
+import YonTaramasi from '../../components/markets/YonTaramasi'
 import MarketComparisonChart from '../../components/markets/MarketComparisonChart'
 import ColumnSetSwitcher from '../../components/markets/ColumnSetSwitcher'
 import StockFilterPanel, { EMPTY_STOCK_FILTERS, applyStockFilters, type StockFilters } from '../../components/markets/StockFilterPanel'
@@ -80,6 +81,11 @@ export default function StocksScreen() {
         <div className="flex flex-col gap-6">
           <div className="h-[320px]">
             <MarketMoversWidget instruments={filteredInstruments} />
+          </div>
+          {/* Gecelik hesaplanmış yön okumaları. "En iyi hisseler" değil:
+              sıralanan şey ölçülen kanıtların meyli. */}
+          <div className="h-[360px]">
+            <YonTaramasi />
           </div>
           <div className="h-[420px]">
             <NewsWidget />

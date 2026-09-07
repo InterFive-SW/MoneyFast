@@ -1128,6 +1128,75 @@ class TestSymbolsWithoutFundamentals:
         db.execute.return_value.all.return_value = []
         assert market_service.symbols_without_fundamentals(db) == []
 
+    def _statement(self, db):
+        return str(db.execute.call_args.args[0].compile(
+            compile_kwargs={"literal_binds": False}
+        ))
+
+    def test_market_cap_alone_no_longer_decides(self):
+        """Ölçüldü: seed 1.011 satırın 1.001'ine piyasa değeri yazıyor ama
+        `profit_margin` yalnızca 10'unda dolu. Sorgu yalnızca piyasa değerine
+        baktığı sürece temiz bir klon o 1.001 sembolü "dolu" sayıyor ve marj,
+        büyüme, özkaynak kârlılığı HİÇ dolmuyordu."""
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        market_service.symbols_without_fundamentals(db)
+        statement = self._statement(db)
+        for field in market_service.FUNDAMENTAL_COVERAGE_FIELDS:
+            assert field in statement, field
+
+    def test_a_stale_record_is_asked_for_again(self):
+        """Bayatlık koşulu olmadan, sağlayıcının gerçekten yayımlamadığı
+        alanlar her açılışta sonsuza kadar yeniden istenirdi."""
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        market_service.symbols_without_fundamentals(db)
+        assert "updated_at" in self._statement(db)
+
+    def test_a_half_filled_row_is_asked_for_again(self):
+        """Seed satırı kapsama alanlarının 6'sından 2'sini taşıyor
+        (`market_cap` + `sector`); sağlayıcının doldurduğu bir satır 4-6'sını.
+        Ölçüldü: canlı veritabanında 1.011 satırın 992'si 4 ve üzeri, seed'de
+        995'i tam olarak 2. Eşik ikisinin arasından geçiyor.
+
+        "Hepsi boş mu" diye bakmak bu satırları KAÇIRIYORDU: `market_cap` dolu
+        olduğu için hiçbiri "hepsi boş" değil."""
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        market_service.symbols_without_fundamentals(db)
+        assert market_service.FUNDAMENTAL_COVERAGE_MINIMUM == 3
+        assert 0 < market_service.FUNDAMENTAL_COVERAGE_MINIMUM < len(
+            market_service.FUNDAMENTAL_COVERAGE_FIELDS
+        )
+
+    def test_a_row_that_never_existed_is_included(self):
+        """Dış birleşimde kayıt hiç yoksa tüm sütunlar NULL olur; bunu
+        `product_id IS NULL` yakalıyor. Yalnızca kapsama alanlarına bakmak
+        aynı satırı da yakalardı, ama niyet ikisinde farklı ve ayrı ayrı
+        okunabilir olmalı."""
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        market_service.symbols_without_fundamentals(db)
+        assert "product_id IS NULL" in self._statement(db)
+
+    def test_the_window_is_caller_settable(self):
+        """Ingestor bunu uçtan geçirebilsin diye parametre; varsayılan
+        modülün kendi sabiti."""
+        db = MagicMock(spec=Session)
+        db.execute.return_value.all.return_value = []
+        market_service.symbols_without_fundamentals(db, stale_after_days=1)
+        assert db.execute.called
+        assert market_service.FUNDAMENTALS_STALE_AFTER_DAYS == 7
+
+    def test_the_coverage_set_is_narrower_than_every_field(self):
+        """`gross_margin` BURAYA GİRMEZ: bir bankanın brüt marjı yoktur ve
+        olmaması bir eksiklik değil. Kapsama alanları, sağlayıcının her sektör
+        için yayımladığı alanlar."""
+        assert set(market_service.FUNDAMENTAL_COVERAGE_FIELDS) < set(
+            market_service.FUNDAMENTAL_FIELDS
+        )
+        assert "gross_margin" not in market_service.FUNDAMENTAL_COVERAGE_FIELDS
+
 
 class TestCalendarRows:
     """Üç listenin her biri, o alanı GERÇEKTEN olan enstrümanlardan kurulur.

@@ -698,13 +698,28 @@ def intraday_symbols(db: Session = Depends(get_db)):
     summary="Temel verisi eksik enstrümanlar (servisler arası)",
     dependencies=[Depends(require_service_token)],
 )
-def fundamentals_missing(db: Session = Depends(get_db)):
+def fundamentals_missing(
+    stale_days: int = Query(
+        market_service.FUNDAMENTALS_STALE_AFTER_DAYS,
+        ge=1,
+        le=365,
+        description="Bu kadar gün geçmiş kayıtlar da eksik sayılır.",
+    ),
+    db: Session = Depends(get_db),
+):
     """`ingestor`'ın açılışta neyi dolduracağını sorduğu uç nokta.
 
-    Yalnızca eksik olanlar: hepsini her açılışta yeniden çekmek, çeyreklik
-    raporlarla değişen oranları durmadan yeniden yazmak olurdu.
+    Yalnızca eksik ya da bayat olanlar: hepsini her açılışta yeniden çekmek,
+    çeyreklik raporlarla değişen oranları durmadan yeniden yazmak olurdu.
+
+    Yanıt şekli (`{"symbols": [...]}`) DEĞİŞMEDİ: `stale_days` isteğe bağlı bir
+    daraltma ve ingestor'ın bugünkü çağrısı olduğu gibi çalışmaya devam ediyor.
     """
-    return {"symbols": market_service.symbols_without_fundamentals(db)}
+    return {
+        "symbols": market_service.symbols_without_fundamentals(
+            db, stale_after_days=stale_days
+        )
+    }
 
 
 def _notify_holders(db: Session, fresh: list[dict]) -> int:

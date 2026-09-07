@@ -72,6 +72,12 @@ LEAN_THRESHOLD = 0.34
 #: otuz gün çoğu hissede tek haber bile bulmuyor.
 NEWS_WINDOW_DAYS = 90
 
+#: Pencere içinde okunan en fazla haber satırı. Sayım bu kadarla sınırlı ama
+#: pratikte sınıra hiç değmiyor: tek bir sembolün doksan günlük etiketli haber
+#: sayısı ölçüldüğünde tek haneli (ASELS 9). Yüksek tutuluyor ki "son 90 günde
+#: N haber" cümlesi bir limitin altında sessizce yanlış çıkmasın.
+NEWS_SAMPLE_LIMIT = 200
+
 #: Temel veri eşikleri. Hepsi modülde sabit ve gerekçeli; "iyi/kötü" değil,
 #: sağlayıcının yayımladığı dağılımda hangi tarafta durduğu.
 ROE_STRONG = 0.15

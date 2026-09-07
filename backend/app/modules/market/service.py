@@ -263,8 +263,14 @@ def latest_news(
     db: Session,
     limit: int = 20,
     symbols: Optional[Sequence[str]] = None,
+    since: Optional[datetime] = None,
 ) -> list[NewsItem]:
     """En yeni haberler; `symbols` verilirse yalnızca o hisselere bağlı olanlar.
+
+    `since` verilirse pencere de sunucuda daraltılır. Pencereyi çağırana
+    bırakmak, "son 90 günde 4 haber" diyen bir cümlenin `limit` kadar satır
+    çekip içinden sayması demekti -- yani limitin altında kalan bir pencerede
+    sayı sessizce yanlış çıkardı.
 
     Süzgeç sunucuda, çünkü istemci tarafında süzmek yalnızca ÇEKİLEN satırları
     daraltabiliyor: hisse detay sayfası "en yeni 20" içinden AAPL'i ayıklamaya
@@ -278,6 +284,8 @@ def latest_news(
     wanted = [symbol for symbol in dict.fromkeys(symbols or []) if symbol]
     if wanted:
         query = query.filter(NewsItem.related_symbols.overlap(wanted))
+    if since is not None:
+        query = query.filter(NewsItem.published_at >= since)
     return (
         query.order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
         .limit(limit)

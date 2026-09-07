@@ -520,6 +520,23 @@ class TestLatestNews:
         news_service.latest_news(db, limit=5, symbols=None)
         db.query.return_value.filter.assert_not_called()
 
+    def test_a_window_narrows_the_query_not_the_page(self):
+        """Pencereyi çağırana bırakmak, "son 90 günde 4 haber" cümlesinin
+        `limit` kadar satır çekip içinden sayması demekti -- yani limitin
+        altında kalan bir pencerede sayı sessizce yanlış çıkardı."""
+        from datetime import datetime, timezone
+
+        db = MagicMock(spec=Session)
+        news_service.latest_news(
+            db, limit=5, since=datetime(2026, 1, 1, tzinfo=timezone.utc)
+        )
+        db.query.return_value.filter.assert_called_once()
+
+    def test_no_window_means_no_date_filter(self):
+        db = MagicMock(spec=Session)
+        news_service.latest_news(db, limit=5, since=None)
+        db.query.return_value.filter.assert_not_called()
+
     def test_symbols_filter_on_array_overlap(self):
         """Süzgeç SORGUDA: dönen sayfayı süzmek, "en yeni 20"de o hisse yoksa
         "haber yok" cevabı üretiyordu -- oysa soru hiç sorulmamış oluyordu."""

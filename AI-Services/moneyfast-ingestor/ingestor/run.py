@@ -932,7 +932,8 @@ def _with_bodies(items: list, client: httpx.Client) -> list:
 
 
 
-def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False) -> dict:
+def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False,
+             quarterly: bool = False) -> dict:
     results = {}
     with httpx.Client() as client:
         # Each job is guarded separately: a dead RSS host must not cost us the
@@ -945,6 +946,8 @@ def run_once(quotes: bool, candles: bool, news: bool, fundamentals: bool = False
             results["news"] = _guard("news", run_news, client)
         if fundamentals:
             results["fundamentals"] = _guard("fundamentals", run_fundamentals, client)
+        if quarterly:
+            results["quarterly"] = _guard("quarterly", run_quarterly, client)
     return results
 
 
@@ -1095,6 +1098,25 @@ def start_scheduler() -> None:
         max_instances=1,
     )
 
+    # Çeyreklik gelir tablosu. HAFTALIK, günlük değil: rakamlar üç ayda bir
+    # açıklanıyor ve `run_quarterly`'nin kendi yorumu bunu söylüyor -- günde bir
+    # çekmek, doksan gün boyunca aynı satırı doksan kez yazmak olurdu. Ölçülen
+    # süre ~0,8 sn/sembol, yani evrenin tamamı ~13 dakika.
+    #
+    # Bu iş bugüne kadar HİÇ ZAMANLANMAMIŞTI: `run_quarterly` tanımlıydı ama
+    # ne burada, ne `run_once`'ta, ne CLI'da çağrılıyordu. Ölçüldü, sonucu
+    # `investment.instrument_quarterly` tablosunun her kurulumda boş kalması
+    # ve "bir önceki çeyreğe göre" diyen her okumanın sessizce üretilememesi.
+    scheduler.add_job(
+        _job("quarterly", run_quarterly),
+        "cron",
+        day_of_week="sun",
+        hour=config.MARKET_CLOSE_HOUR + 2,
+        minute=15,
+        id="quarterly",
+        max_instances=1,
+    )
+
     log.info(
         "scheduler started: band every %ds, quotes every %ds (market hours), "
         "news every %dm, kap every %dm, candles daily at %d:15",
@@ -1161,16 +1183,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--candles", action="store_true", help="candles only")
     parser.add_argument("--news", action="store_true", help="news only")
     parser.add_argument("--fundamentals", action="store_true", help="fundamentals only")
+    parser.add_argument("--quarterly", action="store_true", help="quarterly financials only")
     args = parser.parse_args(argv)
 
-    selected = args.quotes or args.candles or args.news or args.fundamentals
+    selected = (args.quotes or args.candles or args.news or args.fundamentals
+                or args.quarterly)
     quotes = args.quotes or not selected
     candles = args.candles or not selected
     news = args.news or not selected
     fundamentals = args.fundamentals or not selected
+    quarterly = args.quarterly or not selected
 
     if args.once:
-        results = run_once(quotes, candles, news, fundamentals)
+        results = run_once(quotes, candles, news, fundamentals, quarterly)
         log.info("one-shot run complete: %s", results)
         return 0
 

@@ -1067,6 +1067,11 @@ class TestScheduler:
             # Gün içi barlar, toplu turla aynı ritimde.
             "candles_intraday": "interval",
             "candles": "cron", "fundamentals": "cron",
+            # Çeyreklik gelir tablosu HAFTALIK: rakamlar üç ayda bir
+            # açıklanıyor, günde bir çekmek doksan gün boyunca aynı satırı
+            # doksan kez yazmak olurdu. Bu iş bir dönem hiç zamanlanmamıştı
+            # ve `instrument_quarterly` her kurulumda boş kalıyordu.
+            "quarterly": "cron",
             # Vadeli hesap faizi, gün dönümünden hemen sonra.
             "interest": "cron",
             # A one-shot, not part of the warm start: `fetch_candles` is

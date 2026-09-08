@@ -51,6 +51,8 @@ EXPECTED_TOOLS = {
     "get_news_impact_digest",
     # v2.25: sembol -> sektör. Ajan sektörü artık uydurmuyor, okuyor.
     "get_sector_map",
+    # v2.26: haber okumasının ÖLÇÜLMÜŞ zemini. Yorum taşımıyor.
+    "get_news_impact_facts",
     # v2.12: aynı okuma, her POZİSYON için, artı tek bir toplam cümlesi.
     # Tek-sembol aracının n kez çağrılmasıyla aynı şey değil: sayı ile değer
     # ayrışıyor ve toplamı modele hesaplatmak her turda başka bir sayı
@@ -109,7 +111,8 @@ class TestWiring:
         # v2.24: `get_rebalance_plan` satırları taşıyor ve kendi alanında.
         # Politika değişikliği, genişletme değil.
         # v2.25: `get_sector_map`.
-        assert server.CONTRACT_VERSION == "v2.25"
+        # v2.26: `get_news_impact_facts`.
+        assert server.CONTRACT_VERSION == "v2.26"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -132,7 +135,7 @@ class TestWiring:
             # oysa biri bir ölçüm raporu, diğeri bir öneri listesi.
             "rebalance",
             # v2.25: ilk kez bir MCP aracı sektör döndürüyor.
-            "sector",
+            "sector", "news_impact",
         }
 
     def test_every_domain_module_exposes_register(self):

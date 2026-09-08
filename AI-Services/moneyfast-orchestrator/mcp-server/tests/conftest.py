@@ -115,6 +115,8 @@ ROUTES = {
     "/market/news/digest": "news_digest",
     # v2.25. Sembol -> sektör; ilk kez bir MCP aracı sektör döndürüyor.
     "/market/sectors": "sectors",
+    # v2.26. Deterministik olgu paketi; `/market/news/digest`ten AYRI yol.
+    "/market/news/impact": "news_impact",
     "/market/technicals": "technicals",
     # v2.14. `/market/fundamentals` ile `/market/fundamentals/ingest` ayrı
     # yollar; ikincisine bu suite hiç dokunmuyor.

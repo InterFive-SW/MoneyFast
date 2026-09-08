@@ -53,6 +53,7 @@ import fundamentals_tools
 import instrument_tools
 import market_data_tools
 import market_research_tools
+import news_impact_tools
 import news_tools
 import orchestrator_tools
 import order_tools
@@ -139,10 +140,14 @@ SERVER_NAME = "moneyfast"
 #: backend'de vardı ama hiçbir araç sektör döndürmüyordu, dolayısıyla
 #: "bankacılık sektörü bu haberden nasıl etkilenir" sorusunun veri yolu
 #: yoktu ve ajan sektörü kendi bildiğinden uyduruyordu.
-CONTRACT_VERSION = "v2.25"
+#: v2.26: `get_news_impact_facts`. Yorum TAŞIMIYOR: her sayı backend'de
+#: sayılmış ya da ölçülmüş. Yorumu yazar yapıyor, sistem istemindeki iki
+#: taraflı şablonun içinde -- ve o şablon her maddenin "ölçülmüş bir olgu,
+#: sayısıyla" olmasını istiyor.
+CONTRACT_VERSION = "v2.26"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Twenty-five tools across eighteen domains.
+MoneyFast tool server. Twenty-six tools across nineteen domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -206,6 +211,7 @@ DOMAIN_MODULES = (
     ("banking", banking_tools),
     ("technical", technical_tools),
     ("news", news_tools),
+    ("news_impact", news_impact_tools),
     ("rebalance", rebalance_tools),
     ("sector", sector_tools),
     ("scenario", scenario_tools),

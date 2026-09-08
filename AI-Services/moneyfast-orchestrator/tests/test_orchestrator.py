@@ -1967,10 +1967,15 @@ class TestPortfolioNewsBranch:
         assert out["tools_used"] == ["get_portfolio_news"]
         assert out["specialist_output"]["status"] == "OK"
 
-    DIGEST = {"window_hours": 24, "headline": "Son 24 saatte...",
-              "disclaimer": "Bu özet ... yorumlanmasıdır.",
-              "entries": [{"symbol": "AKBNK", "sentence": "AKBNK: 1 haber yorumu.",
-                           "reasons": []}]}
+    DIGEST = {
+        "window_days": 90,
+        "symbols": [{"symbol": "AKBNK", "news_count": 3, "filing_count": 1,
+                     "price": {"recent_move_pct": 1.1, "typical_move_pct": 4.4,
+                               "window_days": 5},
+                     "fundamentals": {"pe_ratio": 4.2}, "articles": []}],
+        "coverage": {"articles": 3, "filings": 1, "feed_articles": 2,
+                     "symbols": 1, "symbols_with_news": 1, "symbols_omitted": 0},
+    }
 
     @pytest.mark.asyncio
     async def test_the_plan_can_choose_the_digest_tool(
@@ -1979,20 +1984,20 @@ class TestPortfolioNewsBranch:
         """Ayrı bir araç çünkü ayrı bir dayanak: yukarıdaki başlıkları
         taşıyor, bu bir modelin okumasını."""
         patched_llm.set_response(
-            '{"tool": "get_news_impact_digest", "arguments": {"hours": 48}}')
-        fake_mcp.responses["get_news_impact_digest"] = self.DIGEST
+            '{"tool": "get_news_impact_facts", "arguments": {"days": 30}}')
+        fake_mcp.responses["get_news_impact_facts"] = self.DIGEST
         out = await orchestrator.portfolio_node(base_state)
-        assert out["tools_used"] == ["get_news_impact_digest"]
-        assert fake_mcp.calls[0][1]["hours"] == 48
+        assert out["tools_used"] == ["get_news_impact_facts"]
+        assert fake_mcp.calls[0][1]["days"] == 30
 
     @pytest.mark.asyncio
     async def test_the_digest_user_also_comes_from_state(
         self, fake_mcp, patched_llm, base_state
     ):
         patched_llm.set_response(
-            '{"tool": "get_news_impact_digest",'
+            '{"tool": "get_news_impact_facts",'
             ' "arguments": {"user_id": "u_someone_else"}}')
-        fake_mcp.responses["get_news_impact_digest"] = self.DIGEST
+        fake_mcp.responses["get_news_impact_facts"] = self.DIGEST
         await orchestrator.portfolio_node(base_state)
         assert fake_mcp.calls[0][1]["user_id"] == "u_123"
 
@@ -2002,12 +2007,12 @@ class TestPortfolioNewsBranch:
     ):
         """Pencerede yorumlanmış haber yok -- ama penceresiyle birlikte
         söylenmeli, o yüzden yük yine gidiyor."""
-        patched_llm.set_response('{"tool": "get_news_impact_digest", "arguments": {}}')
-        fake_mcp.responses["get_news_impact_digest"] = {
-            **self.DIGEST, "entries": []}
+        patched_llm.set_response('{"tool": "get_news_impact_facts", "arguments": {}}')
+        fake_mcp.responses["get_news_impact_facts"] = {
+            **self.DIGEST, "symbols": []}
         out = await orchestrator.portfolio_node(base_state)
         assert out["specialist_output"]["status"] == "EMPTY"
-        assert out["specialist_output"]["data"]["window_hours"] == 24
+        assert out["specialist_output"]["data"]["window_days"] == 90
 
     @pytest.mark.asyncio
     async def test_the_user_still_comes_from_state(self, fake_mcp, patched_llm, base_state):
@@ -6648,7 +6653,7 @@ class TestRebalanceScreenQuestion:
         Düştüğünde geriye ölçülmüş bir bulgudan ayırt edilemeyen bir yorum
         kalıyor."""
         out = orchestrator._keep_news_disclaimer(
-            {"tools_used": ["get_news_impact_digest"]},
+            {"tools_used": ["get_news_impact_facts"]},
             {"final_output": "ASELS hakkında iki haber yükseliş yönünde okundu.",
              "disclosures": []},
         )
@@ -6658,7 +6663,7 @@ class TestRebalanceScreenQuestion:
         """Genel açıklama içeriğin danışmanlık olmadığını söylüyor; bu ise
         içeriğin bir ÖLÇÜM DEĞİL, bir model okuması olduğunu."""
         out = orchestrator._keep_news_disclaimer(
-            {"tools_used": ["get_news_impact_digest"]},
+            {"tools_used": ["get_news_impact_facts"]},
             {"final_output": "x",
              "disclosures": ["Bu içerik yatırım danışmanlığı değildir."]},
         )
@@ -6666,7 +6671,7 @@ class TestRebalanceScreenQuestion:
 
     def test_a_news_text_that_kept_it_is_not_disclaimed_twice(self):
         out = orchestrator._keep_news_disclaimer(
-            {"tools_used": ["get_news_impact_digest"]},
+            {"tools_used": ["get_news_impact_facts"]},
             {"final_output": "... yapay zeka tarafından yorunmasıdır"
                              .replace("yorunmasıdır", "yorumlanmasıdır"),
              "disclosures": []},
@@ -6675,7 +6680,7 @@ class TestRebalanceScreenQuestion:
 
     def test_an_existing_news_copy_is_not_added_again(self):
         out = orchestrator._keep_news_disclaimer(
-            {"tools_used": ["get_news_impact_digest"]},
+            {"tools_used": ["get_news_impact_facts"]},
             {"final_output": "özet",
              "disclosures": [orchestrator.NEWS_DIGEST_DISCLAIMER_TR]},
         )

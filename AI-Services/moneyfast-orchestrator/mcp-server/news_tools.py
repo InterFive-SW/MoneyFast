@@ -101,14 +101,19 @@ async def get_portfolio_news(
     Constraints:
         - RELAY titles verbatim with their source and date. A title is what was
           published; a paraphrase of it is what you think it said.
-        - Do NOT characterise an article as positive, negative, bullish or bearish,
-          and do NOT rank articles by importance. The tool returns no such field
-          because no such judgement is available to this system.
+        - THIS tool returns no judgement about an article, and none can be
+          derived from it: it carries a title, a source and a date. Reading
+          what a development means is a separate job with a separate tool --
+          get_news_impact_facts, which carries the MEASURED ground a reading
+          has to stand on. Do not do that job here, from titles alone.
+        - Do NOT rank articles by importance. Nothing in this payload measures
+          importance, and the order is chronological.
         - Do NOT connect an article to a price move, to a return, or to a risk figure
           unless the article itself states it. Chronology is not causation, and the
-          user will read the connection as an explanation.
-        - Do NOT derive a forecast, a target, or a hold/sell reading from these
-          articles.
+          user will read the connection as an explanation. The one place a price
+          and a headline may sit in the same answer is get_news_impact_facts,
+          where the price figure and its normal range arrive together.
+        - Do NOT derive a target or a hold/sell reading from these articles.
         - An empty `articles` list means nothing MATCHED in the window. Say exactly
           that, with the window. It does not mean the market was quiet, and it does
           not license you to substitute anything you remember.

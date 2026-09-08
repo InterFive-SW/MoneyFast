@@ -731,14 +731,14 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
     # Haberin KENDİSİ değil, ne anlama geldiği. Ayrı bir araç çünkü ayrı bir
     # dayanak: yukarıdaki başlıkları taşıyor, bu bir modelin okumasını. Aynı
     # ajanda duruyor çünkü ikisi de kullanıcının pozisyonlarının kesişimi.
-    if plan.get("tool") == "get_news_impact_digest":
+    if plan.get("tool") == "get_news_impact_facts":
         return await _run_tool(
-            state, "get_news_impact_digest",
-            {key: args[key] for key in ("user_id", "hours") if key in args},
+            state, "get_news_impact_facts",
+            {key: args[key] for key in ("user_id", "days") if key in args},
             assumptions=plan.get("assumptions") or [],
-            # Boş bir liste TAM bir cevap -- pencerede yorumlanmış haber yok --
+            # Boş bir liste TAM bir cevap -- pozisyonu olmayan kullanıcı --
             # ama penceresiyle birlikte söylenmeli, o yüzden yük yine gidiyor.
-            empty_when=lambda p: not p.get("entries"),
+            empty_when=lambda p: not p.get("symbols"),
         )
 
     # Üçüncü araç: neye SAHİP olduğu değil, ne KAZANIP ne HARCADIĞI. Aynı
@@ -2773,7 +2773,7 @@ def _keep_news_disclaimer(
     okuması ve bunu söyleyen tek şey bu çekince. Düştüğünde geriye, ölçülmüş
     bir bulgudan ayırt edilemeyen bir yorum kalıyor.
     """
-    if "get_news_impact_digest" not in set(state.get("tools_used") or []):
+    if "get_news_impact_facts" not in set(state.get("tools_used") or []):
         return out
     if _DIGEST_MARK in (out.get("final_output") or ""):
         return out

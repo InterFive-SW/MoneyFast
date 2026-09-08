@@ -169,6 +169,38 @@ describe('endpoint paths', () => {
     expect(calledUrl(fetchMock)).not.toContain('direction=')
   })
 
+  it('haber özeti penceresini taşır', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getNewsDigest(72)
+    expect(calledUrl(fetchMock)).toContain('/market/news/digest?hours=72')
+  })
+
+  it('pencere verilmezse son 24 saat sorulur', () => {
+    // Panelin sorusu "bugün portföyüme ne dokundu"; sunucudaki
+    // `DIGEST_WINDOW_HOURS` ile aynı, ayrışırsa iki taraf farklı bir günü
+    // özetler.
+    const fetchMock = mockFetch({})
+    apiClient.getNewsDigest()
+    expect(calledUrl(fetchMock)).toContain('hours=24')
+  })
+
+  it('piyasa geneli özeti pencere ve limiti taşır', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getNewsImpactSummary(168, 8)
+    const url = calledUrl(fetchMock)
+    expect(url).toContain('/market/news/impact-summary')
+    expect(url).toContain('hours=168')
+    expect(url).toContain('limit=8')
+  })
+
+  it('piyasa geneli varsayılanları sunucuyla aynı', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getNewsImpactSummary()
+    const url = calledUrl(fetchMock)
+    expect(url).toContain('hours=24')
+    expect(url).toContain('limit=12')
+  })
+
   it('senaryo faktörü ve şoku gövdede gider', () => {
     const fetchMock = mockFetch({})
     apiClient.runScenario('USDTRY', -10)

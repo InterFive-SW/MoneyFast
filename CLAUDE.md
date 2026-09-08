@@ -353,6 +353,53 @@ yeniden başlatmada tek bir HTTP çağrısı. Bloklamaz — `fetch_candles` semb
 başına çalıştığı için tek seferlik bir scheduler job'ı olarak kuyruğa girer. `dumps/` ise gitignore'da — `make db-dump` tam bir yedek alır
 (riskli bir işlemden önce) ve birine tam durumunu vermek için kullanılır.
 
+### Haber yorumu — LLM yargılar, kod toplar
+
+Haberin bir enstrümana etkisi `market.news_impacts`'ta **satır** olarak
+duruyor (migration 0044): sembol, yön, kapsam (DIRECT/SPILLOVER), büyüklük ve
+tek cümlelik bir `mechanism`. Yargıyı LLM üretiyor — istenen belirlenimci
+olmayan yorum tam burada — ama ürettiği şey **düzyazı değil**. Bir modelin
+metni denetlenemez; satır olarak saklandığında her iddia belirli bir habere
+kadar izlenebiliyor, günlük özet **kodda** toplanabiliyor ve toplayıcı test
+edilebiliyor. `technicals.narrate()` ile aynı ayrım.
+
+Yorum `agents` servisinde (`POST /analyze/news-impact`) — "LLM çıkışı yalnızca
+`agents`" kuralı. Backend zamanlıyor (günde iki kez, 07:15 ve 19:15),
+kuyruğu kuruyor, evreni veriyor ve sonucu saklıyor.
+
+**Uydurmaya karşı üç kilit, üçü de kodda.** Sembol kapalı bir evrenden gelir
+ve listede olmayan ad düşürülür. Sayı modelden gelmez: `mechanism` bir cümle,
+yüzdeler `market_candles`'tan ölçülür (tipik 5 günlük hareket ve gerçekleşen
+değişim). Yasak dil satırı düşürür — `compliance.rules` burada da çalışıyor,
+çünkü bu metin uygunluk kapısının bakmadığı bir yoldan (REST) kullanıcıya
+gidiyor; regex'leri kopyalamak bir kuralın iki yerde yaşaması olurdu.
+
+Evren **ölçülerek** daralıyor: 1.009 aktif enstrümanın tamamını her isteğe
+koymak ~2.500 token, yani günlük kotanın tamamı. Onun yerine haberin kendi
+etiketleri + borsa başına ciroya göre ilk 25 (ölçülen: 86 sembol). Sendikasyon
+kopyaları eleniyor — ölçüldü, 48 saatte 787 haberin 120'si (%15) aynı
+gelişmenin başka bir istasyondaki kopyası; eleme yalnızca dikey çizgiden,
+çünkü KAP başlığındaki uzun tireden sonrası haberin KENDİSİ.
+
+Uçlar: `GET /api/market/news/digest` (portföyün özeti, oturum zorunlu),
+servis token'lı ikizi `/digest/{user_id}`, ve `GET /api/market/news/impact-summary`
+(piyasa geneli). Sohbet `get_news_impact_digest` (v2.23) ile okuyor —
+`get_portfolio_news` genişletilmedi, çünkü o yayımlanmış olguyu, bu bir
+modelin okumasını taşıyor.
+
+**Ajana giden yük bilerek dar.** `direction`, `scope`, `measured` ve sayımlar
+MCP katmanında düşürülüyor; hepsi cümlenin içinde zaten Türkçe yazılı. Ölçüldü:
+alanlar dururken model önce ham enum'ları düz yazıya döktü ("yönü DOWN olarak
+işaretlendi"), sonra beş satırlık bir fiyat tablosu kurup **tek bir mekanizma
+yazmadı** — haberin ne anlama geldiğine dair bir cevap, içinde haber olmadan.
+Bir alanı göndermemek, kullanımını yasaklamaktan güçlü. Çekince
+(`_keep_news_disclaimer`) kapının her dalından geçiyor.
+
+**Yorum bir ölçüm değil ve öyle sunulmuyor.** Model gerçek olmayan bir kanal
+uydurabiliyor (ölçüldü: bir maden ruhsatı haberini Vestel'in "tedarik
+zinciri"ne bağladı). Her satır bu yüzden kaynağına kadar izlenebilir ve her
+yüzeyde koşulsuz bir çekince taşıyor.
+
 ### KAP — bildirimler
 
 Haberin bir şirketi olmasını sağlayan kaynak. RSS beslemelerinin güvenilir

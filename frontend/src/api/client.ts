@@ -144,6 +144,54 @@ export interface DirectionScreen {
     note: string | null;
     items: DirectionScreenRow[];
 }
+
+/** Bir haberin bir enstrümana etkisi hakkındaki tek gerekçe.
+ *
+ *  `confidence` YOK ve olmayacak: modelin kendi beyanı bir ölçüm değil ve
+ *  ekranda yüzde olarak göstermek, ölçülmemiş bir şeye ölçülmüş bir otorite
+ *  verirdi. Sunucu onunla sıralıyor, göndermiyor. */
+export interface NewsImpactReason {
+    newsId: string;
+    direction: string;
+    scope: string;
+    magnitude: string;
+    mechanism: string;
+    publishedAt: string;
+}
+
+/** Yorumun oturduğu ÖLÇÜLEN zemin. Ölçülemediğinde alan hiç gelmiyor. */
+export interface NewsImpactMeasure {
+    typicalMovePct: number;
+    recentMovePct: number;
+}
+
+/** Tek enstrüman için özet.
+ *
+ *  `sentence` SUNUCUDA kuruluyor ve olduğu gibi yazılıyor: cümlenin
+ *  koşulluluğu ve çekincesi kodda çivili. Burada yeniden kurulan bir cümle
+ *  o çivinin dışında kalırdı. */
+export interface NewsImpactEntry {
+    symbol: string;
+    sentence: string;
+    counts: Record<string, number>;
+    directCount: number;
+    spilloverCount: number;
+    measured: NewsImpactMeasure | null;
+    reasons: NewsImpactReason[];
+}
+
+export interface NewsDigest {
+    headline: string;
+    entries: NewsImpactEntry[];
+    windowHours: number;
+    disclaimer: string;
+}
+
+export interface NewsImpactSummary {
+    entries: NewsImpactEntry[];
+    windowHours: number;
+    disclaimer: string;
+}
 export type StageTransactionRequest = components['schemas']['StageTransactionRequest'];
 export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
@@ -1041,6 +1089,19 @@ class ApiClient {
         const params = new URLSearchParams({ horizon, limit: String(limit) });
         if (direction) params.set('direction', direction);
         return this.request<DirectionScreen>(`/market/direction/screen?${params}`);
+    }
+
+    /** Portföyün günlük haber özeti. Oturum zorunlu -- sunucu kullanıcıyı
+     *  token'dan çözüyor, demo portföyüne düşmüyor. */
+    getNewsDigest(hours = 24) {
+        return this.request<NewsDigest>(`/market/news/digest?hours=${hours}`);
+    }
+
+    /** Piyasa geneli: haberlerin hangi enstrümanı hangi yönde etkilediği.
+     *  Portföyden bağımsız, oturum aranmıyor. */
+    getNewsImpactSummary(hours = 24, limit = 12) {
+        return this.request<NewsImpactSummary>(
+            `/market/news/impact-summary?hours=${hours}&limit=${limit}`);
     }
 
     /** Follow an instrument. Idempotent — starring twice is not an error. */

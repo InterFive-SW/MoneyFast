@@ -109,6 +109,10 @@ ROUTES = {
     # v2.11. Listed before the bare "/market/" fragments would matter; the
     # paths do not overlap, but naming it keeps the mapping readable.
     "/market/news/portfolio": "portfolio_news",
+    # v2.23. `/market/news/digest` ile `/market/news/portfolio` ayrı yollar
+    # ve ayrı dayanaklar: biri yayımlanmış başlıkları, diğeri onların
+    # yorumlanmış hâlini döndürüyor.
+    "/market/news/digest": "news_digest",
     "/market/technicals": "technicals",
     # v2.14. `/market/fundamentals` ile `/market/fundamentals/ingest` ayrı
     # yollar; ikincisine bu suite hiç dokunmuyor.

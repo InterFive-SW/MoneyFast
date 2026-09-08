@@ -125,10 +125,17 @@ SERVER_NAME = "moneyfast"
 #: cevabı "ekrana bakın"a indiriyordu. Araç listeyi ÜRETMİYOR, okuyor:
 #: `prompts.py:859`'daki "Never recommend a rebalance" cümlesi yerinde
 #: duruyor ve testi (`test_prompts.py`) onu sabitlemeye devam ediyor.
-CONTRACT_VERSION = "v2.22"
+#: v2.23: `get_news_impact_digest`. SALT OKUMA. Sistemdeki tek araç ki
+#: taşıdığı şey bir ÖLÇÜM DEĞİL, bir modelin metin okuması -- ve her alanı
+#: öyle etiketleniyor. `get_portfolio_news` GENİŞLETİLMEDİ: o başlıkları
+#: listeliyor ve hiçbir şey yorumlamıyor, ikisini tek araçta birleştirmek
+#: aynı dayanağa sahiplermiş gibi gösterirdi. Yargıyı ajan üretmiyor; ayrı
+#: bir toplu iş üretiyor, satır olarak saklanıyor ve geldiği habere kadar
+#: izlenebiliyor.
+CONTRACT_VERSION = "v2.23"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Twenty-three tools across sixteen domains.
+MoneyFast tool server. Twenty-four tools across sixteen domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,

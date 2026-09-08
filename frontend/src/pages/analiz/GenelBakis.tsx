@@ -5,6 +5,7 @@ import {
 import { toNumber, seriesName } from '../../lib/chartFormat'
 import { benchmarkName, toComparisonSeries } from '../../lib/riskFormat'
 import { formatMoney } from '../../lib/money'
+import HaberYorumPaneli from '../../components/analiz/HaberYorumPaneli'
 import PortfoyHaberleri from '../../components/analiz/PortfoyHaberleri'
 import { formatDateTime } from '../../lib/datetime'
 import { useAnalysis } from '../Analiz'
@@ -229,6 +230,10 @@ export default function GenelBakis() {
             </div>
 
             {/* Portföye dokunan haberler — listelenir ve tarihlenir, yorumlanmaz */}
+            {/* Yorum ÖNCE, başlık listesi sonra: kullanıcının sorusu
+                "bugün ne oldu ve bu ne demek"; ham başlık listesi o cevabın
+                kaynağı, kendisi değil. */}
+            <HaberYorumPaneli />
             <PortfoyHaberleri />
 
             {/* Uyarılar — hesabın neyi kapsamadığı, gizlenmeden */}

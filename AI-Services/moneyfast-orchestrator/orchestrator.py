@@ -728,6 +728,19 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
             empty_when=lambda p: not p.get("articles"),
         )
 
+    # Haberin KENDİSİ değil, ne anlama geldiği. Ayrı bir araç çünkü ayrı bir
+    # dayanak: yukarıdaki başlıkları taşıyor, bu bir modelin okumasını. Aynı
+    # ajanda duruyor çünkü ikisi de kullanıcının pozisyonlarının kesişimi.
+    if plan.get("tool") == "get_news_impact_digest":
+        return await _run_tool(
+            state, "get_news_impact_digest",
+            {key: args[key] for key in ("user_id", "hours") if key in args},
+            assumptions=plan.get("assumptions") or [],
+            # Boş bir liste TAM bir cevap -- pencerede yorumlanmış haber yok --
+            # ama penceresiyle birlikte söylenmeli, o yüzden yük yine gidiyor.
+            empty_when=lambda p: not p.get("entries"),
+        )
+
     # Üçüncü araç: neye SAHİP olduğu değil, ne KAZANIP ne HARCADIĞI. Aynı
     # ajanda duruyor çünkü köprü burada kuruluyor -- "bu alımı kaldırabilir
     # miyim" sorusu hem pozisyonları hem aylık artanı gerektiriyor ve iki
@@ -2723,6 +2736,45 @@ def _keep_plan_disclaimer(
     return out
 
 
+#: Haber yorumunun kendi çekincesi. Genel uygunluk açıklaması bunun yerini
+#: TUTMUYOR: o, içeriğin yatırım danışmanlığı olmadığını söylüyor; bu ise
+#: içeriğin bir ÖLÇÜM DEĞİL, bir modelin metin okuması olduğunu. Sistemdeki
+#: başka hiçbir araç bunu söylemek zorunda değil, çünkü başka hiçbiri bir
+#: model yargısı taşımıyor.
+NEWS_DIGEST_DISCLAIMER_TR = (
+    "Bu özet, haber metinlerinin yapay zeka tarafından yorumlanmasıdır; "
+    "yatırım tavsiyesi değildir ve haberin fiyata nasıl yansıyacağını "
+    "belirlemez."
+)
+
+_DIGEST_MARK = "yapay zeka tarafından yorumlanmasıdır"
+
+
+def _keep_news_disclaimer(
+    state: MoneyFastState, out: dict[str, Any]
+) -> dict[str, Any]:
+    """Haber yorumunun çekincesini kapının HER dalından geçirir.
+
+    `_keep_plan_disclaimer` ve `_keep_hedge` ile aynı ders: prompt tavsiyedir.
+    Araç sözleşmesi "`disclaimer`ı değiştirmeden aktar" diyor, ama bu depoda
+    aynı talimatın iki kez ölçülüp iki kez tutulmadığı biliniyor -- senaryo
+    çekincesinde ve dengeleme listesinde.
+
+    Burada kaybı daha ağır: kullanıcının okuduğu her cümle bir modelin metin
+    okuması ve bunu söyleyen tek şey bu çekince. Düştüğünde geriye, ölçülmüş
+    bir bulgudan ayırt edilemeyen bir yorum kalıyor.
+    """
+    if "get_news_impact_digest" not in set(state.get("tools_used") or []):
+        return out
+    if _DIGEST_MARK in (out.get("final_output") or ""):
+        return out
+    existing = out.get("disclosures") or []
+    if any(_DIGEST_MARK in item for item in existing):
+        return out
+    out["disclosures"] = existing + [NEWS_DIGEST_DISCLAIMER_TR]
+    return out
+
+
 def _keep_hedge(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
     """Koşullu bir turun çekincesini kapının HER dalından geçirir.
 
@@ -2762,6 +2814,7 @@ def _keep_crisis(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
     """
     out = _keep_hedge(state, out)
     out = _keep_plan_disclaimer(state, out)
+    out = _keep_news_disclaimer(state, out)
     notices = state.get("crisis_notices") or []
     if not notices:
         return out

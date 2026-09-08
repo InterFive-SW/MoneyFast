@@ -57,6 +57,21 @@ export interface RebalanceRow {
     /** Yuvarlamadan artan fark. Saklanmıyor, yazılıyor. */
     residual_base: number;
     statement: string;
+    /** Satırı listeye sokan ÖLÇÜMLER. Boş olamaz: gerekçesi olmayan satır
+     *  sunucuda hiç üretilmiyor. Sohbetin ve ekranın bir alım-satım listesi
+     *  göstermesine izin verilmesinin tek dayanağı bu alan; sebebi
+     *  görünmeyen bir satırın yanında bir "Uygula" düğmesi, kaldırılan
+     *  yasağın engellediği şeyin ta kendisi. */
+    rationale: RebalanceRationale[];
+}
+
+export interface RebalanceRationale {
+    /** RISK_CONTRIBUTION / CONCENTRATION / VALUATION / PROFITABILITY /
+     *  LEVERAGE / NEWS. Kullanıcıya GÖSTERİLMEZ: `text` zaten Türkçe. */
+    kind: string;
+    /** Haber okumasında null -- haber bir sayı değil ve uydurulmuyor. */
+    value: number | null;
+    text: string;
 }
 
 export interface RebalanceUnresolved {
@@ -101,24 +116,7 @@ export interface RebalancePlan {
     warning: string | null;
 }
 
-export interface AllocationTemplateItem {
-    key: string;
-    label: string;
-    weights: { bucket: string; label: string; percent: number }[];
-    /** Ölçülemeyen bir karışımda null -- "orta" değil. */
-    volatility: number | null;
-    band: string | null;
-    /** Bandı beyan edilen toleransla eşleşiyor mu. Sıralama girdisi. */
-    highlighted: boolean;
-    statement: string;
-    unmeasured: string[];
-}
 
-export interface AllocationTemplates {
-    declaredTolerance: string | null;
-    items: AllocationTemplateItem[];
-    measurementNote: string;
-}
 
 export interface DirectionEvidence {
     source: string;
@@ -1088,10 +1086,6 @@ class ApiClient {
         return this.post<RebalancePlan>('/investment/rebalance/plan', { lookback });
     }
 
-    /** Hazır dağılım şablonları ve her birinin ölçülen oynaklığı. */
-    getAllocationTemplates() {
-        return this.request<AllocationTemplates>('/risk/allocation-templates');
-    }
 
     /**
      * Bir enstrümanın yön okuması.

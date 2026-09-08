@@ -110,7 +110,6 @@ describe('endpoint paths', () => {
     ['getPortfolioReport', '/api/analytics/report'],
     ['getAllocationDrift', '/api/investment/allocation-drift'],
     // Sapmanın emir karşılığı; `disclaimer` sunucudan gelir.
-    ['getAllocationTemplates', '/api/risk/allocation-templates'],
     ['getSectorAllocation', '/api/investment/sector-allocation'],
     ['getHeatmap', '/api/investment/heatmap'],
     ['getMarketTickers', '/api/market/tickers'],

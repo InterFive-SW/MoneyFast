@@ -24,9 +24,25 @@ const ROW = {
     amount_base: 3600,
     residual_base: 42,
     statement: 'THYAO için 12 adet satışın karşılığı 3.600,00 TRY.',
+    // Gerekçesiz satır sunucuda hiç üretilmiyor: bir satırın var olması,
+    // onu üreten ölçümün var olması demek.
+    rationale: [
+        {
+            kind: 'RISK_CONTRIBUTION',
+            value: 0.31,
+            text: "Portföy oynaklığının %31,0'lik kısmını bu pozisyon üretiyor.",
+        },
+    ],
 }
 
 const PLAN = {
+    gate: { open: true, reason: 'Uygunluk testi tamamlanmış.' },
+    lookback: '1Y',
+    measuredLevel: 'Orta',
+    declaredTolerance: 'Yüksek',
+    bindingBand: 'Orta',
+    targetSource: 'USER',
+    bandStatement: 'Karşılaştırma kendi hedefinize göre yapıldı.',
     hasTarget: true,
     totalValue: 24607.54,
     statement: 'Sapma ölçüldü.',
@@ -216,5 +232,68 @@ describe('useRebalancePlan', () => {
         await act(async () => {
             resolve(PLAN)
         })
+    })
+})
+
+
+describe('useRebalancePlan — pencere ve gerekçeler', () => {
+    it('varsayılan pencere bir yıl', async () => {
+        const { result } = renderHook(() => useRebalancePlan())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        expect(apiClient.getRebalancePlan).toHaveBeenCalledWith('1Y')
+        expect(result.current.lookback).toBe('1Y')
+    })
+
+    it('pencere değiştirmek planı yeniden hesaplatır', async () => {
+        // Aynı portföy üç aylıkta "Yüksek", beş yıllıkta "Orta" ölçülebilir
+        // ve bağlayıcı bant onunla birlikte değişir.
+        const { result } = renderHook(() => useRebalancePlan())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        act(() => result.current.setLookback('5Y'))
+        await waitFor(() =>
+            expect(apiClient.getRebalancePlan).toHaveBeenCalledWith('5Y'),
+        )
+    })
+
+    it('aynı anda tek satırın gerekçeleri açık', async () => {
+        const { result } = renderHook(() => useRebalancePlan())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        act(() => result.current.toggleRow('a'))
+        expect(result.current.expanded).toBe('a')
+        act(() => result.current.toggleRow('b'))
+        expect(result.current.expanded).toBe('b')
+    })
+
+    it('açık satıra ikinci kez basmak kapatır', async () => {
+        const { result } = renderHook(() => useRebalancePlan())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        act(() => result.current.toggleRow('a'))
+        act(() => result.current.toggleRow('a'))
+        expect(result.current.expanded).toBeNull()
+    })
+
+    it('kapı kapalıysa satır gelmez ve neden taşınır', async () => {
+        vi.spyOn(apiClient, 'getRebalancePlan').mockResolvedValue({
+            ...PLAN,
+            gate: { open: false, reason: 'Önce uygunluk testini tamamlayın.' },
+            rows: [],
+        } as never)
+        const { result } = renderHook(() => useRebalancePlan())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        expect(result.current.plan?.gate.open).toBe(false)
+        expect(result.current.plan?.rows).toEqual([])
+    })
+
+    it('her satır gerekçesiyle gelir', async () => {
+        const { result } = renderHook(() => useRebalancePlan())
+        await waitFor(() => expect(result.current.loading).toBe(false))
+        expect(result.current.plan?.rows[0].rationale).toHaveLength(1)
+    })
+
+    it('pencere seçenekleri sunucudaki kapalı kümeyle aynı', async () => {
+        const { LOOKBACKS } = await import('./useRebalancePlan')
+        expect(LOOKBACKS.map((item) => item.key)).toEqual([
+            '1M', '3M', '6M', '1Y', '3Y', '5Y', 'MAX',
+        ])
     })
 })

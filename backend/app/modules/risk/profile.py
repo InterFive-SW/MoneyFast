@@ -368,6 +368,36 @@ def suitability(
     }
 
 
+def binding_band(measured_level: Optional[str], declared_tolerance: Optional[str]) -> Optional[str]:
+    """İki riskin daha TEMKİNLİ olanı. Ortalama değil, minimum.
+
+    Kullanıcı ankette "Yüksek" demiş ama portföyünün ölçülen riski "Orta"
+    ise, ona daha riskli bir hedef vermek yalnızca beyanına dayanır; tersi
+    durumda beyanını görmezden gelmek olur. Ortalama almak ikisini de
+    sulandırır ve ortaya hiçbir ekseni temsil etmeyen bir sayı çıkar.
+    Minimum, iki bilgi kaynağının çeliştiği yerde daha az iddialı olanı
+    seçiyor.
+
+    Karşılaştırma ETİKET SIRASINA göre, skorlar üzerinde aritmetik yapmadan:
+    ölçülen skor ters (100 = sakin), anketin ham puanı değil, ve ikisi
+    arasındaki her işlem er ya da geç ters okunur. `profile.suitability()`
+    ile birebir aynı kural.
+
+    Biri ölçülemiyorsa diğeri bağlayıcı olur -- eksik olanı en temkinli
+    saymak, ölçülemeyen bir portföye nakit hedefi vermek olurdu; en cesur
+    saymak ise beyanı olmayan birine hisse hedefi vermek. İkisi de yoksa
+    bant yok ve çağıran bunu bir hedef yokluğu olarak görmek zorunda.
+    """
+    known = [
+        level
+        for level in (measured_level, declared_tolerance)
+        if level in _LEVEL_ORDER
+    ]
+    if not known:
+        return None
+    return min(known, key=_LEVEL_ORDER.index)
+
+
 #: Enstrüman türünden SPK ürün grubuna. YALNIZCA testin gerçekten kapsadığı
 #: eşleme yazılı.
 #:

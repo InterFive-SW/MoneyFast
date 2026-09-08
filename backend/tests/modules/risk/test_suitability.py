@@ -297,3 +297,48 @@ class TestTemplateComparison:
         """Ölçülmemiş bir karışımı orta bandda göstermek, olmayan bir ölçümü
         varmış gibi sunmak olurdu."""
         assert profile.volatility_band(None) is None
+
+
+class TestBindingBand:
+    """İki riskin daha temkinli olanı. Ortalama DEĞİL, minimum -- ve
+    karşılaştırma etiket sırasına göre, skorlar üzerinde aritmetik yapmadan.
+    """
+
+    def test_the_more_cautious_side_binds(self):
+        """Belgedeki örnek: ankette "Yüksek", ölçümde "Orta". Daha riskli bir
+        hedef vermek yalnızca beyana dayanırdı."""
+        assert profile.binding_band("Orta", "Yüksek") == "Orta"
+
+    def test_it_binds_the_other_way_too(self):
+        """Tersi durumda beyanı görmezden gelmek olurdu."""
+        assert profile.binding_band("Yüksek", "Düşük") == "Düşük"
+
+    def test_agreement_binds_to_itself(self):
+        assert profile.binding_band("Orta", "Orta") == "Orta"
+
+    def test_the_fourth_band_can_bind(self):
+        assert profile.binding_band("Risksiz", "Yüksek") == "Risksiz"
+
+    def test_a_missing_measurement_leaves_the_declaration_binding(self):
+        """Eksik olanı en temkinli saymak, ölçülemeyen bir portföye nakit
+        hedefi vermek olurdu."""
+        assert profile.binding_band(None, "Orta") == "Orta"
+
+    def test_a_missing_declaration_leaves_the_measurement_binding(self):
+        assert profile.binding_band("Yüksek", None) == "Yüksek"
+
+    def test_neither_side_means_no_band(self):
+        """Bant yok; çağıran bunu bir hedef YOKLUĞU olarak görmek zorunda."""
+        assert profile.binding_band(None, None) is None
+
+    def test_an_unknown_label_is_not_a_band(self):
+        assert profile.binding_band("Belirsiz", "Aşırı") is None
+
+    def test_no_arithmetic_is_done_on_the_scores(self):
+        """Ölçülen skor ters (100 = sakin), anketin ham puanı değil. İkisi
+        arasındaki her işlem er ya da geç ters okunur; fonksiyon skor
+        ALMIYOR, yalnızca etiket."""
+        import inspect
+
+        signature = inspect.signature(profile.binding_band)
+        assert list(signature.parameters) == ["measured_level", "declared_tolerance"]

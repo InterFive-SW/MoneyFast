@@ -19,7 +19,10 @@ from __future__ import annotations
 import math
 from typing import Any, Optional, Sequence
 
+from sqlalchemy.orm import Session
+
 from . import allocation
+from .models import RiskBandTarget
 
 #: Ekranda kalıcı olarak duran etiket. Sunucudan geliyor ki arayüzde ikinci
 #: kez yazılmasın: iki kopyadan biri değişip diğeri kalabilirdi.
@@ -299,3 +302,31 @@ def _row_statement(
         f"{holding.get('symbol')} için {unit} adet {action} karşılığı "
         f"{amount} {base_currency}."
     )
+
+
+# ── Bant hedefi ─────────────────────────────────────────────────────────────
+#
+# Bu bölümün altındaki tek fonksiyon veritabanına dokunuyor; yukarısı saf
+# aritmetik ve öyle kalıyor. `signals.refresh_all_signals` ile aynı ayrım:
+# motorun kendisi DB tanımıyor, yalnızca onu besleyen fonksiyon tanıyor.
+#
+# Bağlayıcı bandın KENDİSİ burada değil, `risk.profile.binding_band` içinde:
+# iki risk etiketi üzerinde yapılan bir işlem ve etiketlerin tanımı orada.
+# Buraya koymak, `investment -> risk` yönünde bir bağımlılık açardı; kurulu
+# yön bunun tersi.
+
+
+def band_targets(db: Session, band: str) -> dict[str, float]:
+    """Bandın kova hedefleri. Satırı olmayan kova sözlükte de YOKTUR.
+
+    Eksik bir anahtar "bu bandın o kova hakkında görüşü yok" demek ve
+    `drift()` onu `None` olarak okuyor. Sıfırla doldurmak, o kovadaki her
+    şeyin satılması gerektiğini söylemek olurdu -- matrisin söylemediği bir
+    şey.
+    """
+    rows = (
+        db.query(RiskBandTarget.bucket, RiskBandTarget.target_percent)
+        .filter(RiskBandTarget.band == band)
+        .all()
+    )
+    return {bucket: float(percent) for bucket, percent in rows}

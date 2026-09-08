@@ -452,6 +452,50 @@ class WatchlistItem(Base):
     )
 
 
+class RiskBandTarget(Base):
+    """Ölçülen risk bandının kova hedefi. Kullanıcıya ait DEĞİL, banda ait.
+
+    `AllocationTarget` ile karıştırılmaması kritik ve ikisi aynı tabloda
+    olamaz: orası kullanıcının KENDİ belirlediği hedef, burası bir bandın
+    karşılığı. Kullanıcının kendi hedefi varsa **o kazanıyor**; bu matris
+    yalnızca hiç hedef koymamış bir kullanıcı için devreye giriyor.
+    `AllocationTarget` docstring'indeki gerekçe yerinde duruyor -- sistemin
+    kullanıcının kendi kararını sessizce değiştirmesi, kullanıcıya ait olan
+    tek girdiyi yok eder.
+
+    **Bir bandın hedefi olmayan kova, satırı OLMAYAN kovadır.** Sıfırlık bir
+    satır yazmak "o kovadaki her şeyi sat" demek olurdu ve bu, matrisin
+    söylemediği bir şey; `allocation.drift()` zaten hedefi olmayan kovayı
+    `None` bırakıyor ve %0 saymıyor. Yüksek bandında `fx` satırının
+    olmaması, döviz hakkında bir görüş olmadığı anlamına geliyor -- döviz
+    tutulmaması gerektiği anlamına değil.
+
+    Satırlar tohum verisi ve migration'la yazılıyor: bir hedef matrisi
+    çalışma anında değişen bir şey değil, ve değişirse bunun diff'te
+    okunabilir olması gerekiyor -- `0006`'daki BIST üyelik listesiyle aynı
+    gerekçe.
+    """
+
+    __tablename__ = "risk_band_targets"
+    __table_args__ = (
+        # Bant başına kova başına tek hedef.
+        UniqueConstraint("band", "bucket", name="uq_risk_band_target_bucket"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    #: `profile.BANDS` etiketi: Risksiz / Düşük / Orta / Yüksek. Etiketle
+    #: saklanıyor çünkü bağlayıcı bant da bir etiket; skorla saklamak,
+    #: eşikleri iki yerde tutmak olurdu.
+    band: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: `allocation.TARGETABLE` üyesi. `other` hedeflenemez.
+    bucket: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_percent: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+
 class AllocationTarget(Base):
     """Kullanıcının KENDİ belirlediği hedef ağırlık, kova başına bir satır.
 

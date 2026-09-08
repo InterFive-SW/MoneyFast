@@ -336,3 +336,36 @@ class TestWording:
         out = rebalance.plan([], [], {}, "TRY")
         assert out["disclaimer"] == rebalance.DISCLAIMER_TR
         assert "yatırım tavsiyesi değildir" in out["disclaimer"]
+
+
+class TestBandTargets:
+    """Bandın kova hedefleri, `investment.risk_band_targets`'tan.
+
+    Sabitlenen tek şey davranış: satırı olmayan kova sözlükte de yok, ve
+    sıfırla doldurulmuyor. `drift()` ikisini ayırıyor -- "hedefin yok" ile
+    "hedefin sıfır" farklı iki şey ve ikincisi o kovadaki her şeyi satmak
+    demek olurdu.
+    """
+
+    def _db(self, rows):
+        from unittest.mock import MagicMock
+
+        from sqlalchemy.orm import Session
+
+        db = MagicMock(spec=Session)
+        db.query.return_value.filter.return_value.all.return_value = rows
+        return db
+
+    def test_rows_become_a_bucket_map(self):
+        db = self._db([("cash", 60), ("bist_equity", 20)])
+        assert rebalance.band_targets(db, "Düşük") == {"cash": 60.0, "bist_equity": 20.0}
+
+    def test_a_bucket_without_a_row_is_absent_not_zero(self):
+        """Sıfır, o kovadaki her şeyi sat demek olurdu."""
+        db = self._db([("cash", 80)])
+        targets = rebalance.band_targets(db, "Risksiz")
+        assert "us_equity" not in targets
+        assert targets.get("us_equity") is None
+
+    def test_an_unknown_band_has_no_targets(self):
+        assert rebalance.band_targets(self._db([]), "Belirsiz") == {}

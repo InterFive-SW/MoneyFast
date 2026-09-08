@@ -314,3 +314,76 @@ class TestTemplateVolatility:
         out = allocation.template_volatility({"cash": 100}, {})
         assert out["volatility"] is None
         assert out["cash_assumed_flat"] is True
+
+
+class TestBandTargetMatrix:
+    """Migration 0046'nın yazdığı matris.
+
+    Tohum verisi test edilir, çünkü toplamı bozulmuş bir bant sessizce yanlış
+    bir sapma üretir: eksik kalan puan, hiçbir kovaya ait olmayan bir fark
+    olarak görünür ve kullanıcı onu kendi hatası sanar.
+    """
+
+    @staticmethod
+    def _matrix():
+        """Migration'ı import ETMEDEN sabiti okur.
+
+        Migration modülü `alembic` istiyor ve bu paket test imajında yok;
+        ayrıca bir migration geçmişte donmuş bir adım ve onu import etmek,
+        testi o adımın çalışabilirliğine bağlardı. Okunan şey yalnızca liste.
+        """
+        import pathlib
+
+        source = pathlib.Path(
+            "alembic/versions/0046_risk_band_targets.py"
+        ).read_text()
+        body = source[source.index("TARGETS = ["):source.index("def upgrade")]
+        namespace: dict = {}
+        exec(body, namespace)  # noqa: S102 - okunan şey depodaki kendi sabitimiz
+        return namespace["TARGETS"]
+
+    def test_every_band_sums_to_one_hundred(self):
+        totals: dict[str, float] = {}
+        for band, _bucket, percent in self._matrix():
+            totals[band] = totals.get(band, 0) + percent
+        assert totals == {"Risksiz": 100, "Düşük": 100, "Orta": 100, "Yüksek": 100}
+
+    def test_every_measured_band_has_a_row(self):
+        """Hedefsiz bir bant, o bandda ölçülen kullanıcıya hiç plan
+        üretilememesi demek olurdu."""
+        from app.modules.risk import profile
+
+        banded = {band for band, _bucket, _percent in self._matrix()}
+        assert banded == {label for _threshold, label in profile.BANDS}
+
+    def test_every_bucket_is_targetable(self):
+        """`other` hedeflenemez: tanımı gereği "eşleştirilemeyen" demek ve ona
+        hedef vermek, eşleştirme hatasını hedefe dönüştürürdü."""
+        for _band, bucket, _percent in self._matrix():
+            assert bucket in allocation.TARGETABLE
+
+    def test_no_zero_row_is_written(self):
+        """Sıfırlık bir satır "o kovadaki her şeyi sat" demek olurdu; satırın
+        hiç olmaması ise "bu bandın o kova hakkında görüşü yok"."""
+        assert all(percent > 0 for _band, _bucket, percent in self._matrix())
+
+    def test_a_bucket_appears_at_most_once_per_band(self):
+        pairs = [(band, bucket) for band, bucket, _percent in self._matrix()]
+        assert len(pairs) == len(set(pairs))
+
+    def test_equity_weight_rises_with_the_band(self):
+        """Bantlar bir SIRA: daha yüksek bir bağlayıcı bant daha yüksek hisse
+        ağırlığı demek. Bozulursa matris, adının söylemediği bir şey yapar."""
+        equity: dict[str, float] = {}
+        for band, bucket, percent in self._matrix():
+            if bucket in ("bist_equity", "us_equity"):
+                equity[band] = equity.get(band, 0) + percent
+        assert equity["Risksiz"] < equity["Düşük"] < equity["Orta"] < equity["Yüksek"]
+
+    def test_cash_weight_falls_with_the_band(self):
+        cash = {
+            band: percent
+            for band, bucket, percent in self._matrix()
+            if bucket == allocation.CASH
+        }
+        assert cash["Risksiz"] > cash["Düşük"] > cash["Orta"] > cash["Yüksek"]

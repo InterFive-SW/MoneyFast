@@ -7,7 +7,7 @@ import type { NewsItem } from '../../api/client'
  *
  * Kategori süzgeci (Piyasa / KAP) kaldırıldı: beslemelerde böyle bir alan yok
  * ve başlıkları kaynağına bakarak "KAP bildirimi" diye etiketlemek uydurma
- * olurdu. Aynı gerekçeyle `sentiment` de backend'de nötr sabit — bir başlığı
+ * olurdu. Aynı gerekçeyle `sentiment` backend'de `null` — ÖLÇÜLMEDİ. Bir başlığı
  * olumlu/olumsuz saymak piyasa görüşü bildirmektir.
  *
  * `symbols` verilirse yalnızca o enstrümanlarla ilişkilendirilmiş haberler

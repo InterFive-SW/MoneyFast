@@ -2,7 +2,10 @@
 
 Bu panelin tek işi, kullanıcının GERÇEKTEN tuttuğu hisselere bağlı haberleri
 listelemek. Yorum yok, duygu puanı yok -- başlık, kaynak ve tarih. Testler bu
-sınırı da sabitliyor: `sentiment` her satırda `neutral` kalmalı.
+sınırı da sabitliyor: `sentiment` her satırda `null` kalmalı -- ÖLÇÜLMEDİ
+demek. Bir dönem sabit `"neutral"` dönüyordu ve bu, yapılmamış bir ölçümü
+yapılmış gibi gösteriyordu: "nötr" bir başlık sınıflandırılmış ve dengede
+bulunmuş bir başlıktır, buradakiler hiç sınıflandırılmadı.
 """
 
 from __future__ import annotations
@@ -164,7 +167,7 @@ class TestEndpoint:
             news_service, "portfolio_news",
             return_value=([_row("a", ["AKBNK"])], {"AKBNK": 1, "DOAS": 0}),
         )
-        assert as_user.get(URL).json()["items"][0]["sentiment"] == "neutral"
+        assert as_user.get(URL).json()["items"][0]["sentiment"] is None
 
     def test_an_item_carries_its_date_as_well_as_its_age(
         self, as_user, portfolio, mocker

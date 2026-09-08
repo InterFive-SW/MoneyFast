@@ -113,11 +113,11 @@ def get_market_news(
             "title": row.title,
             "url": row.url or "#",
             "time": _relative_time(row.published_at),
-            # Sentiment is not computed. Labelling a headline positive or
-            # negative is a market view, and this system is not permitted to
-            # hold one; the field stays neutral until a sourced classifier
-            # exists.
-            "sentiment": "neutral",
+            # ÖLÇÜLMEDİ, `null`. Bir dönem sabit "neutral" dönüyordu ve
+            # bu, yapılmamış bir ölçümü yapılmış gibi gösteriyordu:
+            # "nötr" bir başlık sınıflandırılmış ve dengede bulunmuş bir
+            # başlıktır, buradakiler hiç sınıflandırılmadı.
+            "sentiment": None,
             "relatedSymbols": list(row.related_symbols or []),
         }
         for row in service.latest_news(db, limit=limit, symbols=symbols)
@@ -199,7 +199,7 @@ def _portfolio_news_payload(db: Session, user_id: str, limit: int, days: int) ->
                 "url": row.url or "#",
                 "time": _relative_time(row.published_at),
                 "publishedAt": row.published_at,
-                "sentiment": "neutral",
+                "sentiment": None,
                 "relatedSymbols": list(row.related_symbols or []),
                 "heldSymbols": [s for s in (row.related_symbols or []) if s in held],
             }

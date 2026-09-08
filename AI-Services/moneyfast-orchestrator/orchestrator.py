@@ -2695,6 +2695,11 @@ HEDGED_TOOLS = frozenset(
         "simulate_position_change",
         "get_direction_signal",
         "get_technical_signals",
+        # v2.26. Buradaki risk daha büyük ve sebebi tek cümlede: bu araç
+        # ölçülmüş olgular veriyor, ama üzerine kurulan şey artık bir KANAAT
+        # cümlesi de içeriyor. Modelin unutabildiği bir çekince, kanaatin
+        # yanında duran tek sınırdır.
+        "get_news_impact_facts",
     }
 )
 
@@ -2745,18 +2750,25 @@ def _keep_plan_disclaimer(
     return out
 
 
-#: Haber yorumunun kendi çekincesi. Genel uygunluk açıklaması bunun yerini
-#: TUTMUYOR: o, içeriğin yatırım danışmanlığı olmadığını söylüyor; bu ise
-#: içeriğin bir ÖLÇÜM DEĞİL, bir modelin metin okuması olduğunu. Sistemdeki
-#: başka hiçbir araç bunu söylemek zorunda değil, çünkü başka hiçbiri bir
-#: model yargısı taşımıyor.
+#: Haber okumasının kendi çekincesi.
+#:
+#: `SCENARIO_HEDGE_TR` bunun yerini TUTMUYOR ve ikisi aynı turda birlikte
+#: durabiliyor: o, gösterilen SAYININ bir tahmin değil ölçüm olduğunu
+#: söylüyor. Bu ise sayıların üzerine kurulan OKUMANIN -- iki taraflı
+#: değerlendirmenin, ağırlık ve risk cümlelerinin -- bir yorum olduğunu.
+#:
+#: Metin v2.26'da değişti. Önceki sürümde okumayı bir toplu iş üretiyordu ve
+#: çekince "yapay zeka tarafından yorumlanmasıdır" diyordu; artık olgular
+#: ölçülüyor ve yorumu turun kendisi kuruyor, dolayısıyla çekince neyin
+#: ölçüldüğünü neyin yorumlandığından AYIRMAK zorunda. İkisini aynı cümlede
+#: "yorum" diye anmak, ölçülmüş bir hareketi de bir kanaat gibi gösterirdi.
 NEWS_DIGEST_DISCLAIMER_TR = (
-    "Bu özet, haber metinlerinin yapay zeka tarafından yorumlanmasıdır; "
-    "yatırım tavsiyesi değildir ve haberin fiyata nasıl yansıyacağını "
+    "Buradaki sayılar ölçülmüştür; haberlerin ne anlama geldiğine dair "
+    "değerlendirme ise bir yorumdur ve haberin fiyata nasıl yansıyacağını "
     "belirlemez."
 )
 
-_DIGEST_MARK = "yapay zeka tarafından yorumlanmasıdır"
+_DIGEST_MARK = "değerlendirme ise bir yorumdur"
 
 
 def _keep_news_disclaimer(

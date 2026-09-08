@@ -6672,8 +6672,8 @@ class TestRebalanceScreenQuestion:
     def test_a_news_text_that_kept_it_is_not_disclaimed_twice(self):
         out = orchestrator._keep_news_disclaimer(
             {"tools_used": ["get_news_impact_facts"]},
-            {"final_output": "... yapay zeka tarafından yorunmasıdır"
-                             .replace("yorunmasıdır", "yorumlanmasıdır"),
+            {"final_output": "... değerlendirme ise bir yorumdur ve fiyata "
+                             "nasıl yansıyacağını belirlemez.",
              "disclosures": []},
         )
         assert out["disclosures"] == []
@@ -6727,3 +6727,42 @@ class TestRebalanceScreenQuestion:
             {"final_output": "x", "disclosures": []},
         )
         assert out["disclosures"] == []
+
+
+class TestNewsFactsAreHedged:
+    """v2.26. Haber olgu aracı `HEDGED_TOOLS` üyesi.
+
+    Buradaki risk senaryo araçlarınkinden büyük ve sebebi tek cümlede: araç
+    ölçülmüş olgular veriyor, ama üzerine kurulan şey artık bir KANAAT
+    cümlesi de içeriyor. Modelin unutabildiği bir çekince, kanaatin yanında
+    duran tek sınırdır.
+    """
+
+    def test_the_tool_is_in_the_hedged_set(self):
+        assert "get_news_impact_facts" in orchestrator.HEDGED_TOOLS
+
+    def test_a_turn_that_dropped_the_hedge_gets_it_back(self):
+        out = orchestrator._keep_hedge(
+            {"tools_used": ["get_news_impact_facts"]},
+            {"final_output": "AKBNK %1,1 yükseldi.", "disclosures": []},
+        )
+        assert orchestrator.SCENARIO_HEDGE_TR in out["disclosures"]
+
+    def test_both_disclaimers_can_stand_together(self):
+        """Biri gösterilen SAYININ bir ölçüm olduğunu, diğeri sayıların
+        üzerine kurulan OKUMANIN bir yorum olduğunu söylüyor. İkisi ayrı
+        iddialar ve biri diğerinin yerini tutmuyor."""
+        state = {"tools_used": ["get_news_impact_facts"]}
+        out = orchestrator._keep_news_disclaimer(
+            state,
+            orchestrator._keep_hedge(
+                state, {"final_output": "okuma", "disclosures": []}
+            ),
+        )
+        assert len(out["disclosures"]) == 2
+
+    def test_the_news_disclaimer_separates_measurement_from_reading(self):
+        """Önceki sürümde çekince her şeye "yorum" diyordu; ölçülmüş bir
+        hareketi de bir kanaat gibi gösterirdi."""
+        assert "sayılar ölçülmüştür" in orchestrator.NEWS_DIGEST_DISCLAIMER_TR
+        assert "değerlendirme ise bir yorumdur" in orchestrator.NEWS_DIGEST_DISCLAIMER_TR

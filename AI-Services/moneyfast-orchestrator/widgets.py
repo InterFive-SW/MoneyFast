@@ -1,6 +1,6 @@
 """Chat widget construction.
 
-The chat UI can render four interactive widgets alongside the prose reply
+The chat UI can render five interactive widgets alongside the prose reply
 (see `frontend/src/types/chat.ts`). They are built here, deterministically,
 from the specialist's tool payload.
 
@@ -67,6 +67,11 @@ def build(state: dict[str, Any]) -> tuple[Optional[dict[str, Any]], Optional[str
     if agent == "TRANSACTION_AGENT":
         return _action_widget(data)
     if agent == "PORTFOLIO_AGENT":
+        # İki ayrı yük, iki ayrı widget. Haber olgu paketi `symbols` ve
+        # `coverage` taşıyor, pozisyon yükü `positions` ve `totals`; hangisi
+        # geldiyse ona göre çiziliyor.
+        if "coverage" in data:
+            return _news_impact_widget(data)
         return _portfolio_widget(data)
     if agent == "RISK_STRATEGY_AGENT":
         # Yalnızca dengeleme listesi. Risk metrikleri hâlâ metin olarak
@@ -181,6 +186,58 @@ def _portfolio_widget(data: dict[str, Any]) -> tuple[Optional[dict[str, Any]], O
         # The portfolio widget is already rendered inline in the message. A
         # context panel repeating it added nothing, and it opened showing a
         # price for "Portföy" — which is not an instrument.
+    }, None
+
+
+def _news_impact_widget(
+    data: dict[str, Any]
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Haber okumasının ÖLÇÜLEN zemini.
+
+    Widget yorumu taşımıyor ve taşımamalı: yorum metinde, uygunluk
+    kapısından geçmiş hâliyle duruyor. Buradaki her sayı backend'de sayılmış
+    ya da ölçülmüş -- kaç haber, kaçı bildirim, hisse ne yaptı, o hissede
+    normal hareket ne kadar.
+
+    Ayrım neden bu kadar önemli: bir widget, metnin yanında ama metinden
+    BAĞIMSIZ okunuyor. Kullanıcı tabloyu okuyup paragrafı atlayabilir. O
+    yüzden tabloda duran her şey, tek başına doğru olmak zorunda -- bir
+    kanaat cümlesi bu koşulu sağlamıyor, çünkü çekincesi paragrafta kalıyor.
+
+    `typical_move_pct` yanında DURMADAN `recent_move_pct` çizilmiyor: bir
+    hareket ancak kendi aralığına karşı büyük ya da küçük, ve tek başına
+    gösterilen bir yüzde okuyucunun onu kendi ölçeğiyle yorumlamasına
+    bırakılıyor demektir.
+    """
+    symbols = [row for row in (data.get("symbols") or []) if isinstance(row, dict)]
+    if not symbols:
+        return None, None
+    coverage = data.get("coverage") or {}
+    return {
+        "type": "news_impact",
+        "payload": {
+            "window_days": int(data.get("window_days") or 0),
+            "rows": [
+                {
+                    "symbol": row.get("symbol", ""),
+                    "sector": row.get("sector"),
+                    "news_count": row.get("news_count", 0),
+                    "filing_count": row.get("filing_count", 0),
+                    "recent_move_pct": (row.get("price") or {}).get("recent_move_pct"),
+                    "typical_move_pct": (row.get("price") or {}).get("typical_move_pct"),
+                }
+                for row in symbols
+            ],
+            # Kaç pozisyon dışarıda kaldı ve kaynak kırılımı. Tabloyu tek
+            # başına okuyan biri, listelenenlerin portföyün tamamı olduğunu
+            # sanmamalı.
+            "coverage": {
+                "symbols": int(coverage.get("symbols") or 0),
+                "symbols_omitted": int(coverage.get("symbols_omitted") or 0),
+                "filings": int(coverage.get("filings") or 0),
+                "feed_articles": int(coverage.get("feed_articles") or 0),
+            },
+        },
     }, None
 
 

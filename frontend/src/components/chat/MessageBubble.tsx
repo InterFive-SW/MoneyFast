@@ -1,9 +1,10 @@
 // src/components/chat/MessageBubble.tsx
 import { formatTime } from '../../lib/datetime';
 import { isSafeHref } from '../../lib/safeHref'
-import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload, PortfolioWidgetPayload, RebalanceWidgetPayload } from '../../types/chat';
+import { ChatMessage, ChartWidgetPayload, ActionWidgetPayload, PortfolioWidgetPayload, RebalanceWidgetPayload, NewsImpactWidgetPayload } from '../../types/chat';
 import ChartWidget from './widgets/ChartWidget';
 import ActionWidget from './widgets/ActionWidget';
+import NewsImpactWidget from '../widgets/NewsImpactWidget'
 import RebalanceWidget from '../widgets/RebalanceWidget'
 import PortfolioWidget from './widgets/PortfolioWidget';
 import Markdown from './Markdown';
@@ -77,6 +78,10 @@ export default function MessageBubble({ message, animate = false }: MessageBubbl
           {/* Dengeleme listesi. Onay düğmesi YOK: emir Dengeleme sekmesinde
               kullanıcının kendi tıklamasıyla onaylanıyor ve ikinci bir onay
               yüzeyi, hangisinin geçerli olduğunu okunamaz yapardı. */}
+          {/* Haber okumasının ölçülen zemini. Yorum METİNDE kalıyor. */}
+          {message.widget && message.widget.type === 'news_impact' && (
+            <NewsImpactWidget payload={message.widget.payload as NewsImpactWidgetPayload} />
+          )}
           {message.widget && message.widget.type === 'rebalance' && (
             <RebalanceWidget payload={message.widget.payload as RebalanceWidgetPayload} />
           )}

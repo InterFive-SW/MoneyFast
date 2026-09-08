@@ -1512,23 +1512,24 @@ def _contributions_for(db: Session, valued, base_currency: str, lookback: str):
 
 
 def _news_reading_for(db: Session, symbols: list[str]) -> dict[str, dict]:
-    """Sembol -> en yüksek güvenli haber okuması, varsa.
+    """Sembol -> haber okuması. v2.26'da ARTIK BOŞ ve bu bilinçli.
 
-    Bölüm 12'nin etki analizinden geliyor ve YALNIZCA gerekçe olarak
-    kullanılıyor: bir haber okuması adayı listeye sokabiliyor, ama adet ve
-    tutar aritmetikten çıkıyor. Haber bir sayı değil ve satırdaki `value`
-    alanı bu yüzden boş.
+    Bölüm 12'nin mimari değişikliğinden önce burada saklanmış model
+    yargıları okunuyordu (`market.news_impacts`). O tablo emekliye ayrıldı:
+    okuma artık sohbet turunda, ölçülmüş olgular üzerine kuruluyor ve
+    uygunluk kapısından geçiyor.
+
+    Fonksiyon KALDIRILMADI, çünkü `rebalance.rationale_for` üç girdiyle
+    çalışıyor ve haber girdisinin varlığı sözleşmenin bir parçası. Boş bir
+    harita "bu turda haber gerekçesi yok" demek ve seçim diğer iki ölçümle
+    yapılıyor -- gerekçesiz aday zaten listeye girmiyor.
+
+    Yeniden bağlanacağı yer belli: sohbet turunun ürettiği okuma
+    saklanmadığı için, dengeleme satırına haber gerekçesi koymak ancak
+    ölçülmüş bir haber sinyali (sayım, kaynak kırılımı) üzerinden mümkün --
+    ve o, `impact.fact_package`ta zaten duruyor.
     """
-    from app.modules.market import news_impact
-
-    if not symbols:
-        return {}
-    out: dict[str, dict] = {}
-    for row in news_impact.impacts_since(db, symbols=symbols, hours=24 * 7):
-        # İlk satır kazanıyor: `impacts_since` yeniden eskiye sıralı,
-        # dolayısıyla bu "en yeni okuma".
-        out.setdefault(row.symbol, {"mechanism": row.mechanism, "direction": row.direction})
-    return out
+    return {}
 
 
 def _drift_inputs(

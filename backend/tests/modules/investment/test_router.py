@@ -1239,33 +1239,19 @@ class TestRebalanceTargetSource:
         assert body["lookback"] == "5Y"
         assert risk_router._measure.call_args.args[2] == "5Y"
 
-    def test_a_news_reading_becomes_a_rationale(self, client, mocker):
-        """Bölüm 12'nin etki analizi seçim girdilerinden biri: bir haber
-        okuması adayı listeye sokabiliyor, ama adet ve tutar aritmetikten
-        çıkıyor."""
-        from types import SimpleNamespace as NS
+    def test_the_news_rationale_source_is_empty_after_the_retirement(
+        self, client, mocker
+    ):
+        """v2.26'da `market.news_impacts` emekliye ayrıldı: okuma artık
+        saklanmıyor, sohbet turunda ölçülmüş olgular üzerine kuruluyor.
 
-        from app.modules.market import news_impact
-
-        self._wire(mocker, own={"cash": 100.0}, band_rows={})
-        mocker.patch.object(
-            news_impact, "impacts_since",
-            return_value=[
-                NS(symbol="A", mechanism="Sözleşme ihracata ekleniyor.", direction="UP"),
-                NS(symbol="A", mechanism="Daha eski okuma.", direction="DOWN"),
-            ],
-        )
+        Fonksiyon KALDIRILMADI çünkü `rationale_for` üç girdiyle çalışıyor
+        ve haber girdisinin varlığı sözleşmenin parçası. Boş harita "bu turda
+        haber gerekçesi yok" demek; seçim diğer iki ölçümle yapılıyor ve
+        gerekçesiz aday zaten listeye girmiyor."""
         from app.modules.investment import router as investment_router
 
-        reading = investment_router._news_reading_for(object(), ["A"])
-        # En YENİ okuma kazanıyor: `impacts_since` yeniden eskiye sıralı.
-        assert reading == {"A": {"mechanism": "Sözleşme ihracata ekleniyor.",
-                                 "direction": "UP"}}
-
-    def test_no_symbols_means_no_news_read(self, client, mocker):
-        from app.modules.investment import router as investment_router
-
-        assert investment_router._news_reading_for(object(), []) == {}
+        assert investment_router._news_reading_for(object(), ["A", "B"]) == {}
 
     def test_a_window_written_as_days_is_refused(self, client, mocker):
         """Tanınmayan bir pencere sessizce bir yıla düşüyordu ve çağıran

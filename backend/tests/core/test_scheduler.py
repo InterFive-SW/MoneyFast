@@ -43,20 +43,11 @@ class TestJobsRegistered:
             # çıkıyor ve bugünün barı yazılmadan hesaplamak, dünün okumasını
             # bugünün tarihiyle damgalamak olurdu.
             "direction_signals_job",
-            # Haber yorumları günde İKİ kez. Sürekli çalışan bir iş, yorumu
-            # üreten LLM'in günlük token kotasını sohbetten önce tüketirdi.
-            "news_impact_job_7",
-            "news_impact_job_19",
+            # Haber yorumu için ZAMANLANMIŞ İŞ YOK ve olmaması bilinçli:
+            # okuma artık saklanmıyor, sohbet turunda ölçülmüş olgular
+            # üzerine kuruluyor ve orada uygunluk kapısından geçiyor. Bir
+            # arka plan işi, o kapıdan geçmemiş yorumlar biriktirirdi.
         }
-
-    async def test_news_impact_runs_twice_and_never_overlaps(self):
-        """İki tur üst üste binseydi aynı haber iki kez yargılanır, yani aynı
-        token iki kez harcanırdı."""
-        scheduler_module.start_scheduler()
-        for hour in (7, 19):
-            job = scheduler_module.scheduler.get_job(f"news_impact_job_{hour}")
-            assert job.max_instances == 1
-            assert job.coalesce is True
 
     async def test_the_briefing_runs_on_istanbul_time(self):
         """Container UTC'de; 10:00 TSİ demek için saat dilimi açıkça
@@ -82,7 +73,7 @@ class TestLifecycle:
         assert scheduler_module.scheduler is not first
         # Sayı, kayıtlı iş sayısıyla birlikte büyür; önemli olan İKİYE
         # KATLANMAMASI -- ikinci kurulum işleri eskisinin üstüne eklemiyor.
-        assert len(scheduler_module.scheduler.get_jobs()) == 5
+        assert len(scheduler_module.scheduler.get_jobs()) == 3
 
     async def test_stopping_releases_the_reference(self):
         scheduler_module.start_scheduler()

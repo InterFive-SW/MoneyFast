@@ -65,6 +65,50 @@ export interface RebalanceRow {
     rationale: RebalanceRationale[];
 }
 
+/** Haber okumasının ÖLÇÜLEN zemini. Yorum YOK: her değer sunucuda
+ *  sayılmış ya da ölçülmüş. Okuma sohbet turunda kuruluyor ve orada
+ *  uygunluk kapısından geçiyor; ekranda ikinci kez kurmak, o kapıdan
+ *  geçmeyen bir kopya üretirdi. */
+export interface NewsImpactSymbol {
+    symbol: string;
+    name: string;
+    /** null: sağlayıcı bir sektör kaydetmemiş. Uydurulmuyor. */
+    sector: string | null;
+    news_count: number;
+    filing_count: number;
+    price: {
+        /** İşaretli: fiyatın ne YAPTIĞI. Haberin ne yaptığı değil. */
+        recent_move_pct: number | null;
+        /** O sembolde normal bir hareket. null ise büyüklük hakkında hiçbir
+         *  şey söylenemez. */
+        typical_move_pct: number | null;
+        window_days: number;
+    };
+    fundamentals: Record<string, number>;
+    articles: {
+        id: string;
+        title: string;
+        source: string;
+        published_at: string;
+        is_filing: boolean;
+    }[];
+}
+
+export interface NewsImpactPackage {
+    window_days: number;
+    symbols: NewsImpactSymbol[];
+    coverage: {
+        articles: number;
+        filings: number;
+        feed_articles: number;
+        symbols: number;
+        symbols_with_news: number;
+        /** Pakete girmeyen pozisyon sayısı. Sıfırdan büyükse, listelenenler
+         *  portföyün tamamı DEĞİL. */
+        symbols_omitted: number;
+    };
+}
+
 export interface RebalanceRationale {
     /** RISK_CONTRIBUTION / CONCENTRATION / VALUATION / PROFITABILITY /
      *  LEVERAGE / NEWS. Kullanıcıya GÖSTERİLMEZ: `text` zaten Türkçe. */
@@ -161,53 +205,10 @@ export interface DirectionScreen {
     items: DirectionScreenRow[];
 }
 
-/** Bir haberin bir enstrümana etkisi hakkındaki tek gerekçe.
- *
- *  `confidence` YOK ve olmayacak: modelin kendi beyanı bir ölçüm değil ve
- *  ekranda yüzde olarak göstermek, ölçülmemiş bir şeye ölçülmüş bir otorite
- *  verirdi. Sunucu onunla sıralıyor, göndermiyor. */
-export interface NewsImpactReason {
-    newsId: string;
-    direction: string;
-    scope: string;
-    magnitude: string;
-    mechanism: string;
-    publishedAt: string;
-}
 
-/** Yorumun oturduğu ÖLÇÜLEN zemin. Ölçülemediğinde alan hiç gelmiyor. */
-export interface NewsImpactMeasure {
-    typicalMovePct: number;
-    recentMovePct: number;
-}
 
-/** Tek enstrüman için özet.
- *
- *  `sentence` SUNUCUDA kuruluyor ve olduğu gibi yazılıyor: cümlenin
- *  koşulluluğu ve çekincesi kodda çivili. Burada yeniden kurulan bir cümle
- *  o çivinin dışında kalırdı. */
-export interface NewsImpactEntry {
-    symbol: string;
-    sentence: string;
-    counts: Record<string, number>;
-    directCount: number;
-    spilloverCount: number;
-    measured: NewsImpactMeasure | null;
-    reasons: NewsImpactReason[];
-}
 
-export interface NewsDigest {
-    headline: string;
-    entries: NewsImpactEntry[];
-    windowHours: number;
-    disclaimer: string;
-}
 
-export interface NewsImpactSummary {
-    entries: NewsImpactEntry[];
-    windowHours: number;
-    disclaimer: string;
-}
 export type StageTransactionRequest = components['schemas']['StageTransactionRequest'];
 export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
@@ -1079,6 +1080,13 @@ class ApiClient {
      * sunucudan geliyor ve ekranda koşulsuz gösteriliyor -- arayüzde ikinci kez
      * yazsaydık iki kopyadan biri değişip diğeri kalabilirdi.
      */
+    /** Haber okumasının ölçülen zemini. POST, çünkü paket bir HESAP:
+     *  sembol başına mum okunuyor, medyan alınıyor, haberler sayılıyor. */
+    getNewsImpact(days = 90, limit = 5) {
+        return this.post<NewsImpactPackage>(
+            `/market/news/impact?days=${days}&limit=${limit}`, {});
+    }
+
     getRebalancePlan(lookback = '1Y') {
         // POST, çünkü pencere bir GİRDİ: sunucu onunla ölçüm yapıyor ve
         // sonucu günün anlık görüntüsüne yazabiliyor. Sorgu dizesinde
@@ -1104,19 +1112,6 @@ class ApiClient {
         const params = new URLSearchParams({ horizon, limit: String(limit) });
         if (direction) params.set('direction', direction);
         return this.request<DirectionScreen>(`/market/direction/screen?${params}`);
-    }
-
-    /** Portföyün günlük haber özeti. Oturum zorunlu -- sunucu kullanıcıyı
-     *  token'dan çözüyor, demo portföyüne düşmüyor. */
-    getNewsDigest(hours = 24) {
-        return this.request<NewsDigest>(`/market/news/digest?hours=${hours}`);
-    }
-
-    /** Piyasa geneli: haberlerin hangi enstrümanı hangi yönde etkilediği.
-     *  Portföyden bağımsız, oturum aranmıyor. */
-    getNewsImpactSummary(hours = 24, limit = 12) {
-        return this.request<NewsImpactSummary>(
-            `/market/news/impact-summary?hours=${hours}&limit=${limit}`);
     }
 
     /** Follow an instrument. Idempotent — starring twice is not an error. */

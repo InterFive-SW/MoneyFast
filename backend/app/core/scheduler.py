@@ -5,7 +5,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.modules.investment.matching import match_open_orders_job
 from app.modules.news.service import send_daily_market_briefing_to_all
 from app.modules.market.signals import refresh_all_signals
-from app.modules.market.news_impact import analyze_recent_news
 
 logger = logging.getLogger(__name__)
 
@@ -84,25 +83,6 @@ def start_scheduler():
         coalesce=True,
         replace_existing=True,
     )
-
-    # Haber yorumları, günde iki kez. Sabah turu geceyi, akşam turu gün içini
-    # topluyor; günlük özetin penceresi 24 saat olduğu için ikisi arayı
-    # kapatıyor.
-    #
-    # Neden "haber geldikçe" değil: yorumu üreten LLM'in günlük token kotası
-    # var (ölçüldü: 200.000) ve sürekli çalışan bir iş onu sohbetten önce
-    # tüketirdi. İki tur x 40 haber, kotanın yaklaşık yarısı.
-    for hour in (7, 19):
-        scheduler.add_job(
-            analyze_recent_news,
-            "cron",
-            hour=hour,
-            minute=15,
-            id=f"news_impact_job_{hour}",
-            max_instances=1,
-            coalesce=True,
-            replace_existing=True,
-        )
 
     scheduler.start()
     logger.info(

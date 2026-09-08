@@ -183,36 +183,25 @@ describe('endpoint paths', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ lookback: '1Y' })
   })
 
-  it('haber özeti penceresini taşır', () => {
+  it('haber olgu paketi POST ile ve pencereyle gider', () => {
+    // POST, çünkü paket bir HESAP: sembol başına mum okunuyor, medyan
+    // alınıyor, haberler sayılıyor. Önbelleklenebilir bir okuma gibi
+    // görünmesi yanıltıcı olurdu.
     const fetchMock = mockFetch({})
-    apiClient.getNewsDigest(72)
-    expect(calledUrl(fetchMock)).toContain('/market/news/digest?hours=72')
-  })
-
-  it('pencere verilmezse son 24 saat sorulur', () => {
-    // Panelin sorusu "bugün portföyüme ne dokundu"; sunucudaki
-    // `DIGEST_WINDOW_HOURS` ile aynı, ayrışırsa iki taraf farklı bir günü
-    // özetler.
-    const fetchMock = mockFetch({})
-    apiClient.getNewsDigest()
-    expect(calledUrl(fetchMock)).toContain('hours=24')
-  })
-
-  it('piyasa geneli özeti pencere ve limiti taşır', () => {
-    const fetchMock = mockFetch({})
-    apiClient.getNewsImpactSummary(168, 8)
+    apiClient.getNewsImpact(30, 3)
     const url = calledUrl(fetchMock)
-    expect(url).toContain('/market/news/impact-summary')
-    expect(url).toContain('hours=168')
-    expect(url).toContain('limit=8')
+    expect(url).toContain('/market/news/impact')
+    expect(url).toContain('days=30')
+    expect(url).toContain('limit=3')
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST')
   })
 
-  it('piyasa geneli varsayılanları sunucuyla aynı', () => {
+  it('pencere verilmezse doksan gün sorulur', () => {
+    // Daha kısa bir pencere daha güncel değil, daha BOŞ: ölçüldü, otuz gün
+    // tek bir başlık buluyor, doksan gün dokuz.
     const fetchMock = mockFetch({})
-    apiClient.getNewsImpactSummary()
-    const url = calledUrl(fetchMock)
-    expect(url).toContain('hours=24')
-    expect(url).toContain('limit=12')
+    apiClient.getNewsImpact()
+    expect(calledUrl(fetchMock)).toContain('days=90')
   })
 
   it('senaryo faktörü ve şoku gövdede gider', () => {

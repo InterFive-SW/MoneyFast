@@ -30,6 +30,23 @@ class TestAlignment:
         assert result["alignment"] == profile.ALIGNMENT_CALMER
         assert "altında" in result["statement"]
 
+    def test_a_riskless_measurement_sits_below_every_declared_band(self):
+        """Dördüncü bant beyan tarafında YOK, ama karşılaştırma yine
+        kurulabiliyor: "Risksiz" ortak eksenin en altında duruyor."""
+        for declared in ("Düşük", "Orta", "Yüksek"):
+            result = profile.suitability("Risksiz", declared)
+            assert result["alignment"] == profile.ALIGNMENT_CALMER
+            assert "altında" in result["statement"]
+
+    def test_a_riskless_declaration_cannot_be_compared(self):
+        """Anket "Risksiz" üretemiyor; üretmiş görünen bir değer, ölçekleri
+        karışmış bir kayıt demek ve karşılaştırma onu kabul etmemeli.
+
+        Kabul etseydi cevap "ikisi aynı bandda" olurdu -- var olmayan bir
+        beyanla var olan bir ölçümü eşitleyen bir cümle."""
+        result = profile.suitability("Risksiz", "Risksiz")
+        assert result["alignment"] == profile.ALIGNMENT_UNKNOWN
+
     @pytest.mark.parametrize(
         "measured,declared",
         [(None, "Orta"), ("Orta", None), (None, None), ("Belirsiz", "Orta"), ("Orta", "Agresif")],

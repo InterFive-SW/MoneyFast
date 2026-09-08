@@ -47,7 +47,32 @@ HHI_FLOOR, HHI_CEILING = 0.10, 0.50
 DRAWDOWN_FLOOR, DRAWDOWN_CEILING = 0.10, 0.50
 
 #: Score bands, high to low. The Turkish labels are what the UI renders.
-BANDS = ((70.0, "Düşük"), (45.0, "Orta"), (0.0, "Yüksek"))
+#:
+#: **Dördüncü bant, `Risksiz`.** Yeniden dengeleme hedefi bu banttan
+#: türetiliyor (bkz. `investment.risk_band_targets`) ve üç bantlı ölçekte
+#: "Düşük" iki ayrı portföyü aynı kefeye koyuyordu: ölçülen volatilitesi
+#: `VOLATILITY_FLOOR`'un altında kalan, ağırlıklı olarak nakit ve mevduat
+#: benzeri bir portföy ile gerçekten hisse taşıyan sakin bir portföy. İkisine
+#: aynı kova hedefini vermek, ilkine tutmadığı bir riski önermek olurdu.
+#:
+#: Eşik 85, tabanla değil ÖLÇEKLE hizalı: penaltıların ağırlıklı ortalaması
+#: 0,15'in altında kalan portföy demek, yani üç bileşenin hiçbirinde
+#: tabanından kayda değer biçimde uzaklaşmamış bir portföy.
+BANDS = ((85.0, "Risksiz"), (70.0, "Düşük"), (45.0, "Orta"), (0.0, "Yüksek"))
+
+#: Bu ölçeğin sürümü. `risk_snapshots.band_scale` ile birlikte saklanıyor:
+#: tarihsel anlık görüntüler geriye dönük YENİDEN HESAPLANMIYOR (o gün
+#: ölçülen buydu), dolayısıyla seride iki ölçek yan yana duruyor ve grafiğin
+#: hangi noktanın hangi ölçekte yazıldığını bilmesi gerekiyor.
+#:
+#: `questionnaire.VERSION` ile aynı biçim ve aynı sebep: bir etiketin anlamı
+#: değiştiyse, etiketi taşıyan satır hangi anlamla yazıldığını da taşımalı.
+BAND_SCALE = "v2"
+
+#: Dört bantlı ölçekten önce yazılmış anlık görüntüler. Migration bu değerle
+#: geriye dolduruyor -- boş bırakmak "ölçek bilinmiyor" demek olurdu, oysa
+#: biliniyor: o satırlar üç bantlı ölçekte yazıldı.
+BAND_SCALE_LEGACY = "v1"
 
 
 def _penalty(value: Optional[float], floor: float, ceiling: float) -> Optional[float]:
@@ -259,7 +284,25 @@ def suggestions_from(metrics: dict[str, Any]) -> list[dict[str, Any]]:
 #: measured score is inverted (100 = calm) and the questionnaire's raw score is
 #: not, so any arithmetic between them would be read backwards by someone
 #: eventually. On the label scale there is no arithmetic to get wrong.
-_LEVEL_ORDER = ("Düşük", "Orta", "Yüksek")
+#:
+#: Dört basamak, ama BEYAN tarafı yalnızca son üçünü üretebiliyor:
+#: `TOLERANCE_BANDS` üç bantlı kalıyor ve öyle kalması gerekiyor -- anket
+#: sorularının ağırlıkları o üç banda göre kalibre edilmiş, dördüncüyü
+#: eklemek anketin yeniden kalibre edilmesini gerektirirdi. Tek eksende
+#: durmaları yeterli: "Risksiz" ölçülen bir portföyün beyan edilen her
+#: toleransın altında kaldığını söylüyor ve karşılaştırma bunu okuyabiliyor.
+_LEVEL_ORDER = ("Risksiz", "Düşük", "Orta", "Yüksek")
+
+#: Beyan tarafının üretebildiği etiketler -- eksenin dördüncü basamağı HARİÇ.
+#: `questionnaire.TOLERANCE_LEVELS` ile aynı küme; burada tekrar yazılı olması
+#: `profile`i ankete bağlamamak için, ve ikisinin ayrışmadığını
+#: `test_questionnaire.py` çiviliyor.
+#:
+#: Neden ayrı bir kapı: eksende olmak, ÜRETİLEBİLİR olmakla aynı şey değil.
+#: Beyan olarak gelen bir "Risksiz", ölçekleri karışmış bir kayıt demek --
+#: ve eksen üyeliğine bakan bir kontrol onu kabul edip "ikisi aynı bandda"
+#: derdi: var olmayan bir beyanla var olan bir ölçümü eşitleyen bir cümle.
+_DECLARABLE_LEVELS = _LEVEL_ORDER[1:]
 
 ALIGNMENT_UNKNOWN = "UNKNOWN"
 ALIGNMENT_ALIGNED = "ALIGNED"
@@ -282,7 +325,7 @@ def suitability(
     suitability CLAIM has no basis. A comparison is not that claim, and the
     wording below avoids the banned phrasing on purpose rather than by luck.
     """
-    if measured_level not in _LEVEL_ORDER or declared_tolerance not in _LEVEL_ORDER:
+    if measured_level not in _LEVEL_ORDER or declared_tolerance not in _DECLARABLE_LEVELS:
         return {
             "measured_level": measured_level,
             "declared_tolerance": declared_tolerance,

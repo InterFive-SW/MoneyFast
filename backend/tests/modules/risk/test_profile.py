@@ -27,7 +27,11 @@ class TestScore:
     def test_a_calm_portfolio_scores_high(self):
         result = profile.score_from(metrics(volatility=0.08, hhi=0.08, drawdown=-0.05))
         assert result["score"] == 100.0
-        assert result["level"] == "Düşük"
+        # Üç bileşenin üçü de tabanının altında: dört bantlı ölçekte bu
+        # "Düşük" değil "Risksiz". Ayrım yeniden dengeleme için gerekli --
+        # ağırlıklı nakit bir portföye hisse kovası hedefi vermek, ona
+        # tutmadığı bir riski önermek olurdu.
+        assert result["level"] == "Risksiz"
 
     def test_a_violent_portfolio_scores_low(self):
         result = profile.score_from(metrics(volatility=0.60, hhi=0.90, drawdown=-0.70))
@@ -78,9 +82,35 @@ class TestScore:
     def test_weights_sum_to_one_hundred(self):
         assert sum(profile.WEIGHTS.values()) == 100.0
 
-    @pytest.mark.parametrize("score,expected", [(85.0, "Düşük"), (55.0, "Orta"), (10.0, "Yüksek")])
+    @pytest.mark.parametrize(
+        "score,expected",
+        [(100.0, "Risksiz"), (85.0, "Risksiz"), (84.9, "Düşük"), (70.0, "Düşük"),
+         (69.9, "Orta"), (55.0, "Orta"), (45.0, "Orta"), (44.9, "Yüksek"),
+         (10.0, "Yüksek"), (0.0, "Yüksek")],
+    )
     def test_bands(self, score, expected):
+        """Eşikler DAHİL: 85 tam olarak "Risksiz", 84,9 değil."""
         assert profile._band(score) == expected
+
+    def test_the_measured_scale_has_four_bands(self):
+        assert len(profile.BANDS) == 4
+        assert [label for _threshold, label in profile.BANDS] == [
+            "Risksiz", "Düşük", "Orta", "Yüksek"]
+
+    def test_the_declared_scale_still_has_three(self):
+        """Anket ağırlıkları üç banda göre kalibre edilmiş; dördüncüyü
+        eklemek anketin yeniden kalibre edilmesini gerektirirdi."""
+        from app.modules.risk import questionnaire
+
+        assert len(questionnaire.TOLERANCE_BANDS) == 3
+        assert "Risksiz" not in {label for _t, label in questionnaire.TOLERANCE_BANDS}
+
+    def test_every_band_label_sits_on_the_comparison_axis(self):
+        """`suitability()` etiketleri eksendeki SIRALARINA göre
+        karşılaştırıyor; eksende olmayan bir etiket sessizce
+        "karşılaştırılamaz"a düşerdi."""
+        for _threshold, label in profile.BANDS:
+            assert label in profile._LEVEL_ORDER
 
 
 class TestFindings:

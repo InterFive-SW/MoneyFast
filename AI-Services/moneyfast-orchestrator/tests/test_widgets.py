@@ -305,3 +305,84 @@ class TestContextTopic:
             "transaction_type": "BUY", "quantity": 1,
         }))
         assert topic is None
+
+
+class TestRebalanceWidget:
+    """Dengeleme listesi widget'ı, ARAÇ YÜKÜNDEN deterministik.
+
+    Buradaki gerekçe modülün geri kalanından güçlü: bu widget birden çok
+    işlem satırı taşıyor, yani widget JSON'u üretebilen bir model uydurulmuş
+    bir işlem LİSTESİ üretebilir ve kullanıcı onu tıklanabilir bir yüzey
+    olarak görür.
+    """
+
+    ROW = {
+        "symbol": "NVDA", "side": "SELL", "quantity": 26.0, "amount": 281371.44,
+        "bucket": "ABD Hisse",
+        "statement": "NVDA için 26 adet satışın karşılığı 281.371,44 TRY.",
+        "rationale": [
+            {"kind": "RISK_CONTRIBUTION", "value": 0.40,
+             "text": "Portföy oynaklığının %40,2'lik kısmını bu pozisyon üretiyor."},
+        ],
+    }
+
+    def _state(self, data):
+        return {
+            "target_agent": "RISK_STRATEGY_AGENT",
+            "specialist_output": {
+                "status": "OK", "agent": "RISK_STRATEGY_AGENT", "data": data
+            },
+        }
+
+    def _data(self, **overrides):
+        data = {
+            "gate": {"open": True, "reason": "ok"},
+            "disclaimer": "Bu liste yatırım tavsiyesi değildir.",
+            "bandStatement": "Hedef kendi belirlediğiniz dağılıma göre kuruldu.",
+            "rows": [dict(self.ROW)],
+        }
+        data.update(overrides)
+        return data
+
+    def test_a_plan_becomes_a_widget(self):
+        widget, topic = widgets.build(self._state(self._data()))
+        assert widget["type"] == "rebalance"
+        assert topic is None
+        assert widget["payload"]["rows"][0]["symbol"] == "NVDA"
+
+    def test_every_row_carries_its_reasons_as_plain_text(self):
+        widget, _ = widgets.build(self._state(self._data()))
+        assert widget["payload"]["rows"][0]["rationale"] == [
+            "Portföy oynaklığının %40,2'lik kısmını bu pozisyon üretiyor."
+        ]
+
+    def test_a_row_without_a_reason_is_not_drawn(self):
+        """Sebebi görünmeyen bir satırın yanında bir "Uygula" düğmesi, tam
+        olarak kaldırılan yasağın engellediği şey."""
+        data = self._data(rows=[{**self.ROW, "rationale": []}])
+        assert widgets.build(self._state(data)) == (None, None)
+
+    def test_a_non_object_row_is_dropped(self):
+        data = self._data(rows=["NVDA", dict(self.ROW)])
+        widget, _ = widgets.build(self._state(data))
+        assert len(widget["payload"]["rows"]) == 1
+
+    def test_a_closed_gate_draws_nothing(self):
+        """Boş bir tablo, yapılacak bir şey varmış gibi görünürdü; nedeni
+        zaten metinde yazılı."""
+        data = self._data(gate={"open": False, "reason": "Testi tamamlayın."})
+        assert widgets.build(self._state(data)) == (None, None)
+
+    def test_an_empty_list_draws_nothing(self):
+        assert widgets.build(self._state(self._data(rows=[]))) == (None, None)
+
+    def test_the_disclaimer_and_the_band_sentence_travel(self):
+        widget, _ = widgets.build(self._state(self._data()))
+        assert "yatırım tavsiyesi değildir" in widget["payload"]["disclaimer"]
+        assert "kendi belirlediğiniz" in widget["payload"]["band_statement"]
+
+    def test_risk_metrics_alone_draw_no_widget(self):
+        """Çekinceli sayılardan oluşan bir tablo, widget'a çevrildiğinde
+        çekincelerini kaybediyor."""
+        state = self._state({"metrics": {"volatility_annualized": 0.31}})
+        assert widgets.build(state) == (None, None)

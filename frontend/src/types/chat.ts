@@ -57,10 +57,36 @@ export interface PortfolioWidgetPayload {
   positions: PortfolioPosition[];
 }
 
+/** Dengeleme listesinin sohbetteki hâli.
+ *
+ *  `rationale` HER satırda ve boş olamaz: sohbetin bir alım-satım listesi
+ *  göstermesine izin verilmesinin tek dayanağı, her satırın onu üreten
+ *  ölçümü taşıması. Sebebi görünmeyen bir satırın yanında bir "Uygula"
+ *  düğmesi, kaldırılan yasağın engellediği şeyin ta kendisi. */
+export interface RebalanceWidgetRow {
+  symbol: string;
+  side: string;
+  quantity: number;
+  amount: number;
+  bucket: string;
+  /** Sunucuda kurulmuş, olduğu gibi yazılan cümle. */
+  statement: string;
+  rationale: string[];
+}
+
+export interface RebalanceWidgetPayload {
+  /** Koşulsuz gösterilir; sunucudan gelir. */
+  disclaimer: string;
+  /** Hedefin nereden geldiği: kullanıcının kendi hedefi ya da bandı. */
+  band_statement: string;
+  rows: RebalanceWidgetRow[];
+}
+
 export type ChatWidget = 
   | { type: 'chart'; payload: ChartWidgetPayload }
   | { type: 'action'; payload: ActionWidgetPayload }
-  | { type: 'portfolio'; payload: PortfolioWidgetPayload };
+  | { type: 'portfolio'; payload: PortfolioWidgetPayload }
+  | { type: 'rebalance'; payload: RebalanceWidgetPayload };
 
 export interface ChatMessage {
   id: string;

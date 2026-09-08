@@ -104,7 +104,9 @@ class TestWiring:
         # v2.22: `get_rebalance_plan` (salt okuma).
         # v2.23: `get_news_impact_digest` (salt okuma). Sistemdeki tek araç
         # ki taşıdığı şey bir ölçüm değil, bir modelin metin okuması.
-        assert server.CONTRACT_VERSION == "v2.23"
+        # v2.24: `get_rebalance_plan` satırları taşıyor ve kendi alanında.
+        # Politika değişikliği, genişletme değil.
+        assert server.CONTRACT_VERSION == "v2.24"
 
     def test_instructions_state_the_load_bearing_rules(self):
         """The instructions block is the only guidance a client sees before it
@@ -122,6 +124,10 @@ class TestWiring:
             "risk_strategy", "compliance", "transaction", "banking",
             "technical", "news", "scenario", "fundamentals", "cash_flow",
             "report", "instrument", "order",
+            # v2.24: dengeleme kendi alanında. Pozisyon okumanın yanında
+            # durduğunda ikisi aynı sınıftan iki araç gibi okunuyordu --
+            # oysa biri bir ölçüm raporu, diğeri bir öneri listesi.
+            "rebalance",
         }
 
     def test_every_domain_module_exposes_register(self):

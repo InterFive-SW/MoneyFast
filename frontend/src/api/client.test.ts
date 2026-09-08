@@ -110,7 +110,6 @@ describe('endpoint paths', () => {
     ['getPortfolioReport', '/api/analytics/report'],
     ['getAllocationDrift', '/api/investment/allocation-drift'],
     // Sapmanın emir karşılığı; `disclaimer` sunucudan gelir.
-    ['getRebalancePlan', '/api/investment/rebalance-plan'],
     ['getAllocationTemplates', '/api/risk/allocation-templates'],
     ['getSectorAllocation', '/api/investment/sector-allocation'],
     ['getHeatmap', '/api/investment/heatmap'],
@@ -167,6 +166,22 @@ describe('endpoint paths', () => {
     const fetchMock = mockFetch({})
     apiClient.getDirectionScreen('3M')
     expect(calledUrl(fetchMock)).not.toContain('direction=')
+  })
+
+  it('dengeleme planı POST ile ve pencereyle gider', () => {
+    // Pencere bir GİRDİ: sunucu onunla ölçüm yapıyor. Sorgu dizesinde
+    // taşınan bir girdi, önbelleklenebilir bir okuma gibi görünürdü.
+    const fetchMock = mockFetch({})
+    apiClient.getRebalancePlan('5Y')
+    expect(calledUrl(fetchMock)).toBe('/api/investment/rebalance/plan')
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ lookback: '5Y' })
+  })
+
+  it('pencere verilmezse bir yıl sorulur', () => {
+    const fetchMock = mockFetch({})
+    apiClient.getRebalancePlan()
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ lookback: '1Y' })
   })
 
   it('haber özeti penceresini taşır', () => {

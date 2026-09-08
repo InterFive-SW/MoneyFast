@@ -69,6 +69,20 @@ export interface RebalanceUnresolved {
 }
 
 export interface RebalancePlan {
+    /** Ölçümün penceresi. Yanıtta duruyor çünkü sonucu gerçekten
+     *  değiştiriyor: aynı portföy üç aylıkta "Yüksek", beş yıllıkta "Orta"
+     *  ölçülebilir. */
+    lookback: string;
+    /** Ölçülen risk ve beyan edilen tolerans AYRI alanlarda: ikisi farklıysa
+     *  hangisinin bağladığı okunabilmeli. `bindingBand` daha temkinli olan. */
+    measuredLevel: string | null;
+    declaredTolerance: string | null;
+    bindingBand: string | null;
+    /** USER: kullanıcının kendi hedefi. BAND: bandın matris hedefi.
+     *  NONE: ikisi de yok. Kullanıcının kendi hedefi her zaman kazanır. */
+    targetSource: 'USER' | 'BAND' | 'NONE';
+    /** Hedefin nereden geldiğini söyleyen, SUNUCUDA kurulmuş cümle. */
+    bandStatement: string;
     hasTarget: boolean;
     totalValue: number;
     statement: string;
@@ -1063,8 +1077,11 @@ class ApiClient {
      * sunucudan geliyor ve ekranda koşulsuz gösteriliyor -- arayüzde ikinci kez
      * yazsaydık iki kopyadan biri değişip diğeri kalabilirdi.
      */
-    getRebalancePlan() {
-        return this.request<RebalancePlan>('/investment/rebalance-plan');
+    getRebalancePlan(lookback = '1Y') {
+        // POST, çünkü pencere bir GİRDİ: sunucu onunla ölçüm yapıyor ve
+        // sonucu günün anlık görüntüsüne yazabiliyor. Sorgu dizesinde
+        // taşınan bir girdi, önbelleklenebilir bir okuma gibi görünürdü.
+        return this.post<RebalancePlan>('/investment/rebalance/plan', { lookback });
     }
 
     /** Hazır dağılım şablonları ve her birinin ölçülen oynaklığı. */

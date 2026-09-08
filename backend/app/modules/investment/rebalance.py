@@ -316,6 +316,49 @@ def _row_statement(
 # yön bunun tersi.
 
 
+def band_statement(
+    measured_level: Optional[str],
+    declared_tolerance: Optional[str],
+    band: Optional[str],
+    source: str,
+) -> str:
+    """Hedefin NEREDEN geldiğini söyleyen cümle, kodda kurulu.
+
+    Ayrışma gizlenmiyor: iki eksen farklı ölçüldüyse hangisinin bağladığı
+    yazılıyor. "Size uygun" ya da "önerilen" geçmiyor -- cümle iki olgunun
+    karşılaştırması, kişi hakkında bir yargı değil (`profile.suitability()`
+    ile aynı sınır).
+
+    Kullanıcının kendi hedefi varsa bant hiç anlatılmıyor: o hedef zaten
+    kullanıcınındır ve yanında bir gerekçe istemez.
+    """
+    if source == "USER":
+        return (
+            "Karşılaştırma, kendi belirlediğiniz hedef dağılıma göre yapıldı."
+        )
+    if source == "NONE" or band is None:
+        return (
+            "Karşılaştırma için ya kendi hedef dağılımınız ya da ölçülebilir "
+            "bir portföyle tamamlanmış bir risk anketi gerekiyor."
+        )
+    if measured_level and declared_tolerance and measured_level != declared_tolerance:
+        return (
+            f"Portföyünüzün ölçülen riski \"{measured_level}\", ankette "
+            f"belirttiğiniz tolerans \"{declared_tolerance}\". Hedef, ikisinden "
+            f"daha temkinli olanına -- \"{band}\" bandına -- göre kuruldu."
+        )
+    if measured_level and declared_tolerance:
+        return (
+            f"Ölçülen riskiniz ve beyan ettiğiniz tolerans aynı bandda "
+            f"(\"{band}\"); hedef o banda göre kuruldu."
+        )
+    known = "Ölçülen portföy riskiniz" if measured_level else "Ankette belirttiğiniz tolerans"
+    return (
+        f"{known} \"{band}\"; diğer taraf okunamadığı için hedef buna göre "
+        "kuruldu."
+    )
+
+
 def band_targets(db: Session, band: str) -> dict[str, float]:
     """Bandın kova hedefleri. Satırı olmayan kova sözlükte de YOKTUR.
 

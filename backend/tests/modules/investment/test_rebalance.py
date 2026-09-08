@@ -308,6 +308,15 @@ class TestWording:
         texts += [row["reason"] for row in out["unresolved"]]
         texts.append(out["disclaimer"])
         texts.append(out["summary"])
+        # Bant cümlesi de bu uçtan çıkıyor ve aynı taramadan geçmeli.
+        texts += [
+            rebalance.band_statement("Orta", "Orta", "Orta", "USER"),
+            rebalance.band_statement("Düşük", "Yüksek", "Düşük", "BAND"),
+            rebalance.band_statement("Orta", "Orta", "Orta", "BAND"),
+            rebalance.band_statement("Yüksek", None, "Yüksek", "BAND"),
+            rebalance.band_statement(None, "Risksiz", "Risksiz", "BAND"),
+            rebalance.band_statement(None, None, None, "NONE"),
+        ]
         if out["warning"]:
             texts.append(out["warning"])
         return texts
@@ -369,3 +378,41 @@ class TestBandTargets:
 
     def test_an_unknown_band_has_no_targets(self):
         assert rebalance.band_targets(self._db([]), "Belirsiz") == {}
+
+
+class TestBandStatement:
+    """Hedefin nereden geldiğini söyleyen cümle, KODDA kurulu.
+
+    `profile.suitability()` ile aynı sınır: cümle iki olgunun
+    karşılaştırması, kişi hakkında bir yargı değil. "Size uygun",
+    "önerilen", "sizin için" geçmiyor ve `TestWording` bunu tarıyor.
+    """
+
+    def test_a_users_own_target_needs_no_band(self):
+        text = rebalance.band_statement("Orta", "Orta", "Orta", "USER")
+        assert "kendi belirlediğiniz" in text
+        assert "bant" not in text.lower()
+
+    def test_a_divergence_names_both_sides_and_the_binding_one(self):
+        text = rebalance.band_statement("Düşük", "Yüksek", "Düşük", "BAND")
+        assert "Düşük" in text and "Yüksek" in text and "daha temkinli" in text
+
+    def test_agreement_says_so(self):
+        text = rebalance.band_statement("Orta", "Orta", "Orta", "BAND")
+        assert "aynı bandda" in text
+
+    def test_one_missing_side_is_named_as_unread(self):
+        measured_only = rebalance.band_statement("Yüksek", None, "Yüksek", "BAND")
+        declared_only = rebalance.band_statement(None, "Düşük", "Düşük", "BAND")
+        assert "okunamadığı" in measured_only and "Yüksek" in measured_only
+        assert "okunamadığı" in declared_only and "Düşük" in declared_only
+
+    def test_no_band_asks_for_what_is_missing(self):
+        text = rebalance.band_statement(None, None, None, "NONE")
+        assert "gerekiyor" in text
+
+    def test_a_band_of_none_never_produces_a_band_sentence(self):
+        """`source` BAND derken bandın `None` olması tutarsız bir durum;
+        cümle onu bant varmış gibi anlatmamalı."""
+        text = rebalance.band_statement("Orta", "Orta", None, "BAND")
+        assert "gerekiyor" in text

@@ -1409,13 +1409,27 @@ def _rebalance_payload(db: Session, user_id: str, lookback: str) -> dict:
         }
         for row, value in inputs["valued"]
     ]
+    base_currency = (account.currency_code if account else "TRY") or "TRY"
     plan = rebalance.plan(
         result["buckets"],
         positions,
         inputs["rates"],
-        base_currency=(account.currency_code if account else "TRY") or "TRY",
+        base_currency=base_currency,
         blocked_cash=market_service.blocked_cash(db, user_id),
         available_cash=float(account.cash_balance) if account else 0.0,
+        # Üç seçim girdisi. Hepsi ÖLÇÜM ve hepsi burada okunuyor;
+        # `rebalance` veritabanı tanımıyor.
+        contributions=_contributions_for(db, inputs["valued"], base_currency, lookback),
+        fundamentals={
+            row["symbol"]: row
+            for row in (
+                market_service.fundamentals_for(db, position["symbol"])
+                for position in positions
+                if position.get("symbol")
+            )
+            if row
+        },
+        news=_news_reading_for(db, [p["symbol"] for p in positions if p.get("symbol")]),
     )
     return {
         "lookback": lookback,
@@ -1432,6 +1446,56 @@ def _rebalance_payload(db: Session, user_id: str, lookback: str) -> dict:
         ),
         **plan,
     }
+
+
+def _contributions_for(db: Session, valued, base_currency: str, lookback: str):
+    """Sembol -> risk katkısı. Satış tarafının birincil kriteri.
+
+    Ölçülemeyen bir portföy boş bir harita döndürüyor ve o zaman seçim
+    yalnızca temel veriyle yapılıyor -- sıfır katkı yazmak, ölçülmemiş bir
+    şeyi "risk üretmiyor" diye raporlamak olurdu.
+    """
+    from app.modules.risk import returns as risk_returns
+    from app.modules.risk import service as risk_service
+
+    holdings = [
+        {
+            "symbol": row.get("symbol"),
+            "market_value": value,
+            "instrument_currency": row.get("currency") or base_currency,
+        }
+        for row, value in valued
+        if row.get("symbol")
+    ]
+    if not holdings:
+        return {}
+    limit = risk_service.history_limit(lookback)
+    rows = risk_returns.risk_contributions(
+        holdings,
+        lambda symbol: market_service.candle_closes(db, symbol, limit=limit),
+        base_currency=base_currency,
+    )
+    return {row["symbol"]: row for row in rows}
+
+
+def _news_reading_for(db: Session, symbols: list[str]) -> dict[str, dict]:
+    """Sembol -> en yüksek güvenli haber okuması, varsa.
+
+    Bölüm 12'nin etki analizinden geliyor ve YALNIZCA gerekçe olarak
+    kullanılıyor: bir haber okuması adayı listeye sokabiliyor, ama adet ve
+    tutar aritmetikten çıkıyor. Haber bir sayı değil ve satırdaki `value`
+    alanı bu yüzden boş.
+    """
+    from app.modules.market import news_impact
+
+    if not symbols:
+        return {}
+    out: dict[str, dict] = {}
+    for row in news_impact.impacts_since(db, symbols=symbols, hours=24 * 7):
+        # İlk satır kazanıyor: `impacts_since` yeniden eskiye sıralı,
+        # dolayısıyla bu "en yeni okuma".
+        out.setdefault(row.symbol, {"mechanism": row.mechanism, "direction": row.direction})
+    return out
 
 
 def _drift_inputs(

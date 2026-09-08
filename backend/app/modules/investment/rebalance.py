@@ -62,6 +62,154 @@ def _floor_quantity(raw: float, is_fund: bool) -> float:
     return float(math.floor(raw))
 
 
+# ── Gerekçe: bir satırı listeye sokan sayı ──────────────────────────────────
+#
+# **Sayısı olmayan satır listeye girmiyor.** Bu, kaldırılan yasakların yerine
+# konan birinci kontrol: öneri hâlâ bir ölçüme dayanmak zorunda. Boş bir
+# gerekçe alanıyla öneri sunmak, gerekçeyi kullanıcının uydurmasına bırakmak
+# olurdu -- ve bir tavsiyeyi bir ölçüm raporundan ayıran tek şey bu.
+
+RISK_CONTRIBUTION = "RISK_CONTRIBUTION"
+CONCENTRATION = "CONCENTRATION"
+VALUATION = "VALUATION"
+PROFITABILITY = "PROFITABILITY"
+LEVERAGE = "LEVERAGE"
+NEWS = "NEWS"
+
+#: Tek pozisyon ağırlığı bu oranı aşarsa gerekçe olarak yazılıyor. `profile`
+#: yoğunlaşmayı HHI ile ölçüyor; bu ondan ayrı ve daha dar bir soru: TEK bir
+#: satırın kendi payı. Eşik `HHI_CEILING`in karekökü civarı -- iki eşit
+#: pozisyonun her birinin payı.
+CONCENTRATION_FLOOR = 0.20
+
+#: Ölçülen katkı bu payın altındaysa gerekçe olarak yazılmıyor: yüzde birlik
+#: bir katkı, satışı açıklayan bir sayı değil.
+CONTRIBUTION_FLOOR = 0.05
+
+
+def _pct(value: float) -> str:
+    """Yüzde, İŞARETİYLE.
+
+    Mutlak değer ALMIYOR ve bu bir kez ölçülerek düzeltildi: özkaynak
+    kârlılığı -0,3521 olan bir şirket "Özkaynak kârlılığı %35,2" diye
+    yazılıyordu -- zarar eden bir şirketi kâr ediyor gibi göstermek, gerekçe
+    olarak sunulan sayının tam tersini söylemek demek.
+
+    İşareti cümleye bırakan tek yer risk katkısı ve orası onu KELİMEYLE
+    söylüyor ("üretiyor" / "azaltıyor"), bu yüzden oraya mutlak değer ayrıca
+    geçiliyor.
+    """
+    # İşaret yüzde işaretinin ÖNÜNDE: Türkçede "-%35,2" yazılır, "%-35,2"
+    # değil, ve ikincisi ekranda bir dizgi hatası gibi okunuyor.
+    sign = "-" if value < 0 else ""
+    return f"{sign}%{abs(value) * 100:.1f}".replace(".", ",")
+
+
+def _num(value: float) -> str:
+    return f"{value:,.2f}".replace(",", "~").replace(".", ",").replace("~", ".")
+
+
+def rationale_for(
+    side: str,
+    contribution: Optional[dict[str, Any]] = None,
+    fundamentals: Optional[dict[str, Any]] = None,
+    news: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    """Bir adayı listeye sokan ölçümler ve her birinin cümlesi.
+
+    Üç girdi, üçü de ölçüm: portföyün kendi getirilerinden hesaplanan risk
+    katkısı, sağlayıcıdan gelen temel veriler, ve haber okuması. Hiçbiri
+    yoksa dönen liste BOŞ ve çağıran o enstrümanı listeye almıyor.
+
+    **Satış tarafında birincil kriter risk katkısı**, ağırlık değil: riski
+    düşürmek isteyen için en büyük pozisyon değil, portföy oynaklığının en
+    büyük payını üreten pozisyon önemli. İkisi aynı şey değil ve aradaki fark
+    `returns.risk_contributions()` docstring'inde ölçülmüş.
+
+    Cümleler burada kuruluyor, modelde değil: her cümle koşullu, sayısını
+    içinde taşıyor ve "ucuz", "pahalı", "cazip" gibi bir niteleme
+    kullanmıyor -- bir orana iyi ya da kötü demek, o oranın ne olduğunu
+    söylemekten farklı bir iddiadır.
+    """
+    out: list[dict[str, Any]] = []
+
+    if contribution:
+        share = contribution.get("contribution")
+        weight = contribution.get("weight")
+        if share is not None and abs(share) >= CONTRIBUTION_FLOOR:
+            out.append({
+                "kind": RISK_CONTRIBUTION,
+                "value": round(float(share), 4),
+                # Yön KELİMEYLE, işaretle değil; bu yüzden sayı mutlak
+                # geçiyor. "%-8,4 üretiyor" okunabilir bir cümle değil.
+                "text": (
+                    f"Portföy oynaklığının {_pct(abs(float(share)))}'lik "
+                    "kısmını bu pozisyon üretiyor."
+                    if share > 0
+                    else
+                    f"Bu pozisyon portföy oynaklığını {_pct(abs(float(share)))} "
+                    "azaltıyor."
+                ),
+            })
+        if weight is not None and float(weight) >= CONCENTRATION_FLOOR:
+            out.append({
+                "kind": CONCENTRATION,
+                "value": round(float(weight), 4),
+                "text": f"Tek pozisyon ağırlığı {_pct(float(weight))}.",
+            })
+
+    data = fundamentals or {}
+    pe_ratio = data.get("pe_ratio")
+    if pe_ratio is not None:
+        out.append({
+            "kind": VALUATION,
+            "value": round(float(pe_ratio), 2),
+            # "Ucuz" ya da "pahalı" DEĞİL: oranın kendisi. Nitelemek, bir
+            # fiyat görüşü beyan etmek olurdu.
+            "text": f"Fiyat/kazanç oranı {_num(float(pe_ratio))}.",
+        })
+    roe = data.get("return_on_equity")
+    if roe is not None:
+        out.append({
+            "kind": PROFITABILITY,
+            "value": round(float(roe), 4),
+            "text": f"Özkaynak kârlılığı {_pct(float(roe))}.",
+        })
+    debt = data.get("debt_to_equity")
+    if debt is not None:
+        out.append({
+            "kind": LEVERAGE,
+            # Sağlayıcı bunu YÜZDE olarak veriyor (200 = 2 kat); cümlede kat
+            # olarak yazmak, aynı sayıyı yüz kat küçültmek olurdu.
+            "value": round(float(debt), 2),
+            "text": f"Borç/özkaynak oranı {_num(float(debt))}.",
+        })
+
+    if news and news.get("mechanism"):
+        out.append({
+            "kind": NEWS,
+            # Haber bir SAYI değil; `value` yok ve uydurulmuyor.
+            "value": None,
+            "text": str(news["mechanism"]),
+        })
+
+    return out
+
+
+def _rank_key(side: str, contribution: Optional[dict[str, Any]]) -> tuple:
+    """Aday sıralaması. Ölçülemeyen aday en sona.
+
+    Satışta en yüksek risk katkısı önce: kova farkını kapatmak için satılacak
+    ilk şey, oynaklığın en büyük payını üreten pozisyon. Alışta tersi --
+    eklenecek ilk şey, portföyün oynaklığına en az katkı veren pozisyon.
+    İki kural birbirinin aynası ve ikisi de ölçülmüş bir sayıya dayanıyor.
+    """
+    share = (contribution or {}).get("contribution")
+    if share is None:
+        return (1, 0.0)
+    return (0, -float(share) if side == SELL else float(share))
+
+
 def plan(
     drift_rows: Sequence[dict[str, Any]],
     positions: Sequence[dict[str, Any]],
@@ -69,6 +217,9 @@ def plan(
     base_currency: str,
     blocked_cash: float = 0.0,
     available_cash: float = 0.0,
+    contributions: Optional[dict[str, dict[str, Any]]] = None,
+    fundamentals: Optional[dict[str, dict[str, Any]]] = None,
+    news: Optional[dict[str, dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """Sapmayı satır satır emir karşılığına çevirir.
 
@@ -77,10 +228,17 @@ def plan(
     -- `ai_service.holding_value` tek uygulama ve onu burada tekrarlamak iki
     farklı portföy değeri demek olurdu.
 
+    `contributions`, `fundamentals` ve `news` sembol -> ölçüm haritaları;
+    üçü de opsiyonel ve üçü birden boşsa HİÇBİR satır üretilmiyor -- gerekçe
+    zorunluluğu tam olarak bu.
+
     Dönen `rows` emir üretilebilen satırlar, `unresolved` ise üretilemeyenler
     ve HER BİRİ NEDENİNİ söylüyor. Sessizce atlanmış bir kova, kullanıcının
     hedefine ulaşamamasının sebebini görünmez yapardı.
     """
+    contributions = contributions or {}
+    fundamentals = fundamentals or {}
+    news = news or {}
     by_bucket: dict[str, list[dict[str, Any]]] = {}
     for position in positions:
         by_bucket.setdefault(position.get("bucket") or allocation.OTHER, []).append(
@@ -134,24 +292,74 @@ def plan(
             continue
 
         side = SELL if gap_amount > 0 else BUY
+
+        # Adaylar SEÇİLİYOR, kova farkı orantılı dağıtılmıyor. "Hangi hisse"
+        # ayrı bir soru ve üç ölçümden cevaplanıyor; sıralama satışta en
+        # yüksek risk katkısıyla, alışta en düşüğüyle başlıyor.
+        candidates = []
         for holding in holdings:
-            share = float(holding.get("value_base") or 0.0) / bucket_value
-            # Kova farkı MEVCUT ağırlıklara orantılı dağıtılıyor. Hangi
-            # enstrümanın satılacağını SEÇMEK bir tavsiye olurdu.
-            amount_base = abs(gap_amount) * share
-            row = _order_row(holding, side, amount_base, rates, base_currency)
+            symbol = holding.get("symbol")
+            reasons = rationale_for(
+                side,
+                contributions.get(symbol),
+                fundamentals.get(symbol),
+                news.get(symbol),
+            )
+            if not reasons:
+                # Sayısı olmayan satır listeye GİRMİYOR. Boş bir gerekçe
+                # alanıyla öneri sunmak, gerekçeyi kullanıcının uydurmasına
+                # bırakmak olurdu.
+                unresolved.append({
+                    "bucket": bucket, "label": label, "symbol": symbol,
+                    "gap_amount": None,
+                    "reason": (
+                        f"{symbol} için bir seçim gerekçesi ölçülemedi "
+                        "(risk katkısı, temel veri ve haber okuması yok)."
+                    ),
+                })
+                continue
+            candidates.append((holding, reasons))
+
+        if not candidates:
+            continue
+
+        candidates.sort(
+            key=lambda pair: _rank_key(side, contributions.get(pair[0].get("symbol")))
+        )
+
+        remaining = abs(gap_amount)
+        for holding, reasons in candidates:
+            if remaining < 0.01:
+                break
+            # Satışta bir enstrümandan elde olandan fazlası istenemez; sıra
+            # bir sonrakine geçiyor. Alışta üst sınır nakit ve o plan
+            # seviyesinde uyarılıyor.
+            take = (
+                min(remaining, float(holding.get("value_base") or 0.0))
+                if side == SELL
+                else remaining
+            )
+            if take < 0.01:
+                continue
+            row = _order_row(holding, side, take, rates, base_currency)
             if row.get("reason"):
                 unresolved.append({
                     "bucket": bucket, "label": label,
                     "symbol": holding.get("symbol"),
-                    "gap_amount": round(amount_base, 2),
+                    "gap_amount": round(take, 2),
                     "reason": row["reason"],
                 })
                 continue
-            row.update({"bucket": bucket, "label": label})
+            row.update({
+                "bucket": bucket,
+                "label": label,
+                # Satırı listeye sokan sayılar, satırla BİRLİKTE.
+                "rationale": reasons,
+            })
             residual_total += row["residual_base"]
             if side == BUY:
                 buy_total += row["amount_base"]
+            remaining -= row["amount_base"]
             rows.append(row)
 
     usable_cash = round(available_cash - blocked_cash, 2)
@@ -168,6 +376,11 @@ def plan(
 
     return {
         "disclaimer": DISCLAIMER_TR,
+        # Seçim hangi ölçümlerle yapılabildi. Kapsama DÜZ DEĞİL: temiz bir
+        # klonda analitik alanlar neredeyse boş ve seçim yalnızca temel
+        # oranlar üzerinden çalışır. Bunu söylemeden bir liste sunmak,
+        # eksik bir ölçümü tam bir ölçüm gibi göstermek olurdu.
+        "data_quality": _coverage(positions, contributions, fundamentals, news),
         # Sohbete GİDEN şey bu, satırlar değil. Gerekçe: ekranda duran liste
         # kullanıcının kendi koyduğu hedeften çıkıyor ve onayı kendi
         # tıklaması veriyor; aynı listeyi sohbette adet ve yönle yeniden
@@ -182,6 +395,27 @@ def plan(
         "usable_cash_base": usable_cash,
         "blocked_cash_base": round(blocked_cash, 2),
         "warning": warning,
+    }
+
+
+def _coverage(
+    positions: Sequence[dict[str, Any]],
+    contributions: dict[str, dict[str, Any]],
+    fundamentals: dict[str, dict[str, Any]],
+    news: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Kaç pozisyon için hangi ölçüm vardı.
+
+    Oran DEĞİL, sayı: "%67 kapsama" bir portföyün kaç pozisyonu olduğunu
+    söylemiyor ve üç pozisyonun ikisi ile doksanın altmışı aynı orana
+    düşüyor. Payda da yazılı olduğunda okuyan ikisini ayırt edebiliyor.
+    """
+    symbols = [row.get("symbol") for row in positions if row.get("symbol")]
+    return {
+        "positions": len(symbols),
+        "risk_contribution": sum(1 for symbol in symbols if contributions.get(symbol)),
+        "fundamentals": sum(1 for symbol in symbols if fundamentals.get(symbol)),
+        "news": sum(1 for symbol in symbols if news.get(symbol)),
     }
 
 
@@ -213,8 +447,19 @@ def _summary(
             f"({', '.join(buckets)})."
         )
     if unresolved:
+        # Kova mı enstrüman mı ayrı sayılıyor. Seçim motoru geldiğinden beri
+        # çözülemeyenlerin çoğu kova değil ADAY -- ölçüldü, on dört satırın
+        # tamamı "kova" diye yazılıyordu ve kullanıcının o hesabında on dört
+        # kovası yok, beş kovası var.
+        symbols = sum(1 for row in unresolved if row.get("symbol"))
+        buckets = len(unresolved) - symbols
+        shape = []
+        if buckets:
+            shape.append(f"{buckets} kova")
+        if symbols:
+            shape.append(f"{symbols} enstrüman")
         parts.append(
-            f"{len(unresolved)} kova için emir üretilemedi ve her birinin "
+            f"{' ve '.join(shape)} için emir üretilemedi ve her birinin "
             "nedeni listede yazılı."
         )
     return " ".join(parts)

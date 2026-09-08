@@ -1010,10 +1010,22 @@ class TestRebalancePlan:
     def _plan(self, client, lookback="1Y"):
         return client.post(self.URL, json={"lookback": lookback})
 
-    def _measured(self, mocker, level="Orta", declared=None):
+    def _measured(self, mocker, level="Orta", declared=None, rationale=True):
         """Ölçüm bloğu taklit ediliyor: bu sınıfın konusu plan, risk motoru
-        değil, ve gerçek ölçüm sembol başına mum okumak demek."""
+        değil, ve gerçek ölçüm sembol başına mum okumak demek.
+
+        `rationale`, her adaya bir seçim gerekçesi veriyor. Gerekçesi olmayan
+        aday listeye HİÇ girmiyor (`TestRationaleGate`) ve bu sınıfın ölçtüğü
+        şey o kapı değil, ucun gövdesi.
+        """
+        from app.modules.investment import market_service
         from app.modules.risk import router as risk_router
+
+        if rationale:
+            mocker.patch.object(
+                market_service, "fundamentals_for",
+                side_effect=lambda _db, symbol: {"symbol": symbol, "pe_ratio": 10.0},
+            )
 
         mocker.patch.object(
             risk_router, "_measure",
@@ -1209,6 +1221,34 @@ class TestRebalanceTargetSource:
         body = self._plan(client, lookback="5Y")
         assert body["lookback"] == "5Y"
         assert risk_router._measure.call_args.args[2] == "5Y"
+
+    def test_a_news_reading_becomes_a_rationale(self, client, mocker):
+        """Bölüm 12'nin etki analizi seçim girdilerinden biri: bir haber
+        okuması adayı listeye sokabiliyor, ama adet ve tutar aritmetikten
+        çıkıyor."""
+        from types import SimpleNamespace as NS
+
+        from app.modules.market import news_impact
+
+        self._wire(mocker, own={"cash": 100.0}, band_rows={})
+        mocker.patch.object(
+            news_impact, "impacts_since",
+            return_value=[
+                NS(symbol="A", mechanism="Sözleşme ihracata ekleniyor.", direction="UP"),
+                NS(symbol="A", mechanism="Daha eski okuma.", direction="DOWN"),
+            ],
+        )
+        from app.modules.investment import router as investment_router
+
+        reading = investment_router._news_reading_for(object(), ["A"])
+        # En YENİ okuma kazanıyor: `impacts_since` yeniden eskiye sıralı.
+        assert reading == {"A": {"mechanism": "Sözleşme ihracata ekleniyor.",
+                                 "direction": "UP"}}
+
+    def test_no_symbols_means_no_news_read(self, client, mocker):
+        from app.modules.investment import router as investment_router
+
+        assert investment_router._news_reading_for(object(), []) == {}
 
     def test_a_window_written_as_days_is_refused(self, client, mocker):
         """Tanınmayan bir pencere sessizce bir yıla düşüyordu ve çağıran

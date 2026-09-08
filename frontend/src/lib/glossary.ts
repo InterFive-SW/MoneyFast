@@ -158,7 +158,12 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
             'oluşur — oynaklık (%45), yoğunlaşma (%35) ve en derin düşüş (%20). ' +
             'Ölçülemeyen bir bileşen sıfır sayılmaz, hesaptan çıkarılır ve kalan ' +
             'ağırlıklar yeniden dağıtılır.',
-        anchors: ['70 ve üzeri: Düşük risk', '45–70 arası: Orta', '45 altı: Yüksek'],
+        anchors: [
+            '85 ve üzeri: Risksiz',
+            '70–85 arası: Düşük',
+            '45–70 arası: Orta',
+            '45 altı: Yüksek',
+        ],
     },
     risk_contribution: {
         title: 'Riskteki pay',

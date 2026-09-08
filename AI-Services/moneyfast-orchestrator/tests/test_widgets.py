@@ -305,3 +305,174 @@ class TestContextTopic:
             "transaction_type": "BUY", "quantity": 1,
         }))
         assert topic is None
+
+
+class TestRebalanceWidget:
+    """Dengeleme listesi widget'ı, ARAÇ YÜKÜNDEN deterministik.
+
+    Buradaki gerekçe modülün geri kalanından güçlü: bu widget birden çok
+    işlem satırı taşıyor, yani widget JSON'u üretebilen bir model uydurulmuş
+    bir işlem LİSTESİ üretebilir ve kullanıcı onu tıklanabilir bir yüzey
+    olarak görür.
+    """
+
+    ROW = {
+        "symbol": "NVDA", "side": "SELL", "quantity": 26.0, "amount": 281371.44,
+        "bucket": "ABD Hisse",
+        "statement": "NVDA için 26 adet satışın karşılığı 281.371,44 TRY.",
+        "rationale": [
+            {"kind": "RISK_CONTRIBUTION", "value": 0.40,
+             "text": "Portföy oynaklığının %40,2'lik kısmını bu pozisyon üretiyor."},
+        ],
+    }
+
+    def _state(self, data):
+        return {
+            "target_agent": "RISK_STRATEGY_AGENT",
+            "specialist_output": {
+                "status": "OK", "agent": "RISK_STRATEGY_AGENT", "data": data
+            },
+        }
+
+    def _data(self, **overrides):
+        data = {
+            "gate": {"open": True, "reason": "ok"},
+            "disclaimer": "Bu liste yatırım tavsiyesi değildir.",
+            "bandStatement": "Hedef kendi belirlediğiniz dağılıma göre kuruldu.",
+            "rows": [dict(self.ROW)],
+        }
+        data.update(overrides)
+        return data
+
+    def test_a_plan_becomes_a_widget(self):
+        widget, topic = widgets.build(self._state(self._data()))
+        assert widget["type"] == "rebalance"
+        assert topic is None
+        assert widget["payload"]["rows"][0]["symbol"] == "NVDA"
+
+    def test_every_row_carries_its_reasons_as_plain_text(self):
+        widget, _ = widgets.build(self._state(self._data()))
+        assert widget["payload"]["rows"][0]["rationale"] == [
+            "Portföy oynaklığının %40,2'lik kısmını bu pozisyon üretiyor."
+        ]
+
+    def test_a_row_without_a_reason_is_not_drawn(self):
+        """Sebebi görünmeyen bir satırın yanında bir "Uygula" düğmesi, tam
+        olarak kaldırılan yasağın engellediği şey."""
+        data = self._data(rows=[{**self.ROW, "rationale": []}])
+        assert widgets.build(self._state(data)) == (None, None)
+
+    def test_a_non_object_row_is_dropped(self):
+        data = self._data(rows=["NVDA", dict(self.ROW)])
+        widget, _ = widgets.build(self._state(data))
+        assert len(widget["payload"]["rows"]) == 1
+
+    def test_a_closed_gate_draws_nothing(self):
+        """Boş bir tablo, yapılacak bir şey varmış gibi görünürdü; nedeni
+        zaten metinde yazılı."""
+        data = self._data(gate={"open": False, "reason": "Testi tamamlayın."})
+        assert widgets.build(self._state(data)) == (None, None)
+
+    def test_an_empty_list_draws_nothing(self):
+        assert widgets.build(self._state(self._data(rows=[]))) == (None, None)
+
+    def test_the_disclaimer_and_the_band_sentence_travel(self):
+        widget, _ = widgets.build(self._state(self._data()))
+        assert "yatırım tavsiyesi değildir" in widget["payload"]["disclaimer"]
+        assert "kendi belirlediğiniz" in widget["payload"]["band_statement"]
+
+    def test_risk_metrics_alone_draw_no_widget(self):
+        """Çekinceli sayılardan oluşan bir tablo, widget'a çevrildiğinde
+        çekincelerini kaybediyor."""
+        state = self._state({"metrics": {"volatility_annualized": 0.31}})
+        assert widgets.build(state) == (None, None)
+
+
+class TestNewsImpactWidget:
+    """Haber okumasının ÖLÇÜLEN zemini; yorum METİNDE kalıyor.
+
+    Bir widget, metnin yanında ama metinden BAĞIMSIZ okunuyor: kullanıcı
+    tabloyu okuyup paragrafı atlayabilir. O yüzden tabloda duran her şey tek
+    başına doğru olmak zorunda -- bir kanaat cümlesi bu koşulu sağlamıyor,
+    çünkü çekincesi paragrafta kalıyor.
+    """
+
+    DATA = {
+        "window_days": 90,
+        "symbols": [{
+            "symbol": "AKBNK", "sector": "Financial Services",
+            "news_count": 114, "filing_count": 25,
+            "price": {"recent_move_pct": 1.11, "typical_move_pct": 4.42,
+                      "window_days": 5},
+            "fundamentals": {"pe_ratio": 4.2}, "articles": [],
+        }],
+        "coverage": {"articles": 200, "filings": 148, "feed_articles": 52,
+                     "symbols": 16, "symbols_with_news": 15,
+                     "symbols_omitted": 11},
+    }
+
+    def _state(self, data):
+        return {
+            "target_agent": "PORTFOLIO_AGENT",
+            "specialist_output": {
+                "status": "OK", "agent": "PORTFOLIO_AGENT", "data": data
+            },
+        }
+
+    def test_a_fact_package_becomes_a_widget(self):
+        widget, topic = widgets.build(self._state(self.DATA))
+        assert widget["type"] == "news_impact" and topic is None
+        assert widget["payload"]["rows"][0]["symbol"] == "AKBNK"
+
+    def test_both_price_figures_are_drawn_together(self):
+        """Bir hareket ancak KENDİ aralığına karşı büyük; tek başına
+        gösterilen bir yüzde, okuyucunun onu kendi ölçeğiyle yorumlamasına
+        bırakılıyor demektir."""
+        widget, _ = widgets.build(self._state(self.DATA))
+        row = widget["payload"]["rows"][0]
+        assert row["recent_move_pct"] == 1.11
+        assert row["typical_move_pct"] == 4.42
+
+    def test_an_unmeasured_price_stays_null(self):
+        data = {**self.DATA, "symbols": [{
+            **self.DATA["symbols"][0],
+            "price": {"recent_move_pct": None, "typical_move_pct": None},
+        }]}
+        row = widgets.build(self._state(data))[0]["payload"]["rows"][0]
+        assert row["recent_move_pct"] is None
+
+    def test_the_omitted_count_is_drawn(self):
+        """Tabloyu tek başına okuyan biri, listelenenlerin portföyün tamamı
+        olduğunu sanmamalı."""
+        widget, _ = widgets.build(self._state(self.DATA))
+        assert widget["payload"]["coverage"]["symbols_omitted"] == 11
+        assert widget["payload"]["coverage"]["symbols"] == 16
+
+    def test_the_source_split_is_drawn(self):
+        widget, _ = widgets.build(self._state(self.DATA))
+        assert widget["payload"]["coverage"]["filings"] == 148
+        assert widget["payload"]["coverage"]["feed_articles"] == 52
+
+    def test_no_judgement_reaches_the_widget(self):
+        """Yorum metinde, uygunluk kapısından geçmiş hâliyle duruyor."""
+        widget, _ = widgets.build(self._state(self.DATA))
+        import json as _json
+
+        flat = _json.dumps(widget, ensure_ascii=False).lower()
+        for banned in ("olumlu", "olumsuz", "risk", "öneri", "tavsiye"):
+            assert banned not in flat
+
+    def test_an_empty_package_draws_nothing(self):
+        assert widgets.build(self._state({**self.DATA, "symbols": []})) == (None, None)
+
+    def test_a_non_object_row_is_dropped(self):
+        data = {**self.DATA, "symbols": ["AKBNK", self.DATA["symbols"][0]]}
+        assert len(widgets.build(self._state(data))[0]["payload"]["rows"]) == 1
+
+    def test_a_positions_payload_still_draws_the_portfolio_widget(self):
+        """İki ayrı yük, iki ayrı widget: `coverage` varsa haber paketi."""
+        widget, _ = widgets.build(self._state({
+            "positions": [{"symbol": "AKBNK", "quantity": 10}],
+            "totals": {"total_market_value": 1000.0},
+        }))
+        assert widget["type"] == "portfolio"

@@ -107,7 +107,13 @@ async def run_portfolio_scenario(
           relationship were strong.
         - NEVER say the factor is likely to move, or in which direction. The tool
           measures sensitivity; it observes nothing about what comes next.
-        - Do NOT turn the result into a recommendation to hedge, sell or rebalance.
+        - Do NOT turn the result into a recommendation to hedge or sell. A
+          scenario is a measurement of what WOULD have followed, and turning it
+          into an instruction attaches a decision to a number that never made
+          one. The rebalancing list is the one place this system recommends,
+          and it does so from `get_rebalance_plan` -- a list the backend built
+          with a measured reason on every row. Nothing here builds that list,
+          so nothing here may stand in for it.
         - Any response built on this tool MUST pass validate_compliance_rules.
     """
     body: dict[str, Any] = {"factor": factor, "shock_pct": shock_pct}

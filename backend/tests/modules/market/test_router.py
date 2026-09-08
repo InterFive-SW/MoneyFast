@@ -112,10 +112,10 @@ class TestNews:
         assert body[0]["relatedSymbols"] == ["THYAO"]
 
     @pytest.mark.parametrize("news", [[article()]])
-    def test_sentiment_is_never_asserted(self, market_client):
+    def test_sentiment_is_null_because_it_was_never_measured(self, market_client):
         """Calling a headline positive or negative is a market view, and this
         system is not permitted to hold one."""
-        assert market_client.get("/api/market/news").json()[0]["sentiment"] == "neutral"
+        assert market_client.get("/api/market/news").json()[0]["sentiment"] is None
 
     @pytest.mark.parametrize("news", [[article(url=None)]])
     def test_missing_url_falls_back_to_a_placeholder(self, market_client):

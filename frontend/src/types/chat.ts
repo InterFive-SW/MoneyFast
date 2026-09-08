@@ -57,10 +57,61 @@ export interface PortfolioWidgetPayload {
   positions: PortfolioPosition[];
 }
 
+/** Dengeleme listesinin sohbetteki hâli.
+ *
+ *  `rationale` HER satırda ve boş olamaz: sohbetin bir alım-satım listesi
+ *  göstermesine izin verilmesinin tek dayanağı, her satırın onu üreten
+ *  ölçümü taşıması. Sebebi görünmeyen bir satırın yanında bir "Uygula"
+ *  düğmesi, kaldırılan yasağın engellediği şeyin ta kendisi. */
+export interface RebalanceWidgetRow {
+  symbol: string;
+  side: string;
+  quantity: number;
+  amount: number;
+  bucket: string;
+  /** Sunucuda kurulmuş, olduğu gibi yazılan cümle. */
+  statement: string;
+  rationale: string[];
+}
+
+export interface RebalanceWidgetPayload {
+  /** Koşulsuz gösterilir; sunucudan gelir. */
+  disclaimer: string;
+  /** Hedefin nereden geldiği: kullanıcının kendi hedefi ya da bandı. */
+  band_statement: string;
+  rows: RebalanceWidgetRow[];
+}
+
+/** Haber okumasının ölçülen zemini, sohbette.
+ *
+ *  Widget YORUM taşımıyor: yorum metinde, uygunluk kapısından geçmiş
+ *  hâliyle duruyor. Bir widget metnin yanında ama metinden BAĞIMSIZ
+ *  okunuyor -- kullanıcı tabloyu okuyup paragrafı atlayabilir -- ve tabloda
+ *  duran her şey tek başına doğru olmak zorunda. */
+export interface NewsImpactWidgetPayload {
+  window_days: number;
+  rows: {
+    symbol: string;
+    sector: string | null;
+    news_count: number;
+    filing_count: number;
+    recent_move_pct: number | null;
+    typical_move_pct: number | null;
+  }[];
+  coverage: {
+    symbols: number;
+    symbols_omitted: number;
+    filings: number;
+    feed_articles: number;
+  };
+}
+
 export type ChatWidget = 
   | { type: 'chart'; payload: ChartWidgetPayload }
   | { type: 'action'; payload: ActionWidgetPayload }
-  | { type: 'portfolio'; payload: PortfolioWidgetPayload };
+  | { type: 'portfolio'; payload: PortfolioWidgetPayload }
+  | { type: 'rebalance'; payload: RebalanceWidgetPayload }
+  | { type: 'news_impact'; payload: NewsImpactWidgetPayload };
 
 export interface ChatMessage {
   id: string;

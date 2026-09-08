@@ -731,14 +731,14 @@ async def portfolio_node(state: MoneyFastState) -> dict[str, Any]:
     # Haberin KENDİSİ değil, ne anlama geldiği. Ayrı bir araç çünkü ayrı bir
     # dayanak: yukarıdaki başlıkları taşıyor, bu bir modelin okumasını. Aynı
     # ajanda duruyor çünkü ikisi de kullanıcının pozisyonlarının kesişimi.
-    if plan.get("tool") == "get_news_impact_digest":
+    if plan.get("tool") == "get_news_impact_facts":
         return await _run_tool(
-            state, "get_news_impact_digest",
-            {key: args[key] for key in ("user_id", "hours") if key in args},
+            state, "get_news_impact_facts",
+            {key: args[key] for key in ("user_id", "days") if key in args},
             assumptions=plan.get("assumptions") or [],
-            # Boş bir liste TAM bir cevap -- pencerede yorumlanmış haber yok --
+            # Boş bir liste TAM bir cevap -- pozisyonu olmayan kullanıcı --
             # ama penceresiyle birlikte söylenmeli, o yüzden yük yine gidiyor.
-            empty_when=lambda p: not p.get("entries"),
+            empty_when=lambda p: not p.get("symbols"),
         )
 
     # Üçüncü araç: neye SAHİP olduğu değil, ne KAZANIP ne HARCADIĞI. Aynı
@@ -2695,20 +2695,34 @@ HEDGED_TOOLS = frozenset(
         "simulate_position_change",
         "get_direction_signal",
         "get_technical_signals",
+        # v2.26. Buradaki risk daha büyük ve sebebi tek cümlede: bu araç
+        # ölçülmüş olgular veriyor, ama üzerine kurulan şey artık bir KANAAT
+        # cümlesi de içeriyor. Modelin unutabildiği bir çekince, kanaatin
+        # yanında duran tek sınırdır.
+        "get_news_impact_facts",
     }
 )
 
 
 #: Dengeleme listesinin kendi çekincesi. Genel uygunluk açıklaması bunun
 #: yerini TUTMUYOR: o, içeriğin yatırım danışmanlığı olmadığını söylüyor; bu
-#: ise listenin KİMİN hedefinden çıktığını -- kullanıcının kendi girdiği
-#: hedeften.
+#: ise listenin NEREDEN çıktığını.
+#:
+#: Metin, liste artık kullanıcının kendi hedefinden DE bir risk bandından DA
+#: çıkabildiği için genişledi (v2.24): "kendi belirlediğiniz hedef" cümlesi,
+#: hedefi ankete verdiği cevapların bağladığı bir kullanıcı için yanlış bir
+#: iddia olurdu.
+#:
+#: Bu, kaldırılan yasakların yerine konan ÜÇÜNCÜ kontrol ve modelin
+#: hatırlamasına bırakılmıyor: aşağıdaki fonksiyon kapının her dalından
+#: geçiyor.
 PLAN_DISCLAIMER_TR = (
-    "Bu liste yatırım tavsiyesi değildir; kendi belirlediğiniz hedefin "
-    "aritmetik karşılığıdır."
+    "Bu liste yatırım tavsiyesi değildir; kendi belirlediğiniz hedefin ya da "
+    "ankette verdiğiniz cevapların bağladığı risk bandının aritmetik "
+    "karşılığıdır ve her satırı onu üreten ölçümle birlikte listelenmiştir."
 )
 
-_PLAN_MARK = "kendi belirlediğiniz hedefin"
+_PLAN_MARK = "aritmetik karşılığıdır"
 
 
 def _keep_plan_disclaimer(
@@ -2736,18 +2750,25 @@ def _keep_plan_disclaimer(
     return out
 
 
-#: Haber yorumunun kendi çekincesi. Genel uygunluk açıklaması bunun yerini
-#: TUTMUYOR: o, içeriğin yatırım danışmanlığı olmadığını söylüyor; bu ise
-#: içeriğin bir ÖLÇÜM DEĞİL, bir modelin metin okuması olduğunu. Sistemdeki
-#: başka hiçbir araç bunu söylemek zorunda değil, çünkü başka hiçbiri bir
-#: model yargısı taşımıyor.
+#: Haber okumasının kendi çekincesi.
+#:
+#: `SCENARIO_HEDGE_TR` bunun yerini TUTMUYOR ve ikisi aynı turda birlikte
+#: durabiliyor: o, gösterilen SAYININ bir tahmin değil ölçüm olduğunu
+#: söylüyor. Bu ise sayıların üzerine kurulan OKUMANIN -- iki taraflı
+#: değerlendirmenin, ağırlık ve risk cümlelerinin -- bir yorum olduğunu.
+#:
+#: Metin v2.26'da değişti. Önceki sürümde okumayı bir toplu iş üretiyordu ve
+#: çekince "yapay zeka tarafından yorumlanmasıdır" diyordu; artık olgular
+#: ölçülüyor ve yorumu turun kendisi kuruyor, dolayısıyla çekince neyin
+#: ölçüldüğünü neyin yorumlandığından AYIRMAK zorunda. İkisini aynı cümlede
+#: "yorum" diye anmak, ölçülmüş bir hareketi de bir kanaat gibi gösterirdi.
 NEWS_DIGEST_DISCLAIMER_TR = (
-    "Bu özet, haber metinlerinin yapay zeka tarafından yorumlanmasıdır; "
-    "yatırım tavsiyesi değildir ve haberin fiyata nasıl yansıyacağını "
+    "Buradaki sayılar ölçülmüştür; haberlerin ne anlama geldiğine dair "
+    "değerlendirme ise bir yorumdur ve haberin fiyata nasıl yansıyacağını "
     "belirlemez."
 )
 
-_DIGEST_MARK = "yapay zeka tarafından yorumlanmasıdır"
+_DIGEST_MARK = "değerlendirme ise bir yorumdur"
 
 
 def _keep_news_disclaimer(
@@ -2764,7 +2785,7 @@ def _keep_news_disclaimer(
     okuması ve bunu söyleyen tek şey bu çekince. Düştüğünde geriye, ölçülmüş
     bir bulgudan ayırt edilemeyen bir yorum kalıyor.
     """
-    if "get_news_impact_digest" not in set(state.get("tools_used") or []):
+    if "get_news_impact_facts" not in set(state.get("tools_used") or []):
         return out
     if _DIGEST_MARK in (out.get("final_output") or ""):
         return out
@@ -2772,6 +2793,54 @@ def _keep_news_disclaimer(
     if any(_DIGEST_MARK in item for item in existing):
         return out
     out["disclosures"] = existing + [NEWS_DIGEST_DISCLAIMER_TR]
+    return out
+
+
+#: Gerekçe bloğunun başlığı. Kullanıcıya görünen metin, bir alan adı değil.
+RATIONALE_HEADING_TR = "Bu satırları listeye sokan ölçümler:"
+
+
+def _keep_rationale(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
+    """Dengeleme satırlarının GEREKÇELERİNİ kapının her dalından geçirir.
+
+    Bu, kaldırılan yasakların yerine konan birinci kontrolün son halkası ve
+    en kritiği: sohbetin bir alım-satım listesi basmasına izin verilmesinin
+    TEK dayanağı, her satırın onu üreten ölçümü yanında taşıması. Gerekçesiz
+    bir tablo, kaldırılan yasağın engellediği şeyin ta kendisi.
+
+    **Ölçüldü.** Araç sözleşmesinin ilk kısıtı "her satır gerekçesiyle
+    anılır" diyor; ilk canlı turda model dört satırlık bir tablo bastı ve
+    `rationale` metinlerinin HİÇBİRİ cevaba girmedi. `_keep_hedge` ve
+    `_keep_plan_disclaimer` ile aynı ders, üçüncü kez: prompt tavsiyedir.
+
+    Metin gerekçelerden herhangi birini zaten taşıyorsa dokunulmuyor: model
+    işini yaptıysa aynı cümleyi ikinci kez göstermek gürültü olurdu.
+    """
+    if "get_rebalance_plan" not in set(state.get("tools_used") or []):
+        return out
+    rows = (
+        ((state.get("specialist_output") or {}).get("data") or {}).get("rows") or []
+    )
+    texts: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for reason in row.get("rationale") or []:
+            text = (reason or {}).get("text") if isinstance(reason, dict) else None
+            if text:
+                texts.append(f"{row.get('symbol')}: {text}")
+    if not texts:
+        return out
+    written = out.get("final_output") or ""
+    # Herhangi biri geçtiyse model gerekçeleri aktarmış demektir.
+    if any(text.split(": ", 1)[-1] in written for text in texts):
+        return out
+    existing = out.get("disclosures") or []
+    if any(RATIONALE_HEADING_TR in item for item in existing):
+        return out
+    out["disclosures"] = existing + [
+        RATIONALE_HEADING_TR + " " + " ".join(texts)
+    ]
     return out
 
 
@@ -2814,6 +2883,7 @@ def _keep_crisis(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
     """
     out = _keep_hedge(state, out)
     out = _keep_plan_disclaimer(state, out)
+    out = _keep_rationale(state, out)
     out = _keep_news_disclaimer(state, out)
     notices = state.get("crisis_notices") or []
     if not notices:

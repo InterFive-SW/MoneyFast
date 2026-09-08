@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
+from . import profile
 from .models import RiskAssessment, RiskProfile, RiskSnapshot
 
 log = logging.getLogger("moneyfast.risk")
@@ -123,6 +124,10 @@ def record_snapshot(
             hhi=concentration.get("hhi"),
             max_drawdown=drawdown.get("value"),
             position_count=position_count,
+            # Ölçek, etiketle BİRLİKTE yazılıyor. Sonradan türetilemez:
+            # bantlar değiştikten sonra eski bir "Düşük"ün hangi ölçekten
+            # geldiğini söyleyecek başka bir şey kalmaz.
+            band_scale=profile.BAND_SCALE,
         )
         db.add(snapshot)
         db.commit()

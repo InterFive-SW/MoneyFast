@@ -4,7 +4,6 @@ import { useInstruments } from '../../hooks/useInstruments'
 import NewsWidget from '../../components/widgets/NewsWidget'
 import MarketInstrumentsTable from '../../components/markets/MarketInstrumentsTable'
 import MarketMoversWidget from '../../components/markets/MarketMoversWidget'
-import HaberEtkiKarti from '../../components/markets/HaberEtkiKarti'
 import YonTaramasi from '../../components/markets/YonTaramasi'
 import MarketComparisonChart from '../../components/markets/MarketComparisonChart'
 import ColumnSetSwitcher from '../../components/markets/ColumnSetSwitcher'
@@ -87,13 +86,6 @@ export default function StocksScreen() {
               sıralanan şey ölçülen kanıtların meyli. */}
           <div className="h-[360px]">
             <YonTaramasi />
-          </div>
-          {/* Yorum ÖNCE, başlık listesi sonra: "ne oldu" ile "bu ne
-              demek" ayrı sorular ve ikincisi bir modelin yargısına
-              dayanıyor. Aynı kutuda göstermek ikisini eşit ağırlıkta iki
-              satır gibi okuturdu. */}
-          <div className="h-[360px]">
-            <HaberEtkiKarti />
           </div>
           <div className="h-[420px]">
             <NewsWidget />

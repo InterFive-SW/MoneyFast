@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 from sqlalchemy.orm import Session
 
-from app.modules.risk import store
+from app.modules.risk import profile, store
 
 SCORED = {
     "version": "v1",
@@ -116,6 +116,18 @@ class TestRecordSnapshot:
         assert snapshot.max_drawdown == -0.11
         assert snapshot.position_count == 14
         assert db.commit.called
+
+    def test_the_band_scale_is_written_with_the_label(self):
+        """Ölçek sonradan TÜRETİLEMEZ: bantlar değiştikten sonra eski bir
+        "Düşük"ün hangi ölçekten geldiğini söyleyecek başka bir şey kalmaz."""
+        db = make_snapshot_db()
+        snapshot = store.record_snapshot(db, "u1", "1Y", SNAP_SCORED, SNAP_METRICS, 14)
+        assert snapshot.band_scale == profile.BAND_SCALE
+
+    def test_the_written_scale_is_not_the_legacy_one(self):
+        """Sabit yanlışlıkla eskiye bağlanırsa yeni satırlar üç bantlı
+        ölçekte yazılmış gibi görünürdü."""
+        assert profile.BAND_SCALE != profile.BAND_SCALE_LEGACY
 
     def test_a_non_default_window_is_not_recorded(self):
         """Üç aylık bir puanla bir yıllık puanı aynı seride toplamak,

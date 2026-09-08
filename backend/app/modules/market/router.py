@@ -13,7 +13,7 @@ from app.core.deps import get_current_user_id, require_service_token
 from app.modules.investment import ai_service, market_service
 from app.modules.notification import service as notification_service
 from . import funds as funds_service
-from . import news_impact, service, signals, stream, technicals
+from . import impact, service, signals, stream, technicals
 from .schemas import (
     DirectionSignalOut,
     CandleSeriesOut,
@@ -30,8 +30,6 @@ from .schemas import (
     MarketCalendarOut,
     MarketHeatmapOut,
     MarketTicker,
-    NewsDigestOut,
-    NewsImpactSummaryOut,
     NewsIngestRequest,
     NewsItem,
     PortfolioNewsOut,
@@ -113,11 +111,11 @@ def get_market_news(
             "title": row.title,
             "url": row.url or "#",
             "time": _relative_time(row.published_at),
-            # Sentiment is not computed. Labelling a headline positive or
-            # negative is a market view, and this system is not permitted to
-            # hold one; the field stays neutral until a sourced classifier
-            # exists.
-            "sentiment": "neutral",
+            # ÖLÇÜLMEDİ, `null`. Bir dönem sabit "neutral" dönüyordu ve
+            # bu, yapılmamış bir ölçümü yapılmış gibi gösteriyordu:
+            # "nötr" bir başlık sınıflandırılmış ve dengede bulunmuş bir
+            # başlıktır, buradakiler hiç sınıflandırılmadı.
+            "sentiment": None,
             "relatedSymbols": list(row.related_symbols or []),
         }
         for row in service.latest_news(db, limit=limit, symbols=symbols)
@@ -199,7 +197,7 @@ def _portfolio_news_payload(db: Session, user_id: str, limit: int, days: int) ->
                 "url": row.url or "#",
                 "time": _relative_time(row.published_at),
                 "publishedAt": row.published_at,
-                "sentiment": "neutral",
+                "sentiment": None,
                 "relatedSymbols": list(row.related_symbols or []),
                 "heldSymbols": [s for s in (row.related_symbols or []) if s in held],
             }
@@ -210,114 +208,126 @@ def _portfolio_news_payload(db: Session, user_id: str, limit: int, days: int) ->
 
 
 @router.get(
-    "/news/digest",
-    response_model=NewsDigestOut,
-    summary="Portföyün günlük haber özeti (yorumlanmış)",
+    "/sectors",
+    summary="Sembol -> sektör eşlemesi",
 )
-def get_news_digest(
-    hours: int = Query(default=news_impact.DIGEST_WINDOW_HOURS, ge=1, le=168),
+def get_sectors(
+    sector: Optional[str] = Query(None, description="Tek bir sektöre daralt"),
+    db: Session = Depends(get_db),
+):
+    """Hangi enstrüman hangi sektörde.
+
+    **Kapatılan boşluk:** `sector_by_symbol()` vardı ve ısı haritası ile
+    dağılım kırılımlarını besliyordu, ama hiçbir MCP aracı sektör
+    döndürmüyordu -- "bankacılık sektörü bu haberden nasıl etkilenir"
+    sorusunun veri yolu yoktu.
+
+    Kaynak TEK: `instrument_fundamentals.sector`, yani sağlayıcı verisi. Elle
+    yazılmış sektör yok ve olmayacak; `market_service.sector_by_symbol()`
+    içindeki not bir yasak olarak duruyor. Sektörü olmayan enstrüman burada
+    HİÇ GÖRÜNMÜYOR -- boş bir dize döndürmek, ölçülmemiş bir sektörü
+    ölçülmüş gibi gösterirdi.
+
+    Oturum aranmıyor: bu eşleme kullanıcıya ait hiçbir şey içermiyor.
+    """
+    mapping = market_service.sector_by_symbol(db)
+    # Süzgeç SUNUCUDA ve büyük/küçük harfe duyarsız: sağlayıcının etiketi
+    # İngilizce ("Financial Services") ve çağıranın onu birebir yazmasını
+    # beklemek, bir eşleşmeyi yazım tercihine bağlamak olurdu.
+    wanted = (market_service.canonical_sector(sector) or "").lower()
+    by_sector: dict[str, list[str]] = {}
+    for symbol, row_sector in mapping.items():
+        if wanted and row_sector.lower() != wanted:
+            continue
+        by_sector.setdefault(row_sector, []).append(symbol)
+    return {
+        # Düz eşleme yalnızca süzgeçsiz çağrıda: bin satırlık bir sözlük,
+        # tek bir sektör sorulduğunda okunmayacak bir yük.
+        "symbols": mapping if not wanted else {
+            symbol: row for symbol, row in mapping.items() if row.lower() == wanted
+        },
+        "sectors": [
+            {"sector": sector, "symbols": sorted(symbols)}
+            for sector, symbols in sorted(by_sector.items())
+        ],
+        # Kaç enstrümanın sektörü BİLİNMİYOR. Ölçülmüş bir boşluk: kapsama
+        # düz değil ve bunu söylemeden eşlemeyi sunmak, eksik bir haritayı
+        # tam bir harita gibi göstermek olurdu.
+        "unclassified": market_service.count_active_products(db) - len(mapping),
+    }
+
+
+@router.post(
+    "/news/impact",
+    summary="Haber etkisi için ölçülmüş olgular (oturum sahibi)",
+)
+def build_news_impact_for_me(
+    days: int = Query(default=service.NEWS_WINDOW_DAYS, ge=1, le=365),
+    limit: int = Query(default=impact.MAX_SYMBOLS, ge=1, le=25),
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    """Kullanıcının enstrümanlarına dokunan haberlerin YORUMLANMIŞ özeti.
+    """Ekranın okuduğu hâl; MCP ikizinin gövdesi birebir aynı.
 
-    `/news/portfolio`den farkı tek cümlede: orası başlıkları listeliyor ve
-    yorumlamıyor, burası yorumluyor. İkisi ayrı uçlar çünkü ayrı sorular --
-    "ne yayımlandı" ile "bu ne anlama geliyor" aynı şey değil ve ikincisi bir
-    modelin yargısına dayanıyor, birincisi dayanmıyor.
+    Oturum ZORUNLU, demo portföyüne düşülmüyor: "portföyünüz" başlığı
+    altında başkasının pozisyonlarını ölçmek, `/news/portfolio`nun kaçındığı
+    hatanın aynısı olurdu.
 
-    Oturum ZORUNLU, demo portföyüne düşülmüyor: "portföyünüz" başlığı altında
-    başkasının portföyünü özetlemek, `/news/portfolio`nun kaçındığı hatanın
-    aynısı olurdu.
-
-    Cümleler SUNUCUDA kuruluyor. Model yapılandırılmış satır üretiyor; sayılar
-    `market_candles`tan ölçülüyor; birleştiren cümle kodda ve çekincesini
-    yanında taşıyor.
+    **Ekran YORUM göstermiyor, ÖLÇÜLEN ZEMİNİ gösteriyor.** Okuma sohbet
+    turunda kuruluyor ve orada uygunluk kapısından geçiyor; aynı okumayı
+    ekranda ikinci kez kurmak, o kapıdan geçmeyen bir kopya üretirdi.
     """
-    return _news_digest_payload(db, user_id, hours=hours)
+    return _impact_payload(db, user_id, days, limit)
 
 
-@router.get(
-    "/news/digest/{user_id}",
-    response_model=NewsDigestOut,
-    summary="Portföyün günlük haber özeti (MCP sözleşmesi)",
-    # `/news/portfolio/{user_id}` ile aynı koruma ve aynı gerekçe: konusunu
-    # YOLDA adlandıran bir uç, korumasızken bir kullanıcı id'si bilen herkese
-    # o kişinin tuttuğu sembolleri okutur.
+@router.post(
+    "/news/impact/{user_id}",
+    summary="Haber etkisi için deterministik olgu paketi (MCP sözleşmesi)",
     dependencies=[Depends(require_service_token)],
 )
-def get_news_digest_for_ai(
+def build_news_impact_package(
     user_id: str,
-    hours: int = Query(default=news_impact.DIGEST_WINDOW_HOURS, ge=1, le=168),
+    days: int = Query(default=service.NEWS_WINDOW_DAYS, ge=1, le=365),
+    limit: int = Query(default=impact.MAX_SYMBOLS, ge=1, le=25),
     db: Session = Depends(get_db),
 ):
-    """Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli."""
-    return _news_digest_payload(db, user_id, hours=hours)
+    """Kullanıcının pozisyonları için ÖLÇÜLMÜŞ olgular; yorum YOK.
+
+    Ürettiği her sayı ya sayılmış ya ölçülmüş: kaç haber, kaçı KAP
+    bildirimi, hissenin son beş işlem günündeki gerçekleşen hareketi, o
+    sembolde beş günlük hareketlerin tipik büyüklüğü, sağlayıcının
+    yayımladığı oranlar, ve sembolün sektörü.
+
+    Yorumu `agents` yapıyor: sistem istemindeki "Artış lehine / Düşüş
+    lehine" şablonu her maddenin "ölçülmüş bir olgu, sayısıyla" olmasını
+    istiyor ve bu uç tam olarak o maddeleri veriyor.
+
+    POST, çünkü paket bir HESAPTIR: sembol başına mum okunuyor, medyan
+    alınıyor, haberler sayılıyor. Önbelleklenebilir bir okuma gibi
+    görünmesi yanıltıcı olurdu.
+
+    Konusunu YOLDA adlandıran her uç gibi servis token'ıyla korunuyor:
+    korumasızken bir kullanıcı id'si bilen herkes o kişinin TUTTUĞU
+    SEMBOLLERİ okuyabilirdi.
+    """
+    return _impact_payload(db, user_id, days, limit)
 
 
-def _news_digest_payload(db: Session, user_id: str, hours: int) -> dict:
+def _impact_payload(db: Session, user_id: str, days: int, limit: int) -> dict:
     """İki ucun ortak gövdesi.
 
-    Kapanmış pozisyonlar dışarıda (`held_symbols`): sattığın bir hissenin
-    haberi "portföyüne dokunan haber" değil.
-
-    Fiyat serisi sembol BAŞINA okunuyor ve yalnızca haberi olan semboller
-    için: portföyün tamamı için mum çekmek, çoğu hiç kullanılmayacak olan bir
-    okuma demekti.
+    Ayrışsalardı ekran ile sohbet aynı portföy için farklı sayılar
+    gösterebilirdi -- `_portfolio_news_payload` ile aynı gerekçe.
     """
-    holdings = market_service.holdings(db, user_id=user_id)
-    symbols = service.held_symbols(holdings)
-    rows = news_impact.impacts_since(db, symbols=symbols, hours=hours)
-    grouped = news_impact.group_by_symbol(rows)
-    entries = [
-        news_impact.symbol_entry(
-            symbol,
-            symbol_rows,
-            closes=[
-                close
-                for _stamp, close in market_service.candle_closes(db, symbol, limit=260)
-            ],
-        )
-        for symbol, symbol_rows in grouped.items()
-    ]
-    entries.sort(key=lambda entry: (-sum(entry["counts"].values()), entry["symbol"]))
-    return {
-        "headline": news_impact.portfolio_headline(entries, hours),
-        "entries": entries,
-        "windowHours": hours,
-        "disclaimer": news_impact.DISCLAIMER_TR,
-    }
-
-
-@router.get(
-    "/news/impact-summary",
-    response_model=NewsImpactSummaryOut,
-    summary="Haberlerin hangi enstrümanı hangi yönde etkilediği (piyasa geneli)",
-)
-def get_news_impact_summary(
-    hours: int = Query(default=news_impact.DIGEST_WINDOW_HOURS, ge=1, le=168),
-    limit: int = Query(default=12, ge=1, le=50),
-    db: Session = Depends(get_db),
-):
-    """Portföyden bağımsız: pencere içinde en çok yoruma konu olan enstrümanlar.
-
-    Oturum ARANMIYOR, çünkü burada kullanıcıya ait hiçbir şey yok -- piyasa
-    geneli bir okuma. `/news` gibi.
-
-    Sıralama yorum SAYISINA göre, modelin beyan ettiği güvene göre değil:
-    beyan bir ölçüm değil ve onunla sıralamak, ekrandaki sıraya ölçülmemiş
-    bir otorite verirdi.
-
-    Burada fiyat ölçümü YOK ve bilerek: on iki enstrümanın her biri için mum
-    okumak, portföy özetinden farklı olarak, kullanıcının hiç sormadığı
-    semboller için yapılmış bir iş olurdu. Ölçüm, sembolün kendi sayfasında.
-    """
-    rows = news_impact.impacts_since(db, symbols=None, hours=hours)
-    return {
-        "entries": news_impact.market_entries(rows, limit=limit),
-        "windowHours": hours,
-        "disclaimer": news_impact.DISCLAIMER_TR,
-    }
+    return impact.fact_package(
+        db,
+        market_service.holdings(db, user_id=user_id),
+        closes_for=lambda symbol: market_service.candle_closes(db, symbol, limit=260),
+        fundamentals_for=lambda symbol: market_service.fundamentals_for(db, symbol),
+        sectors=market_service.sector_by_symbol(db),
+        days=days,
+        limit=limit,
+    )
 
 
 @router.get(

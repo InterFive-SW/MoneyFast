@@ -29,7 +29,7 @@ FOG-04/FOG-05).
 | `base-db` | PostgreSQL 16 — uygulama verisi |
 | `vector-db` | pgvector — yalnızca `rag.documents` / `rag.chunks` |
 | `rag` | Retrieval servisi. Vektör DB kredensiyelini tutan **tek** bileşen; embedding'i yerel çalıştırır |
-| `mcp` | MCP tool sunucusu (SSE). Ajanların çağırdığı yedi tool |
+| `mcp` | MCP tool sunucusu (SSE). Yirmi sekiz tool, on dokuz alan |
 | `agents` | LangGraph orchestrator. Yönlendirme + uzman ajanlar; Groq'a çıkar |
 | `ingestor` | Fiyat (yfinance) ve haber (RSS) toplayıcı. DB kredensiyeli **taşımaz**, her şeyi HTTP ile iter |
 
@@ -86,6 +86,10 @@ Bu uç noktaları değiştirirken `AI-Services/.../mcp-server/*_tools.py` içind
 | `get_market_data` | `GET /api/market/instruments` — v2.2 ile eklendi |
 | `get_open_orders` | `GET /api/investment/agent/{user_id}/orders` — v2.20 |
 | `cancel_order` | `POST /api/investment/agent/{user_id}/orders/{id}/cancel` — v2.20 |
+| `get_direction_signal` | `GET /api/market/direction` — v2.21 |
+| `get_rebalance_plan` | `GET /api/investment/rebalance/plan/{user_id}` — v2.24 |
+| `get_sector_map` | `GET /api/market/sectors` — v2.25 |
+| `get_news_impact_facts` | `POST /api/market/news/impact/{user_id}` — v2.26 |
 
 v2.3 ile `get_portfolio_positions` yanıtına `totals.cash_balance` ve
 `totals.total_value` eklendi. Öncesinde sözleşmede nakit yoktu, dolayısıyla
@@ -353,52 +357,79 @@ yeniden başlatmada tek bir HTTP çağrısı. Bloklamaz — `fetch_candles` semb
 başına çalıştığı için tek seferlik bir scheduler job'ı olarak kuyruğa girer. `dumps/` ise gitignore'da — `make db-dump` tam bir yedek alır
 (riskli bir işlemden önce) ve birine tam durumunu vermek için kullanılır.
 
-### Haber yorumu — LLM yargılar, kod toplar
+### Haber okuması — olgular ölçülür, yorum turda kurulur
 
-Haberin bir enstrümana etkisi `market.news_impacts`'ta **satır** olarak
-duruyor (migration 0044): sembol, yön, kapsam (DIRECT/SPILLOVER), büyüklük ve
-tek cümlelik bir `mechanism`. Yargıyı LLM üretiyor — istenen belirlenimci
-olmayan yorum tam burada — ama ürettiği şey **düzyazı değil**. Bir modelin
-metni denetlenemez; satır olarak saklandığında her iddia belirli bir habere
-kadar izlenebiliyor, günlük özet **kodda** toplanabiliyor ve toplayıcı test
-edilebiliyor. `technicals.narrate()` ile aynı ayrım.
+Haberin ne anlama geldiğine dair okuma **saklanmıyor**. `POST
+/api/market/news/impact` (ekran) ve `/impact/{user_id}` (MCP) bir
+**deterministik olgu paketi** üretiyor: kaç haber, kaçı KAP bildirimi,
+hissenin son beş işlem günündeki gerçekleşen hareketi, o sembolde beş
+günlük hareketlerin **tipik** büyüklüğü (medyan), sağlayıcının yayımladığı
+oranlar ve sembolün sektörü. Yorum yok; her sayı sayılmış ya da ölçülmüş.
 
-Yorum `agents` servisinde (`POST /analyze/news-impact`) — "LLM çıkışı yalnızca
-`agents`" kuralı. Backend zamanlıyor (günde iki kez, 07:15 ve 19:15),
-kuyruğu kuruyor, evreni veriyor ve sonucu saklıyor.
+Okumayı sohbet turu kuruyor — sistem isteminin zaten var olan **"Artış
+lehine / Düşüş lehine / yakalamadığı şey / kanaat / Karar sizin"** şablonu
+içinde — ve orada uygunluk kapısından geçiyor. Bir dönem bunu günde iki kez
+çalışan bir toplu iş yapıyor ve yargıları `market.news_impacts`'e yazıyordu;
+tablo `0047` ile düşürüldü. Sebep maliyet değil: **saklanan bir yargı,
+üretildiği turun kuralları geçtikten sonra da okunabilir kalıyor** ve bir
+sonraki okuyucu onu bugünün kurallarıyla değerlendirilmiş sanıyor.
 
-**Uydurmaya karşı üç kilit, üçü de kodda.** Sembol kapalı bir evrenden gelir
-ve listede olmayan ad düşürülür. Sayı modelden gelmez: `mechanism` bir cümle,
-yüzdeler `market_candles`'tan ölçülür (tipik 5 günlük hareket ve gerçekleşen
-değişim). Yasak dil satırı düşürür — `compliance.rules` burada da çalışıyor,
-çünkü bu metin uygunluk kapısının bakmadığı bir yoldan (REST) kullanıcıya
-gidiyor; regex'leri kopyalamak bir kuralın iki yerde yaşaması olurdu.
+**Bir hareket ancak KENDİ aralığına karşı büyük.** "%5 düştü" tek başına
+hiçbir şey söylemiyor; "bu sembolde beş günlük hareketler tipik olarak %2
+büyüklüğünde" ile birlikte söylüyor. `typical_move_pct` ölçülemediğinde
+büyüklük hakkında hiçbir şey denmiyor ve arayüz o satırı hiç yazmıyor.
 
-Evren **ölçülerek** daralıyor: 1.009 aktif enstrümanın tamamını her isteğe
-koymak ~2.500 token, yani günlük kotanın tamamı. Onun yerine haberin kendi
-etiketleri + borsa başına ciroya göre ilk 25 (ölçülen: 86 sembol). Sendikasyon
-kopyaları eleniyor — ölçüldü, 48 saatte 787 haberin 120'si (%15) aynı
-gelişmenin başka bir istasyondaki kopyası; eleme yalnızca dikey çizgiden,
-çünkü KAP başlığındaki uzun tireden sonrası haberin KENDİSİ.
+Paket **kırpılıyor ve kırpma söyleniyor**: ölçüldü, sınırsız paket 23 KB ve
+tek başına 8.000 token/dakika sınırını aşıyor (on altı pozisyon, KAP
+etiketlemesi yoğun olduğu için tek bir bankada doksan günde 114 haber). Beş
+sembol + üç başlıkla 4,9 KB. `coverage.symbols_omitted` kaç pozisyonun
+dışarıda kaldığını yazıyor — sessizce kırpılmış bir portföy, "portföyünüzde
+şunlar oldu" cümlesini yanlış yapardı.
 
-Uçlar: `GET /api/market/news/digest` (portföyün özeti, oturum zorunlu),
-servis token'lı ikizi `/digest/{user_id}`, ve `GET /api/market/news/impact-summary`
-(piyasa geneli). Sohbet `get_news_impact_digest` (v2.23) ile okuyor —
-`get_portfolio_news` genişletilmedi, çünkü o yayımlanmış olguyu, bu bir
-modelin okumasını taşıyor.
+Kaynak kırılımı da taşınıyor: bildirimin ihraççısı makine okunur bir alanda
+yazılı, besleme haberi metinden eşleştirildi. Ölçüldü, son otuz gün: RSS'in
+%5,3'ü bir sembole bağlanıyor, KAP'ın %83'ü — etiketli haberin %97,6'sı
+KAP'tan geliyor.
 
-**Ajana giden yük bilerek dar.** `direction`, `scope`, `measured` ve sayımlar
-MCP katmanında düşürülüyor; hepsi cümlenin içinde zaten Türkçe yazılı. Ölçüldü:
-alanlar dururken model önce ham enum'ları düz yazıya döktü ("yönü DOWN olarak
-işaretlendi"), sonra beş satırlık bir fiyat tablosu kurup **tek bir mekanizma
-yazmadı** — haberin ne anlama geldiğine dair bir cevap, içinde haber olmadan.
-Bir alanı göndermemek, kullanımını yasaklamaktan güçlü. Çekince
-(`_keep_news_disclaimer`) kapının her dalından geçiyor.
+`sentiment` **`null`**, `"neutral"` değil: ölçülmedi demek. Nötr bir başlık
+sınıflandırılmış ve dengede bulunmuş bir başlıktır; buradakiler hiç
+sınıflandırılmadı.
 
-**Yorum bir ölçüm değil ve öyle sunulmuyor.** Model gerçek olmayan bir kanal
-uydurabiliyor (ölçüldü: bir maden ruhsatı haberini Vestel'in "tedarik
-zinciri"ne bağladı). Her satır bu yüzden kaynağına kadar izlenebilir ve her
-yüzeyde koşulsuz bir çekince taşıyor.
+Sektör ilk kez AI katmanında: `GET /api/market/sectors` + `get_sector_map`
+(v2.25). Kaynak tek (`instrument_fundamentals.sector`), elle yazılmış sektör
+yok. Kullanıcının Türkçe yazdığı ad sağlayıcının İngilizce etiketine
+`SECTOR_ALIASES` ile **çevriliyor** — bu bir sektör tanımı değil, bir çeviri;
+tanınmayan ad olduğu gibi bırakılıyor çünkü yakınına eşlemek üyelik
+uydurmak olurdu.
+
+### Yeniden dengeleme — sistem ilk kez gerekçeli öneri veriyor
+
+`POST /api/investment/rebalance/plan` (gövde: `{lookback}`) bir emir listesi
+üretiyor ve bu, sistemin bilerek yapmadığı bir şeyi yapıyor. Kaldırılan
+yasaklar ve yerlerine konanlar `docs/MoneyFast_Teknik_Dokumantasyon.md`
+Bölüm 11'de tek tek yazılı; **sunumda o başlık atlanmamalı.**
+
+Hedef iki yerden gelebiliyor ve **kullanıcının kendisi kazanıyor**: kendi
+`allocation_targets` satırları varsa onlar, yoksa ölçülen risk ile beyan
+edilen toleransın daha temkinli olanı (`profile.binding_band`, minimum —
+ortalama değil) `investment.risk_band_targets` matrisinden okunuyor. Ölçülen
+risk dördüncü bir bant kazandı: `Risksiz ≥85`. Beyan tarafı üç bantta
+kalıyor (anket ağırlıkları ona göre kalibre) ve `_DECLARABLE_LEVELS` beyan
+olarak gelen bir `Risksiz`i reddediyor.
+
+**Sayısı olmayan satır listeye girmiyor.** Aday üç ölçümden seçiliyor — risk
+katkısı (satışta birincil), temel veri, haber okuması — ve hiçbiri yoksa
+enstrüman `unresolved`'a "veri yok" notuyla düşüyor. Kural dört katmanda
+birden: backend üretmiyor, MCP `ContractViolationError` fırlatıyor, widget
+çizmiyor, ve model gerekçeleri aktarmazsa `_keep_rationale` onları ekliyor.
+
+**Uygunluk testi kapısı**: `questionnaire_v2` tamamlanmamışsa liste **hiç
+üretilmiyor**; kademesi yetmeyen ürün grubu plana girmiyor ve grubun kendi
+gerekçesi taşınıyor. v1 anketi kapıyı açmıyor.
+
+`compliance/rules.py`'de `ADV-001`/`ADV-002` dengeleme bağlamında CRITICAL
+değil **MEDIUM** — kural kalkmıyor, şiddeti düşüyor. Bağlam **kullanılan
+araçlardan** çıkarılıyor, isteğin bir alanından değil.
 
 ### KAP — bildirimler
 

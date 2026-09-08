@@ -446,6 +446,10 @@ class SnapshotOut(BaseModel):
     hhi: Optional[float] = None
     max_drawdown: Optional[float] = None
     position_count: int = 0
+    #: `level`in hangi ölçekte yazıldığı. Dışarı VERİLİYOR: dört bantlı bir
+    #: "Düşük" ile üç bantlıyı aynı sanan bir grafik, altında bir bant daha
+    #: olduğunu göremezdi.
+    band_scale: str = "v1"
 
     model_config = {"from_attributes": True}
 

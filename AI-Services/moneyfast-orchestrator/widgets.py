@@ -1,6 +1,6 @@
 """Chat widget construction.
 
-The chat UI can render three interactive widgets alongside the prose reply
+The chat UI can render five interactive widgets alongside the prose reply
 (see `frontend/src/types/chat.ts`). They are built here, deterministically,
 from the specialist's tool payload.
 
@@ -67,7 +67,17 @@ def build(state: dict[str, Any]) -> tuple[Optional[dict[str, Any]], Optional[str
     if agent == "TRANSACTION_AGENT":
         return _action_widget(data)
     if agent == "PORTFOLIO_AGENT":
+        # İki ayrı yük, iki ayrı widget. Haber olgu paketi `symbols` ve
+        # `coverage` taşıyor, pozisyon yükü `positions` ve `totals`; hangisi
+        # geldiyse ona göre çiziliyor.
+        if "coverage" in data:
+            return _news_impact_widget(data)
         return _portfolio_widget(data)
+    if agent == "RISK_STRATEGY_AGENT":
+        # Yalnızca dengeleme listesi. Risk metrikleri hâlâ metin olarak
+        # okunuyor: çekinceli sayılardan oluşan bir tablo, widget'a
+        # çevrildiğinde çekincelerini kaybediyor.
+        return _rebalance_widget(data)
     # Market research cites sources in prose; a widget would compete with the
     # citations rather than add to them. Risk output is a table of caveated
     # figures and is better read as text.
@@ -176,4 +186,115 @@ def _portfolio_widget(data: dict[str, Any]) -> tuple[Optional[dict[str, Any]], O
         # The portfolio widget is already rendered inline in the message. A
         # context panel repeating it added nothing, and it opened showing a
         # price for "Portföy" — which is not an instrument.
+    }, None
+
+
+def _news_impact_widget(
+    data: dict[str, Any]
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Haber okumasının ÖLÇÜLEN zemini.
+
+    Widget yorumu taşımıyor ve taşımamalı: yorum metinde, uygunluk
+    kapısından geçmiş hâliyle duruyor. Buradaki her sayı backend'de sayılmış
+    ya da ölçülmüş -- kaç haber, kaçı bildirim, hisse ne yaptı, o hissede
+    normal hareket ne kadar.
+
+    Ayrım neden bu kadar önemli: bir widget, metnin yanında ama metinden
+    BAĞIMSIZ okunuyor. Kullanıcı tabloyu okuyup paragrafı atlayabilir. O
+    yüzden tabloda duran her şey, tek başına doğru olmak zorunda -- bir
+    kanaat cümlesi bu koşulu sağlamıyor, çünkü çekincesi paragrafta kalıyor.
+
+    `typical_move_pct` yanında DURMADAN `recent_move_pct` çizilmiyor: bir
+    hareket ancak kendi aralığına karşı büyük ya da küçük, ve tek başına
+    gösterilen bir yüzde okuyucunun onu kendi ölçeğiyle yorumlamasına
+    bırakılıyor demektir.
+    """
+    symbols = [row for row in (data.get("symbols") or []) if isinstance(row, dict)]
+    if not symbols:
+        return None, None
+    coverage = data.get("coverage") or {}
+    return {
+        "type": "news_impact",
+        "payload": {
+            "window_days": int(data.get("window_days") or 0),
+            "rows": [
+                {
+                    "symbol": row.get("symbol", ""),
+                    "sector": row.get("sector"),
+                    "news_count": row.get("news_count", 0),
+                    "filing_count": row.get("filing_count", 0),
+                    "recent_move_pct": (row.get("price") or {}).get("recent_move_pct"),
+                    "typical_move_pct": (row.get("price") or {}).get("typical_move_pct"),
+                }
+                for row in symbols
+            ],
+            # Kaç pozisyon dışarıda kaldı ve kaynak kırılımı. Tabloyu tek
+            # başına okuyan biri, listelenenlerin portföyün tamamı olduğunu
+            # sanmamalı.
+            "coverage": {
+                "symbols": int(coverage.get("symbols") or 0),
+                "symbols_omitted": int(coverage.get("symbols_omitted") or 0),
+                "filings": int(coverage.get("filings") or 0),
+                "feed_articles": int(coverage.get("feed_articles") or 0),
+            },
+        },
+    }, None
+
+
+def _rebalance_widget(
+    data: dict[str, Any]
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Dengeleme listesi, ARAÇ YÜKÜNDEN deterministik olarak kuruluyor.
+
+    Buradaki gerekçe modülün geri kalanından daha güçlü, çünkü bu widget
+    BİRDEN ÇOK işlem satırı taşıyor: widget JSON'u üretebilen bir model,
+    uydurulmuş bir işlem listesi üretebilir ve kullanıcı onu tıklanabilir bir
+    yüzey olarak görür. Aşağıdaki her alan, bir aracın gerçekten döndürdüğü
+    bir değerin izdüşümü.
+
+    **Gerekçesi olmayan satır çizilmiyor.** MCP katmanı zaten böyle bir satırı
+    reddediyor; burada ikinci kez kontrol edilmesinin sebebi, widget'ın
+    kullanıcının TIKLAYACAĞI yüzey olması: sebebi görünmeyen bir satırın
+    yanında bir "Uygula" düğmesi, tam olarak kaldırılan yasağın engellediği
+    şey.
+
+    Kapı kapalıysa ya da hiç satır yoksa widget YOK: boş bir tablo, yapılacak
+    bir şey varmış gibi görünürdü. Nedeni zaten metinde yazılı.
+    """
+    if not (data.get("gate") or {}).get("open"):
+        return None, None
+    rows = [
+        row for row in (data.get("rows") or [])
+        if isinstance(row, dict) and row.get("rationale")
+    ]
+    if not rows:
+        return None, None
+    return {
+        "type": "rebalance",
+        "payload": {
+            # Ekranda koşulsuz duran çekince. Sunucudan geliyor ki arayüzde
+            # ikinci kez yazılmasın.
+            "disclaimer": data.get("disclaimer") or "",
+            # Hedefin NEREDEN geldiği: kullanıcının kendi hedefi mi, ankete
+            # verdiği cevapların bağladığı bant mı. Satırların yanında
+            # durmalı -- bir emir listesinin kaynağı, listenin kendisi kadar
+            # önemli.
+            "band_statement": data.get("bandStatement") or "",
+            "rows": [
+                {
+                    "symbol": row.get("symbol", ""),
+                    "side": row.get("side", ""),
+                    "quantity": row.get("quantity", 0.0),
+                    "amount": row.get("amount", 0.0),
+                    "bucket": row.get("bucket", ""),
+                    "statement": row.get("statement", ""),
+                    "rationale": [
+                        str(reason.get("text") or "")
+                        for reason in (row.get("rationale") or [])
+                        if isinstance(reason, dict) and reason.get("text")
+                    ],
+                }
+                for row in rows
+            ],
+        },
     }, None

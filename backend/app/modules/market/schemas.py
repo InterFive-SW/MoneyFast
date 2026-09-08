@@ -23,7 +23,19 @@ class NewsItem(BaseModel):
     title: str
     url: str
     time: str
-    sentiment: Literal["positive", "negative", "neutral"]
+    #: `null`, ölçülmedi demek -- `"neutral"` DEĞİL.
+    #:
+    #: Alan bir dönem sabit `"neutral"` dönüyordu ve gerekçesi haberi
+    #: nitelendirme yasağıydı. O yasak kalktı (bkz. Bölüm 12), ama yerine
+    #: gelen şey bir sınıflandırıcı değil: okuma, ÖLÇÜLMÜŞ olgular üzerine
+    #: sohbet turunda kuruluyor. Bu uç hâlâ hiçbir şey ölçmüyor.
+    #:
+    #: Bu yüzden `"neutral"` kalmadı: yapılmamış bir ölçümü yapılmış gibi
+    #: gösteriyordu. "Nötr" bir başlık, sınıflandırılmış ve dengede
+    #: bulunmuş bir başlıktır; buradakiler hiç sınıflandırılmadı ve ikisi
+    #: farklı iki iddia. Bu deponun kendi kuralı: `null` bilinmiyor demek,
+    #: sıfır ya da nötr ölçülmüş demek.
+    sentiment: Optional[Literal["positive", "negative", "neutral"]] = None
     relatedSymbols: List[str]
 
 

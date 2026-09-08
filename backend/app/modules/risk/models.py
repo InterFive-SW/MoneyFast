@@ -128,6 +128,13 @@ class RiskSnapshot(Base):
     hhi: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
     position_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: `level`in hangi ölçekte yazıldığı (`profile.BAND_SCALE`). Tarihsel
+    #: satırlar geriye dönük yeniden hesaplanmıyor -- o gün ölçülen buydu --
+    #: dolayısıyla seride iki ölçek yan yana duruyor. Ölçeği yazmadan
+    #: saklamak, grafiğin üç bantlı bir "Düşük" ile dört bantlı bir "Düşük"ü
+    #: aynı şey sanmasına yol açardı; ikincisinin altında artık bir bant daha
+    #: var. `questionnaire_version` ile aynı gerekçe.
+    band_scale: Mapped[str] = mapped_column(String(16), nullable=False, default="v2")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )

@@ -30,6 +30,23 @@ class TestAlignment:
         assert result["alignment"] == profile.ALIGNMENT_CALMER
         assert "altında" in result["statement"]
 
+    def test_a_riskless_measurement_sits_below_every_declared_band(self):
+        """Dördüncü bant beyan tarafında YOK, ama karşılaştırma yine
+        kurulabiliyor: "Risksiz" ortak eksenin en altında duruyor."""
+        for declared in ("Düşük", "Orta", "Yüksek"):
+            result = profile.suitability("Risksiz", declared)
+            assert result["alignment"] == profile.ALIGNMENT_CALMER
+            assert "altında" in result["statement"]
+
+    def test_a_riskless_declaration_cannot_be_compared(self):
+        """Anket "Risksiz" üretemiyor; üretmiş görünen bir değer, ölçekleri
+        karışmış bir kayıt demek ve karşılaştırma onu kabul etmemeli.
+
+        Kabul etseydi cevap "ikisi aynı bandda" olurdu -- var olmayan bir
+        beyanla var olan bir ölçümü eşitleyen bir cümle."""
+        result = profile.suitability("Risksiz", "Risksiz")
+        assert result["alignment"] == profile.ALIGNMENT_UNKNOWN
+
     @pytest.mark.parametrize(
         "measured,declared",
         [(None, "Orta"), ("Orta", None), (None, None), ("Belirsiz", "Orta"), ("Orta", "Agresif")],
@@ -198,85 +215,106 @@ class TestGroupExposure:
                 assert banned not in lowered, f"{banned}: {statement}"
 
 
-class TestTemplateComparison:
-    """`suitability` ile AYNI dil ve aynı sınır: iki OLGU yan yana konuyor.
-
-    Öne çıkarma bir SIRALAMA girdisi, bir seçim değil -- sistem şablonu
-    seçmiyor, kullanıcı seçiyor.
+class TestBindingBand:
+    """İki riskin daha temkinli olanı. Ortalama DEĞİL, minimum -- ve
+    karşılaştırma etiket sırasına göre, skorlar üzerinde aritmetik yapmadan.
     """
 
-    ALL = [
-        profile.template_comparison("Dengeli", vol, declared)["statement"]
-        for vol in (None, 0.05, 0.14, 0.35)
-        for declared in (None, "Düşük", "Orta", "Yüksek")
-    ] + [
-        profile.template_comparison("Dengeli", None, "Orta", ["ABD Hisse"])["statement"]
-    ]
+    def test_the_more_cautious_side_binds(self):
+        """Belgedeki örnek: ankette "Yüksek", ölçümde "Orta". Daha riskli bir
+        hedef vermek yalnızca beyana dayanırdı."""
+        assert profile.binding_band("Orta", "Yüksek") == "Orta"
 
-    def test_no_statement_trips_the_suitability_rule(self):
-        """SUI-001 "size uygun" kalıplarını engelliyor. Ürettiğimiz cümle bir
-        karşılaştırma, bir uygunluk iddiası değil -- ve bunun tesadüf
-        olmadığını burası sabitliyor."""
-        from app.modules.compliance import rules
+    def test_it_binds_the_other_way_too(self):
+        """Tersi durumda beyanı görmezden gelmek olurdu."""
+        assert profile.binding_band("Yüksek", "Düşük") == "Düşük"
 
-        rule = next(r for r in rules.RULES if r.rule_id == "SUI-001")
-        for statement in self.ALL:
-            assert not rule.regex.search(statement), statement
+    def test_agreement_binds_to_itself(self):
+        assert profile.binding_band("Orta", "Orta") == "Orta"
 
-    def test_no_statement_trips_any_advice_rule(self):
-        from app.modules.compliance import rules
+    def test_the_fourth_band_can_bind(self):
+        assert profile.binding_band("Risksiz", "Yüksek") == "Risksiz"
 
-        watched = {"ADV-001", "ADV-002", "ADV-003", "GUA-001", "GUA-002",
-                   "GUA-003", "SOL-001"}
-        for rule in (r for r in rules.RULES if r.rule_id in watched):
-            for statement in self.ALL:
-                assert not rule.regex.search(statement), f"{rule.rule_id}: {statement}"
+    def test_a_missing_measurement_leaves_the_declaration_binding(self):
+        """Eksik olanı en temkinli saymak, ölçülemeyen bir portföye nakit
+        hedefi vermek olurdu."""
+        assert profile.binding_band(None, "Orta") == "Orta"
 
-    def test_no_statement_recommends_or_ranks(self):
-        for statement in self.ALL:
-            lowered = statement.lower()
-            for banned in ("önerilen", "öneririz", "size uygun", "en iyi",
-                           "tercih edin", "seçin", "ideal"):
-                assert banned not in lowered, f"{banned}: {statement}"
+    def test_a_missing_declaration_leaves_the_measurement_binding(self):
+        assert profile.binding_band("Yüksek", None) == "Yüksek"
 
-    def test_a_matching_band_is_highlighted(self):
-        out = profile.template_comparison("Dengeli", 0.05, "Düşük")
-        assert out["band"] == "Düşük"
-        assert out["highlighted"] is True
-        assert "aynı bandda" in out["statement"]
+    def test_neither_side_means_no_band(self):
+        """Bant yok; çağıran bunu bir hedef YOKLUĞU olarak görmek zorunda."""
+        assert profile.binding_band(None, None) is None
 
-    def test_a_mismatch_names_which_side(self):
-        higher = profile.template_comparison("Ağırlıklı hisse", 0.35, "Düşük")
-        lower = profile.template_comparison("Ağırlıklı nakit", 0.05, "Yüksek")
-        assert "üzerinde ölçülüyor" in higher["statement"]
-        assert "altında ölçülüyor" in lower["statement"]
-        assert higher["highlighted"] is False and lower["highlighted"] is False
+    def test_an_unknown_label_is_not_a_band(self):
+        assert profile.binding_band("Belirsiz", "Aşırı") is None
 
-    def test_without_a_questionnaire_nothing_is_highlighted(self):
-        """Beyan yoksa karşılaştırılacak ikinci olgu da yok."""
-        out = profile.template_comparison("Dengeli", 0.14, None)
-        assert out["highlighted"] is False
-        assert "risk anketi gerekiyor" in out["statement"]
-        assert "%14,0" in out["statement"], "ölçüm yine söyleniyor"
+    def test_no_arithmetic_is_done_on_the_scores(self):
+        """Ölçülen skor ters (100 = sakin), anketin ham puanı değil. İkisi
+        arasındaki her işlem er ya da geç ters okunur; fonksiyon skor
+        ALMIYOR, yalnızca etiket."""
+        import inspect
 
-    def test_an_unmeasured_template_names_what_was_missing(self):
-        out = profile.template_comparison("Dengeli", None, "Orta", ["ABD Hisse"])
-        assert out["band"] is None
-        assert out["highlighted"] is False
-        assert "ABD Hisse" in out["statement"]
+        signature = inspect.signature(profile.binding_band)
+        assert list(signature.parameters) == ["measured_level", "declared_tolerance"]
 
-    def test_the_bands_come_from_the_scoring_scale(self):
-        """İki farklı ölçekten "Orta" karşılaştırmak, aynı kelimeyle iki
-        farklı şey söylemek olurdu.
 
-        İlk denemede eşikler elle seçilmişti ve üç şablonun ÜÇÜ de "Düşük"
-        çıkıyordu -- öne çıkarma anlamını yitiriyordu."""
-        assert profile.VOLATILITY_BANDS[0][0] == profile.VOLATILITY_FLOOR
-        assert profile.volatility_band(0.05) == "Düşük"
-        assert profile.volatility_band(0.15) == "Orta"
-        assert profile.volatility_band(0.40) == "Yüksek"
+class TestSuitabilityGate:
+    """Kaldırılan yasakların yerine konan İKİNCİ kontrol.
 
-    def test_an_unmeasured_volatility_has_no_band(self):
-        """Ölçülmemiş bir karışımı orta bandda göstermek, olmayan bir ölçümü
-        varmış gibi sunmak olurdu."""
-        assert profile.volatility_band(None) is None
+    Test zaten vardı ve dört ürün grubu için kademe gereksinimlerini
+    yazıyordu; burada ilk kez bir YETENEĞİ KAPATMAK için kullanılıyor.
+    """
+
+    def _declared(self, version="v2", groups=None):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            questionnaire_version=version,
+            product_groups=groups if groups is not None else [
+                {"key": "equity", "label": "Hisse", "eligible": True, "reason": "ok"},
+            ],
+        )
+
+    def test_no_profile_closes_the_gate(self):
+        gate = profile.suitability_gate(None)
+        assert gate["open"] is False
+        assert "uygunluk testini tamamlamanız" in gate["reason"]
+
+    def test_the_v1_questionnaire_does_not_open_it(self):
+        """v1 bir RİSK TOLERANSI anketi: ürün grubu başına bilgi ve tecrübe
+        beyanı yok, dolayısıyla kademe koşulları hakkında hiçbir şey
+        söyleyemiyor."""
+        assert profile.suitability_gate(self._declared(version="v1"))["open"] is False
+
+    def test_an_empty_group_list_does_not_open_it(self):
+        assert profile.suitability_gate(self._declared(groups=[]))["open"] is False
+
+    def test_a_completed_test_opens_it(self):
+        gate = profile.suitability_gate(self._declared())
+        assert gate["open"] is True
+        assert gate["groups"]["equity"]["eligible"] is True
+
+    def test_an_ineligible_group_keeps_its_own_reason(self):
+        """"Uygun değil" tek başına kişi hakkında bir yargı gibi okunur;
+        hangi beyandan çıktığı yazılı olunca kullanıcı cevabını
+        değiştirebileceğini de görür."""
+        gate = profile.suitability_gate(self._declared(groups=[
+            {"key": "equity", "label": "Hisse", "eligible": False,
+             "reason": "Bu ürünler hakkında beyan ettiğiniz bilgi seviyesi yeterli değil."},
+        ]))
+        assert gate["groups"]["equity"]["eligible"] is False
+        assert "bilgi seviyesi" in gate["groups"]["equity"]["reason"]
+
+    def test_a_group_without_a_key_is_dropped(self):
+        gate = profile.suitability_gate(self._declared(groups=[
+            {"label": "Anahtarsız", "eligible": True},
+            {"key": "equity", "label": "Hisse", "eligible": True, "reason": "ok"},
+        ]))
+        assert set(gate["groups"]) == {"equity"}
+
+    def test_the_gate_never_raises(self):
+        """Kapı REDDETME değil bir DURUM döndürüyor: hata koduyla kapatmak,
+        ekranda bir arıza gibi okunurdu -- oysa yapılacak bir şey var."""
+        assert profile.suitability_gate(object())["open"] is False

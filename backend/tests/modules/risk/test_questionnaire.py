@@ -141,13 +141,21 @@ class TestScoring:
     def test_bands(self, raw_answers, expected):
         assert questionnaire.score_answers(answers(**raw_answers))["tolerance_level"] == expected
 
-    def test_the_tolerance_uses_the_same_labels_as_the_measurement(self):
-        """Karşılaştırma etiket üzerinden yapılıyor; iki taraf aynı kelimeleri
-        kullanmazsa kıyaslanacak bir şey kalmaz."""
-        from app.modules.risk.profile import BANDS
+    def test_every_tolerance_label_exists_on_the_measured_axis(self):
+        """Karşılaştırma etiket üzerinden yapılıyor; beyan edilen bir etiketin
+        ölçülen eksende karşılığı yoksa kıyaslanacak bir şey kalmaz.
 
-        measured_labels = {label for _, label in BANDS}
-        assert set(questionnaire.TOLERANCE_LEVELS) == measured_labels
+        İki küme artık EŞİT DEĞİL, kapsanıyor: ölçülen taraf dördüncü bir
+        bant kazandı (`Risksiz`), beyan edilen taraf üç bantta kaldı ve öyle
+        kalması gerekiyor -- anket ağırlıkları o üç banda göre kalibre
+        edilmiş. Karşılaştırma için gereken şey eşitlik değil, ortak eksen."""
+        from app.modules.risk import profile
+
+        measured_labels = {label for _, label in profile.BANDS}
+        assert set(questionnaire.TOLERANCE_LEVELS) < measured_labels
+        # `profile` anketi import ETMİYOR, kümeyi kendi yazıyor; ayrışırlarsa
+        # beyan edilen geçerli bir etiket "karşılaştırılamaz"a düşerdi.
+        assert set(questionnaire.TOLERANCE_LEVELS) == set(profile._DECLARABLE_LEVELS)
 
     def test_the_horizon_is_carried_separately_and_in_turkish(self):
         """Vade toleranstan ayrı: biri dalgalanmaya dayanma isteğini, diğeri

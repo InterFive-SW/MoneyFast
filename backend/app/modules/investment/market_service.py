@@ -1249,8 +1249,12 @@ def _instrument_query(db: Session, symbols, filters):
     if filters.get("product_type"):
         statement = statement.where(InvestmentProduct.product_type == filters["product_type"])
     if filters.get("sector"):
+        # Türkçe ad, sağlayıcının İngilizce etiketine çevriliyor. Çeviri
+        # yapılmadığında "bankacılık" hiçbir şeyle eşleşmiyor ve sonuç,
+        # veri duruyorken, boş dönüyordu.
         statement = statement.where(
-            func.upper(InstrumentFundamentals.sector) == str(filters["sector"]).upper()
+            func.upper(InstrumentFundamentals.sector)
+            == str(canonical_sector(filters["sector"])).upper()
         )
     if filters.get("max_pe") is not None:
         statement = statement.where(
@@ -1484,6 +1488,82 @@ def candle_series(db: Session, symbol: str, limit: int = 400) -> list[dict[str, 
         }
         for row in reversed(rows)
     ]
+
+
+#: Kullanıcının yazdığı sektör adından SAĞLAYICININ etiketine.
+#:
+#: Bu bir sektör TANIMI değil, bir ÇEVİRİ. Sağlayıcı etiketleri İngilizce
+#: ("Financial Services") ve kullanıcı Türkçe soruyor ("bankacılık");
+#: eşleşmeyen bir süzgeç, ölçüldüğü üzere "Bankacılık sektöründeki hisseler
+#: hakkında veri alınamadı" cevabı üretiyordu -- veri duruyorken.
+#:
+#: `sector_by_symbol` içindeki "elle yazılmış sektör YOK" yasağı YERİNDE:
+#: burada hiçbir enstrümanın sektörü belirlenmiyor, yalnızca kullanıcının
+#: yazdığı ad sağlayıcının kendi etiketine bağlanıyor. Üyelik hâlâ tek
+#: kaynaktan geliyor.
+#:
+#: Anahtarlar ölçülen on bir etiketin tamamını kapsıyor; tanınmayan bir ad
+#: OLDUĞU GİBİ bırakılıyor ve eşleşmezse sonuç boş kalıyor -- uydurulmuş bir
+#: eşleşmeden iyi.
+SECTOR_ALIASES: dict[str, str] = {
+    "hammadde": "Basic Materials",
+    "temel malzemeler": "Basic Materials",
+    "iletişim": "Communication Services",
+    "iletisim": "Communication Services",
+    "medya": "Communication Services",
+    "tüketici döngüsel": "Consumer Cyclical",
+    "perakende": "Consumer Cyclical",
+    "otomotiv": "Consumer Cyclical",
+    "temel tüketim": "Consumer Defensive",
+    "gıda": "Consumer Defensive",
+    "gida": "Consumer Defensive",
+    "enerji": "Energy",
+    "petrol": "Energy",
+    "bankacılık": "Financial Services",
+    "bankacilik": "Financial Services",
+    "banka": "Financial Services",
+    "finans": "Financial Services",
+    "sağlık": "Healthcare",
+    "saglik": "Healthcare",
+    "ilaç": "Healthcare",
+    "sanayi": "Industrials",
+    "havacılık": "Industrials",
+    "havacilik": "Industrials",
+    "gayrimenkul": "Real Estate",
+    "teknoloji": "Technology",
+    "yazılım": "Technology",
+    "yazilim": "Technology",
+    "kamu hizmetleri": "Utilities",
+    "elektrik": "Utilities",
+}
+
+
+def canonical_sector(name: Optional[str]) -> Optional[str]:
+    """Kullanıcının yazdığı adı sağlayıcının etiketine çevirir.
+
+    Tanınmayan bir ad OLDUĞU GİBİ dönüyor: sağlayıcının etiketini birebir
+    yazan bir çağıranın engellenmemesi gerekiyor, ve tanınmayan bir adı
+    yakınına eşlemek üyelik uydurmak olurdu.
+    """
+    if not name:
+        return None
+    return SECTOR_ALIASES.get(name.strip().lower(), name.strip())
+
+
+def count_active_products(db: Session) -> int:
+    """İşlem gören enstrüman sayısı.
+
+    Sektör eşlemesinin PAYDASI. Yalnızca eşleşenleri döndüren bir harita,
+    kaçının dışarıda kaldığını söylemiyor -- ve kapsama düz değil.
+    """
+    return int(
+        db.execute(
+            select(func.count())
+            .select_from(InvestmentProduct)
+            .where(InvestmentProduct.status == "active")
+        ).scalar()
+        or 0
+    )
 
 
 def sector_by_symbol(db: Session) -> dict[str, str]:

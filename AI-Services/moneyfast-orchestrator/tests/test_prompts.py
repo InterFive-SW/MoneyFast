@@ -437,12 +437,25 @@ def test_the_portfolio_agent_is_told_not_to_invent_a_news_window():
     assert "`days` ONLY when the user named a period" in text
 
 
-def test_the_portfolio_agent_may_not_interpret_an_article():
-    """Calling a headline positive or negative is a market view, and this
-    system holds none."""
+def test_a_headline_alone_is_not_enough_to_interpret_it():
+    """Yorumlama yasağı KALKTI ama yerine bir koşul kondu: okuma, ölçülmüş
+    bir zemin gerektiriyor. Başlıklardan yapılan bir okuma tam olarak
+    yasağın engellediği şey ve o yol hâlâ kapalı.
+
+    Sıralama de kapalı ve sebebi yazılı: bu yükte önemi ölçen hiçbir şey yok
+    ve sıra kronolojik."""
     text = flat(prompts.SPECIALIST_PROMPTS["PORTFOLIO_AGENT"])
-    assert "Never call an article positive or negative" in text
-    assert "never rank articles" in text
+    assert "carries titles and nothing else" in text
+    assert "so do not rank" in text
+    assert "measured ground" in text
+
+
+def test_chronology_is_still_not_causation():
+    """Kalkan yasakların yanında DURAN kural. Bir haberden sonra düşen fiyat,
+    o haber YÜZÜNDEN düşmüş bir fiyat değil."""
+    text = flat(prompts.SPECIALIST_PROMPTS["PORTFOLIO_AGENT"])
+    assert "chronology alone" in text
+    assert "adjacency is not causation" in text
 
 
 def test_news_about_holdings_routes_to_the_portfolio_agent():
@@ -528,7 +541,12 @@ PROMPT_BUDGETS = {
     #: olduğunu söyleyen tek cümle o), ve mekanizmanın bir OLGU gibi
     #: sunulmaması. Ayrım da burada duruyor: `get_portfolio_news` yayımlanmış
     #: olguyu, bu araç onun okumasını taşıyor.
-    "PORTFOLIO_AGENT": 5400,
+    #: v2.26 ile get_news_impact_digest yerine get_news_impact_facts: yükte
+    #: hazır cümle YOK, ölçülmüş olgu var. Bütçeyi aşan kısım kısaltılınca
+    #: kaybolan kurallar iki tane ve ikisi de kaldırılan yasağın yerine
+    #: konanlar: okumanın ÖLÇÜLMÜŞ bir zemine dayanması, ve bir haberden
+    #: sonra düşen fiyatın o haber YÜZÜNDEN düşmüş sayılmaması.
+    "PORTFOLIO_AGENT": 5600,
     #: v2.20: limit emri artık ONAYLANDIĞINDA GERÇEKLEŞMİYOR. Bütçeyi aşan
     #: kısım kısaltılınca kaybolan kural, modelin "aldınız" demesinin
     #: YASAK olması: emir vermek başka, gerçekleşmek başka ve ikisini
@@ -540,7 +558,12 @@ PROMPT_BUDGETS = {
     #: üretiyor: hazır cümlenin YENİDEN YAZILMAMASI (çekince ondan
     #: ayrılamıyor), altı aydan uzun vadenin REDDEDİLDİĞİ ve kısa okumadan
     #: cevaplanmadığı, ve `lean` sayısının kullanıcıya ULAŞMAMASI.
-    "MARKET_DATA_AGENT": 4800,
+    #: v2.25 ile altıncı araç: `get_sector_map`. Bütçeyi aşan kısım
+    #: kısaltılınca kaybolan kural, sektörün HAFIZADAN cevaplanmaması: hangi
+    #: şirketin hangi sektörde olduğu tam olarak bir modelin kendinden emin
+    #: biçimde yanlış hatırladığı türden bir olgu ve yanlış bir üyelik, bir
+    #: şirketi hiç ilgisi olmayan bir hikâyenin içine koyuyor.
+    "MARKET_DATA_AGENT": 5300,
     #: v2.17 ile iki karşılaştırma daha yanında geliyor: ürün grubu beyanı ve
     #: kullanıcının kendi hedefinden sapma. Bütçeyi aşan kısım kısaltılınca
     #: kaybolan kurallar: hazır cümlelerin YENİDEN YAZILMAMASI, hedefsizliğin
@@ -678,10 +701,14 @@ def test_the_non_advisory_rule_still_stands_above_the_exception():
 
 
 def test_the_risk_specialist_still_forbids_threshold_judgements():
-    """Reaching a score must not loosen the planner's own limits."""
+    """Bir skora ulaşmak, planlayıcının kendi sınırlarını gevşetmiyor.
+
+    Eşik yargısı yasağı DURUYOR ama artık kapsamı yazılı: ham bir metrik
+    hakkında. Yeniden dengeleme listesi bunun dışında ve dışında olmasının
+    sebebi listenin her satırının onu üreten sayıyı taşıması."""
     text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
     assert "Never emit a threshold judgement" in text
-    assert "Never recommend a rebalance, hedge or target weight" in text
+    assert "about a raw metric you were handed" in text
 
 
 def test_the_risk_specialist_does_not_plan_the_summary_call():
@@ -864,11 +891,15 @@ class TestDirectionSignalIsBound:
         assert "carries its own limit in the same breath" in prompt
         assert 'A bare "yükselecek" has none of those and stays forbidden' in prompt
 
-    def test_the_rebalance_prohibition_is_untouched(self):
-        """Yön sinyali eklemek, dengeleme yasağını gevşetmiyor. İkisi ayrı
-        kararlar ve bu test onların birlikte durduğunu sabitliyor."""
+    def test_the_direction_signal_did_not_open_the_rebalance_door(self):
+        """Yön sinyali eklemek dengelemeyi açmadı; dengelemeyi açan şey ayrı
+        bir karar oldu ve yerine üç kontrol kondu. Bu test o üç kontrolün
+        istemde yazılı olduğunu sabitliyor -- gevşemenin karşılıksız
+        olmadığını."""
         prompt = " ".join(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"].split())
-        assert "Never recommend a rebalance, hedge or target weight" in prompt
+        assert "every row carries `rationale`" in prompt
+        assert "a row that arrived WITHOUT a rationale does not exist" in prompt
+        assert "gate.open == false" in prompt
 
     def test_a_forward_question_is_routed_to_the_data_agent(self):
         """Ölçülen hata: "ASELS önümüzdeki 3 ayda nasıl gider" OUT_OF_SCOPE
@@ -895,41 +926,31 @@ class TestRebalanceOpeningIsReadOnly:
     açıklık eklendi diye yasak gevşemedi.
     """
 
-    def test_the_prohibition_is_still_there_word_for_word(self):
+    def test_three_things_stay_closed(self):
+        """Yasak kalkarken kapalı kalanlar tek tek yazılı olmalı: gevşemenin
+        neyi kapsamadığı, kapsadığı kadar önemli."""
         prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-        assert "Never recommend a rebalance, hedge or target weight" in prompt
-        assert "Despite the name, you produce no strategy" in prompt
+        assert "never propose a target of your own" in prompt
+        assert "never tell them to execute anything" in prompt
+        assert "never raise the subject unasked" in prompt
 
-    def test_the_opening_is_explicitly_read_only(self):
+    def test_the_list_is_read_not_produced(self):
         prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-        assert "ONE NARROW OPENING, and it is read-only" in prompt
-        assert "get_rebalance_plan describes it" in prompt
+        assert "a list the BACKEND built" in prompt
+        assert "Never invent a row" in prompt
+        assert "never present the list as your own conclusion" in prompt
 
-    def test_the_order_rows_are_kept_off_the_chat(self):
-        """Ekranda kullanıcı hedefi kendi koydu ve her satırı kendi tıklaması
-        onaylıyor; sembol, yön ve adedi sohbette yeniden basmak o zinciri
-        koparıyor ve cevap bir tavsiyeden ayırt edilemez hâle geliyor."""
+    def test_every_relayed_row_must_carry_its_reason(self):
+        """Gevşemenin dayandığı tek şey bu: gerekçesi yazılmayan bir satır bir
+        tavsiye, sayısıyla yazılan bir satır bir okuma."""
         prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-        assert "The ORDER ROWS THEMSELVES are not given to you" in prompt
-        assert "point at the screen for the rows" in prompt
-        assert 'Asked "kaç lot", say the amounts are on the screen' in prompt
+        assert "every row carries `rationale`" in prompt
 
-    def test_the_opening_names_what_it_does_not_allow(self):
-        """Açıklığın kendisi sınırlarını taşımalı: eklendiği yerde
-        okunmayan bir sınır, yokmuş gibi davranılan bir sınırdır."""
+    def test_the_closed_gate_is_not_answered_from_the_metrics(self):
+        """Kapı kapalıyken metriklerden cevap üretmek, kapının kapattığı şeyi
+        başka bir kapıdan vermek olurdu."""
         prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-        for rule in (
-            "you never build a list",
-            "never name a symbol with a quantity",
-            "never propose a target",
-            "never tell them to execute anything",
-            "never raise the subject yourself",
-        ):
-            assert rule in prompt, rule
-
-    def test_a_choice_question_is_deflected_to_the_user(self):
-        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-        assert "the target is theirs to set and point at the screen" in prompt
+        assert "Do not answer the question from the metrics instead" in prompt
 
     def test_the_target_prohibition_elsewhere_is_untouched(self):
         """`allocation_drift` tarafındaki "kendi hedefini önerme" kuralı bu
@@ -949,3 +970,68 @@ class TestRebalanceOpeningIsReadOnly:
         router = flat(prompts.ROUTER_PROMPT)
         assert '"Portföyümü nasıl dengelemeliyim" is NOT this' in router
         assert "the target is theirs to set" in router
+
+
+class TestNewsReadingIsAllowedButBounded:
+    """Bölüm 12'nin politika değişikliği. Yorumlama yasağı kalktı; yerine
+    konan şey, okumanın ÖLÇÜLMÜŞ bir zemine dayanma zorunluluğu.
+
+    Bu sınıfın işi gevşemenin karşılıksız olmadığını çivilemek: neyin
+    serbest bırakıldığı kadar, neyin yerinde kaldığı da yazılı olmalı.
+    """
+
+    def test_the_two_sided_shape_is_reused_not_reinvented(self):
+        """Çıktı biçimi için yeni bir şey icat EDİLMEDİ: sistem istemi zaten
+        tam olarak bu yapıyı tarif eden bir bölüm taşıyordu."""
+        text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
+        assert "uses the SAME shape as any other" in text
+        assert "Nothing new is invented for news" in text
+
+    def test_every_bullet_must_point_at_a_figure(self):
+        text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
+        assert "EVERY bullet points at a figure in the payload" in text
+
+    def test_a_move_is_sized_only_against_its_own_range(self):
+        """%5 bir sembolde olağanüstü, başka birinde sıradan."""
+        text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
+        assert "A move is only large against" in text
+        assert "say nothing about size" in text
+
+    def test_chronology_is_still_not_causation(self):
+        """Kalkan yasakların yanında DURAN kural."""
+        text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
+        assert "chronology is still not causation" in text
+
+    def test_neither_side_may_be_padded(self):
+        """Tek yöne işaret eden bir haber akışı gerçek bir şey; onu berabere
+        gibi giydirmek tarafsızlık değil, çarpıtmadır."""
+        text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
+        assert "Do NOT pad a side" in text
+
+    def test_zero_news_is_a_measured_silence(self):
+        text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
+        assert "MEASURED silence" in text
+        assert "it is not reassurance" in text
+
+
+class TestRiskReadingIsBounded:
+    """"Bu gerçekten riskli" diyebilmek, kaldırılan yasağın ta kendisi --
+    ve serbest bırakılışı üç şeyden birine bağlanmak koşuluyla."""
+
+    def test_it_must_attach_to_one_of_three_measured_things(self):
+        text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
+        assert "at least ONE of three measured things" in text
+        assert "the one it attaches to appears in the sentence" in text
+
+    def test_without_a_measurement_there_is_no_risk_sentence(self):
+        """Ölçülmemiş bir risk okuması bir izlenim, ve bir izlenimi ölçüm
+        sesiyle söylemek bu sistemin karşı kurulduğu hata."""
+        text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
+        assert "there is NO risk sentence" in text
+        assert "An unmeasured risk reading is an impression" in text
+
+    def test_it_is_about_the_situation_not_the_person(self):
+        """"Bu sizin için riskli" kişi hakkında bir yargı ve yasak kalıyor."""
+        text = flat(prompts.ORCHESTRATOR_SYSTEM_PROMPT)
+        assert "about the SITUATION, never about the person" in text
+        assert "stays forbidden" in text

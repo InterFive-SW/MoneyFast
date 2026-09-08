@@ -989,11 +989,68 @@ class TestAllocationDrift:
         db.commit.assert_called_once()
 
 
+def _declared(tolerance=None, version="v2", groups=None):
+    """Uygunluk testi TAMAMLANMIŞ bir beyan.
+
+    Kapı kapalıyken liste hiç üretilmiyor (`TestSuitabilityGateEndpoint`);
+    aşağıdaki sınıfların ölçtüğü şey o kapı değil, ucun gövdesi -- o yüzden
+    varsayılan beyan v2 ve hisse grubu yeterli.
+    """
+    return SimpleNamespace(
+        tolerance_level=tolerance,
+        questionnaire_version=version,
+        product_groups=groups if groups is not None else [
+            {"key": "equity", "label": "Ortaklık Payı", "eligible": True,
+             "reason": "Beyan ettiğiniz bilgi ve tecrübe bu grup için yeterli."},
+        ],
+    )
+
+
 class TestRebalancePlan:
     """Sapmanın emir karşılığı. Sistem hedefi KOYMUYOR ve enstrüman SEÇMİYOR:
     kova farkı mevcut pozisyonlara orantılı dağıtılıyor."""
 
-    URL = "/api/investment/rebalance-plan"
+    URL = "/api/investment/rebalance/plan"
+
+    @pytest.fixture(autouse=True)
+    def _session(self):
+        """Oturum ZORUNLU: plan kullanıcının kendi pozisyonlarından ve kendi
+        risk beyanından çıkıyor, ve demo portföyüne düşmek başkasının planını
+        onunki gibi göstermek olurdu."""
+        from app.core.deps import get_current_user_id
+        from app.main import app
+
+        app.dependency_overrides[get_current_user_id] = lambda: "u-1"
+        yield
+        app.dependency_overrides.pop(get_current_user_id, None)
+
+    def _plan(self, client, lookback="1Y"):
+        return client.post(self.URL, json={"lookback": lookback})
+
+    def _measured(self, mocker, level="Orta", declared=None, rationale=True):
+        """Ölçüm bloğu taklit ediliyor: bu sınıfın konusu plan, risk motoru
+        değil, ve gerçek ölçüm sembol başına mum okumak demek.
+
+        `rationale`, her adaya bir seçim gerekçesi veriyor. Gerekçesi olmayan
+        aday listeye HİÇ girmiyor (`TestRationaleGate`) ve bu sınıfın ölçtüğü
+        şey o kapı değil, ucun gövdesi.
+        """
+        from app.modules.investment import market_service
+        from app.modules.risk import router as risk_router
+
+        if rationale:
+            mocker.patch.object(
+                market_service, "fundamentals_for",
+                side_effect=lambda _db, symbol: {"symbol": symbol, "pe_ratio": 10.0},
+            )
+
+        mocker.patch.object(
+            risk_router, "_measure",
+            return_value={
+                "scored": {"level": level},
+                "declared": _declared(declared),
+            },
+        )
 
     def _portfolio(self, mocker, rows, cash=100000.0, blocked=0.0):
         from app.modules.investment import market_service, router as investment_router
@@ -1026,20 +1083,25 @@ class TestRebalancePlan:
         """Sunucudan geliyor ki arayüzde ikinci kez yazılmasın."""
         self._portfolio(mocker, [])
         self._targets(mocker, {})
-        body = client.get(self.URL).json()
+        self._measured(mocker)
+        body = self._plan(client).json()
         assert "yatırım tavsiyesi değildir" in body["disclaimer"]
 
-    def test_no_target_produces_no_orders(self, client, mocker):
+    def test_no_target_and_no_band_produces_no_orders(self, client, mocker):
         self._portfolio(mocker, [self._row("THYAO", "BIST", 90, 100.0)])
         self._targets(mocker, {})
-        body = client.get(self.URL).json()
+        self._measured(mocker, level=None)
+        body = self._plan(client).json()
         assert body["hasTarget"] is False
+        assert body["targetSource"] == "NONE"
         assert body["rows"] == []
+        assert "gerekiyor" in body["bandStatement"]
 
     def test_an_overweight_bucket_produces_sell_rows(self, client, mocker):
         self._portfolio(mocker, [self._row("THYAO", "BIST", 100, 100.0)], cash=0.0)
         self._targets(mocker, {"bist_equity": 50.0, "cash": 50.0})
-        body = client.get(self.URL).json()
+        self._measured(mocker)
+        body = self._plan(client).json()
         rows = [row for row in body["rows"] if row["symbol"] == "THYAO"]
         assert rows and rows[0]["side"] == "SELL"
         assert "karşılığı" in rows[0]["statement"]
@@ -1047,7 +1109,8 @@ class TestRebalancePlan:
     def test_a_bucket_without_holdings_is_explained(self, client, mocker):
         self._portfolio(mocker, [self._row("THYAO", "BIST", 100, 100.0)], cash=0.0)
         self._targets(mocker, {"bist_equity": 50.0, "gold": 50.0})
-        body = client.get(self.URL).json()
+        self._measured(mocker)
+        body = self._plan(client).json()
         reasons = " ".join(row["reason"] for row in body["unresolved"])
         assert "sizin seçiminiz" in reasons
 
@@ -1055,8 +1118,9 @@ class TestRebalancePlan:
         """Bakiyede eksilen ama nedeni yazmayan bir tutar kullanıcıya hata
         gibi görünür."""
         self._portfolio(mocker, [], cash=5000.0, blocked=1500.0)
-        self._targets(mocker, {})
-        body = client.get(self.URL).json()
+        self._targets(mocker, {"cash": 100.0})
+        self._measured(mocker)
+        body = self._plan(client).json()
         assert body["blocked_cash_base"] == 1500.0
         assert body["usable_cash_base"] == 3500.0
 
@@ -1065,17 +1129,240 @@ class TestRebalancePlan:
         olurdu -- ekranda bir sayı, emir listesinde başka bir sayı."""
         self._portfolio(mocker, [self._row("THYAO", "BIST", 100, 100.0)], cash=0.0)
         self._targets(mocker, {"bist_equity": 50.0, "cash": 50.0})
-        plan = client.get(self.URL).json()
+        self._measured(mocker)
+        plan = self._plan(client).json()
         drift = client.get("/api/investment/allocation-drift").json()
         assert plan["totalValue"] == drift["totalValue"]
         assert plan["statement"] == drift["statement"]
+
+
+class TestRebalanceTargetSource:
+    """Hedef iki yerden gelebiliyor ve kullanıcının kendisi KAZANIYOR.
+
+    Sistemin kullanıcının kendi kararını sessizce değiştirmesi, kullanıcıya
+    ait olan tek girdiyi yok ederdi -- `AllocationTarget` docstring'indeki
+    gerekçe, hedef artık bir banttan da gelebildiği için daha da geçerli.
+    """
+
+    URL = "/api/investment/rebalance/plan"
+
+    @pytest.fixture(autouse=True)
+    def _session(self):
+        from app.core.deps import get_current_user_id
+        from app.main import app
+
+        app.dependency_overrides[get_current_user_id] = lambda: "u-1"
+        yield
+        app.dependency_overrides.pop(get_current_user_id, None)
+
+    def _wire(self, mocker, own, band_rows, level="Orta", declared=None):
+        from app.modules.investment import (
+            market_service, rebalance, router as investment_router,
+        )
+        from app.modules.risk import router as risk_router
+
+        mocker.patch.object(market_service, "holdings", return_value=[])
+        mocker.patch.object(market_service, "latest_quotes", return_value={})
+        mocker.patch.object(
+            market_service, "account",
+            return_value=SimpleNamespace(id="a1", cash_balance=1000.0,
+                                         currency_code="TRY", account_number="TR-1"),
+        )
+        mocker.patch.object(market_service, "blocked_cash", return_value=0.0)
+        mocker.patch.object(investment_router, "_targets_for", return_value=own)
+        mocker.patch.object(rebalance, "band_targets", return_value=band_rows)
+        mocker.patch.object(
+            risk_router, "_measure",
+            return_value={
+                "scored": {"level": level},
+                "declared": _declared(declared),
+            },
+        )
+
+    def _plan(self, client, lookback="1Y"):
+        return client.post(self.URL, json={"lookback": lookback}).json()
+
+    def test_the_users_own_target_wins(self, client, mocker):
+        self._wire(mocker, own={"cash": 100.0}, band_rows={"cash": 10.0})
+        body = self._plan(client)
+        assert body["targetSource"] == "USER"
+        assert "kendi belirlediğiniz" in body["bandStatement"]
+
+    def test_the_band_target_fills_in_when_the_user_has_none(self, client, mocker):
+        self._wire(mocker, own={}, band_rows={"cash": 25.0, "bist_equity": 30.0})
+        body = self._plan(client)
+        assert body["targetSource"] == "BAND"
+        assert body["bindingBand"] == "Orta"
+
+    def test_the_band_is_never_consulted_when_the_user_has_a_target(
+        self, client, mocker
+    ):
+        """Okumak bile yanlış olurdu: okunan bir hedefin kullanılmadığını
+        söyleyen tek şey bu çağrının hiç yapılmaması."""
+        from app.modules.investment import rebalance
+
+        self._wire(mocker, own={"cash": 100.0}, band_rows={"cash": 10.0})
+        self._plan(client)
+        rebalance.band_targets.assert_not_called()
+
+    def test_the_more_cautious_side_binds(self, client, mocker):
+        """Ankette "Yüksek" diyen ama portföyü "Orta" ölçülen kullanıcı."""
+        self._wire(mocker, own={}, band_rows={"cash": 25.0},
+                   level="Orta", declared="Yüksek")
+        body = self._plan(client)
+        assert body["bindingBand"] == "Orta"
+        assert body["measuredLevel"] == "Orta"
+        assert body["declaredTolerance"] == "Yüksek"
+
+    def test_a_divergence_is_stated_not_hidden(self, client, mocker):
+        self._wire(mocker, own={}, band_rows={"cash": 25.0},
+                   level="Düşük", declared="Yüksek")
+        statement = self._plan(client)["bandStatement"]
+        assert "Düşük" in statement and "Yüksek" in statement
+        assert "daha temkinli" in statement
+
+    def test_no_measurement_and_no_declaration_means_no_target(self, client, mocker):
+        self._wire(mocker, own={}, band_rows={"cash": 25.0}, level=None)
+        body = self._plan(client)
+        assert body["targetSource"] == "NONE"
+        assert body["bindingBand"] is None
+
+    def test_the_window_travels_into_the_measurement_and_back_out(
+        self, client, mocker
+    ):
+        """Pencere sonucu gerçekten değiştiriyor: aynı portföy üç aylıkta
+        "Yüksek", beş yıllıkta "Orta" ölçülebilir."""
+        from app.modules.risk import router as risk_router
+
+        self._wire(mocker, own={"cash": 100.0}, band_rows={})
+        body = self._plan(client, lookback="5Y")
+        assert body["lookback"] == "5Y"
+        assert risk_router._measure.call_args.args[2] == "5Y"
+
+    def test_the_news_rationale_source_is_empty_after_the_retirement(
+        self, client, mocker
+    ):
+        """v2.26'da `market.news_impacts` emekliye ayrıldı: okuma artık
+        saklanmıyor, sohbet turunda ölçülmüş olgular üzerine kuruluyor.
+
+        Fonksiyon KALDIRILMADI çünkü `rationale_for` üç girdiyle çalışıyor
+        ve haber girdisinin varlığı sözleşmenin parçası. Boş harita "bu turda
+        haber gerekçesi yok" demek; seçim diğer iki ölçümle yapılıyor ve
+        gerekçesiz aday zaten listeye girmiyor."""
+        from app.modules.investment import router as investment_router
+
+        assert investment_router._news_reading_for(object(), ["A", "B"]) == {}
+
+    def test_a_window_written_as_days_is_refused(self, client, mocker):
+        """Tanınmayan bir pencere sessizce bir yıla düşüyordu ve çağıran
+        bunu hiç öğrenmiyordu."""
+        self._wire(mocker, own={}, band_rows={})
+        assert client.post(self.URL, json={"lookback": "365"}).status_code == 422
+
+    def test_the_window_is_case_insensitive(self, client, mocker):
+        self._wire(mocker, own={"cash": 100.0}, band_rows={})
+        assert client.post(self.URL, json={"lookback": "3m"}).json()["lookback"] == "3M"
+
+    def test_the_default_window_is_a_year(self, client, mocker):
+        self._wire(mocker, own={"cash": 100.0}, band_rows={})
+        assert client.post(self.URL, json={}).json()["lookback"] == "1Y"
+
+
+class TestSuitabilityGateEndpoint:
+    """Uygunluk testi tamamlanmamışsa liste HİÇ ÜRETİLMİYOR.
+
+    Üretilip sonra süzülen bir liste, süzgecin bir gün unutulabileceği bir
+    yer açardı.
+    """
+
+    URL = "/api/investment/rebalance/plan"
+
+    @pytest.fixture(autouse=True)
+    def _session(self):
+        from app.core.deps import get_current_user_id
+        from app.main import app
+
+        app.dependency_overrides[get_current_user_id] = lambda: "u-1"
+        yield
+        app.dependency_overrides.pop(get_current_user_id, None)
+
+    def _wire(self, mocker, declared):
+        from app.modules.investment import market_service, router as investment_router
+        from app.modules.risk import router as risk_router
+
+        mocker.patch.object(
+            market_service, "holdings",
+            return_value=[{"symbol": "A", "currency": "TRY", "market": "BIST",
+                           "quantity": 100, "price": 100.0, "avg_cost": 100.0,
+                           "name": "A", "product_type": "stock"}],
+        )
+        mocker.patch.object(market_service, "latest_quotes", return_value={})
+        mocker.patch.object(
+            market_service, "account",
+            return_value=SimpleNamespace(id="a1", cash_balance=0.0,
+                                         currency_code="TRY", account_number="TR-1"),
+        )
+        mocker.patch.object(market_service, "blocked_cash", return_value=0.0)
+        mocker.patch.object(
+            market_service, "fundamentals_for",
+            side_effect=lambda _db, symbol: {"symbol": symbol, "pe_ratio": 10.0},
+        )
+        # BIST fazlalı: gerçekten bir emir satırı çıkması gerekiyor, aksi
+        # hâlde "kapı açık ama satır yok" ile "kapı kapalı" ayırt edilemezdi.
+        mocker.patch.object(
+            investment_router, "_targets_for",
+            return_value={"bist_equity": 50.0, "cash": 50.0},
+        )
+        mocker.patch.object(
+            risk_router, "_measure",
+            return_value={"scored": {"level": "Orta"}, "declared": declared},
+        )
+
+    def _plan(self, client):
+        return client.post(self.URL, json={"lookback": "1Y"}).json()
+
+    def test_an_incomplete_test_closes_the_feature(self, client, mocker):
+        self._wire(mocker, None)
+        body = self._plan(client)
+        assert body["gate"]["open"] is False
+        assert body["rows"] == []
+        assert "uygunluk testini tamamlamanız" in body["summary"]
+
+    def test_the_v1_questionnaire_does_not_open_it(self, client, mocker):
+        self._wire(mocker, _declared(version="v1"))
+        assert self._plan(client)["gate"]["open"] is False
+
+    def test_a_completed_test_opens_it(self, client, mocker):
+        self._wire(mocker, _declared())
+        body = self._plan(client)
+        assert body["gate"]["open"] is True
+        assert body["rows"]
+
+    def test_the_disclaimer_travels_even_when_closed(self, client, mocker):
+        """Kapalı bir ekran da bir liste ekranı: çekince koşulsuz."""
+        self._wire(mocker, None)
+        assert "yatırım tavsiyesi değildir" in self._plan(client)["disclaimer"]
+
+    def test_an_ineligible_group_is_filtered_out_of_an_open_plan(
+        self, client, mocker
+    ):
+        self._wire(mocker, _declared(groups=[
+            {"key": "equity", "label": "Ortaklık Payı", "eligible": False,
+             "reason": "Bu ürünler hakkında beyan ettiğiniz bilgi seviyesi yeterli değil."},
+        ]))
+        body = self._plan(client)
+        assert body["gate"]["open"] is True
+        assert body["rows"] == []
+        assert "bilgi seviyesi" in " ".join(
+            row["reason"] for row in body["unresolved"]
+        )
 
 
 class TestRebalancePlanForAgent:
     """Servis token'lı ikiz uç. Ekranın ve sohbetin aynı portföy için farklı
     bir plan göstermesi mümkün olmamalı."""
 
-    URL = "/api/investment/agent/u-1/rebalance-plan"
+    URL = "/api/investment/rebalance/plan/u-1"
 
     def test_without_a_service_token_it_is_refused(self, client, monkeypatch):
         """Bir kullanıcının planını başkasının okuyabilmesi, oturum
@@ -1090,6 +1377,17 @@ class TestRebalancePlanForAgent:
         koruma, olmayan bir korumadır."""
         monkeypatch.delenv("BACKEND_API_KEY", raising=False)
         assert client.get(self.URL).status_code == 503
+
+    def test_a_bad_window_is_refused_on_the_service_endpoint_too(
+        self, client, monkeypatch
+    ):
+        """Sohbet yolu da aynı kapalı kümeyi geçmek zorunda: gevşek bir ikiz
+        uç, sessizce başka bir pencereye düşen bir ölçüm demek olurdu."""
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        response = client.get(
+            f"{self.URL}?lookback=365", headers={"Authorization": "Bearer secret"}
+        )
+        assert response.status_code == 422
 
     def test_it_serves_the_same_body_as_the_session_endpoint(
         self, client, mocker, monkeypatch

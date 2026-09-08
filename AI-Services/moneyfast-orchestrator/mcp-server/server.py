@@ -53,12 +53,15 @@ import fundamentals_tools
 import instrument_tools
 import market_data_tools
 import market_research_tools
+import news_impact_tools
 import news_tools
 import orchestrator_tools
 import order_tools
 import portfolio_tools
+import rebalance_tools
 import risk_strategy_tools
 import scenario_tools
+import sector_tools
 import banking_tools
 import technical_tools
 import transaction_tools
@@ -119,23 +122,32 @@ SERVER_NAME = "moneyfast"
 #: `get_technical_signals`'ın v2.10 yükü DEĞİŞMEDİ -- o tek bir göstergeler
 #: okuması, bu üç kaynağın birleşimi ve farklı bir başarısızlık biçimi var
 #: (vade dışı bir istek REDDEDİLİYOR).
-#: v2.22: `get_rebalance_plan`. SALT OKUMA. Dengeleme ekranı kullanıcının
-#: kendi hedefinin aritmetik karşılığını gösteriyor ve kullanıcı sohbete
-#: "şu listede ne yazıyor" diye sorabiliyordu; sohbetin o listeyi GÖREMEMESİ,
-#: cevabı "ekrana bakın"a indiriyordu. Araç listeyi ÜRETMİYOR, okuyor:
-#: `prompts.py:859`'daki "Never recommend a rebalance" cümlesi yerinde
-#: duruyor ve testi (`test_prompts.py`) onu sabitlemeye devam ediyor.
+#: v2.22: `get_rebalance_plan`. O sürümde SALT OKUMA idi ve emir satırları
+#: bilerek dışarıda bırakılıyordu.
 #: v2.23: `get_news_impact_digest`. SALT OKUMA. Sistemdeki tek araç ki
 #: taşıdığı şey bir ÖLÇÜM DEĞİL, bir modelin metin okuması -- ve her alanı
 #: öyle etiketleniyor. `get_portfolio_news` GENİŞLETİLMEDİ: o başlıkları
-#: listeliyor ve hiçbir şey yorumlamıyor, ikisini tek araçta birleştirmek
-#: aynı dayanağa sahiplermiş gibi gösterirdi. Yargıyı ajan üretmiyor; ayrı
-#: bir toplu iş üretiyor, satır olarak saklanıyor ve geldiği habere kadar
-#: izlenebiliyor.
-CONTRACT_VERSION = "v2.23"
+#: listeliyor ve hiçbir şey yorumlamıyor.
+#: v2.24: `get_rebalance_plan` artık SATIRLARI taşıyor ve kendi dosyasında
+#: (`rebalance_tools.py`). Bu bir politika değişikliği, bir genişletme değil:
+#: sistem ilk kez gerekçeli bir işlem listesi öneriyor. Dayanağı tek cümlede
+#: -- her satır onu listeye sokan ÖLÇÜMÜ yanında taşıyor, ve gerekçesiz bir
+#: satır üç katmanın üçünde de reddediliyor (backend üretmiyor, bu katman
+#: ContractViolationError fırlatıyor, widget çizmiyor). Yanında iki kapı
+#: daha var: uygunluk testi tamamlanmamışsa liste hiç yok, ve çekince
+#: `_keep_rationale` ile kapının her dalından geçiyor.
+#: v2.25: `get_sector_map`. KAPATILAN BİR BOŞLUK: `sector_by_symbol()`
+#: backend'de vardı ama hiçbir araç sektör döndürmüyordu, dolayısıyla
+#: "bankacılık sektörü bu haberden nasıl etkilenir" sorusunun veri yolu
+#: yoktu ve ajan sektörü kendi bildiğinden uyduruyordu.
+#: v2.26: `get_news_impact_facts`. Yorum TAŞIMIYOR: her sayı backend'de
+#: sayılmış ya da ölçülmüş. Yorumu yazar yapıyor, sistem istemindeki iki
+#: taraflı şablonun içinde -- ve o şablon her maddenin "ölçülmüş bir olgu,
+#: sayısıyla" olmasını istiyor.
+CONTRACT_VERSION = "v2.26"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Twenty-four tools across sixteen domains.
+MoneyFast tool server. Twenty-six tools across nineteen domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -199,6 +211,9 @@ DOMAIN_MODULES = (
     ("banking", banking_tools),
     ("technical", technical_tools),
     ("news", news_tools),
+    ("news_impact", news_impact_tools),
+    ("rebalance", rebalance_tools),
+    ("sector", sector_tools),
     ("scenario", scenario_tools),
     ("fundamentals", fundamentals_tools),
     ("cash_flow", cash_flow_tools),

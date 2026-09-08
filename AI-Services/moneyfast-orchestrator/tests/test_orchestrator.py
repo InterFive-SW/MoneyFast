@@ -1967,10 +1967,15 @@ class TestPortfolioNewsBranch:
         assert out["tools_used"] == ["get_portfolio_news"]
         assert out["specialist_output"]["status"] == "OK"
 
-    DIGEST = {"window_hours": 24, "headline": "Son 24 saatte...",
-              "disclaimer": "Bu özet ... yorumlanmasıdır.",
-              "entries": [{"symbol": "AKBNK", "sentence": "AKBNK: 1 haber yorumu.",
-                           "reasons": []}]}
+    DIGEST = {
+        "window_days": 90,
+        "symbols": [{"symbol": "AKBNK", "news_count": 3, "filing_count": 1,
+                     "price": {"recent_move_pct": 1.1, "typical_move_pct": 4.4,
+                               "window_days": 5},
+                     "fundamentals": {"pe_ratio": 4.2}, "articles": []}],
+        "coverage": {"articles": 3, "filings": 1, "feed_articles": 2,
+                     "symbols": 1, "symbols_with_news": 1, "symbols_omitted": 0},
+    }
 
     @pytest.mark.asyncio
     async def test_the_plan_can_choose_the_digest_tool(
@@ -1979,20 +1984,20 @@ class TestPortfolioNewsBranch:
         """Ayrı bir araç çünkü ayrı bir dayanak: yukarıdaki başlıkları
         taşıyor, bu bir modelin okumasını."""
         patched_llm.set_response(
-            '{"tool": "get_news_impact_digest", "arguments": {"hours": 48}}')
-        fake_mcp.responses["get_news_impact_digest"] = self.DIGEST
+            '{"tool": "get_news_impact_facts", "arguments": {"days": 30}}')
+        fake_mcp.responses["get_news_impact_facts"] = self.DIGEST
         out = await orchestrator.portfolio_node(base_state)
-        assert out["tools_used"] == ["get_news_impact_digest"]
-        assert fake_mcp.calls[0][1]["hours"] == 48
+        assert out["tools_used"] == ["get_news_impact_facts"]
+        assert fake_mcp.calls[0][1]["days"] == 30
 
     @pytest.mark.asyncio
     async def test_the_digest_user_also_comes_from_state(
         self, fake_mcp, patched_llm, base_state
     ):
         patched_llm.set_response(
-            '{"tool": "get_news_impact_digest",'
+            '{"tool": "get_news_impact_facts",'
             ' "arguments": {"user_id": "u_someone_else"}}')
-        fake_mcp.responses["get_news_impact_digest"] = self.DIGEST
+        fake_mcp.responses["get_news_impact_facts"] = self.DIGEST
         await orchestrator.portfolio_node(base_state)
         assert fake_mcp.calls[0][1]["user_id"] == "u_123"
 
@@ -2002,12 +2007,12 @@ class TestPortfolioNewsBranch:
     ):
         """Pencerede yorumlanmış haber yok -- ama penceresiyle birlikte
         söylenmeli, o yüzden yük yine gidiyor."""
-        patched_llm.set_response('{"tool": "get_news_impact_digest", "arguments": {}}')
-        fake_mcp.responses["get_news_impact_digest"] = {
-            **self.DIGEST, "entries": []}
+        patched_llm.set_response('{"tool": "get_news_impact_facts", "arguments": {}}')
+        fake_mcp.responses["get_news_impact_facts"] = {
+            **self.DIGEST, "symbols": []}
         out = await orchestrator.portfolio_node(base_state)
         assert out["specialist_output"]["status"] == "EMPTY"
-        assert out["specialist_output"]["data"]["window_hours"] == 24
+        assert out["specialist_output"]["data"]["window_days"] == 90
 
     @pytest.mark.asyncio
     async def test_the_user_still_comes_from_state(self, fake_mcp, patched_llm, base_state):
@@ -6575,13 +6580,80 @@ class TestRebalanceScreenQuestion:
         )
         assert orchestrator.PLAN_DISCLAIMER_TR in out["disclosures"]
 
+    def _plan_state(self, rows):
+        return {
+            "tools_used": ["get_rebalance_plan"],
+            "specialist_output": {"data": {"rows": rows}},
+        }
+
+    ROW = {
+        "symbol": "NVDA",
+        "rationale": [
+            {"kind": "RISK_CONTRIBUTION", "value": 0.40,
+             "text": "Portföy oynaklığının %40,2'lik kısmını bu pozisyon üretiyor."},
+        ],
+    }
+
+    def test_the_rationale_is_guaranteed_in_code(self):
+        """Sohbetin bir alım-satım listesi basmasına izin verilmesinin TEK
+        dayanağı her satırın onu üreten ölçümü taşıması. Ölçüldü: ilk canlı
+        turda model dört satırlık bir tablo bastı ve gerekçelerin hiçbiri
+        cevaba girmedi."""
+        out = orchestrator._keep_rationale(
+            self._plan_state([self.ROW]),
+            {"final_output": "| NVDA | SAT | 26 | 281.371,44 |", "disclosures": []},
+        )
+        assert orchestrator.RATIONALE_HEADING_TR in out["disclosures"][0]
+        assert "%40,2" in out["disclosures"][0]
+        assert "NVDA:" in out["disclosures"][0]
+
+    def test_a_text_that_relayed_the_reason_is_left_alone(self):
+        """Model işini yaptıysa aynı cümleyi ikinci kez göstermek gürültü."""
+        out = orchestrator._keep_rationale(
+            self._plan_state([self.ROW]),
+            {"final_output": "NVDA satışı: Portföy oynaklığının %40,2'lik "
+                             "kısmını bu pozisyon üretiyor.",
+             "disclosures": []},
+        )
+        assert out["disclosures"] == []
+
+    def test_a_turn_without_the_plan_tool_is_untouched(self):
+        out = orchestrator._keep_rationale(
+            {"tools_used": ["get_portfolio_positions"]},
+            {"final_output": "x", "disclosures": []},
+        )
+        assert out["disclosures"] == []
+
+    def test_a_plan_without_rows_adds_nothing(self):
+        """Kapalı kapı ya da hedefsiz kullanıcı: eklenecek gerekçe yok."""
+        out = orchestrator._keep_rationale(
+            self._plan_state([]), {"final_output": "x", "disclosures": []}
+        )
+        assert out["disclosures"] == []
+
+    def test_a_malformed_row_does_not_break_the_turn(self):
+        out = orchestrator._keep_rationale(
+            self._plan_state(["dize", {"symbol": "A", "rationale": ["dize"]},
+                              {"symbol": "B"}, self.ROW]),
+            {"final_output": "tablo", "disclosures": []},
+        )
+        assert "NVDA:" in out["disclosures"][0]
+
+    def test_an_existing_block_is_not_added_twice(self):
+        out = orchestrator._keep_rationale(
+            self._plan_state([self.ROW]),
+            {"final_output": "tablo",
+             "disclosures": [orchestrator.RATIONALE_HEADING_TR + " NVDA: x"]},
+        )
+        assert len(out["disclosures"]) == 1
+
     def test_the_news_disclaimer_is_guaranteed_in_code(self):
         """Prompt tavsiyedir ve burada kaybı ağır: kullanıcının okuduğu her
         cümle bir modelin metin okuması, ve bunu söyleyen tek şey bu çekince.
         Düştüğünde geriye ölçülmüş bir bulgudan ayırt edilemeyen bir yorum
         kalıyor."""
         out = orchestrator._keep_news_disclaimer(
-            {"tools_used": ["get_news_impact_digest"]},
+            {"tools_used": ["get_news_impact_facts"]},
             {"final_output": "ASELS hakkında iki haber yükseliş yönünde okundu.",
              "disclosures": []},
         )
@@ -6591,7 +6663,7 @@ class TestRebalanceScreenQuestion:
         """Genel açıklama içeriğin danışmanlık olmadığını söylüyor; bu ise
         içeriğin bir ÖLÇÜM DEĞİL, bir model okuması olduğunu."""
         out = orchestrator._keep_news_disclaimer(
-            {"tools_used": ["get_news_impact_digest"]},
+            {"tools_used": ["get_news_impact_facts"]},
             {"final_output": "x",
              "disclosures": ["Bu içerik yatırım danışmanlığı değildir."]},
         )
@@ -6599,16 +6671,16 @@ class TestRebalanceScreenQuestion:
 
     def test_a_news_text_that_kept_it_is_not_disclaimed_twice(self):
         out = orchestrator._keep_news_disclaimer(
-            {"tools_used": ["get_news_impact_digest"]},
-            {"final_output": "... yapay zeka tarafından yorunmasıdır"
-                             .replace("yorunmasıdır", "yorumlanmasıdır"),
+            {"tools_used": ["get_news_impact_facts"]},
+            {"final_output": "... değerlendirme ise bir yorumdur ve fiyata "
+                             "nasıl yansıyacağını belirlemez.",
              "disclosures": []},
         )
         assert out["disclosures"] == []
 
     def test_an_existing_news_copy_is_not_added_again(self):
         out = orchestrator._keep_news_disclaimer(
-            {"tools_used": ["get_news_impact_digest"]},
+            {"tools_used": ["get_news_impact_facts"]},
             {"final_output": "özet",
              "disclosures": [orchestrator.NEWS_DIGEST_DISCLAIMER_TR]},
         )
@@ -6634,7 +6706,7 @@ class TestRebalanceScreenQuestion:
     def test_a_text_that_kept_it_is_not_disclaimed_twice(self):
         out = orchestrator._keep_plan_disclaimer(
             {"tools_used": ["get_rebalance_plan"]},
-            {"final_output": "... kendi belirlediğiniz hedefin aritmetik karşılığı.",
+            {"final_output": "... hedefinizin aritmetik karşılığıdır.",
              "disclosures": []},
         )
         assert out["disclosures"] == []
@@ -6655,3 +6727,42 @@ class TestRebalanceScreenQuestion:
             {"final_output": "x", "disclosures": []},
         )
         assert out["disclosures"] == []
+
+
+class TestNewsFactsAreHedged:
+    """v2.26. Haber olgu aracı `HEDGED_TOOLS` üyesi.
+
+    Buradaki risk senaryo araçlarınkinden büyük ve sebebi tek cümlede: araç
+    ölçülmüş olgular veriyor, ama üzerine kurulan şey artık bir KANAAT
+    cümlesi de içeriyor. Modelin unutabildiği bir çekince, kanaatin yanında
+    duran tek sınırdır.
+    """
+
+    def test_the_tool_is_in_the_hedged_set(self):
+        assert "get_news_impact_facts" in orchestrator.HEDGED_TOOLS
+
+    def test_a_turn_that_dropped_the_hedge_gets_it_back(self):
+        out = orchestrator._keep_hedge(
+            {"tools_used": ["get_news_impact_facts"]},
+            {"final_output": "AKBNK %1,1 yükseldi.", "disclosures": []},
+        )
+        assert orchestrator.SCENARIO_HEDGE_TR in out["disclosures"]
+
+    def test_both_disclaimers_can_stand_together(self):
+        """Biri gösterilen SAYININ bir ölçüm olduğunu, diğeri sayıların
+        üzerine kurulan OKUMANIN bir yorum olduğunu söylüyor. İkisi ayrı
+        iddialar ve biri diğerinin yerini tutmuyor."""
+        state = {"tools_used": ["get_news_impact_facts"]}
+        out = orchestrator._keep_news_disclaimer(
+            state,
+            orchestrator._keep_hedge(
+                state, {"final_output": "okuma", "disclosures": []}
+            ),
+        )
+        assert len(out["disclosures"]) == 2
+
+    def test_the_news_disclaimer_separates_measurement_from_reading(self):
+        """Önceki sürümde çekince her şeye "yorum" diyordu; ölçülmüş bir
+        hareketi de bir kanaat gibi gösterirdi."""
+        assert "sayılar ölçülmüştür" in orchestrator.NEWS_DIGEST_DISCLAIMER_TR
+        assert "değerlendirme ise bir yorumdur" in orchestrator.NEWS_DIGEST_DISCLAIMER_TR

@@ -3,48 +3,48 @@
  *
  * Kapsama kapısı JSX'i saymıyor, dolayısıyla bu dosya kapsama için değil:
  * bileşenin hook'a bağlanmasında bir hata olduğunda test paketinin sessiz
- * kalmaması için. Asıl değer katan senaryo BOŞ gövde -- yeni kayıtlı bir
- * kullanıcının göreceği şekil.
+ * kalmaması için.
+ *
+ * En değerli iki senaryo: **gerekçelerin gerçekten çizilebiliyor olması**
+ * (sistemin bir işlem listesi önermesine izin verilmesinin tek dayanağı) ve
+ * **kapalı uygunluk kapısı** -- testi tamamlamamış bir kullanıcının göreceği
+ * şekil.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 
-import Dengeleme from '../../../pages/analiz/Dengeleme'
-
-const TEMPLATES = {
-    declaredTolerance: 'Düşük',
-    measurementNote: 'Oynaklık son bir yıldan ölçüldü; nakit getirisi sıfır varsayıldı.',
-    items: [
-        {
-            key: 'cash_heavy',
-            label: 'Ağırlıklı nakit',
-            weights: [{ bucket: 'cash', label: 'Nakit (TRY)', percent: 100 }],
-            volatility: 0.067,
-            band: 'Düşük',
-            highlighted: true,
-            statement: 'Ağırlıklı nakit şablonunun ölçülen oynaklığı %6,7.',
-            unmeasured: [],
-        },
-    ],
-}
+import DengelemePaneli from '../DengelemePaneli'
 
 const PLAN = {
+    gate: { open: true, reason: 'Uygunluk testi tamamlanmış.' },
+    lookback: '1Y',
+    measuredLevel: 'Orta',
+    declaredTolerance: 'Yüksek',
+    bindingBand: 'Orta',
+    targetSource: 'BAND',
+    bandStatement:
+        'Portföyünüzün ölçülen riski "Orta", ankette belirttiğiniz tolerans "Yüksek".',
     hasTarget: true,
     totalValue: 24607.54,
     statement: 'Sapma ölçüldü.',
-    disclaimer: 'Bu liste yatırım tavsiyesi değildir; kendi belirlediğiniz hedefin aritmetik karşılığıdır.',
+    disclaimer: 'Bu liste yatırım tavsiyesi değildir.',
     rows: [
         {
             symbol: 'THYAO', name: 'THYAO', bucket: 'bist_equity', label: 'BIST Hisse',
             side: 'SELL', quantity: 12, price: 300, currency: 'TRY',
             amount_base: 3600, residual_base: 0,
             statement: 'THYAO için 12 adet satışın karşılığı 3.600,00 TRY.',
+            rationale: [
+                {
+                    kind: 'RISK_CONTRIBUTION',
+                    value: 0.31,
+                    text: "Portföy oynaklığının %31,0'lik kısmını bu pozisyon üretiyor.",
+                },
+            ],
         },
     ],
-    unresolved: [
-        { bucket: 'gold', label: 'Altın', gap_amount: -5000,
-          reason: 'Altın kovasında pozisyonunuz yok; hangi enstrümanla dolduracağınız sizin seçiminiz.' },
-    ],
+    unresolved: [],
+    data_quality: { positions: 1, risk_contribution: 1, fundamentals: 1, news: 0 },
     rounding_residual_base: 0,
     buy_total_base: 0,
     usable_cash_base: 1000,
@@ -52,54 +52,75 @@ const PLAN = {
     warning: null,
 }
 
-const EMPTY_PLAN = {
-    ...PLAN, hasTarget: false, rows: [], unresolved: [],
-    statement: 'Hedef dağılım belirlemediniz.',
-}
-
-function stubFetch(plan: unknown, templates: unknown = TEMPLATES) {
-    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(
-            String(url).includes('allocation-templates') ? templates : plan,
-        ),
-    })))
+function mockFetch(plan: unknown) {
+    return vi.fn(async () =>
+        new Response(JSON.stringify(plan), {
+            status: 200, headers: { 'Content-Type': 'application/json' },
+        }),
+    )
 }
 
 beforeEach(() => {
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', mockFetch(PLAN))
 })
 afterEach(() => {
-    vi.restoreAllMocks()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
 })
 
-describe('Dengeleme ekranı', () => {
-    it('şablonu, emri ve çekinceyi birlikte gösterir', async () => {
-        stubFetch(PLAN)
-        render(<Dengeleme />)
-
-        // Ad hem kartın başlığında hem cümlesinde geçiyor.
-        expect((await screen.findAllByText(/Ağırlıklı nakit/)).length).toBeGreaterThan(0)
-        expect(await screen.findByText(/12 adet satışın karşılığı/)).toBeTruthy()
-        // Çekince KOŞULSUZ: plan boş olsa da duruyor.
-        expect(await screen.findByText(/yatırım tavsiyesi değildir/)).toBeTruthy()
-    })
-
-    it('emir üretilemeyen kovanın nedenini yazar', async () => {
-        // Sessiz bir atlama, hedefe ulaşılamamasının sebebini görünmez yapardı.
-        stubFetch(PLAN)
-        render(<Dengeleme />)
-        expect(await screen.findByText(/sizin seçiminiz/)).toBeTruthy()
-    })
-
-    it('hedefi olmayan yeni bir kullanıcıda boş ama anlamlı', async () => {
-        stubFetch(EMPTY_PLAN, { ...TEMPLATES, items: [] })
-        render(<Dengeleme />)
-        expect(await screen.findByText(/Hedef dağılım belirlemediniz/)).toBeTruthy()
+describe('DengelemePaneli', () => {
+    it('planı ve satır cümlesini çizer', async () => {
+        render(<DengelemePaneli />)
         await waitFor(() =>
-            expect(screen.queryByText(/adet satışın karşılığı/)).toBeNull(),
+            expect(
+                screen.getByText(/12 adet satışın karşılığı/),
+            ).toBeInTheDocument(),
+        )
+    })
+
+    it('hedefin nereden geldiğini yazar', async () => {
+        // Bir emir listesinin kaynağı, listenin kendisi kadar önemli.
+        render(<DengelemePaneli />)
+        await waitFor(() =>
+            expect(screen.getByText(/ankette belirttiğiniz tolerans/)).toBeInTheDocument(),
+        )
+    })
+
+    it('her satırın gerekçe bağlantısı var', async () => {
+        render(<DengelemePaneli />)
+        await waitFor(() =>
+            expect(screen.getByText(/Neden bu satır\?/)).toBeInTheDocument(),
+        )
+    })
+
+    it('çekince koşulsuz görünür', async () => {
+        render(<DengelemePaneli />)
+        await waitFor(() =>
+            expect(
+                screen.getByText(/yatırım tavsiyesi değildir/),
+            ).toBeInTheDocument(),
+        )
+    })
+
+    it('pencere seçenekleri çizilir', async () => {
+        render(<DengelemePaneli />)
+        await waitFor(() => expect(screen.getByText('5 yıl')).toBeInTheDocument())
+    })
+
+    it('kapalı kapı boş bir liste ve nedeniyle çizilir', async () => {
+        vi.stubGlobal('fetch', mockFetch({
+            ...PLAN,
+            gate: { open: false, reason: 'Önce uygunluk testini tamamlayın.' },
+            hasTarget: false,
+            statement: 'Önce uygunluk testini tamamlayın.',
+            bandStatement: 'Önce uygunluk testini tamamlayın.',
+            rows: [],
+        }))
+        render(<DengelemePaneli />)
+        await waitFor(() =>
+            expect(
+                screen.getAllByText(/uygunluk testini tamamlayın/).length,
+            ).toBeGreaterThan(0),
         )
     })
 })

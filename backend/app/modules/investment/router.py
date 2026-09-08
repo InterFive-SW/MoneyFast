@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, BackgroundTasks
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 
@@ -1275,32 +1276,155 @@ def set_allocation_target(
     return get_allocation_target(db=db, user_id=user_id)
 
 
-@router.get(
-    "/rebalance-plan",
-    summary="Hedeften sapmanın emir karşılığı",
+#: Ölçülen riskin hangi pencerede okunacağı. `risk.schemas.LOOKBACKS` ile
+#: aynı kapalı küme ve aynı gerekçe: gün sayısı olarak yazılmış bir değer
+#: ("365") kabul edilmiyor, çünkü tanınmayan bir pencere sessizce bir yıla
+#: düşüyordu ve çağıran bunu hiç öğrenmiyordu.
+REBALANCE_LOOKBACKS = ("1M", "3M", "6M", "1Y", "3Y", "5Y", "MAX")
+
+
+class RebalancePlanRequest(BaseModel):
+    """Planın tek girdisi: ölçümün penceresi.
+
+    Kullanıcı seçiyor ve varsayılan bir yıl. Pencere sonucu gerçekten
+    değiştiriyor -- aynı portföy üç aylık pencerede "Yüksek", beş yıllıkta
+    "Orta" ölçülebilir -- dolayısıyla hangi pencerede bakıldığı yanıtta da
+    yazılı.
+    """
+
+    lookback: str = "1Y"
+
+    @field_validator("lookback")
+    @classmethod
+    def _known_lookback(cls, value: str) -> str:
+        upper = (value or "").upper()
+        if upper not in REBALANCE_LOOKBACKS:
+            raise ValueError(
+                f"lookback {value!r} geçersiz; beklenen: "
+                f"{', '.join(REBALANCE_LOOKBACKS)}"
+            )
+        return upper
+
+
+@router.post(
+    "/rebalance/plan",
+    summary="Yeniden dengeleme planı",
 )
-def get_rebalance_plan(
+def create_rebalance_plan(
+    request: RebalancePlanRequest,
     db: Session = Depends(get_db),
-    user_id: Optional[str] = Depends(get_optional_user_id),
+    user_id: str = Depends(get_current_user_id),
 ):
     """
-    Kullanıcının KENDİ hedefindeki sapmanın lot karşılığı.
+    Bağlayıcı bandın kova hedefinden çıkan emir listesi.
 
-    **Sistem hedefi koymuyor ve enstrüman seçmiyor.** Kova farkı, o kovadaki
-    mevcut pozisyonlara mevcut ağırlıkları oranında dağıtılıyor -- seçmek bir
-    tavsiye olurdu, orantılı dağıtmak aritmetiktir. `disclaimer` sunucudan
-    geliyor ve ekranda koşulsuz gösteriliyor.
+    **Hedef iki yerden gelebiliyor ve kullanıcının kendisi KAZANIYOR.**
+    Kendi `allocation_targets` satırları varsa onlar kullanılıyor; yoksa
+    ölçülen risk ile beyan edilen toleransın daha temkinli olanı --
+    bağlayıcı bant -- `risk_band_targets` matrisinden okunuyor. Sistemin
+    kullanıcının kendi kararını sessizce değiştirmesi, kullanıcıya ait olan
+    tek girdiyi yok ederdi.
 
-    Emir üretilemeyen kovalar SESSİZCE atlanmıyor: `unresolved` her birinin
-    nedenini taşıyor, çünkü sessiz bir atlama kullanıcının hedefine
-    ulaşamamasının sebebini görünmez yapardı.
+    **Ayrışma gizlenmiyor.** Ölçülen seviye ve beyan edilen tolerans
+    yanıtta AYRI alanlarda duruyor; ikisi farklıysa hangisinin bağladığı
+    okunabiliyor.
+
+    Oturum ZORUNLU: plan kullanıcının kendi pozisyonlarından ve kendi risk
+    beyanından çıkıyor, ve demo portföyüne düşmek başkasının planını onunki
+    gibi göstermek olurdu.
     """
-    return _rebalance_payload(db, user_id)
+    return _rebalance_payload(db, user_id, request.lookback)
 
 
-def _rebalance_payload(db: Session, user_id: Optional[str]) -> dict:
-    """Planın gövdesi; oturum ucu ile servis ucu paylaşıyor."""
-    result, inputs = _drift_inputs(db, user_id)
+@router.get(
+    "/rebalance/plan/{user_id}",
+    summary="Yeniden dengeleme planı (MCP sözleşmesi)",
+    dependencies=[Depends(require_service_token)],
+)
+def get_rebalance_plan_for_ai(
+    user_id: str,
+    lookback: str = Query("1Y"),
+    db: Session = Depends(get_db),
+):
+    """
+    Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+
+    `get_portfolio_technical_for_ai` ile aynı desen: MCP araçları kullanıcıyı
+    doğrulanmış oturum zarfından alıp yola koyuyor. İkisi TEK bir yardımcıyı
+    çağırıyor, böylece ekranın ve sohbetin aynı portföy için farklı bir plan
+    göstermesi mümkün değil.
+
+    **Salt okuma.** Sohbet bu listeyi ÜRETMİYOR; ekranda duranı açıklıyor.
+    """
+    if (lookback or "").upper() not in REBALANCE_LOOKBACKS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"lookback geçersiz; beklenen: {', '.join(REBALANCE_LOOKBACKS)}",
+        )
+    return _rebalance_payload(db, user_id, lookback.upper())
+
+
+def _rebalance_payload(db: Session, user_id: str, lookback: str) -> dict:
+    """Planın gövdesi; oturum ucu ile servis ucu paylaşıyor.
+
+    `risk` modülü FONKSİYON İÇİNDE import ediliyor. Kurulu bağımlılık yönü
+    `risk -> investment` (bkz. CLAUDE.md) ve modül seviyesinde ters yönde bir
+    import gerçek bir döngü açardı: `risk/router.py` zaten `market_service`
+    ve `allocation` okuyor. Yerel import o döngüyü açmadan tek bir çağrıya
+    izin veriyor -- `signals.refresh_all_signals` ile aynı teknik ve aynı
+    gerekçe.
+    """
+    from app.modules.risk import profile as risk_profile
+    from app.modules.risk.router import _measure
+
+    measured = _measure(db, user_id, lookback)
+    measured_level = (measured.get("scored") or {}).get("level")
+    declared = measured.get("declared")
+    declared_tolerance = declared.tolerance_level if declared else None
+    band = risk_profile.binding_band(measured_level, declared_tolerance)
+
+    # Uygunluk testi kapısı. Kapalıysa liste HİÇ ÜRETİLMİYOR -- kademesi
+    # bilinmeyen bir kullanıcı için üretilip sonra süzülen bir liste,
+    # süzgecin bir gün unutulabileceği bir yer açardı.
+    gate = risk_profile.suitability_gate(declared)
+    if not gate["open"]:
+        return {
+            "lookback": lookback,
+            "gate": {"open": False, "reason": gate["reason"]},
+            "hasTarget": False,
+            "totalValue": None,
+            "statement": gate["reason"],
+            "measuredLevel": measured_level,
+            "declaredTolerance": declared_tolerance,
+            "bindingBand": band,
+            "targetSource": "NONE",
+            "bandStatement": gate["reason"],
+            "disclaimer": rebalance.DISCLAIMER_TR,
+            "summary": gate["reason"],
+            "rows": [],
+            "unresolved": [],
+            "data_quality": {
+                "positions": 0, "risk_contribution": 0, "fundamentals": 0, "news": 0
+            },
+            "rounding_residual_base": 0.0,
+            "buy_total_base": 0.0,
+            "usable_cash_base": 0.0,
+            "blocked_cash_base": 0.0,
+            "warning": None,
+        }
+
+    own_targets = _targets_for(db, user_id)
+    if own_targets:
+        targets, source = own_targets, "USER"
+    elif band:
+        targets, source = rebalance.band_targets(db, band), "BAND"
+    else:
+        # Ne kullanıcının hedefi var ne de ölçülebilir bir bant. Boş bir
+        # hedefle devam etmek, her kovanın sapmasını "hedefin yok" olarak
+        # gösterirdi -- doğru, ve `drift` bunu zaten söylüyor.
+        targets, source = {}, "NONE"
+
+    result, inputs = _drift_inputs(db, user_id, targets)
     account = inputs["account"]
     positions = [
         {
@@ -1315,48 +1439,115 @@ def _rebalance_payload(db: Session, user_id: Optional[str]) -> dict:
         }
         for row, value in inputs["valued"]
     ]
+    base_currency = (account.currency_code if account else "TRY") or "TRY"
     plan = rebalance.plan(
         result["buckets"],
         positions,
         inputs["rates"],
-        base_currency=(account.currency_code if account else "TRY") or "TRY",
+        base_currency=base_currency,
         blocked_cash=market_service.blocked_cash(db, user_id),
         available_cash=float(account.cash_balance) if account else 0.0,
+        # Üç seçim girdisi. Hepsi ÖLÇÜM ve hepsi burada okunuyor;
+        # `rebalance` veritabanı tanımıyor.
+        contributions=_contributions_for(db, inputs["valued"], base_currency, lookback),
+        fundamentals={
+            row["symbol"]: row
+            for row in (
+                market_service.fundamentals_for(db, position["symbol"])
+                for position in positions
+                if position.get("symbol")
+            )
+            if row
+        },
+        news=_news_reading_for(db, [p["symbol"] for p in positions if p.get("symbol")]),
+        groups=gate["groups"],
+        group_for=risk_profile.GROUP_BY_PRODUCT_TYPE,
     )
     return {
+        "lookback": lookback,
+        "gate": {"open": True, "reason": gate["reason"]},
         "hasTarget": result["has_target"],
         "totalValue": result["total_value"],
         "statement": result["statement"],
+        # İki eksen AYRI alanlarda: hangisinin bağladığı okunabilmeli.
+        "measuredLevel": measured_level,
+        "declaredTolerance": declared_tolerance,
+        "bindingBand": band,
+        "targetSource": source,
+        "bandStatement": rebalance.band_statement(
+            measured_level, declared_tolerance, band, source
+        ),
         **plan,
     }
 
 
-@router.get(
-    "/agent/{user_id}/rebalance-plan",
-    summary="Dengeleme planı (MCP sözleşmesi)",
-    dependencies=[Depends(require_service_token)],
-)
-def get_rebalance_plan_for_ai(user_id: str, db: Session = Depends(get_db)):
+def _contributions_for(db: Session, valued, base_currency: str, lookback: str):
+    """Sembol -> risk katkısı. Satış tarafının birincil kriteri.
+
+    Ölçülemeyen bir portföy boş bir harita döndürüyor ve o zaman seçim
+    yalnızca temel veriyle yapılıyor -- sıfır katkı yazmak, ölçülmemiş bir
+    şeyi "risk üretmiyor" diye raporlamak olurdu.
     """
-    Yukarıdakiyle aynı veri, kullanıcısı yoldan gelen hâli.
+    from app.modules.risk import returns as risk_returns
+    from app.modules.risk import service as risk_service
 
-    `get_portfolio_technical_for_ai` ile aynı desen: MCP araçları kullanıcıyı
-    doğrulanmış oturum zarfından alıp yola koyuyor. İkisi TEK bir yardımcıyı
-    çağırıyor, böylece ekranın ve sohbetin aynı portföy için farklı bir plan
-    göstermesi mümkün değil.
+    holdings = [
+        {
+            "symbol": row.get("symbol"),
+            "market_value": value,
+            "instrument_currency": row.get("currency") or base_currency,
+        }
+        for row, value in valued
+        if row.get("symbol")
+    ]
+    if not holdings:
+        return {}
+    limit = risk_service.history_limit(lookback)
+    rows = risk_returns.risk_contributions(
+        holdings,
+        lambda symbol: market_service.candle_closes(db, symbol, limit=limit),
+        base_currency=base_currency,
+    )
+    return {row["symbol"]: row for row in rows}
 
-    **Salt okuma.** Sohbet bu listeyi ÜRETMİYOR; ekranda duranı açıklıyor.
-    Cümleler burada kuruluyor ve model onları aynen aktarıyor.
+
+def _news_reading_for(db: Session, symbols: list[str]) -> dict[str, dict]:
+    """Sembol -> haber okuması. v2.26'da ARTIK BOŞ ve bu bilinçli.
+
+    Bölüm 12'nin mimari değişikliğinden önce burada saklanmış model
+    yargıları okunuyordu (`market.news_impacts`). O tablo emekliye ayrıldı:
+    okuma artık sohbet turunda, ölçülmüş olgular üzerine kuruluyor ve
+    uygunluk kapısından geçiyor.
+
+    Fonksiyon KALDIRILMADI, çünkü `rebalance.rationale_for` üç girdiyle
+    çalışıyor ve haber girdisinin varlığı sözleşmenin bir parçası. Boş bir
+    harita "bu turda haber gerekçesi yok" demek ve seçim diğer iki ölçümle
+    yapılıyor -- gerekçesiz aday zaten listeye girmiyor.
+
+    Yeniden bağlanacağı yer belli: sohbet turunun ürettiği okuma
+    saklanmadığı için, dengeleme satırına haber gerekçesi koymak ancak
+    ölçülmüş bir haber sinyali (sayım, kaynak kırılımı) üzerinden mümkün --
+    ve o, `impact.fact_package`ta zaten duruyor.
     """
-    return _rebalance_payload(db, user_id)
+    return {}
 
 
-def _drift_inputs(db: Session, user_id: Optional[str]):
+def _drift_inputs(
+    db: Session,
+    user_id: Optional[str],
+    targets: Optional[dict[str, float]] = None,
+):
     """Sapma hesabının okuma bloğu; sapma ucu ile dengeleme planı paylaşıyor.
 
     İkisi ayrı okusaydı "aynı portföy için iki farklı sapma" mümkün olurdu --
     ekranda bir sayı, emir listesinde başka bir sayı. Değerleme
     `ai_service.holding_value` ile, yani tek uygulamayla yapılıyor.
+
+    `targets` verilmezse kullanıcının KENDİ hedefleri okunuyor. Dengeleme
+    planı bunu geçiyor, çünkü kullanıcının hedefi yoksa bağlayıcı bandın
+    matrisi devreye giriyor; sapma ucu ise her zaman kullanıcının kendi
+    hedefine bakıyor ve bakmaya devam etmeli -- o ekranın sorusu "kendi
+    koyduğum hedeften ne kadar saptım".
     """
     rows = market_service.holdings(db, user_id=user_id)
     quotes = market_service.latest_quotes(db)
@@ -1371,7 +1562,9 @@ def _drift_inputs(db: Session, user_id: Optional[str]):
     amounts = allocation.current_amounts(
         valued, float(account.cash_balance) if account else 0.0
     )
-    result = allocation.drift(amounts, _targets_for(db, user_id))
+    result = allocation.drift(
+        amounts, _targets_for(db, user_id) if targets is None else targets
+    )
     return result, {
         "valued": valued,
         "rates": rates,

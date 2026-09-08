@@ -57,6 +57,65 @@ export interface RebalanceRow {
     /** Yuvarlamadan artan fark. Saklanmıyor, yazılıyor. */
     residual_base: number;
     statement: string;
+    /** Satırı listeye sokan ÖLÇÜMLER. Boş olamaz: gerekçesi olmayan satır
+     *  sunucuda hiç üretilmiyor. Sohbetin ve ekranın bir alım-satım listesi
+     *  göstermesine izin verilmesinin tek dayanağı bu alan; sebebi
+     *  görünmeyen bir satırın yanında bir "Uygula" düğmesi, kaldırılan
+     *  yasağın engellediği şeyin ta kendisi. */
+    rationale: RebalanceRationale[];
+}
+
+/** Haber okumasının ÖLÇÜLEN zemini. Yorum YOK: her değer sunucuda
+ *  sayılmış ya da ölçülmüş. Okuma sohbet turunda kuruluyor ve orada
+ *  uygunluk kapısından geçiyor; ekranda ikinci kez kurmak, o kapıdan
+ *  geçmeyen bir kopya üretirdi. */
+export interface NewsImpactSymbol {
+    symbol: string;
+    name: string;
+    /** null: sağlayıcı bir sektör kaydetmemiş. Uydurulmuyor. */
+    sector: string | null;
+    news_count: number;
+    filing_count: number;
+    price: {
+        /** İşaretli: fiyatın ne YAPTIĞI. Haberin ne yaptığı değil. */
+        recent_move_pct: number | null;
+        /** O sembolde normal bir hareket. null ise büyüklük hakkında hiçbir
+         *  şey söylenemez. */
+        typical_move_pct: number | null;
+        window_days: number;
+    };
+    fundamentals: Record<string, number>;
+    articles: {
+        id: string;
+        title: string;
+        source: string;
+        published_at: string;
+        is_filing: boolean;
+    }[];
+}
+
+export interface NewsImpactPackage {
+    window_days: number;
+    symbols: NewsImpactSymbol[];
+    coverage: {
+        articles: number;
+        filings: number;
+        feed_articles: number;
+        symbols: number;
+        symbols_with_news: number;
+        /** Pakete girmeyen pozisyon sayısı. Sıfırdan büyükse, listelenenler
+         *  portföyün tamamı DEĞİL. */
+        symbols_omitted: number;
+    };
+}
+
+export interface RebalanceRationale {
+    /** RISK_CONTRIBUTION / CONCENTRATION / VALUATION / PROFITABILITY /
+     *  LEVERAGE / NEWS. Kullanıcıya GÖSTERİLMEZ: `text` zaten Türkçe. */
+    kind: string;
+    /** Haber okumasında null -- haber bir sayı değil ve uydurulmuyor. */
+    value: number | null;
+    text: string;
 }
 
 export interface RebalanceUnresolved {
@@ -69,6 +128,24 @@ export interface RebalanceUnresolved {
 }
 
 export interface RebalancePlan {
+    /** Uygunluk testi tamamlanmamışsa `open: false` ve liste BOŞ gelir --
+     *  hata değil, yapılacak bir şey. Arayüz nedeni gösterip teste
+     *  yönlendiriyor. */
+    gate: { open: boolean; reason: string };
+    /** Ölçümün penceresi. Yanıtta duruyor çünkü sonucu gerçekten
+     *  değiştiriyor: aynı portföy üç aylıkta "Yüksek", beş yıllıkta "Orta"
+     *  ölçülebilir. */
+    lookback: string;
+    /** Ölçülen risk ve beyan edilen tolerans AYRI alanlarda: ikisi farklıysa
+     *  hangisinin bağladığı okunabilmeli. `bindingBand` daha temkinli olan. */
+    measuredLevel: string | null;
+    declaredTolerance: string | null;
+    bindingBand: string | null;
+    /** USER: kullanıcının kendi hedefi. BAND: bandın matris hedefi.
+     *  NONE: ikisi de yok. Kullanıcının kendi hedefi her zaman kazanır. */
+    targetSource: 'USER' | 'BAND' | 'NONE';
+    /** Hedefin nereden geldiğini söyleyen, SUNUCUDA kurulmuş cümle. */
+    bandStatement: string;
     hasTarget: boolean;
     totalValue: number;
     statement: string;
@@ -83,24 +160,7 @@ export interface RebalancePlan {
     warning: string | null;
 }
 
-export interface AllocationTemplateItem {
-    key: string;
-    label: string;
-    weights: { bucket: string; label: string; percent: number }[];
-    /** Ölçülemeyen bir karışımda null -- "orta" değil. */
-    volatility: number | null;
-    band: string | null;
-    /** Bandı beyan edilen toleransla eşleşiyor mu. Sıralama girdisi. */
-    highlighted: boolean;
-    statement: string;
-    unmeasured: string[];
-}
 
-export interface AllocationTemplates {
-    declaredTolerance: string | null;
-    items: AllocationTemplateItem[];
-    measurementNote: string;
-}
 
 export interface DirectionEvidence {
     source: string;
@@ -145,53 +205,10 @@ export interface DirectionScreen {
     items: DirectionScreenRow[];
 }
 
-/** Bir haberin bir enstrümana etkisi hakkındaki tek gerekçe.
- *
- *  `confidence` YOK ve olmayacak: modelin kendi beyanı bir ölçüm değil ve
- *  ekranda yüzde olarak göstermek, ölçülmemiş bir şeye ölçülmüş bir otorite
- *  verirdi. Sunucu onunla sıralıyor, göndermiyor. */
-export interface NewsImpactReason {
-    newsId: string;
-    direction: string;
-    scope: string;
-    magnitude: string;
-    mechanism: string;
-    publishedAt: string;
-}
 
-/** Yorumun oturduğu ÖLÇÜLEN zemin. Ölçülemediğinde alan hiç gelmiyor. */
-export interface NewsImpactMeasure {
-    typicalMovePct: number;
-    recentMovePct: number;
-}
 
-/** Tek enstrüman için özet.
- *
- *  `sentence` SUNUCUDA kuruluyor ve olduğu gibi yazılıyor: cümlenin
- *  koşulluluğu ve çekincesi kodda çivili. Burada yeniden kurulan bir cümle
- *  o çivinin dışında kalırdı. */
-export interface NewsImpactEntry {
-    symbol: string;
-    sentence: string;
-    counts: Record<string, number>;
-    directCount: number;
-    spilloverCount: number;
-    measured: NewsImpactMeasure | null;
-    reasons: NewsImpactReason[];
-}
 
-export interface NewsDigest {
-    headline: string;
-    entries: NewsImpactEntry[];
-    windowHours: number;
-    disclaimer: string;
-}
 
-export interface NewsImpactSummary {
-    entries: NewsImpactEntry[];
-    windowHours: number;
-    disclaimer: string;
-}
 export type StageTransactionRequest = components['schemas']['StageTransactionRequest'];
 export type StageTransactionOut = components['schemas']['StageTransactionOut'];
 
@@ -1063,14 +1080,20 @@ class ApiClient {
      * sunucudan geliyor ve ekranda koşulsuz gösteriliyor -- arayüzde ikinci kez
      * yazsaydık iki kopyadan biri değişip diğeri kalabilirdi.
      */
-    getRebalancePlan() {
-        return this.request<RebalancePlan>('/investment/rebalance-plan');
+    /** Haber okumasının ölçülen zemini. POST, çünkü paket bir HESAP:
+     *  sembol başına mum okunuyor, medyan alınıyor, haberler sayılıyor. */
+    getNewsImpact(days = 90, limit = 5) {
+        return this.post<NewsImpactPackage>(
+            `/market/news/impact?days=${days}&limit=${limit}`, {});
     }
 
-    /** Hazır dağılım şablonları ve her birinin ölçülen oynaklığı. */
-    getAllocationTemplates() {
-        return this.request<AllocationTemplates>('/risk/allocation-templates');
+    getRebalancePlan(lookback = '1Y') {
+        // POST, çünkü pencere bir GİRDİ: sunucu onunla ölçüm yapıyor ve
+        // sonucu günün anlık görüntüsüne yazabiliyor. Sorgu dizesinde
+        // taşınan bir girdi, önbelleklenebilir bir okuma gibi görünürdü.
+        return this.post<RebalancePlan>('/investment/rebalance/plan', { lookback });
     }
+
 
     /**
      * Bir enstrümanın yön okuması.
@@ -1089,19 +1112,6 @@ class ApiClient {
         const params = new URLSearchParams({ horizon, limit: String(limit) });
         if (direction) params.set('direction', direction);
         return this.request<DirectionScreen>(`/market/direction/screen?${params}`);
-    }
-
-    /** Portföyün günlük haber özeti. Oturum zorunlu -- sunucu kullanıcıyı
-     *  token'dan çözüyor, demo portföyüne düşmüyor. */
-    getNewsDigest(hours = 24) {
-        return this.request<NewsDigest>(`/market/news/digest?hours=${hours}`);
-    }
-
-    /** Piyasa geneli: haberlerin hangi enstrümanı hangi yönde etkilediği.
-     *  Portföyden bağımsız, oturum aranmıyor. */
-    getNewsImpactSummary(hours = 24, limit = 12) {
-        return this.request<NewsImpactSummary>(
-            `/market/news/impact-summary?hours=${hours}&limit=${limit}`);
     }
 
     /** Follow an instrument. Idempotent — starring twice is not an error. */

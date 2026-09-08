@@ -47,7 +47,32 @@ HHI_FLOOR, HHI_CEILING = 0.10, 0.50
 DRAWDOWN_FLOOR, DRAWDOWN_CEILING = 0.10, 0.50
 
 #: Score bands, high to low. The Turkish labels are what the UI renders.
-BANDS = ((70.0, "Düşük"), (45.0, "Orta"), (0.0, "Yüksek"))
+#:
+#: **Dördüncü bant, `Risksiz`.** Yeniden dengeleme hedefi bu banttan
+#: türetiliyor (bkz. `investment.risk_band_targets`) ve üç bantlı ölçekte
+#: "Düşük" iki ayrı portföyü aynı kefeye koyuyordu: ölçülen volatilitesi
+#: `VOLATILITY_FLOOR`'un altında kalan, ağırlıklı olarak nakit ve mevduat
+#: benzeri bir portföy ile gerçekten hisse taşıyan sakin bir portföy. İkisine
+#: aynı kova hedefini vermek, ilkine tutmadığı bir riski önermek olurdu.
+#:
+#: Eşik 85, tabanla değil ÖLÇEKLE hizalı: penaltıların ağırlıklı ortalaması
+#: 0,15'in altında kalan portföy demek, yani üç bileşenin hiçbirinde
+#: tabanından kayda değer biçimde uzaklaşmamış bir portföy.
+BANDS = ((85.0, "Risksiz"), (70.0, "Düşük"), (45.0, "Orta"), (0.0, "Yüksek"))
+
+#: Bu ölçeğin sürümü. `risk_snapshots.band_scale` ile birlikte saklanıyor:
+#: tarihsel anlık görüntüler geriye dönük YENİDEN HESAPLANMIYOR (o gün
+#: ölçülen buydu), dolayısıyla seride iki ölçek yan yana duruyor ve grafiğin
+#: hangi noktanın hangi ölçekte yazıldığını bilmesi gerekiyor.
+#:
+#: `questionnaire.VERSION` ile aynı biçim ve aynı sebep: bir etiketin anlamı
+#: değiştiyse, etiketi taşıyan satır hangi anlamla yazıldığını da taşımalı.
+BAND_SCALE = "v2"
+
+#: Dört bantlı ölçekten önce yazılmış anlık görüntüler. Migration bu değerle
+#: geriye dolduruyor -- boş bırakmak "ölçek bilinmiyor" demek olurdu, oysa
+#: biliniyor: o satırlar üç bantlı ölçekte yazıldı.
+BAND_SCALE_LEGACY = "v1"
 
 
 def _penalty(value: Optional[float], floor: float, ceiling: float) -> Optional[float]:
@@ -259,7 +284,25 @@ def suggestions_from(metrics: dict[str, Any]) -> list[dict[str, Any]]:
 #: measured score is inverted (100 = calm) and the questionnaire's raw score is
 #: not, so any arithmetic between them would be read backwards by someone
 #: eventually. On the label scale there is no arithmetic to get wrong.
-_LEVEL_ORDER = ("Düşük", "Orta", "Yüksek")
+#:
+#: Dört basamak, ama BEYAN tarafı yalnızca son üçünü üretebiliyor:
+#: `TOLERANCE_BANDS` üç bantlı kalıyor ve öyle kalması gerekiyor -- anket
+#: sorularının ağırlıkları o üç banda göre kalibre edilmiş, dördüncüyü
+#: eklemek anketin yeniden kalibre edilmesini gerektirirdi. Tek eksende
+#: durmaları yeterli: "Risksiz" ölçülen bir portföyün beyan edilen her
+#: toleransın altında kaldığını söylüyor ve karşılaştırma bunu okuyabiliyor.
+_LEVEL_ORDER = ("Risksiz", "Düşük", "Orta", "Yüksek")
+
+#: Beyan tarafının üretebildiği etiketler -- eksenin dördüncü basamağı HARİÇ.
+#: `questionnaire.TOLERANCE_LEVELS` ile aynı küme; burada tekrar yazılı olması
+#: `profile`i ankete bağlamamak için, ve ikisinin ayrışmadığını
+#: `test_questionnaire.py` çiviliyor.
+#:
+#: Neden ayrı bir kapı: eksende olmak, ÜRETİLEBİLİR olmakla aynı şey değil.
+#: Beyan olarak gelen bir "Risksiz", ölçekleri karışmış bir kayıt demek --
+#: ve eksen üyeliğine bakan bir kontrol onu kabul edip "ikisi aynı bandda"
+#: derdi: var olmayan bir beyanla var olan bir ölçümü eşitleyen bir cümle.
+_DECLARABLE_LEVELS = _LEVEL_ORDER[1:]
 
 ALIGNMENT_UNKNOWN = "UNKNOWN"
 ALIGNMENT_ALIGNED = "ALIGNED"
@@ -282,7 +325,7 @@ def suitability(
     suitability CLAIM has no basis. A comparison is not that claim, and the
     wording below avoids the banned phrasing on purpose rather than by luck.
     """
-    if measured_level not in _LEVEL_ORDER or declared_tolerance not in _LEVEL_ORDER:
+    if measured_level not in _LEVEL_ORDER or declared_tolerance not in _DECLARABLE_LEVELS:
         return {
             "measured_level": measured_level,
             "declared_tolerance": declared_tolerance,
@@ -322,6 +365,90 @@ def suitability(
         "declared_tolerance": declared_tolerance,
         "alignment": alignment,
         "statement": statement,
+    }
+
+
+def binding_band(measured_level: Optional[str], declared_tolerance: Optional[str]) -> Optional[str]:
+    """İki riskin daha TEMKİNLİ olanı. Ortalama değil, minimum.
+
+    Kullanıcı ankette "Yüksek" demiş ama portföyünün ölçülen riski "Orta"
+    ise, ona daha riskli bir hedef vermek yalnızca beyanına dayanır; tersi
+    durumda beyanını görmezden gelmek olur. Ortalama almak ikisini de
+    sulandırır ve ortaya hiçbir ekseni temsil etmeyen bir sayı çıkar.
+    Minimum, iki bilgi kaynağının çeliştiği yerde daha az iddialı olanı
+    seçiyor.
+
+    Karşılaştırma ETİKET SIRASINA göre, skorlar üzerinde aritmetik yapmadan:
+    ölçülen skor ters (100 = sakin), anketin ham puanı değil, ve ikisi
+    arasındaki her işlem er ya da geç ters okunur. `profile.suitability()`
+    ile birebir aynı kural.
+
+    Biri ölçülemiyorsa diğeri bağlayıcı olur -- eksik olanı en temkinli
+    saymak, ölçülemeyen bir portföye nakit hedefi vermek olurdu; en cesur
+    saymak ise beyanı olmayan birine hisse hedefi vermek. İkisi de yoksa
+    bant yok ve çağıran bunu bir hedef yokluğu olarak görmek zorunda.
+    """
+    known = [
+        level
+        for level in (measured_level, declared_tolerance)
+        if level in _LEVEL_ORDER
+    ]
+    if not known:
+        return None
+    return min(known, key=_LEVEL_ORDER.index)
+
+
+# ---------------------------------------------------------------------------
+# Uygunluk testi kapısı
+# ---------------------------------------------------------------------------
+#: Kapının istediği anket sürümü. v1 bir RİSK TOLERANSI anketi; ürün grubu
+#: başına bilgi ve tecrübe beyanı yok, dolayısıyla kademe koşulları hakkında
+#: hiçbir şey söyleyemiyor. Kapı v2'yi istiyor çünkü kapattığı şey tam olarak
+#: o beyanın yokluğu.
+GATE_VERSION = "v2"
+
+GATE_CLOSED_TR = (
+    "Yeniden dengeleme listesi için önce uygunluk testini tamamlamanız "
+    "gerekiyor: liste, hangi ürün gruplarında işlem yapabileceğinizi kendi "
+    "bilgi ve tecrübe beyanınızdan okuyor."
+)
+
+GATE_OPEN_TR = "Uygunluk testi tamamlanmış; liste beyanlarınıza göre süzüldü."
+
+
+def suitability_gate(declared: Any) -> dict[str, Any]:
+    """Yeniden dengeleme açık mı, ve hangi ürün grupları listeye girebilir.
+
+    Test ZATEN VARDI ve dört ürün grubu için kademe gereksinimlerini
+    yazıyordu (`questionnaire_v2.TIER_REQUIREMENTS`); burada ilk kez bir
+    YETENEĞİ KAPATMAK için kullanılıyor. Kaldırılan yasakların yerine konan
+    ikinci kontrol bu.
+
+    Kapı REDDETME değil bir DURUM döndürüyor: çağıran bunu boş bir listeyle
+    ve nedeniyle birlikte sunuyor. Hata koduyla kapatmak, ekranda bir arıza
+    gibi okunurdu -- oysa yapılacak bir şey var ve kullanıcı onu yapabilir.
+
+    Kademesi yetmeyen grup listeye GİRMİYOR ama grubun kendi gerekçesi
+    taşınıyor: "uygun değil" tek başına kişi hakkında bir yargı gibi okunur,
+    hangi beyandan çıktığı yazılı olunca kullanıcı cevabını değiştirerek
+    sonucu değiştirebileceğini de görür.
+    """
+    version = getattr(declared, "questionnaire_version", None)
+    groups = getattr(declared, "product_groups", None) or []
+    if declared is None or version != GATE_VERSION or not groups:
+        return {"open": False, "reason": GATE_CLOSED_TR, "groups": {}}
+    return {
+        "open": True,
+        "reason": GATE_OPEN_TR,
+        "groups": {
+            str(entry.get("key")): {
+                "eligible": bool(entry.get("eligible")),
+                "label": entry.get("label"),
+                "reason": entry.get("reason"),
+            }
+            for entry in groups
+            if entry.get("key")
+        },
     }
 
 
@@ -434,114 +561,4 @@ def group_exposure(
         "assessed": bool(product_groups),
         "total_value": round(total, 2),
         "groups": rows,
-    }
-
-
-# ── Şablon oynaklığı ve öne çıkarma ─────────────────────────────────────────
-#
-# Cümle BURADA kuruluyor, `allocation.py`'de değil: beyan edilen tolerans risk
-# modülünün tablosunda ve `risk -> investment` import yönü zaten kurulu.
-# Tersi çift yönlü bağımlılık açardı -- `market/router.py:453`'te yazılı olan
-# gerekçenin aynısı. `allocation.py` ağırlıkları ve aritmetiği tutuyor,
-# cümleyi risk kuruyor.
-
-#: Yıllık oynaklığın banda çevrildiği eşikler.
-#:
-#: Sayılar UYDURULMADI, `score_from`'un kendi ölçeğinden türetildi:
-#: `VOLATILITY_FLOOR` (0,10) "sıradan çeşitlendirilmiş bir hisse portföyü",
-#: `VOLATILITY_CEILING` (0,45) ise ölçeğin tepesi. Taban ile ölçeğin ortası
-#: iki sınırı veriyor.
-#:
-#: Aynı ölçekten türemesi ŞART: şablonun bandı, kullanıcının beyan ettiği
-#: toleransla karşılaştırılıyor ve o tolerans `score_from`'un ürettiği
-#: seviyeyle aynı kelimeleri kullanıyor. İki farklı ölçekten "Orta"
-#: karşılaştırmak, aynı kelimeyle iki farklı şey söylemek olurdu.
-#:
-#: İlk denemede eşikler (0,15 / 0,30) elle seçilmişti ve ölçüldüğünde üç
-#: şablonun ÜÇÜ de "Düşük" çıktı -- öne çıkarma böyle anlamını yitiriyordu.
-VOLATILITY_BANDS = (
-    (VOLATILITY_FLOOR, "Düşük"),
-    (VOLATILITY_FLOOR + (VOLATILITY_CEILING - VOLATILITY_FLOOR) / 2, "Orta"),
-)
-
-
-def volatility_band(volatility: Optional[float]) -> Optional[str]:
-    """Yıllık oynaklığı `_LEVEL_ORDER` bandına çevirir; ölçülemezse None.
-
-    None dönüyor, "Orta" değil: ölçülmemiş bir karışımı orta bandda göstermek,
-    olmayan bir ölçümü varmış gibi sunmak olurdu.
-    """
-    if volatility is None:
-        return None
-    for threshold, label in VOLATILITY_BANDS:
-        if volatility < threshold:
-            return label
-    return _LEVEL_ORDER[-1]
-
-
-def template_comparison(
-    label: str,
-    volatility: Optional[float],
-    declared_tolerance: Optional[str],
-    unmeasured: Optional[list[str]] = None,
-) -> dict[str, Any]:
-    """Şablonun ölçülen oynaklığı ile kullanıcının beyan ettiği tolerans.
-
-    `suitability` ile AYNI dil ve aynı sınır: iki OLGU yan yana konuyor, biri
-    geçmiş fiyat verisinden ölçülüyor, diğeri kullanıcının ankette kendi
-    yazdığı. Hiçbir yerde "size uygun" denmiyor ve bu bir tesadüf değil --
-    `compliance/rules.py:SUI-001` o ifadeyi engelliyor ve
-    `test_suitability.py` üretilebilir her cümleyi o kurala karşı tarıyor.
-
-    `highlighted` bir SIRALAMA girdisi, bir seçim değil: bandı beyan edilen
-    toleransla eşleşen şablon listenin başına geliyor ve neye göre
-    sıralandığı cümlede yazıyor. Sistem şablonu SEÇMİYOR; kullanıcı seçiyor.
-    """
-    band = volatility_band(volatility)
-    if band is None:
-        missing = ", ".join(unmeasured or []) or "yeterli fiyat geçmişi"
-        return {
-            "band": None,
-            "highlighted": False,
-            "statement": (
-                f"{label} şablonunun oynaklığı ölçülemedi: {missing} için "
-                "yeterli fiyat geçmişi yok."
-            ),
-        }
-
-    percent = f"%{volatility * 100:.1f}".replace(".", ",")
-    measured = (
-        f"{label} şablonunun geçmiş veriyle ölçülen yıllık oynaklığı "
-        f"{percent}; bu, ölçüm bandında \"{band}\"."
-    )
-    if declared_tolerance not in _LEVEL_ORDER:
-        return {
-            "band": band,
-            "highlighted": False,
-            "statement": (
-                f"{measured} Karşılaştırma için tamamlanmış bir risk anketi "
-                "gerekiyor."
-            ),
-        }
-
-    if band == declared_tolerance:
-        return {
-            "band": band,
-            "highlighted": True,
-            "statement": (
-                f"{measured} Ankette belirttiğiniz tolerans da "
-                f"\"{declared_tolerance}\" — ikisi aynı bandda."
-            ),
-        }
-
-    side = "üzerinde" if _LEVEL_ORDER.index(band) > _LEVEL_ORDER.index(
-        declared_tolerance
-    ) else "altında"
-    return {
-        "band": band,
-        "highlighted": False,
-        "statement": (
-            f"{measured} Ankette belirttiğiniz tolerans \"{declared_tolerance}\"; "
-            f"şablon, beyan ettiğiniz bandın {side} ölçülüyor."
-        ),
     }

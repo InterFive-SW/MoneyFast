@@ -1,17 +1,25 @@
 import DengelemePaneli from '../../components/analiz/DengelemePaneli'
-import SablonSecici from '../../components/analiz/SablonSecici'
+import HedefDagilimPaneli from '../../components/risk/HedefDagilimPaneli'
 
 /**
- * Analiz > Dengeleme — hedefimden ne kadar saptım, karşılığı kaç lot.
+ * Analiz > Dengeleme — hedefimden ne kadar saptım, karşılığı kaç lot ve neden.
  *
- * İki parça: üstte hedef formu (şablonlar başlangıç değerini veriyor), altta
- * sapmanın emir karşılığı. Hesap yok, koşul yok: mantığın tamamı hook'larda,
- * çünkü kapsama kapısı `src/hooks/**` altını sayıyor ve JSX'i saymıyor.
+ * **Şablon seçici kaldırıldı.** Hedef artık bir addan değil, iki ölçümden
+ * çıkıyor: kullanıcının kendi girdiği dağılım, ya da o yoksa ölçülen risk ile
+ * ankette beyan ettiği toleransın daha temkinli olanı. Kullanıcının bir
+ * "Dengeli" adı seçmesi, o iki ölçümün söylediğinden bağımsız bir üçüncü
+ * girdi olurdu.
+ *
+ * Kullanıcının KENDİ hedefi hâlâ kazanıyor ve hâlâ buradan giriliyor: sistem
+ * hedefi ancak kullanıcı hiç koymadıysa banttan okuyor.
+ *
+ * Hesap yok, koşul yok: mantığın tamamı hook'larda, çünkü kapsama kapısı
+ * `src/hooks/**` altını sayıyor ve JSX'i saymıyor.
  */
 export default function Dengeleme() {
     return (
         <div className="flex flex-col gap-6">
-            <SablonSecici />
+            <HedefDagilimPaneli />
             <DengelemePaneli />
         </div>
     )

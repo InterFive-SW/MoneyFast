@@ -196,10 +196,14 @@ class TestUnremediableFindingFailsClosed:
 class TestRemediationInternals:
     def test_a_finding_with_no_safe_rewrite_falls_through_to_block(self):
         """HIGH bulgular arasında replacement'ı olmayan biri varsa, kısmen
-        temizlenmiş taslak yayımlanmaz."""
+        temizlenmiş taslak yayımlanmaz.
+
+        Kural GUA-001 (getiri garantisi): bir garanti vaadinin güvenli bir
+        yeniden yazımı YOK -- cümleden çıkarılabilecek bir parça değil, iddia
+        cümlenin kendisi."""
         violations = [
             {
-                "rule_id": "ADV-001",
+                "rule_id": "GUA-001",
                 "offending_span": {"start": 0, "end": 5, "text": "dummy"},
             }
         ]
@@ -224,3 +228,67 @@ class TestHealth:
         assert client.get("/api/compliance/health").json() == {
             "status": "ok", "module": "compliance",
         }
+
+
+class TestRebalanceContext:
+    """ADV-001 ve ADV-002 yeniden dengeleme bağlamında koşullu.
+
+    Kural KALKMIYOR, şiddeti düşüyor. Fark ölçülebilir: engellenen bir cevap
+    kullanıcıya hiç ulaşmıyor, düzeltilen bir cevap uygunluk katmanının kendi
+    yeniden yazımıyla ulaşıyor ve denetim kaydında iz bırakıyor.
+    """
+
+    DRAFT = "Dengeleme listesine göre THYAO satmalısınız."
+
+    def test_outside_the_context_it_still_blocks(self):
+        result = service.validate(
+            {"draft_response": self.DRAFT, "jurisdiction": "TR", "tools_used": []}
+        )
+        assert result["verdict"] == "BLOCK"
+
+    def test_inside_the_context_it_is_revised_not_blocked(self):
+        result = service.validate({
+            "draft_response": self.DRAFT, "jurisdiction": "TR",
+            "tools_used": ["get_rebalance_plan"],
+        })
+        assert result["verdict"] == "REVISE"
+        assert "[emir kipi kaldırıldı]" in result["remediated_response"]
+
+    def test_the_finding_is_still_reported(self):
+        """Gevşeyen şey şiddet; bulgu kaybolmuyor. Kaybolsaydı denetim kaydı
+        gevşemenin ne sıklıkta işlediğini söyleyemezdi."""
+        result = service.validate({
+            "draft_response": self.DRAFT, "jurisdiction": "TR",
+            "tools_used": ["get_rebalance_plan"],
+        })
+        assert [v["rule_id"] for v in result["violations"]] == ["ADV-001"]
+        assert result["violations"][0]["severity"] == "MEDIUM"
+
+    def test_a_guarantee_is_not_relaxed_by_the_context(self):
+        """Gevşeme yalnızca `relaxed_in` yazan iki kuralda. Bir getiri
+        garantisi hiçbir bağlamda kabul edilebilir değil."""
+        result = service.validate({
+            "draft_response": "Bu liste ile garantili getiri elde edersiniz.",
+            "jurisdiction": "TR", "tools_used": ["get_rebalance_plan"],
+        })
+        assert result["verdict"] == "BLOCK"
+
+    def test_another_tool_does_not_open_the_context(self):
+        result = service.validate({
+            "draft_response": self.DRAFT, "jurisdiction": "TR",
+            "tools_used": ["get_portfolio_positions", "calculate_portfolio_risk_metrics"],
+        })
+        assert result["verdict"] == "BLOCK"
+
+    def test_an_unknown_context_name_changes_nothing(self):
+        """Yazım hatasıyla gevşeyen bir kural paketi, gevşemeyi ölçülemez
+        yapardı."""
+        found = rules.find_violations(
+            self.DRAFT, "STANDARD", False, frozenset({"REBALANC"})
+        )
+        assert found[0]["severity"] == "CRITICAL"
+
+    def test_the_rule_pack_version_moved_with_the_change(self):
+        """Denetim kaydı hangi kural paketinin uygulandığını söylüyor; paket
+        değişip sürüm kalsaydı iki farklı davranış aynı sürümle kaydedilirdi."""
+        assert rules.RULE_PACK_VERSION == "TR_RETAIL_2026.09"

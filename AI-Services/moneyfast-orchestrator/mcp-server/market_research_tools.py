@@ -177,9 +177,16 @@ async def rag_semantic_market_search(
           proximity, not accuracy or recency.
         - `doc_type` changes how a result may be attributed, not how much it is
           worth. A FILING is what the company itself stated; a NEWS item is what
-          a publisher wrote. Say which one you are quoting — but a filing being
-          primary does not make its contents a prediction, and neither type
-          licenses a market view.
+          a publisher wrote. Say which one you are quoting — and a filing being
+          primary does not make its contents a prediction.
+        - `is_opinion` true means the document IS somebody's view: an analyst
+          note, an editorial, a price target. Relaying one is fine and it must
+          be ATTRIBUTED — "X kurumunun değerlendirmesine göre" — because the
+          view belongs to its author. Presenting it as the system's own reading
+          is the failure this flag exists to prevent, and it is the easiest
+          mistake to make when the document reads like analysis.
+        - NEVER average opinions into a consensus. Five analysts' price targets
+          averaged into one number is a measurement nobody made.
         - Reproduce only short excerpts. Paraphrase by default.
         - Any response built on this tool MUST pass validate_compliance_rules before
           emission.

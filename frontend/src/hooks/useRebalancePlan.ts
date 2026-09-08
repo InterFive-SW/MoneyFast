@@ -15,6 +15,18 @@ import { apiClient, type RebalancePlan, type RebalanceRow } from '../api/client'
 
 export const PLAN_ERROR = 'Dengeleme planı yüklenemedi.';
 
+/** Ölçümün penceresi. Sunucudaki kapalı kümeyle AYNI: ayrışırsa kullanıcı
+ *  sorduğundan başka bir pencerenin okumasını alır ve bunu hiç öğrenmez. */
+export const LOOKBACKS = [
+    { key: '1M', label: '1 ay' },
+    { key: '3M', label: '3 ay' },
+    { key: '6M', label: '6 ay' },
+    { key: '1Y', label: '1 yıl' },
+    { key: '3Y', label: '3 yıl' },
+    { key: '5Y', label: '5 yıl' },
+    { key: 'MAX', label: 'Tüm geçmiş' },
+] as const;
+
 /** Bir satırın durumu. Satırlar birbirinden BAĞIMSIZ: birinin hatası
  *  diğerlerini durdurmuyor. */
 export type RowStatus = 'idle' | 'submitting' | 'done' | 'error';
@@ -39,6 +51,15 @@ export interface RebalancePlanState {
     failed: number;
     confirmRow: (row: RebalanceRow) => Promise<void>;
     reload: () => void;
+    /** Ölçümün penceresi. Değiştirmek planı yeniden hesaplatıyor: aynı
+     *  portföy üç aylıkta "Yüksek", beş yıllıkta "Orta" ölçülebilir ve
+     *  bağlayıcı bant onunla birlikte değişir. */
+    lookback: string;
+    setLookback: (lookback: string) => void;
+    /** Gerekçeleri açık olan satır. Tek satır açık: on satırın gerekçeleri
+     *  birden, okunacak bir metin değil bir duvar olurdu. */
+    expanded: string | null;
+    toggleRow: (key: string) => void;
 }
 
 /**
@@ -57,13 +78,15 @@ export function useRebalancePlan(): RebalancePlanState {
     const [rowState, setRowState] = useState<Record<string, RowState>>({});
     const [confirmed, setConfirmed] = useState(0);
     const [nonce, setNonce] = useState(0);
+    const [lookback, setLookback] = useState('1Y');
+    const [expanded, setExpanded] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
         setLoading(true);
         setError(null);
         apiClient
-            .getRebalancePlan()
+            .getRebalancePlan(lookback)
             .then((data) => {
                 if (cancelled) return;
                 setPlan(data);
@@ -89,7 +112,7 @@ export function useRebalancePlan(): RebalancePlanState {
         return () => {
             cancelled = true;
         };
-    }, [nonce]);
+    }, [nonce, lookback]);
 
     const reload = useCallback(() => setNonce((value) => value + 1), []);
 
@@ -153,5 +176,12 @@ export function useRebalancePlan(): RebalancePlanState {
         failed: states.filter((row) => row.status === 'error').length,
         confirmRow,
         reload,
+        lookback,
+        setLookback: useCallback((next: string) => setLookback(next), []),
+        expanded,
+        toggleRow: useCallback(
+            (key: string) => setExpanded((current) => (current === key ? null : key)),
+            [],
+        ),
     };
 }

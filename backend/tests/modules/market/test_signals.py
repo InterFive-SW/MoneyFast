@@ -294,9 +294,14 @@ class TestNewsEvidence:
         assert signals.news_evidence([]) == []
 
     def test_news_never_casts_a_direction_vote(self):
-        """Sistemde ölçülmüş bir duygu skoru yok (`sentiment` her satırda sabit
-        "neutral"). Bir başlıktan yön çıkarmak, ölçmediğimiz bir şeyi ölçmüş
-        gibi göstermek olurdu."""
+        """Sistemde ölçülmüş bir duygu skoru yok (`sentiment` her satırda
+        `null`, yani ÖLÇÜLMEDİ). Bir başlıktan yön çıkarmak, ölçmediğimiz bir
+        şeyi ölçmüş gibi göstermek olurdu.
+
+        Bu motorun kuralı, Bölüm 12'nin politika değişikliğinden SONRA da
+        aynı: haber okuması artık serbest ama o okuma sohbet turunda,
+        ölçülmüş olgular üzerine kuruluyor. Gecelik yön hesabının böyle bir
+        zemini yok ve başlık sayısından yön üretmiyor."""
         rows = signals.news_evidence([object(), object()])
         assert rows[0]["direction"] == signals.NEUTRAL
         assert rows[0]["value"] == 2

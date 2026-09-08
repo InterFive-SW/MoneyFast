@@ -418,3 +418,53 @@ class TestSortVocabulary:
         fake_backend.set("instruments", httpx.Response(200, json={"instruments": []}))
         await market_data_tools.get_market_data(sort_by=None)
         assert fake_backend.last.url.params.get("sort_by", "") == ""
+
+
+class TestMisplacedFilters:
+    """Süzgeçler yanlış yere yazıldığında.
+
+    ÖLÇÜLDÜ: model `{"sector": "bankacilik", "top_k": 20}` gönderdi, `sector`
+    imzada olmadığı için sessizce düştü, ve "bankacılık sektöründe hangi
+    hisseler var" sorusuna evrenin alfabetik ilk yirmisi (A, AAP, AAPL,
+    ABBV, ABNB) süzülmüş bir liste gibi döndü.
+
+    Sessizce yok sayılan bir süzgeç, "eşleşme yok"u yanlış bir iddiaya
+    çevirir -- aracın kendi yorumu bunu zaten söylüyordu, ama yalnızca
+    `filters` İÇİNDEKİ anahtarlar için.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_top_level_sector_is_lifted_into_the_filters(self, fake_backend):
+        fake_backend.json("instruments", {"instruments": [], "total": 0})
+        out = await market_data_tools.get_market_data(sector="Financial Services")
+        assert out["filters_echo"]["sector"] == "Financial Services"
+        assert "sector=Financial" in str(fake_backend.last.url)
+
+    @pytest.mark.asyncio
+    async def test_every_screening_key_can_be_lifted(self, fake_backend):
+        fake_backend.json("instruments", {"instruments": [], "total": 0})
+        out = await market_data_tools.get_market_data(
+            market="BIST", max_pe=20.0, min_pe=5.0, max_pb=3.0
+        )
+        assert set(out["filters_echo"]) == {"market", "max_pe", "min_pe", "max_pb"}
+
+    @pytest.mark.asyncio
+    async def test_the_properly_placed_filter_wins(self, fake_backend):
+        """İki yere birden yazılmışsa, niyeti doğru yerdeki söylüyor."""
+        fake_backend.json("instruments", {"instruments": [], "total": 0})
+        out = await market_data_tools.get_market_data(
+            filters={"sector": "Technology"}, sector="Healthcare"
+        )
+        assert out["filters_echo"]["sector"] == "Technology"
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_key_inside_filters_is_still_refused(self, fake_backend):
+        """Taşıma, reddetmeyi gevşetmiyor: burada niyet AÇIK değil."""
+        with pytest.raises(InvalidInputError):
+            await market_data_tools.get_market_data(filters={"kurulus_yili": 1946})
+
+    @pytest.mark.asyncio
+    async def test_no_filter_at_all_stays_empty(self, fake_backend):
+        fake_backend.json("instruments", {"instruments": [], "total": 0})
+        out = await market_data_tools.get_market_data()
+        assert out["filters_echo"] == {}

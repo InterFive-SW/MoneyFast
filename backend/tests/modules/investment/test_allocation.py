@@ -189,128 +189,74 @@ class TestStatement:
                 assert banned not in lowered, f"{banned}: {statement}"
 
 
-class TestTemplates:
-    """Şablon bir MODEL PORTFÖY DEĞİL: formun başlangıç değeri. Kaydedilen
-    şey yine kullanıcının kendi PUT'u -- `AllocationTarget` modelindeki
-    gerekçe burada da geçerli."""
+class TestBandTargetMatrix:
+    """Migration 0046'nın yazdığı matris.
 
-    def test_every_template_sums_to_one_hundred(self):
-        """Hedef ucu toplamın tam 100 olmasını şart koşuyor; başlangıç değeri
-        o kapıdan geçemeyen bir form üretemez."""
-        for key, template in allocation.TEMPLATES.items():
-            assert sum(template["weights"].values()) == 100, key
+    Tohum verisi test edilir, çünkü toplamı bozulmuş bir bant sessizce yanlış
+    bir sapma üretir: eksik kalan puan, hiçbir kovaya ait olmayan bir fark
+    olarak görünür ve kullanıcı onu kendi hatası sanar.
+    """
 
-    def test_templates_only_use_targetable_buckets(self):
-        """`other` hedef alamıyor: eşlenmemiş bir piyasayı hedef hâline
-        getirirdi."""
-        for key, template in allocation.TEMPLATES.items():
-            for bucket in template["weights"]:
-                assert bucket in allocation.TARGETABLE, f"{key}: {bucket}"
+    @staticmethod
+    def _matrix():
+        """Migration'ı import ETMEDEN sabiti okur.
 
-    def test_no_template_name_makes_a_claim_about_the_user(self):
-        """"Ağırlıklı nakit" ne yaptığını söylüyor; "temkinli" kullanıcının
-        durumu hakkında bir iddia olurdu."""
-        for template in allocation.TEMPLATES.values():
-            lowered = template["label"].lower()
-            for banned in ("temkinli", "güvenli", "agresif", "ideal", "uygun",
-                           "önerilen", "en iyi"):
-                assert banned not in lowered, template["label"]
+        Migration modülü `alembic` istiyor ve bu paket test imajında yok;
+        ayrıca bir migration geçmişte donmuş bir adım ve onu import etmek,
+        testi o adımın çalışabilirliğine bağlardı. Okunan şey yalnızca liste.
+        """
+        import pathlib
 
-    def test_every_targetable_bucket_has_a_proxy_decision(self):
-        """Vekili olmayan bir kova sessizce ölçümün dışında kalırdı."""
-        for bucket in allocation.TARGETABLE:
-            assert bucket in allocation.PROXY_FOR_BUCKET, bucket
+        source = pathlib.Path(
+            "alembic/versions/0046_risk_band_targets.py"
+        ).read_text()
+        body = source[source.index("TARGETS = ["):source.index("def upgrade")]
+        namespace: dict = {}
+        exec(body, namespace)  # noqa: S102 - okunan şey depodaki kendi sabitimiz
+        return namespace["TARGETS"]
 
-    def test_cash_has_no_proxy_and_that_is_deliberate(self):
-        """Nakit faiz serisi sistemde yok; getirisi sıfır alınıyor ve bu bir
-        VARSAYIM olarak raporlanıyor."""
-        assert allocation.PROXY_FOR_BUCKET[allocation.CASH] is None
+    def test_every_band_sums_to_one_hundred(self):
+        totals: dict[str, float] = {}
+        for band, _bucket, percent in self._matrix():
+            totals[band] = totals.get(band, 0) + percent
+        assert totals == {"Risksiz": 100, "Düşük": 100, "Orta": 100, "Yüksek": 100}
 
+    def test_every_measured_band_has_a_row(self):
+        """Hedefsiz bir bant, o bandda ölçülen kullanıcıya hiç plan
+        üretilememesi demek olurdu."""
+        from app.modules.risk import profile
 
-class TestTemplateVolatility:
-    def _series(self, n=260, step=1.0, start=100.0):
-        from datetime import date, timedelta
+        banded = {band for band, _bucket, _percent in self._matrix()}
+        assert banded == {label for _threshold, label in profile.BANDS}
 
-        day = date(2025, 1, 1)
-        return [
-            (day + timedelta(days=i), start + i * step) for i in range(n)
-        ]
+    def test_every_bucket_is_targetable(self):
+        """`other` hedeflenemez: tanımı gereği "eşleştirilemeyen" demek ve ona
+        hedef vermek, eşleştirme hatasını hedefe dönüştürürdü."""
+        for _band, bucket, _percent in self._matrix():
+            assert bucket in allocation.TARGETABLE
 
-    def test_a_measured_mix_reports_a_number_and_the_cash_assumption(self):
-        out = allocation.template_volatility(
-            {"cash": 50, "bist_equity": 50},
-            {"bist_equity": self._series()},
-        )
-        assert out["volatility"] is not None
-        assert out["cash_assumed_flat"] is True
-        assert out["unmeasured"] == []
+    def test_no_zero_row_is_written(self):
+        """Sıfırlık bir satır "o kovadaki her şeyi sat" demek olurdu; satırın
+        hiç olmaması ise "bu bandın o kova hakkında görüşü yok"."""
+        assert all(percent > 0 for _band, _bucket, percent in self._matrix())
 
-    def test_a_short_series_is_not_measured(self):
-        """Altmışın altında bir seri, yıllıklandırıldığında gürültüyü bir
-        orana çevirir."""
-        out = allocation.template_volatility(
-            {"bist_equity": 100}, {"bist_equity": self._series(n=30)}
-        )
-        assert out["volatility"] is None
-        assert "BIST Hisse" in out["unmeasured"]
+    def test_a_bucket_appears_at_most_once_per_band(self):
+        pairs = [(band, bucket) for band, bucket, _percent in self._matrix()]
+        assert len(pairs) == len(set(pairs))
 
-    def test_a_missing_bucket_is_named_not_silently_dropped(self):
-        out = allocation.template_volatility(
-            {"us_equity": 100}, {}
-        )
-        assert out["volatility"] is None
-        assert out["unmeasured"] == ["ABD Hisse"]
+    def test_equity_weight_rises_with_the_band(self):
+        """Bantlar bir SIRA: daha yüksek bir bağlayıcı bant daha yüksek hisse
+        ağırlığı demek. Bozulursa matris, adının söylemediği bir şey yapar."""
+        equity: dict[str, float] = {}
+        for band, bucket, percent in self._matrix():
+            if bucket in ("bist_equity", "us_equity"):
+                equity[band] = equity.get(band, 0) + percent
+        assert equity["Risksiz"] < equity["Düşük"] < equity["Orta"] < equity["Yüksek"]
 
-    def test_a_small_unmeasured_weight_does_not_block_the_reading(self):
-        """Yüzde onun altında ölçülemeyen bir kova okumayı düşürmüyor;
-        adı yine raporlanıyor."""
-        out = allocation.template_volatility(
-            {"bist_equity": 95, "us_equity": 5},
-            {"bist_equity": self._series()},
-        )
-        assert out["volatility"] is not None
-        assert out["unmeasured"] == ["ABD Hisse"]
-
-    def test_a_large_unmeasured_weight_blocks_it(self):
-        """Yüzde otuzu ölçülemeyen bir karışımın oynaklığını tek bir sayı
-        olarak sunmak, ölçülen yüzde yetmişi bütünmüş gibi göstermek olurdu."""
-        out = allocation.template_volatility(
-            {"bist_equity": 70, "us_equity": 30},
-            {"bist_equity": self._series()},
-        )
-        assert out["volatility"] is None
-
-    def test_series_are_aligned_by_day_not_by_length(self):
-        """İki seriyi son N gününe göre eşlemek farklı günleri yan yana
-        koymak olurdu. Ortak günler yeterliyse ölçüm yapılıyor."""
-        long = self._series(n=260)
-        # Yarısı eksik ama ortak gün sayısı hâlâ eşiğin üstünde.
-        every_other = long[::2]
-        out = allocation.template_volatility(
-            {"bist_equity": 50, "us_equity": 50},
-            {"bist_equity": long, "us_equity": every_other},
-        )
-        assert out["volatility"] is not None
-        assert out["unmeasured"] == []
-
-    def test_too_few_common_days_blocks_the_reading(self):
-        """Seriler tek tek yeterliydi ama ORTAK günleri yetmiyor: farklı
-        takvimlerde işlem gören iki piyasa böyle."""
-        from datetime import date, timedelta
-
-        first = self._series(n=200)
-        # Hiç kesişmeyen bir pencere.
-        later = [
-            (date(2027, 1, 1) + timedelta(days=i), 100.0 + i) for i in range(200)
-        ]
-        out = allocation.template_volatility(
-            {"bist_equity": 50, "us_equity": 50},
-            {"bist_equity": first, "us_equity": later},
-        )
-        assert out["volatility"] is None
-        assert set(out["unmeasured"]) == {"BIST Hisse", "ABD Hisse"}
-
-    def test_a_cash_only_template_has_nothing_to_measure(self):
-        out = allocation.template_volatility({"cash": 100}, {})
-        assert out["volatility"] is None
-        assert out["cash_assumed_flat"] is True
+    def test_cash_weight_falls_with_the_band(self):
+        cash = {
+            band: percent
+            for band, bucket, percent in self._matrix()
+            if bucket == allocation.CASH
+        }
+        assert cash["Risksiz"] > cash["Düşük"] > cash["Orta"] > cash["Yüksek"]

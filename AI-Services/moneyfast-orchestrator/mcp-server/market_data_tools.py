@@ -98,6 +98,22 @@ async def get_market_data(
     # tells the user it could not reach the data — which is what happened to
     # "THYAO kaç lira?".
     top_k: Optional[int] = None,
+    # Süzgeçlerin YANLIŞ YERE yazılmış hâli. Model bunları düzenli olarak üst
+    # seviyede gönderiyor (`{"sector": "bankacilik", "top_k": 20}`) ve
+    # imzada yoklarken sessizce DÜŞÜYORLARDI: ölçüldü, "bankacılık
+    # sektöründe hangi hisseler var" sorusuna evrenin alfabetik ilk yirmisi
+    # (A, AAP, AAPL, ABBV, ABNB) süzülmüş bir liste gibi döndü.
+    #
+    # Kabul edilip `filters`a taşınıyorlar. `filters` içindeki tanınmayan bir
+    # anahtar hâlâ REDDEDİLİYOR ve gerekçe aynı: sessizce yok sayılan bir
+    # süzgeç, "eşleşme yok"u yanlış bir iddiaya çevirir. Burada niyet açık
+    # olduğu için düzeltmek reddetmekten iyi -- `_SORT_SYNONYMS` ile aynı
+    # ders.
+    sector: Optional[str] = None,
+    market: Optional[str] = None,
+    max_pe: Optional[float] = None,
+    min_pe: Optional[float] = None,
+    max_pb: Optional[float] = None,
     sort_by: Optional[str] = None,
 ) -> dict[str, Any]:
     """
@@ -196,7 +212,16 @@ async def get_market_data(
     """
     sort_by = _canonical_sort(sort_by)
 
-    filters = filters or {}
+    filters = dict(filters or {})
+    # Üst seviyeye yazılmış süzgeçler yerlerine taşınıyor. `filters` içinde
+    # zaten varsa oradaki kazanıyor: iki yere birden yazılmışsa, niyeti
+    # doğru yerdeki söylüyor.
+    for key, value in (
+        ("sector", sector), ("market", market),
+        ("max_pe", max_pe), ("min_pe", min_pe), ("max_pb", max_pb),
+    ):
+        if value is not None:
+            filters.setdefault(key, value)
     unknown = sorted(set(filters) - ALLOWED_FILTERS)
     if unknown:
         # Rejected rather than dropped: the model believes the filter applied,

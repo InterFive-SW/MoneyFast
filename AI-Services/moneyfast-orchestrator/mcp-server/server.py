@@ -60,6 +60,7 @@ import portfolio_tools
 import rebalance_tools
 import risk_strategy_tools
 import scenario_tools
+import sector_tools
 import banking_tools
 import technical_tools
 import transaction_tools
@@ -134,10 +135,14 @@ SERVER_NAME = "moneyfast"
 #: ContractViolationError fırlatıyor, widget çizmiyor). Yanında iki kapı
 #: daha var: uygunluk testi tamamlanmamışsa liste hiç yok, ve çekince
 #: `_keep_rationale` ile kapının her dalından geçiyor.
-CONTRACT_VERSION = "v2.24"
+#: v2.25: `get_sector_map`. KAPATILAN BİR BOŞLUK: `sector_by_symbol()`
+#: backend'de vardı ama hiçbir araç sektör döndürmüyordu, dolayısıyla
+#: "bankacılık sektörü bu haberden nasıl etkilenir" sorusunun veri yolu
+#: yoktu ve ajan sektörü kendi bildiğinden uyduruyordu.
+CONTRACT_VERSION = "v2.25"
 
 SERVER_INSTRUCTIONS = """\
-MoneyFast tool server. Twenty-four tools across seventeen domains.
+MoneyFast tool server. Twenty-five tools across eighteen domains.
 
 Routing: call classify_and_route_intent first on every user turn.
 Data:    get_portfolio_positions, get_market_data,
@@ -202,6 +207,7 @@ DOMAIN_MODULES = (
     ("technical", technical_tools),
     ("news", news_tools),
     ("rebalance", rebalance_tools),
+    ("sector", sector_tools),
     ("scenario", scenario_tools),
     ("fundamentals", fundamentals_tools),
     ("cash_flow", cash_flow_tools),

@@ -152,3 +152,92 @@ class TestImpactSummary:
         mocker.patch.object(news_impact, "impacts_since", return_value=[])
         body = client.get(SUMMARY).json()
         assert body["entries"] == [] and body["windowHours"] == 24
+
+
+class TestSectors:
+    """Sembol -> sektör. Kapatılan boşluk: `sector_by_symbol()` vardı ve
+    ekranları besliyordu, ama hiçbir MCP aracı sektör döndürmüyordu."""
+
+    URL = "/api/market/sectors"
+
+    def test_the_map_is_grouped_by_sector(self, client, mocker):
+        mocker.patch.object(
+            market_service, "sector_by_symbol",
+            return_value={"AKBNK": "Financial Services", "GARAN": "Financial Services",
+                          "THYAO": "Industrials"},
+        )
+        mocker.patch.object(market_service, "count_active_products", return_value=5)
+        body = client.get(self.URL).json()
+        assert [row["sector"] for row in body["sectors"]] == [
+            "Financial Services", "Industrials"]
+        assert body["sectors"][0]["symbols"] == ["AKBNK", "GARAN"]
+
+    def test_the_unclassified_count_is_measured_not_guessed(self, client, mocker):
+        """Neyi kaçırdığını söylemeyen bir harita, tam bir harita gibi
+        okunur."""
+        mocker.patch.object(
+            market_service, "sector_by_symbol",
+            return_value={"AKBNK": "Financial Services"},
+        )
+        mocker.patch.object(market_service, "count_active_products", return_value=10)
+        assert client.get(self.URL).json()["unclassified"] == 9
+
+    def test_an_instrument_without_a_sector_is_absent_not_blank(self, client, mocker):
+        """Boş bir dize döndürmek, ölçülmemiş bir sektörü ölçülmüş gibi
+        gösterirdi."""
+        mocker.patch.object(
+            market_service, "sector_by_symbol",
+            return_value={"AKBNK": "Financial Services"},
+        )
+        mocker.patch.object(market_service, "count_active_products", return_value=2)
+        body = client.get(self.URL).json()
+        assert "THYAO" not in body["symbols"]
+        assert all(row["sector"] for row in body["sectors"])
+
+    def test_an_empty_universe_is_a_valid_answer(self, client, mocker):
+        mocker.patch.object(market_service, "sector_by_symbol", return_value={})
+        mocker.patch.object(market_service, "count_active_products", return_value=0)
+        body = client.get(self.URL).json()
+        assert body["sectors"] == [] and body["unclassified"] == 0
+
+    def test_a_sector_filter_narrows_the_map(self, client, mocker):
+        """Süzgeç SUNUCUDA: bin satırlık bir sözlük, tek bir sektör
+        sorulduğunda okunmayacak bir yük.
+
+        Türkçe ad sağlayıcının İngilizce etiketine ÇEVRİLİYOR: çeviri yokken
+        "bankacılık" hiçbir şeyle eşleşmiyor ve sonuç, veri duruyorken boş
+        dönüyordu."""
+        mocker.patch.object(
+            market_service, "sector_by_symbol",
+            return_value={"AKBNK": "Financial Services", "THYAO": "Industrials"},
+        )
+        mocker.patch.object(market_service, "count_active_products", return_value=2)
+        body = client.get(f"{self.URL}?sector=bankacılık").json()
+        assert [row["sector"] for row in body["sectors"]] == ["Financial Services"]
+        assert set(body["symbols"]) == {"AKBNK"}
+
+    def test_the_filter_ignores_case(self, client, mocker):
+        """Sağlayıcının etiketi İngilizce ve çağıranın onu birebir yazmasını
+        beklemek, bir eşleşmeyi yazım tercihine bağlamak olurdu."""
+        mocker.patch.object(
+            market_service, "sector_by_symbol",
+            return_value={"AKBNK": "Financial Services"},
+        )
+        mocker.patch.object(market_service, "count_active_products", return_value=1)
+        body = client.get(f"{self.URL}?sector=FINANCIAL services").json()
+        assert body["sectors"][0]["sector"] == "Financial Services"
+
+    def test_an_unknown_sector_is_an_empty_answer_not_an_error(self, client, mocker):
+        mocker.patch.object(
+            market_service, "sector_by_symbol",
+            return_value={"AKBNK": "Financial Services"},
+        )
+        mocker.patch.object(market_service, "count_active_products", return_value=1)
+        body = client.get(f"{self.URL}?sector=Uzay").json()
+        assert body["sectors"] == [] and body["symbols"] == {}
+
+    def test_no_session_is_required(self, client, mocker):
+        """Bu eşleme kullanıcıya ait hiçbir şey içermiyor."""
+        mocker.patch.object(market_service, "sector_by_symbol", return_value={})
+        mocker.patch.object(market_service, "count_active_products", return_value=0)
+        assert client.get(self.URL).status_code == 200

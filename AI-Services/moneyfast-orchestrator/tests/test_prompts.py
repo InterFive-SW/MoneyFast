@@ -540,7 +540,12 @@ PROMPT_BUDGETS = {
     #: üretiyor: hazır cümlenin YENİDEN YAZILMAMASI (çekince ondan
     #: ayrılamıyor), altı aydan uzun vadenin REDDEDİLDİĞİ ve kısa okumadan
     #: cevaplanmadığı, ve `lean` sayısının kullanıcıya ULAŞMAMASI.
-    "MARKET_DATA_AGENT": 4800,
+    #: v2.25 ile altıncı araç: `get_sector_map`. Bütçeyi aşan kısım
+    #: kısaltılınca kaybolan kural, sektörün HAFIZADAN cevaplanmaması: hangi
+    #: şirketin hangi sektörde olduğu tam olarak bir modelin kendinden emin
+    #: biçimde yanlış hatırladığı türden bir olgu ve yanlış bir üyelik, bir
+    #: şirketi hiç ilgisi olmayan bir hikâyenin içine koyuyor.
+    "MARKET_DATA_AGENT": 5300,
     #: v2.17 ile iki karşılaştırma daha yanında geliyor: ürün grubu beyanı ve
     #: kullanıcının kendi hedefinden sapma. Bütçeyi aşan kısım kısaltılınca
     #: kaybolan kurallar: hazır cümlelerin YENİDEN YAZILMAMASI, hedefsizliğin

@@ -113,6 +113,8 @@ ROUTES = {
     # ve ayrı dayanaklar: biri yayımlanmış başlıkları, diğeri onların
     # yorumlanmış hâlini döndürüyor.
     "/market/news/digest": "news_digest",
+    # v2.25. Sembol -> sektör; ilk kez bir MCP aracı sektör döndürüyor.
+    "/market/sectors": "sectors",
     "/market/technicals": "technicals",
     # v2.14. `/market/fundamentals` ile `/market/fundamentals/ingest` ayrı
     # yollar; ikincisine bu suite hiç dokunmuyor.

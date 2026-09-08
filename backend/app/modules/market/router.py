@@ -210,6 +210,56 @@ def _portfolio_news_payload(db: Session, user_id: str, limit: int, days: int) ->
 
 
 @router.get(
+    "/sectors",
+    summary="Sembol -> sektör eşlemesi",
+)
+def get_sectors(
+    sector: Optional[str] = Query(None, description="Tek bir sektöre daralt"),
+    db: Session = Depends(get_db),
+):
+    """Hangi enstrüman hangi sektörde.
+
+    **Kapatılan boşluk:** `sector_by_symbol()` vardı ve ısı haritası ile
+    dağılım kırılımlarını besliyordu, ama hiçbir MCP aracı sektör
+    döndürmüyordu -- "bankacılık sektörü bu haberden nasıl etkilenir"
+    sorusunun veri yolu yoktu.
+
+    Kaynak TEK: `instrument_fundamentals.sector`, yani sağlayıcı verisi. Elle
+    yazılmış sektör yok ve olmayacak; `market_service.sector_by_symbol()`
+    içindeki not bir yasak olarak duruyor. Sektörü olmayan enstrüman burada
+    HİÇ GÖRÜNMÜYOR -- boş bir dize döndürmek, ölçülmemiş bir sektörü
+    ölçülmüş gibi gösterirdi.
+
+    Oturum aranmıyor: bu eşleme kullanıcıya ait hiçbir şey içermiyor.
+    """
+    mapping = market_service.sector_by_symbol(db)
+    # Süzgeç SUNUCUDA ve büyük/küçük harfe duyarsız: sağlayıcının etiketi
+    # İngilizce ("Financial Services") ve çağıranın onu birebir yazmasını
+    # beklemek, bir eşleşmeyi yazım tercihine bağlamak olurdu.
+    wanted = (market_service.canonical_sector(sector) or "").lower()
+    by_sector: dict[str, list[str]] = {}
+    for symbol, row_sector in mapping.items():
+        if wanted and row_sector.lower() != wanted:
+            continue
+        by_sector.setdefault(row_sector, []).append(symbol)
+    return {
+        # Düz eşleme yalnızca süzgeçsiz çağrıda: bin satırlık bir sözlük,
+        # tek bir sektör sorulduğunda okunmayacak bir yük.
+        "symbols": mapping if not wanted else {
+            symbol: row for symbol, row in mapping.items() if row.lower() == wanted
+        },
+        "sectors": [
+            {"sector": sector, "symbols": sorted(symbols)}
+            for sector, symbols in sorted(by_sector.items())
+        ],
+        # Kaç enstrümanın sektörü BİLİNMİYOR. Ölçülmüş bir boşluk: kapsama
+        # düz değil ve bunu söylemeden eşlemeyi sunmak, eksik bir haritayı
+        # tam bir harita gibi göstermek olurdu.
+        "unclassified": market_service.count_active_products(db) - len(mapping),
+    }
+
+
+@router.get(
     "/news/digest",
     response_model=NewsDigestOut,
     summary="Portföyün günlük haber özeti (yorumlanmış)",

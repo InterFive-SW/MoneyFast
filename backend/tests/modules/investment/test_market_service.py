@@ -1430,3 +1430,79 @@ class TestOrderPrivacy:
         for status in ("PENDING", "FAILED", "WAITING_PRICE", "CANCELLED",
                        "CONFIRMED", "PENDING_USER_CONFIRMATION"):
             assert status in market_service.ORDER_STATUS_TR
+
+
+class TestCountActiveProducts:
+    """Sektör eşlemesinin PAYDASI.
+
+    Yalnızca eşleşenleri döndüren bir harita kaçının dışarıda kaldığını
+    söylemiyor, ve kapsama düz değil: ölçülen 1.001 sembolün 14'ünde sektör
+    yok.
+    """
+
+    def _db(self, value):
+        from unittest.mock import MagicMock
+
+        from sqlalchemy.orm import Session
+
+        db = MagicMock(spec=Session)
+        db.execute.return_value.scalar.return_value = value
+        return db
+
+    def test_it_counts(self):
+        assert market_service.count_active_products(self._db(1011)) == 1011
+
+    def test_an_empty_universe_is_zero_not_none(self):
+        """None dönen bir sayım, "sıfır enstrüman" ile "sayamadım"ı aynı
+        şeye çevirirdi; burada ikisi de sıfır çünkü payda olarak kullanılıyor
+        ve bölünen taraf zaten boş."""
+        assert market_service.count_active_products(self._db(None)) == 0
+
+
+class TestCanonicalSector:
+    """Kullanıcının yazdığı sektör adından sağlayıcının etiketine.
+
+    Bu bir sektör TANIMI değil, bir ÇEVİRİ: hiçbir enstrümanın sektörü
+    burada belirlenmiyor, yalnızca kullanıcının yazdığı ad sağlayıcının
+    kendi etiketine bağlanıyor. Üyelik hâlâ tek kaynaktan geliyor ve
+    `sector_by_symbol` içindeki "elle yazılmış sektör YOK" yasağı yerinde.
+    """
+
+    def test_a_turkish_name_becomes_the_provider_label(self):
+        """ÖLÇÜLDÜ: çeviri yokken "bankacılık sektöründe hangi hisseler var"
+        sorusu, veri duruyorken "veri alınamadı" cevabı üretiyordu."""
+        assert market_service.canonical_sector("bankacılık") == "Financial Services"
+        assert market_service.canonical_sector("Bankacilik") == "Financial Services"
+
+    def test_the_provider_label_passes_through(self):
+        """Etiketi birebir yazan bir çağıran engellenmemeli."""
+        assert market_service.canonical_sector("Financial Services") == "Financial Services"
+
+    def test_an_unknown_name_is_left_alone(self):
+        """Tanınmayan bir adı yakınına eşlemek üyelik uydurmak olurdu;
+        eşleşmezse sonuç boş kalır ve bu doğru cevaptır."""
+        assert market_service.canonical_sector("Uzay Sanayii") == "Uzay Sanayii"
+
+    def test_nothing_stays_nothing(self):
+        assert market_service.canonical_sector(None) is None
+        assert market_service.canonical_sector("") is None
+
+    def test_every_alias_points_at_a_real_provider_label(self):
+        """Ölçülen on bir etiket dışında bir hedefe işaret eden bir takma ad,
+        hiçbir zaman eşleşmeyen sessiz bir süzgeç olurdu."""
+        measured = {
+            "Basic Materials", "Communication Services", "Consumer Cyclical",
+            "Consumer Defensive", "Energy", "Financial Services", "Healthcare",
+            "Industrials", "Real Estate", "Technology", "Utilities",
+        }
+        assert set(market_service.SECTOR_ALIASES.values()) <= measured
+
+    def test_every_measured_label_can_be_reached_in_turkish(self):
+        """Kullanıcının Türkçe soramadığı bir sektör, pratikte olmayan bir
+        sektör."""
+        measured = {
+            "Basic Materials", "Communication Services", "Consumer Cyclical",
+            "Consumer Defensive", "Energy", "Financial Services", "Healthcare",
+            "Industrials", "Real Estate", "Technology", "Utilities",
+        }
+        assert set(market_service.SECTOR_ALIASES.values()) == measured

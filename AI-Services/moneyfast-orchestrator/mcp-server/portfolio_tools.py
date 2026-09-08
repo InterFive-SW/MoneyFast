@@ -420,41 +420,48 @@ async def get_rebalance_plan(user_id: str) -> dict[str, Any]:
 
     Returns:
         dict with exactly these top-level keys:
-            hasTarget (bool): false means the user set no target; there is then
-                no list and nothing to explain.
+            gate (dict): {open, reason}. `open: false` means the user has not
+                completed the suitability test; there is NO list, and `reason`
+                is the sentence to relay. Do not answer from anything else.
+            hasTarget (bool): false means neither the user's own target nor a
+                binding band was available.
+            measuredLevel / declaredTolerance / bindingBand (str | null): the
+                two risk axes and the more cautious one, which set the target.
+            bandStatement (str): where the target came from, already written.
             statement (str): the drift sentence, already written.
-            summary (str): what the list CONTAINS — how many buy and sell rows,
-                in which buckets, how many buckets produced none. Composed
-                backend-side.
+            summary (str): what the list CONTAINS, composed backend-side.
             disclaimer (str): must be relayed with any part of this.
-            unresolved (list[dict]): buckets that produced no order, each with
-                a `reason` saying why.
+            rows (list[dict]): the orders, in the order the backend chose:
+                symbol, side (BUY/SELL), quantity, amount (in the account's
+                currency), bucket, statement (a ready sentence), and
+                rationale (list of {kind, value, text}) -- the MEASURED reasons
+                that put the row in the list.
+            unresolved (list[dict]): what produced no order, each with a
+                `reason` saying why.
             warning (str | null).
 
-        The individual order rows are deliberately NOT here. They live on the
-        screen, where the user's own click confirms them.
-
     Constraints:
-        - RELAY `summary` and `statement` AS WRITTEN, and point the user at the
-          Dengeleme screen for the rows themselves.
-        - Do NOT produce a table, a list, or any line naming a symbol with a
-          quantity or a side. You were not given those figures BECAUSE they do
-          not belong in a chat reply: on the screen the user set the target and
-          confirms each row themselves, and reproducing the rows here breaks
-          that chain. If asked "kaç lot", say the amounts are on the screen.
-        - Relay `disclaimer` whenever you relay any of this. It is arithmetic
-          over the user's OWN target; without that sentence it reads as advice.
-        - Do NOT build a list of your own, do NOT invent a symbol or a
-          quantity, and do NOT suggest a target. The system does not propose
-          model portfolios and you do not either.
+        - EVERY row you mention carries at least one of its `rationale` texts.
+          A row without its reason is a recommendation; a row with the number
+          that produced it is a reading. This is the whole basis on which this
+          tool is allowed to exist.
+        - RELAY `statement`, `bandStatement`, `summary` and each row's
+          `statement` AS WRITTEN. They are conditional, they carry their own
+          limits, and a rewrite drops the condition and keeps the claim.
+        - The ORDER of `rows` is a measurement, not a preference: the backend
+          ranked them by risk contribution. Relay that order; never re-rank,
+          and never say one row matters more than another.
+        - Do NOT invent a row, change a quantity, or add a symbol the list does
+          not contain. Do NOT propose a target of your own -- the target is the
+          user's, or the band their own answers bind them to.
         - Do NOT tell the user to execute the list, and do not call it
-          recommended, optimal or suitable. Confirming an order is the user's
-          own click on that screen.
-        - `unresolved` is part of the answer, not noise: a bucket that produced
-          no order is why the target cannot be reached, and dropping it hides
-          that.
-        - hasTarget false is a COMPLETE answer. Say the target is the user's to
-          set and that the screen is where it is set.
+          recommended, optimal or suitable. Each row is confirmed by the user's
+          own click on the Dengeleme screen.
+        - Do NOT raise this subject unasked.
+        - Relay `disclaimer` whenever you relay any of this.
+        - `unresolved` is part of the answer, not noise: it is why the target
+          cannot be reached, and dropping it hides that.
+        - `gate.open` false and `hasTarget` false are COMPLETE answers.
         - Never name a field key to the user.
         - Any response carrying these figures MUST pass validate_compliance_rules.
 
@@ -464,40 +471,86 @@ async def get_rebalance_plan(user_id: str) -> dict[str, Any]:
             read; never reconstruct it yourself.
     """
     payload = await backend_client.request(
-        "GET", f"/investment/agent/{user_id}/rebalance-plan", tool=REBALANCE_TOOL
+        "GET", f"/investment/rebalance/plan/{user_id}", tool=REBALANCE_TOOL
     )
     return _normalize_rebalance(payload)
 
 
 def _normalize_rebalance(payload: Any) -> dict[str, Any]:
-    """Project the backend response onto the v2.22 payload.
+    """Project the backend response onto the v2.24 payload.
 
-    Row fields the writer does not need are dropped for the same reason as in
-    `technical_tools._normalize_direction`: handing the model a raw quantity
-    next to a sentence that already contains it invites it to print both.
+    **Satırlar artık taşınıyor ve bu bilinçli bir politika değişikliği.**
+    v2.22'de emir satırları BİLEREK dışarıda bırakılmıştı: ölçülmüştü, model
+    onları bir alım-satım tablosuna çeviriyor ve çıktı çekinceyle bile bir
+    tavsiyeden ayırt edilemiyordu.
+
+    Değişen şey satırların KENDİSİ: her satır artık onu üreten ÖLÇÜMÜ
+    (`rationale`) yanında taşıyor ve gerekçesi olmayan satır backend'de hiç
+    üretilmiyor. Koruma "göndermemek"ten "sayısıyla birlikte göndermek"e
+    geçti.
+
+    Ham `price` ve `residual_base` yine DÜŞÜYOR: satırın kendi cümlesi tutarı
+    zaten içeriyor ve cümlenin yanına ham sayıyı koymak, modeli ikisini
+    birden basmaya davet ediyor (`_normalize_direction` ile aynı ders).
     """
-    backend_client.require(payload, ("summary", "disclaimer"), REBALANCE_TOOL)
+    backend_client.require(payload, ("summary", "disclaimer", "gate"), REBALANCE_TOOL)
+    gate = payload.get("gate") or {}
     return {
+        "gate": {
+            "open": bool(gate.get("open")),
+            "reason": str(gate.get("reason") or ""),
+        },
         "hasTarget": bool(payload.get("hasTarget")),
+        "measuredLevel": payload.get("measuredLevel"),
+        "declaredTolerance": payload.get("declaredTolerance"),
+        "bindingBand": payload.get("bindingBand"),
+        "bandStatement": payload.get("bandStatement") or "",
         "statement": payload.get("statement") or "",
         "disclaimer": payload.get("disclaimer") or "",
-        # Emir SATIRLARI burada YOK ve bu, aracın en önemli kısıtı.
-        #
-        # Ekranda duran liste kullanıcının kendi koyduğu hedeften çıkıyor ve
-        # onayı kendi tıklaması veriyor. Aynı listeyi sohbette adet ve yönle
-        # yeniden basmak o nedensellik zincirini koparıyor: ölçüldü, model
-        # satırları bir alım-satım tablosuna çevirdi ve çekince eklendikten
-        # sonra bile çıktı bir tavsiyeden ayırt edilemez duruyordu.
-        #
-        # Modele göndermemek, ona yasaklamaktan daha güçlü: `_slim_results`
-        # ve `_normalize_direction` ile aynı ders.
         "summary": payload.get("summary") or "",
+        "rows": [_normalize_rebalance_row(row) for row in (payload.get("rows") or [])],
         "unresolved": [
             {"label": row.get("label"), "reason": row.get("reason")}
             for row in (payload.get("unresolved") or [])
             if isinstance(row, dict)
         ],
         "warning": payload.get("warning") or None,
+    }
+
+
+def _normalize_rebalance_row(raw: Any) -> dict[str, Any]:
+    """One order row and the measurements that put it there.
+
+    `rationale` is REQUIRED and never defaulted to an empty list: a row
+    without its reason is exactly the thing this tool is not allowed to emit,
+    and defaulting would turn a broken body into a silent recommendation.
+    """
+    if not isinstance(raw, dict):
+        raise ContractViolationError(f"{REBALANCE_TOOL}: each row must be an object.")
+    backend_client.require(
+        raw, ("symbol", "side", "quantity", "statement", "rationale"), REBALANCE_TOOL
+    )
+    reasons = backend_client.require_list(raw, "rationale", REBALANCE_TOOL)
+    if not reasons:
+        raise ContractViolationError(
+            f"{REBALANCE_TOOL}: a row without a rationale is not a readable row."
+        )
+    return {
+        "symbol": str(raw["symbol"]),
+        "side": str(raw["side"]),
+        "quantity": float(raw["quantity"]),
+        "amount": float(raw.get("amount_base") or 0.0),
+        "bucket": str(raw.get("label") or raw.get("bucket") or ""),
+        "statement": str(raw["statement"]),
+        "rationale": [
+            {
+                "kind": str(reason.get("kind") or ""),
+                "value": reason.get("value"),
+                "text": str(reason.get("text") or ""),
+            }
+            for reason in reasons
+            if isinstance(reason, dict)
+        ],
     }
 
 

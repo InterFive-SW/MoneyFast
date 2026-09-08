@@ -678,10 +678,14 @@ def test_the_non_advisory_rule_still_stands_above_the_exception():
 
 
 def test_the_risk_specialist_still_forbids_threshold_judgements():
-    """Reaching a score must not loosen the planner's own limits."""
+    """Bir skora ulaşmak, planlayıcının kendi sınırlarını gevşetmiyor.
+
+    Eşik yargısı yasağı DURUYOR ama artık kapsamı yazılı: ham bir metrik
+    hakkında. Yeniden dengeleme listesi bunun dışında ve dışında olmasının
+    sebebi listenin her satırının onu üreten sayıyı taşıması."""
     text = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
     assert "Never emit a threshold judgement" in text
-    assert "Never recommend a rebalance, hedge or target weight" in text
+    assert "about a raw metric you were handed" in text
 
 
 def test_the_risk_specialist_does_not_plan_the_summary_call():
@@ -864,11 +868,15 @@ class TestDirectionSignalIsBound:
         assert "carries its own limit in the same breath" in prompt
         assert 'A bare "yükselecek" has none of those and stays forbidden' in prompt
 
-    def test_the_rebalance_prohibition_is_untouched(self):
-        """Yön sinyali eklemek, dengeleme yasağını gevşetmiyor. İkisi ayrı
-        kararlar ve bu test onların birlikte durduğunu sabitliyor."""
+    def test_the_direction_signal_did_not_open_the_rebalance_door(self):
+        """Yön sinyali eklemek dengelemeyi açmadı; dengelemeyi açan şey ayrı
+        bir karar oldu ve yerine üç kontrol kondu. Bu test o üç kontrolün
+        istemde yazılı olduğunu sabitliyor -- gevşemenin karşılıksız
+        olmadığını."""
         prompt = " ".join(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"].split())
-        assert "Never recommend a rebalance, hedge or target weight" in prompt
+        assert "every row carries `rationale`" in prompt
+        assert "a row that arrived WITHOUT a rationale does not exist" in prompt
+        assert "gate.open == false" in prompt
 
     def test_a_forward_question_is_routed_to_the_data_agent(self):
         """Ölçülen hata: "ASELS önümüzdeki 3 ayda nasıl gider" OUT_OF_SCOPE
@@ -895,41 +903,31 @@ class TestRebalanceOpeningIsReadOnly:
     açıklık eklendi diye yasak gevşemedi.
     """
 
-    def test_the_prohibition_is_still_there_word_for_word(self):
+    def test_three_things_stay_closed(self):
+        """Yasak kalkarken kapalı kalanlar tek tek yazılı olmalı: gevşemenin
+        neyi kapsamadığı, kapsadığı kadar önemli."""
         prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-        assert "Never recommend a rebalance, hedge or target weight" in prompt
-        assert "Despite the name, you produce no strategy" in prompt
+        assert "never propose a target of your own" in prompt
+        assert "never tell them to execute anything" in prompt
+        assert "never raise the subject unasked" in prompt
 
-    def test_the_opening_is_explicitly_read_only(self):
+    def test_the_list_is_read_not_produced(self):
         prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-        assert "ONE NARROW OPENING, and it is read-only" in prompt
-        assert "get_rebalance_plan describes it" in prompt
+        assert "a list the BACKEND built" in prompt
+        assert "Never invent a row" in prompt
+        assert "never present the list as your own conclusion" in prompt
 
-    def test_the_order_rows_are_kept_off_the_chat(self):
-        """Ekranda kullanıcı hedefi kendi koydu ve her satırı kendi tıklaması
-        onaylıyor; sembol, yön ve adedi sohbette yeniden basmak o zinciri
-        koparıyor ve cevap bir tavsiyeden ayırt edilemez hâle geliyor."""
+    def test_every_relayed_row_must_carry_its_reason(self):
+        """Gevşemenin dayandığı tek şey bu: gerekçesi yazılmayan bir satır bir
+        tavsiye, sayısıyla yazılan bir satır bir okuma."""
         prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-        assert "The ORDER ROWS THEMSELVES are not given to you" in prompt
-        assert "point at the screen for the rows" in prompt
-        assert 'Asked "kaç lot", say the amounts are on the screen' in prompt
+        assert "every row carries `rationale`" in prompt
 
-    def test_the_opening_names_what_it_does_not_allow(self):
-        """Açıklığın kendisi sınırlarını taşımalı: eklendiği yerde
-        okunmayan bir sınır, yokmuş gibi davranılan bir sınırdır."""
+    def test_the_closed_gate_is_not_answered_from_the_metrics(self):
+        """Kapı kapalıyken metriklerden cevap üretmek, kapının kapattığı şeyi
+        başka bir kapıdan vermek olurdu."""
         prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-        for rule in (
-            "you never build a list",
-            "never name a symbol with a quantity",
-            "never propose a target",
-            "never tell them to execute anything",
-            "never raise the subject yourself",
-        ):
-            assert rule in prompt, rule
-
-    def test_a_choice_question_is_deflected_to_the_user(self):
-        prompt = flat(prompts.SPECIALIST_PROMPTS["RISK_STRATEGY_AGENT"])
-        assert "the target is theirs to set and point at the screen" in prompt
+        assert "Do not answer the question from the metrics instead" in prompt
 
     def test_the_target_prohibition_elsewhere_is_untouched(self):
         """`allocation_drift` tarafındaki "kendi hedefini önerme" kuralı bu

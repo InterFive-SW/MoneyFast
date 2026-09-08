@@ -142,6 +142,26 @@ def _append_disclosures(text: str, disclosures: List[Dict[str, str]]) -> str:
     return "\n\n".join(part for part in parts if part)
 
 
+#: Bağlamı açan araçlar. Aracın kendisi zaten kapıdan geçmiş bir listeyi
+#: döndürüyor: `POST /investment/rebalance/plan` uygunluk testi tamamlanmamış
+#: bir kullanıcıya HİÇ satır vermiyor (`profile.suitability_gate`). Bu yüzden
+#: "araç kullanıldı" ile "test tamamlanmış" burada aynı şey ve ikinci bir
+#: kontrol, aynı kuralı iki yere yazmak olurdu.
+CONTEXT_TOOLS = {"get_rebalance_plan": rules.CONTEXT_REBALANCE}
+
+
+def contexts_for(tools_used: List[str]) -> frozenset:
+    """Turun bağlamı, KULLANILAN ARAÇLARDAN.
+
+    Beyandan değil ölçümden: bir turun gerçekten ne yaptığını araç listesi
+    söylüyor ve o liste orkestratörün grafından geliyor, modelin metninden
+    değil.
+    """
+    return frozenset(
+        CONTEXT_TOOLS[tool] for tool in tools_used if tool in CONTEXT_TOOLS
+    )
+
+
 def validate(request: Dict[str, Any]) -> Dict[str, Any]:
     jurisdiction = str(request.get("jurisdiction", "TR")).upper()
     if jurisdiction not in rules.SUPPORTED_JURISDICTIONS:
@@ -150,16 +170,23 @@ def validate(request: Dict[str, Any]) -> Dict[str, Any]:
         raise UnsupportedJurisdiction(jurisdiction)
 
     draft = request["draft_response"]
+    # Bağlam KULLANILAN ARAÇLARDAN çıkarılıyor, isteğin bir alanından değil.
+    # Çağıranın "bu bir dengeleme turu" demesine izin vermek, gevşemeyi bir
+    # beyana bağlamak olurdu; araç listesi ise turun gerçekten ne yaptığını
+    # söylüyor ve zaten `required_disclosures` için de okunuyor.
+    tools_used = list(request.get("tools_used") or [])
+    contexts = contexts_for(tools_used)
     violations = rules.find_violations(
         draft,
         strictness=request.get("strictness", "STANDARD"),
         contains_personal_data=bool(request.get("contains_personal_data")),
+        contexts=contexts,
     )
     disclosures = required_disclosures(
         draft,
         bool(request.get("contains_personal_data")),
         bool(request.get("contains_transaction_proposal")),
-        list(request.get("tools_used") or []),
+        tools_used,
     )
 
     audit_id = str(uuid.uuid4())

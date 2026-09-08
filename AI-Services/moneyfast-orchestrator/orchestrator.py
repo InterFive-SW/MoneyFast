@@ -2701,14 +2701,23 @@ HEDGED_TOOLS = frozenset(
 
 #: Dengeleme listesinin kendi çekincesi. Genel uygunluk açıklaması bunun
 #: yerini TUTMUYOR: o, içeriğin yatırım danışmanlığı olmadığını söylüyor; bu
-#: ise listenin KİMİN hedefinden çıktığını -- kullanıcının kendi girdiği
-#: hedeften.
+#: ise listenin NEREDEN çıktığını.
+#:
+#: Metin, liste artık kullanıcının kendi hedefinden DE bir risk bandından DA
+#: çıkabildiği için genişledi (v2.24): "kendi belirlediğiniz hedef" cümlesi,
+#: hedefi ankete verdiği cevapların bağladığı bir kullanıcı için yanlış bir
+#: iddia olurdu.
+#:
+#: Bu, kaldırılan yasakların yerine konan ÜÇÜNCÜ kontrol ve modelin
+#: hatırlamasına bırakılmıyor: aşağıdaki fonksiyon kapının her dalından
+#: geçiyor.
 PLAN_DISCLAIMER_TR = (
-    "Bu liste yatırım tavsiyesi değildir; kendi belirlediğiniz hedefin "
-    "aritmetik karşılığıdır."
+    "Bu liste yatırım tavsiyesi değildir; kendi belirlediğiniz hedefin ya da "
+    "ankette verdiğiniz cevapların bağladığı risk bandının aritmetik "
+    "karşılığıdır ve her satırı onu üreten ölçümle birlikte listelenmiştir."
 )
 
-_PLAN_MARK = "kendi belirlediğiniz hedefin"
+_PLAN_MARK = "aritmetik karşılığıdır"
 
 
 def _keep_plan_disclaimer(
@@ -2775,6 +2784,54 @@ def _keep_news_disclaimer(
     return out
 
 
+#: Gerekçe bloğunun başlığı. Kullanıcıya görünen metin, bir alan adı değil.
+RATIONALE_HEADING_TR = "Bu satırları listeye sokan ölçümler:"
+
+
+def _keep_rationale(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
+    """Dengeleme satırlarının GEREKÇELERİNİ kapının her dalından geçirir.
+
+    Bu, kaldırılan yasakların yerine konan birinci kontrolün son halkası ve
+    en kritiği: sohbetin bir alım-satım listesi basmasına izin verilmesinin
+    TEK dayanağı, her satırın onu üreten ölçümü yanında taşıması. Gerekçesiz
+    bir tablo, kaldırılan yasağın engellediği şeyin ta kendisi.
+
+    **Ölçüldü.** Araç sözleşmesinin ilk kısıtı "her satır gerekçesiyle
+    anılır" diyor; ilk canlı turda model dört satırlık bir tablo bastı ve
+    `rationale` metinlerinin HİÇBİRİ cevaba girmedi. `_keep_hedge` ve
+    `_keep_plan_disclaimer` ile aynı ders, üçüncü kez: prompt tavsiyedir.
+
+    Metin gerekçelerden herhangi birini zaten taşıyorsa dokunulmuyor: model
+    işini yaptıysa aynı cümleyi ikinci kez göstermek gürültü olurdu.
+    """
+    if "get_rebalance_plan" not in set(state.get("tools_used") or []):
+        return out
+    rows = (
+        ((state.get("specialist_output") or {}).get("data") or {}).get("rows") or []
+    )
+    texts: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for reason in row.get("rationale") or []:
+            text = (reason or {}).get("text") if isinstance(reason, dict) else None
+            if text:
+                texts.append(f"{row.get('symbol')}: {text}")
+    if not texts:
+        return out
+    written = out.get("final_output") or ""
+    # Herhangi biri geçtiyse model gerekçeleri aktarmış demektir.
+    if any(text.split(": ", 1)[-1] in written for text in texts):
+        return out
+    existing = out.get("disclosures") or []
+    if any(RATIONALE_HEADING_TR in item for item in existing):
+        return out
+    out["disclosures"] = existing + [
+        RATIONALE_HEADING_TR + " " + " ".join(texts)
+    ]
+    return out
+
+
 def _keep_hedge(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
     """Koşullu bir turun çekincesini kapının HER dalından geçirir.
 
@@ -2814,6 +2871,7 @@ def _keep_crisis(state: MoneyFastState, out: dict[str, Any]) -> dict[str, Any]:
     """
     out = _keep_hedge(state, out)
     out = _keep_plan_disclaimer(state, out)
+    out = _keep_rationale(state, out)
     out = _keep_news_disclaimer(state, out)
     notices = state.get("crisis_notices") or []
     if not notices:

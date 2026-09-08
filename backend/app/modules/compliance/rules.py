@@ -20,7 +20,18 @@ character classes because `\\b` mishandles the dotted/dotless i pair.
 import re
 from typing import Any, Dict, List, Optional
 
-RULE_PACK_VERSION = "TR_RETAIL_2026.08"
+RULE_PACK_VERSION = "TR_RETAIL_2026.09"
+
+#: Bir turun bağlamı. Şu an tek üye ve genişletilmemeli: her yeni bağlam,
+#: kural paketinin bir yerini gevşetmenin yeni bir yolu demek.
+#:
+#: `REBALANCE` yalnızca İKİ koşul birlikte sağlandığında veriliyor ve ikisi de
+#: `investment` tarafında ölçülüyor: turun konusu gerçekten yeniden dengeleme
+#: listesi olmalı, VE kullanıcının uygunluk testi tamamlanmış olmalı
+#: (`profile.suitability_gate`). Bağlamı isteğin gövdesinden okumak, gevşemeyi
+#: çağıranın beyanına bağlamak olurdu.
+CONTEXT_REBALANCE = "REBALANCE"
+KNOWN_CONTEXTS = frozenset({CONTEXT_REBALANCE})
 
 SUPPORTED_JURISDICTIONS = frozenset({"TR"})
 
@@ -37,6 +48,7 @@ class Rule:
         replacement: Optional[str] = None,
         strict_only: bool = False,
         requires_personal_data: bool = False,
+        relaxed_in: frozenset = frozenset(),
     ) -> None:
         self.rule_id = rule_id
         self.name = name
@@ -50,6 +62,22 @@ class Rule:
         self.replacement = replacement
         self.strict_only = strict_only
         self.requires_personal_data = requires_personal_data
+        #: Bu bağlamlarda kural KALDIRILMIYOR, ŞİDDETİ DÜŞÜYOR. Kaldırmak,
+        #: bağlam bayrağını taşıyan her turu denetimsiz bırakırdı; şiddeti
+        #: düşürmek bulguyu görünür ve düzeltilebilir tutuyor.
+        self.relaxed_in = relaxed_in
+
+    def severity_in(self, contexts: frozenset) -> str:
+        """Kuralın bu bağlamdaki şiddeti.
+
+        `CRITICAL` -> `MEDIUM`: bulgu kayboluyor değil, BLOCK yerine REVISE
+        üretiyor. Ölçülen fark şu: engellenen bir dengeleme cevabı kullanıcıya
+        hiç ulaşmıyor, düzeltilen bir cevap ise uygunluk katmanının kendi
+        yeniden yazımıyla ulaşıyor ve denetim kaydında iz bırakıyor.
+        """
+        if self.severity == "CRITICAL" and contexts & self.relaxed_in:
+            return "MEDIUM"
+        return self.severity
 
 
 RULES: List[Rule] = [
@@ -60,6 +88,13 @@ RULES: List[Rule] = [
         r"\b(al|sat)(malısın|malısınız|manı öneririm|manızı öneririm)\b",
         "Doğrudan alım/satım talimatı, kişiye özel yatırım tavsiyesi sayılır.",
         "Emir kipini kaldırın; yalnızca geçmiş veriyi ve maliyetleri tarafsız biçimde aktarın.",
+        replacement="[emir kipi kaldırıldı]",
+        # Yeniden dengeleme bağlamında CRITICAL değil. Gerekçesi: o listedeki
+        # her satır kullanıcının KENDİ hedefinden ya da kendi beyanının
+        # bağladığı banttan çıkıyor ve yanında onu üreten sayıyı taşıyor
+        # (`rebalance.rationale_for`). Kural kalkmıyor, şiddeti düşüyor:
+        # engellemek yerine emir kipini kaldırıyor.
+        relaxed_in=frozenset({CONTEXT_REBALANCE}),
     ),
     Rule(
         "ADV-002",
@@ -68,6 +103,8 @@ RULES: List[Rule] = [
         r"(tavsiye ediyorum|tavsiyem|öneriyorum|önerim şu|portföyünüze ekleyin)",
         "Tavsiye fiili, yatırım danışmanlığı yetkisi gerektirir.",
         "Tavsiye ifadesini kaldırın ve bilgilendirici bir çerçeveye geçin.",
+        replacement="[tavsiye ifadesi kaldırıldı]",
+        relaxed_in=frozenset({CONTEXT_REBALANCE}),
     ),
     Rule(
         "ADV-003",
@@ -195,8 +232,20 @@ DISCLOSURES: Dict[str, Dict[str, str]] = {
 }
 
 
-def find_violations(draft: str, strictness: str, contains_personal_data: bool) -> List[Dict[str, Any]]:
+def find_violations(
+    draft: str,
+    strictness: str,
+    contains_personal_data: bool,
+    contexts: frozenset = frozenset(),
+) -> List[Dict[str, Any]]:
+    """Taslaktaki ihlaller.
+
+    `contexts` bir kuralı SUSTURMUYOR, şiddetini düşürebiliyor -- ve yalnızca
+    `relaxed_in` yazan kurallarda. Tanınmayan bir bağlam hiçbir şey yapmıyor:
+    yazım hatasıyla gevşeyen bir kural paketi, gevşemeyi ölçülemez yapardı.
+    """
     strict = strictness.upper() == "STRICT"
+    active = frozenset(contexts) & KNOWN_CONTEXTS
     findings: List[Dict[str, Any]] = []
     for rule in RULES:
         if rule.strict_only and not strict:
@@ -208,7 +257,7 @@ def find_violations(draft: str, strictness: str, contains_personal_data: bool) -
                 {
                     "rule_id": rule.rule_id,
                     "rule_name": rule.name,
-                    "severity": rule.severity,
+                    "severity": rule.severity_in(active),
                     "offending_span": {
                         "start": match.start(),
                         "end": match.end(),

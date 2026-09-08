@@ -6575,6 +6575,73 @@ class TestRebalanceScreenQuestion:
         )
         assert orchestrator.PLAN_DISCLAIMER_TR in out["disclosures"]
 
+    def _plan_state(self, rows):
+        return {
+            "tools_used": ["get_rebalance_plan"],
+            "specialist_output": {"data": {"rows": rows}},
+        }
+
+    ROW = {
+        "symbol": "NVDA",
+        "rationale": [
+            {"kind": "RISK_CONTRIBUTION", "value": 0.40,
+             "text": "Portföy oynaklığının %40,2'lik kısmını bu pozisyon üretiyor."},
+        ],
+    }
+
+    def test_the_rationale_is_guaranteed_in_code(self):
+        """Sohbetin bir alım-satım listesi basmasına izin verilmesinin TEK
+        dayanağı her satırın onu üreten ölçümü taşıması. Ölçüldü: ilk canlı
+        turda model dört satırlık bir tablo bastı ve gerekçelerin hiçbiri
+        cevaba girmedi."""
+        out = orchestrator._keep_rationale(
+            self._plan_state([self.ROW]),
+            {"final_output": "| NVDA | SAT | 26 | 281.371,44 |", "disclosures": []},
+        )
+        assert orchestrator.RATIONALE_HEADING_TR in out["disclosures"][0]
+        assert "%40,2" in out["disclosures"][0]
+        assert "NVDA:" in out["disclosures"][0]
+
+    def test_a_text_that_relayed_the_reason_is_left_alone(self):
+        """Model işini yaptıysa aynı cümleyi ikinci kez göstermek gürültü."""
+        out = orchestrator._keep_rationale(
+            self._plan_state([self.ROW]),
+            {"final_output": "NVDA satışı: Portföy oynaklığının %40,2'lik "
+                             "kısmını bu pozisyon üretiyor.",
+             "disclosures": []},
+        )
+        assert out["disclosures"] == []
+
+    def test_a_turn_without_the_plan_tool_is_untouched(self):
+        out = orchestrator._keep_rationale(
+            {"tools_used": ["get_portfolio_positions"]},
+            {"final_output": "x", "disclosures": []},
+        )
+        assert out["disclosures"] == []
+
+    def test_a_plan_without_rows_adds_nothing(self):
+        """Kapalı kapı ya da hedefsiz kullanıcı: eklenecek gerekçe yok."""
+        out = orchestrator._keep_rationale(
+            self._plan_state([]), {"final_output": "x", "disclosures": []}
+        )
+        assert out["disclosures"] == []
+
+    def test_a_malformed_row_does_not_break_the_turn(self):
+        out = orchestrator._keep_rationale(
+            self._plan_state(["dize", {"symbol": "A", "rationale": ["dize"]},
+                              {"symbol": "B"}, self.ROW]),
+            {"final_output": "tablo", "disclosures": []},
+        )
+        assert "NVDA:" in out["disclosures"][0]
+
+    def test_an_existing_block_is_not_added_twice(self):
+        out = orchestrator._keep_rationale(
+            self._plan_state([self.ROW]),
+            {"final_output": "tablo",
+             "disclosures": [orchestrator.RATIONALE_HEADING_TR + " NVDA: x"]},
+        )
+        assert len(out["disclosures"]) == 1
+
     def test_the_news_disclaimer_is_guaranteed_in_code(self):
         """Prompt tavsiyedir ve burada kaybı ağır: kullanıcının okuduğu her
         cümle bir modelin metin okuması, ve bunu söyleyen tek şey bu çekince.
@@ -6634,7 +6701,7 @@ class TestRebalanceScreenQuestion:
     def test_a_text_that_kept_it_is_not_disclaimed_twice(self):
         out = orchestrator._keep_plan_disclaimer(
             {"tools_used": ["get_rebalance_plan"]},
-            {"final_output": "... kendi belirlediğiniz hedefin aritmetik karşılığı.",
+            {"final_output": "... hedefinizin aritmetik karşılığıdır.",
              "disclosures": []},
         )
         assert out["disclosures"] == []

@@ -220,6 +220,8 @@ def plan(
     contributions: Optional[dict[str, dict[str, Any]]] = None,
     fundamentals: Optional[dict[str, dict[str, Any]]] = None,
     news: Optional[dict[str, dict[str, Any]]] = None,
+    groups: Optional[dict[str, dict[str, Any]]] = None,
+    group_for: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     """Sapmayı satır satır emir karşılığına çevirir.
 
@@ -239,6 +241,11 @@ def plan(
     contributions = contributions or {}
     fundamentals = fundamentals or {}
     news = news or {}
+    # `groups` boşsa süzgeç YOK. Kapının kendisi çağırandadır; buraya boş bir
+    # harita gelmesi "test yapılmadı" değil "süzülecek bir şey yok" demek ve
+    # ikisini burada ayırt etmeye çalışmak, kapıyı iki yere yazmak olurdu.
+    groups = groups or {}
+    group_for = group_for or {}
     by_bucket: dict[str, list[dict[str, Any]]] = {}
     for position in positions:
         by_bucket.setdefault(position.get("bucket") or allocation.OTHER, []).append(
@@ -299,6 +306,22 @@ def plan(
         candidates = []
         for holding in holdings:
             symbol = holding.get("symbol")
+            group = group_for.get((holding.get("asset_kind") or "").lower())
+            verdict = groups.get(group) if group else None
+            if verdict is not None and not verdict.get("eligible"):
+                # Kademesi yetmeyen ürün grubu listeye GİRMİYOR. Grubun kendi
+                # gerekçesi taşınıyor: "uygun değil" tek başına kişi hakkında
+                # bir yargı gibi okunur, hangi beyandan çıktığı yazılı olunca
+                # kullanıcı cevabını değiştirebileceğini de görür.
+                unresolved.append({
+                    "bucket": bucket, "label": label, "symbol": symbol,
+                    "gap_amount": None,
+                    "reason": (
+                        f"{symbol} {verdict.get('label') or group} grubunda; "
+                        f"{verdict.get('reason')}"
+                    ),
+                })
+                continue
             reasons = rationale_for(
                 side,
                 contributions.get(symbol),

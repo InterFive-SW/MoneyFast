@@ -1383,6 +1383,36 @@ def _rebalance_payload(db: Session, user_id: str, lookback: str) -> dict:
     declared_tolerance = declared.tolerance_level if declared else None
     band = risk_profile.binding_band(measured_level, declared_tolerance)
 
+    # Uygunluk testi kapısı. Kapalıysa liste HİÇ ÜRETİLMİYOR -- kademesi
+    # bilinmeyen bir kullanıcı için üretilip sonra süzülen bir liste,
+    # süzgecin bir gün unutulabileceği bir yer açardı.
+    gate = risk_profile.suitability_gate(declared)
+    if not gate["open"]:
+        return {
+            "lookback": lookback,
+            "gate": {"open": False, "reason": gate["reason"]},
+            "hasTarget": False,
+            "totalValue": None,
+            "statement": gate["reason"],
+            "measuredLevel": measured_level,
+            "declaredTolerance": declared_tolerance,
+            "bindingBand": band,
+            "targetSource": "NONE",
+            "bandStatement": gate["reason"],
+            "disclaimer": rebalance.DISCLAIMER_TR,
+            "summary": gate["reason"],
+            "rows": [],
+            "unresolved": [],
+            "data_quality": {
+                "positions": 0, "risk_contribution": 0, "fundamentals": 0, "news": 0
+            },
+            "rounding_residual_base": 0.0,
+            "buy_total_base": 0.0,
+            "usable_cash_base": 0.0,
+            "blocked_cash_base": 0.0,
+            "warning": None,
+        }
+
     own_targets = _targets_for(db, user_id)
     if own_targets:
         targets, source = own_targets, "USER"
@@ -1430,9 +1460,12 @@ def _rebalance_payload(db: Session, user_id: str, lookback: str) -> dict:
             if row
         },
         news=_news_reading_for(db, [p["symbol"] for p in positions if p.get("symbol")]),
+        groups=gate["groups"],
+        group_for=risk_profile.GROUP_BY_PRODUCT_TYPE,
     )
     return {
         "lookback": lookback,
+        "gate": {"open": True, "reason": gate["reason"]},
         "hasTarget": result["has_target"],
         "totalValue": result["total_value"],
         "statement": result["statement"],

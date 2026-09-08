@@ -989,6 +989,23 @@ class TestAllocationDrift:
         db.commit.assert_called_once()
 
 
+def _declared(tolerance=None, version="v2", groups=None):
+    """Uygunluk testi TAMAMLANMIŞ bir beyan.
+
+    Kapı kapalıyken liste hiç üretilmiyor (`TestSuitabilityGateEndpoint`);
+    aşağıdaki sınıfların ölçtüğü şey o kapı değil, ucun gövdesi -- o yüzden
+    varsayılan beyan v2 ve hisse grubu yeterli.
+    """
+    return SimpleNamespace(
+        tolerance_level=tolerance,
+        questionnaire_version=version,
+        product_groups=groups if groups is not None else [
+            {"key": "equity", "label": "Ortaklık Payı", "eligible": True,
+             "reason": "Beyan ettiğiniz bilgi ve tecrübe bu grup için yeterli."},
+        ],
+    )
+
+
 class TestRebalancePlan:
     """Sapmanın emir karşılığı. Sistem hedefi KOYMUYOR ve enstrüman SEÇMİYOR:
     kova farkı mevcut pozisyonlara orantılı dağıtılıyor."""
@@ -1031,7 +1048,7 @@ class TestRebalancePlan:
             risk_router, "_measure",
             return_value={
                 "scored": {"level": level},
-                "declared": SimpleNamespace(tolerance_level=declared) if declared else None,
+                "declared": _declared(declared),
             },
         )
 
@@ -1158,7 +1175,7 @@ class TestRebalanceTargetSource:
             risk_router, "_measure",
             return_value={
                 "scored": {"level": level},
-                "declared": SimpleNamespace(tolerance_level=declared) if declared else None,
+                "declared": _declared(declared),
             },
         )
 
@@ -1263,6 +1280,96 @@ class TestRebalanceTargetSource:
     def test_the_default_window_is_a_year(self, client, mocker):
         self._wire(mocker, own={"cash": 100.0}, band_rows={})
         assert client.post(self.URL, json={}).json()["lookback"] == "1Y"
+
+
+class TestSuitabilityGateEndpoint:
+    """Uygunluk testi tamamlanmamışsa liste HİÇ ÜRETİLMİYOR.
+
+    Üretilip sonra süzülen bir liste, süzgecin bir gün unutulabileceği bir
+    yer açardı.
+    """
+
+    URL = "/api/investment/rebalance/plan"
+
+    @pytest.fixture(autouse=True)
+    def _session(self):
+        from app.core.deps import get_current_user_id
+        from app.main import app
+
+        app.dependency_overrides[get_current_user_id] = lambda: "u-1"
+        yield
+        app.dependency_overrides.pop(get_current_user_id, None)
+
+    def _wire(self, mocker, declared):
+        from app.modules.investment import market_service, router as investment_router
+        from app.modules.risk import router as risk_router
+
+        mocker.patch.object(
+            market_service, "holdings",
+            return_value=[{"symbol": "A", "currency": "TRY", "market": "BIST",
+                           "quantity": 100, "price": 100.0, "avg_cost": 100.0,
+                           "name": "A", "product_type": "stock"}],
+        )
+        mocker.patch.object(market_service, "latest_quotes", return_value={})
+        mocker.patch.object(
+            market_service, "account",
+            return_value=SimpleNamespace(id="a1", cash_balance=0.0,
+                                         currency_code="TRY", account_number="TR-1"),
+        )
+        mocker.patch.object(market_service, "blocked_cash", return_value=0.0)
+        mocker.patch.object(
+            market_service, "fundamentals_for",
+            side_effect=lambda _db, symbol: {"symbol": symbol, "pe_ratio": 10.0},
+        )
+        # BIST fazlalı: gerçekten bir emir satırı çıkması gerekiyor, aksi
+        # hâlde "kapı açık ama satır yok" ile "kapı kapalı" ayırt edilemezdi.
+        mocker.patch.object(
+            investment_router, "_targets_for",
+            return_value={"bist_equity": 50.0, "cash": 50.0},
+        )
+        mocker.patch.object(
+            risk_router, "_measure",
+            return_value={"scored": {"level": "Orta"}, "declared": declared},
+        )
+
+    def _plan(self, client):
+        return client.post(self.URL, json={"lookback": "1Y"}).json()
+
+    def test_an_incomplete_test_closes_the_feature(self, client, mocker):
+        self._wire(mocker, None)
+        body = self._plan(client)
+        assert body["gate"]["open"] is False
+        assert body["rows"] == []
+        assert "uygunluk testini tamamlamanız" in body["summary"]
+
+    def test_the_v1_questionnaire_does_not_open_it(self, client, mocker):
+        self._wire(mocker, _declared(version="v1"))
+        assert self._plan(client)["gate"]["open"] is False
+
+    def test_a_completed_test_opens_it(self, client, mocker):
+        self._wire(mocker, _declared())
+        body = self._plan(client)
+        assert body["gate"]["open"] is True
+        assert body["rows"]
+
+    def test_the_disclaimer_travels_even_when_closed(self, client, mocker):
+        """Kapalı bir ekran da bir liste ekranı: çekince koşulsuz."""
+        self._wire(mocker, None)
+        assert "yatırım tavsiyesi değildir" in self._plan(client)["disclaimer"]
+
+    def test_an_ineligible_group_is_filtered_out_of_an_open_plan(
+        self, client, mocker
+    ):
+        self._wire(mocker, _declared(groups=[
+            {"key": "equity", "label": "Ortaklık Payı", "eligible": False,
+             "reason": "Bu ürünler hakkında beyan ettiğiniz bilgi seviyesi yeterli değil."},
+        ]))
+        body = self._plan(client)
+        assert body["gate"]["open"] is True
+        assert body["rows"] == []
+        assert "bilgi seviyesi" in " ".join(
+            row["reason"] for row in body["unresolved"]
+        )
 
 
 class TestRebalancePlanForAgent:

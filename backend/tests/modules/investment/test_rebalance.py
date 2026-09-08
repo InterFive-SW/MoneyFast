@@ -675,3 +675,71 @@ class TestBandStatement:
         cümle onu bant varmış gibi anlatmamalı."""
         text = rebalance.band_statement("Orta", "Orta", None, "BAND")
         assert "gerekiyor" in text
+
+
+class TestProductGroupFilter:
+    """Kademesi yetmeyen ürün grubu plana GİRMİYOR.
+
+    Süzgeç `plan`'ın içinde, çağıranda değil: dışarıda süzülen bir liste,
+    süzgecin bir gün unutulabileceği bir yer açardı.
+    """
+
+    GROUPS = {
+        "equity": {
+            "eligible": False,
+            "label": "Ortaklık Payı",
+            "reason": "Bu ürünler hakkında beyan ettiğiniz bilgi seviyesi yeterli değil.",
+        }
+    }
+    GROUP_FOR = {"stock": "equity"}
+
+    def test_an_ineligible_group_produces_no_order(self):
+        out = rebalance.plan(
+            [_drift("bist_equity", "BIST Hisse", 10_000.0)],
+            [_holding("A", "bist_equity", 100, 100.0, 10_000.0)],
+            {}, "TRY", available_cash=0.0, contributions=_measured("A"),
+            groups=self.GROUPS, group_for=self.GROUP_FOR,
+        )
+        assert out["rows"] == []
+
+    def test_the_groups_own_reason_travels(self):
+        out = rebalance.plan(
+            [_drift("bist_equity", "BIST Hisse", 10_000.0)],
+            [_holding("A", "bist_equity", 100, 100.0, 10_000.0)],
+            {}, "TRY", available_cash=0.0, contributions=_measured("A"),
+            groups=self.GROUPS, group_for=self.GROUP_FOR,
+        )
+        assert "bilgi seviyesi" in out["unresolved"][0]["reason"]
+        assert "Ortaklık Payı" in out["unresolved"][0]["reason"]
+
+    def test_an_eligible_group_passes_through(self):
+        out = rebalance.plan(
+            [_drift("bist_equity", "BIST Hisse", 10_000.0)],
+            [_holding("A", "bist_equity", 100, 100.0, 10_000.0)],
+            {}, "TRY", available_cash=0.0, contributions=_measured("A"),
+            groups={"equity": {"eligible": True, "label": "Hisse", "reason": "ok"}},
+            group_for=self.GROUP_FOR,
+        )
+        assert out["rows"][0]["symbol"] == "A"
+
+    def test_an_uncovered_instrument_type_is_not_blocked(self):
+        """Spot altın ve döviz dört grubun hiçbirinde yok. Kapsanmayan
+        pozisyonu düşürmek, hakkında hiç soru sorulmamış bir ürünü test
+        sonucuyla engellemek olurdu."""
+        out = rebalance.plan(
+            [_drift("gold", "Altın", 10_000.0)],
+            [_holding("XAU", "gold", 100, 100.0, 10_000.0, kind="commodity")],
+            {}, "TRY", available_cash=0.0, contributions=_measured("XAU"),
+            groups=self.GROUPS, group_for=self.GROUP_FOR,
+        )
+        assert out["rows"][0]["symbol"] == "XAU"
+
+    def test_no_group_map_means_no_filtering(self):
+        """Boş bir harita "test yapılmadı" değil "süzülecek bir şey yok"
+        demek; kapının kendisi çağıranda."""
+        out = rebalance.plan(
+            [_drift("bist_equity", "BIST Hisse", 10_000.0)],
+            [_holding("A", "bist_equity", 100, 100.0, 10_000.0)],
+            {}, "TRY", available_cash=0.0, contributions=_measured("A"),
+        )
+        assert out["rows"][0]["symbol"] == "A"

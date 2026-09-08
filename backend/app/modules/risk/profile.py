@@ -398,6 +398,60 @@ def binding_band(measured_level: Optional[str], declared_tolerance: Optional[str
     return min(known, key=_LEVEL_ORDER.index)
 
 
+# ---------------------------------------------------------------------------
+# Uygunluk testi kapısı
+# ---------------------------------------------------------------------------
+#: Kapının istediği anket sürümü. v1 bir RİSK TOLERANSI anketi; ürün grubu
+#: başına bilgi ve tecrübe beyanı yok, dolayısıyla kademe koşulları hakkında
+#: hiçbir şey söyleyemiyor. Kapı v2'yi istiyor çünkü kapattığı şey tam olarak
+#: o beyanın yokluğu.
+GATE_VERSION = "v2"
+
+GATE_CLOSED_TR = (
+    "Yeniden dengeleme listesi için önce uygunluk testini tamamlamanız "
+    "gerekiyor: liste, hangi ürün gruplarında işlem yapabileceğinizi kendi "
+    "bilgi ve tecrübe beyanınızdan okuyor."
+)
+
+GATE_OPEN_TR = "Uygunluk testi tamamlanmış; liste beyanlarınıza göre süzüldü."
+
+
+def suitability_gate(declared: Any) -> dict[str, Any]:
+    """Yeniden dengeleme açık mı, ve hangi ürün grupları listeye girebilir.
+
+    Test ZATEN VARDI ve dört ürün grubu için kademe gereksinimlerini
+    yazıyordu (`questionnaire_v2.TIER_REQUIREMENTS`); burada ilk kez bir
+    YETENEĞİ KAPATMAK için kullanılıyor. Kaldırılan yasakların yerine konan
+    ikinci kontrol bu.
+
+    Kapı REDDETME değil bir DURUM döndürüyor: çağıran bunu boş bir listeyle
+    ve nedeniyle birlikte sunuyor. Hata koduyla kapatmak, ekranda bir arıza
+    gibi okunurdu -- oysa yapılacak bir şey var ve kullanıcı onu yapabilir.
+
+    Kademesi yetmeyen grup listeye GİRMİYOR ama grubun kendi gerekçesi
+    taşınıyor: "uygun değil" tek başına kişi hakkında bir yargı gibi okunur,
+    hangi beyandan çıktığı yazılı olunca kullanıcı cevabını değiştirerek
+    sonucu değiştirebileceğini de görür.
+    """
+    version = getattr(declared, "questionnaire_version", None)
+    groups = getattr(declared, "product_groups", None) or []
+    if declared is None or version != GATE_VERSION or not groups:
+        return {"open": False, "reason": GATE_CLOSED_TR, "groups": {}}
+    return {
+        "open": True,
+        "reason": GATE_OPEN_TR,
+        "groups": {
+            str(entry.get("key")): {
+                "eligible": bool(entry.get("eligible")),
+                "label": entry.get("label"),
+                "reason": entry.get("reason"),
+            }
+            for entry in groups
+            if entry.get("key")
+        },
+    }
+
+
 #: Enstrüman türünden SPK ürün grubuna. YALNIZCA testin gerçekten kapsadığı
 #: eşleme yazılı.
 #:

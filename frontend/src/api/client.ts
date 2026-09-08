@@ -69,6 +69,10 @@ export interface RebalanceUnresolved {
 }
 
 export interface RebalancePlan {
+    /** Uygunluk testi tamamlanmamışsa `open: false` ve liste BOŞ gelir --
+     *  hata değil, yapılacak bir şey. Arayüz nedeni gösterip teste
+     *  yönlendiriyor. */
+    gate: { open: boolean; reason: string };
     /** Ölçümün penceresi. Yanıtta duruyor çünkü sonucu gerçekten
      *  değiştiriyor: aynı portföy üç aylıkta "Yüksek", beş yıllıkta "Orta"
      *  ölçülebilir. */

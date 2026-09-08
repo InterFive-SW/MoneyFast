@@ -241,3 +241,70 @@ class TestSectors:
         mocker.patch.object(market_service, "sector_by_symbol", return_value={})
         mocker.patch.object(market_service, "count_active_products", return_value=0)
         assert client.get(self.URL).status_code == 200
+
+
+class TestImpactPackageEndpoint:
+    """Deterministik olgu paketi. Konusunu YOLDA adlandırıyor, dolayısıyla
+    servis token'ıyla korunuyor: korumasızken bir kullanıcı id'si bilen
+    herkes o kişinin TUTTUĞU SEMBOLLERİ okuyabilirdi."""
+
+    URL = f"/api/market/news/impact/{USER}"
+
+    def _wire(self, mocker, rows=(), holdings=None):
+        from app.modules.market import service as market_module
+
+        mocker.patch.object(
+            market_service, "holdings",
+            return_value=holdings if holdings is not None else [
+                {"symbol": "AKBNK", "name": "Akbank", "quantity": 10}
+            ],
+        )
+        mocker.patch.object(
+            market_service, "candle_closes",
+            return_value=[(None, 100.0 + index) for index in range(60)],
+        )
+        mocker.patch.object(
+            market_service, "fundamentals_for", return_value={"pe_ratio": 4.2}
+        )
+        mocker.patch.object(
+            market_service, "sector_by_symbol",
+            return_value={"AKBNK": "Financial Services"},
+        )
+        mocker.patch.object(
+            market_module, "portfolio_news",
+            return_value=(list(rows), {"AKBNK": len(rows)}),
+        )
+
+    def test_it_builds_a_package(self, client, mocker):
+        self._wire(mocker)
+        body = client.post(self.URL).json()
+        assert body["symbols"][0]["symbol"] == "AKBNK"
+        assert body["symbols"][0]["sector"] == "Financial Services"
+        assert body["coverage"]["symbols"] == 1
+
+    def test_the_window_travels(self, client, mocker):
+        self._wire(mocker)
+        assert client.post(f"{self.URL}?days=30").json()["window_days"] == 30
+
+    def test_an_out_of_range_window_is_refused(self, client, mocker):
+        self._wire(mocker)
+        assert client.post(f"{self.URL}?days=0").status_code == 422
+
+    def test_the_symbol_limit_is_bounded(self, client, mocker):
+        self._wire(mocker)
+        assert client.post(f"{self.URL}?limit=0").status_code == 422
+        assert client.post(f"{self.URL}?limit=99").status_code == 422
+
+    def test_without_a_service_token_it_is_refused(self, client, monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        monkeypatch.setenv("BACKEND_API_KEY", "secret")
+        app.dependency_overrides.clear()
+        app.dependency_overrides[get_db] = lambda: MagicMock(spec=Session)
+        try:
+            with TestClient(app) as guarded:
+                assert guarded.post(self.URL).status_code in (401, 403, 503)
+        finally:
+            app.dependency_overrides.clear()

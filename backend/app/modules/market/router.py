@@ -13,7 +13,7 @@ from app.core.deps import get_current_user_id, require_service_token
 from app.modules.investment import ai_service, market_service
 from app.modules.notification import service as notification_service
 from . import funds as funds_service
-from . import news_impact, service, signals, stream, technicals
+from . import impact, news_impact, service, signals, stream, technicals
 from .schemas import (
     DirectionSignalOut,
     CandleSeriesOut,
@@ -257,6 +257,47 @@ def get_sectors(
         # tam bir harita gibi göstermek olurdu.
         "unclassified": market_service.count_active_products(db) - len(mapping),
     }
+
+
+@router.post(
+    "/news/impact/{user_id}",
+    summary="Haber etkisi için deterministik olgu paketi (MCP sözleşmesi)",
+    dependencies=[Depends(require_service_token)],
+)
+def build_news_impact_package(
+    user_id: str,
+    days: int = Query(default=service.NEWS_WINDOW_DAYS, ge=1, le=365),
+    limit: int = Query(default=impact.MAX_SYMBOLS, ge=1, le=25),
+    db: Session = Depends(get_db),
+):
+    """Kullanıcının pozisyonları için ÖLÇÜLMÜŞ olgular; yorum YOK.
+
+    Ürettiği her sayı ya sayılmış ya ölçülmüş: kaç haber, kaçı KAP
+    bildirimi, hissenin son beş işlem günündeki gerçekleşen hareketi, o
+    sembolde beş günlük hareketlerin tipik büyüklüğü, sağlayıcının
+    yayımladığı oranlar, ve sembolün sektörü.
+
+    Yorumu `agents` yapıyor: sistem istemindeki "Artış lehine / Düşüş
+    lehine" şablonu her maddenin "ölçülmüş bir olgu, sayısıyla" olmasını
+    istiyor ve bu uç tam olarak o maddeleri veriyor.
+
+    POST, çünkü paket bir HESAPTIR: sembol başına mum okunuyor, medyan
+    alınıyor, haberler sayılıyor. Önbelleklenebilir bir okuma gibi
+    görünmesi yanıltıcı olurdu.
+
+    Konusunu YOLDA adlandıran her uç gibi servis token'ıyla korunuyor:
+    korumasızken bir kullanıcı id'si bilen herkes o kişinin TUTTUĞU
+    SEMBOLLERİ okuyabilirdi.
+    """
+    return impact.fact_package(
+        db,
+        market_service.holdings(db, user_id=user_id),
+        closes_for=lambda symbol: market_service.candle_closes(db, symbol, limit=260),
+        fundamentals_for=lambda symbol: market_service.fundamentals_for(db, symbol),
+        sectors=market_service.sector_by_symbol(db),
+        days=days,
+        limit=limit,
+    )
 
 
 @router.get(
